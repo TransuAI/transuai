@@ -1,0 +1,23 @@
+[project]
+name = "transcription-service"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.43.67",
+    "groq>=1.6.0",
+    "grpcio>=1.83.0",
+    "grpcio-health-checking>=1.83.0",
+    "grpcio-reflection>=1.83.0",
+    "moviepy>=2.2.1",
+    "pika>=1.4.4",
+    "protobuf>=7.35.1",
+    "psycopg2-binary>=2.9.12",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.0.51",
+]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.83.0",
+]
