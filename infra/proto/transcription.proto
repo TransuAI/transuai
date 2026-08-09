@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package transuai.transcription.v1;
+
+// TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿。
+// 跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫。
+// 主要處理流程是 MQ 驅動（消費 transcription.requested，見 ../README.md），這支 RPC 只是查詢用。
+service TranscriptionService {
+  rpc GetTranscript(GetTranscriptRequest) returns (Transcript);
+}
+
+message TranscriptSegment {
+  double start_time = 1;
+  double end_time = 2;
+  string speaker_label = 3;
+  string text = 4;
+}
+
+message Transcript {
+  string job_id = 1;
+  string language = 2;
+  string full_text = 3;
+  repeated TranscriptSegment segments = 4;
+}
+
+message GetTranscriptRequest {
+  string job_id = 1;
+}
