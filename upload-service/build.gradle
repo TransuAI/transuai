@@ -46,6 +46,16 @@ tasks.named('test') {
 	useJUnitPlatform()
 }
 
+// proto 定義集中放在 ../infra/proto（供 transcription-service 共用），不再放在 src/main/proto。
+sourceSets {
+	main {
+		proto {
+			srcDir '../infra/proto'
+			exclude 'transcription.proto'
+		}
+	}
+}
+
 protobuf {
 	protoc {
 		artifact = 'com.google.protobuf:protoc:4.34.2'
