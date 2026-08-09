@@ -28,6 +28,14 @@ service UploadService {
   rpc DeleteJob(DeleteJobRequest) returns (google.protobuf.Empty);
 }
 
+// InternalJobService 僅供內部服務（Transcription Service / AI Service 等 pipeline 下游）呼叫，
+// 用來回寫 Job 狀態。不透過 API Gateway 對外開放，也不需要 "x-user-id"
+// （呼叫方只知道 job_id，沒有終端使用者身分），只信任內部網路呼叫。
+service InternalJobService {
+  // 更新 Job 狀態（例如 transcribing / transcribed / failed），失敗時可附上 error_reason。
+  rpc UpdateJobStatus(UpdateJobStatusRequest) returns (Job);
+}
+
 enum FileType {
   FILE_TYPE_UNSPECIFIED = 0;
   AUDIO = 1;
@@ -98,4 +106,10 @@ message ListJobsResponse {
 
 message DeleteJobRequest {
   string job_id = 1;
+}
+
+message UpdateJobStatusRequest {
+  string job_id = 1;
+  JobStatus status = 2;
+  string error_reason = 3;
 }

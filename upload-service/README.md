@@ -71,7 +71,13 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`src/main/proto/upl
 | `ListJobs` | 分頁查詢目前使用者的所有 Job |
 | `DeleteJob` | 刪除 Job record 與物件儲存檔案 |
 
-Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCRIBED → SUMMARIZING → COMPLETED`（任一階段可轉 `FAILED`）。
+Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCRIBED → SUMMARIZING → COMPLETED`（任一階段可轉 `FAILED`）。Upload Service 只會把新建的 Job 寫成 `UPLOADED`；`UPLOADED` 之後的每一步轉換都是由下游服務透過 `InternalJobService.UpdateJobStatus` 回寫。
+
+`InternalJobService`（`transuai.upload.v1`）—— 純內部 service，供 pipeline 下游（Transcription Service / AI Service）回呼，不透過 Gateway、也不需要 `x-user-id`（呼叫方只有 `job_id`，整個 service 在 `UserIdServerInterceptor` 中豁免）：
+
+| RPC | 說明 |
+|---|---|
+| `UpdateJobStatus` | 依 `job_id` 更新 Job 狀態，可選帶 `error_reason`（轉 `FAILED` 時使用） |
 
 ## 環境變數
 
@@ -107,7 +113,7 @@ src/main/java/com/transuai/upload_service/
   repository/       Spring Data JPA repository
   service/          StorageService（S3 presign / head / delete）
   event/            JobEventPublisher 抽象 + RabbitMQ 實作（發送 transcription.requested）
-  grpc/             UploadGrpcService（5 支 rpc 實作）、JobMapper（domain ↔ proto）
+  grpc/             UploadGrpcService（5 支 rpc 實作）、InternalJobGrpcService（UpdateJobStatus）、JobMapper（domain ↔ proto）
   grpc/auth/        UserIdServerInterceptor（解析 x-user-id metadata）、GrpcAuthContext
   grpc/advice/      GrpcExceptionAdvice（非預期例外 → 安全的 gRPC Status，避免內部細節外洩）
   config/           StorageConfig / RabbitConfig 與對應的 @ConfigurationProperties

@@ -28,6 +28,21 @@ public final class JobMapper {
         return com.transuai.upload.grpc.v1.JobStatus.valueOf(status.name());
     }
 
+    public static com.transuai.upload_service.domain.JobStatus toDomain(com.transuai.upload.grpc.v1.JobStatus status) {
+        return switch (status) {
+            case PENDING -> com.transuai.upload_service.domain.JobStatus.PENDING;
+            case UPLOADING -> com.transuai.upload_service.domain.JobStatus.UPLOADING;
+            case UPLOADED -> com.transuai.upload_service.domain.JobStatus.UPLOADED;
+            case TRANSCRIBING -> com.transuai.upload_service.domain.JobStatus.TRANSCRIBING;
+            case TRANSCRIBED -> com.transuai.upload_service.domain.JobStatus.TRANSCRIBED;
+            case SUMMARIZING -> com.transuai.upload_service.domain.JobStatus.SUMMARIZING;
+            case COMPLETED -> com.transuai.upload_service.domain.JobStatus.COMPLETED;
+            case FAILED -> com.transuai.upload_service.domain.JobStatus.FAILED;
+            case JOB_STATUS_UNSPECIFIED, UNRECOGNIZED ->
+                throw Status.INVALID_ARGUMENT.withDescription("unsupported status: " + status).asRuntimeException();
+        };
+    }
+
     public static com.transuai.upload.grpc.v1.Job toProto(com.transuai.upload_service.domain.Job job) {
         com.transuai.upload.grpc.v1.Job.Builder builder = com.transuai.upload.grpc.v1.Job.newBuilder()
                 .setJobId(job.getId().toString())

@@ -21,6 +21,10 @@ import io.grpc.Status;
  *
  * grpc.health.v1.Health / grpc.reflection.v1.ServerReflection 是基礎設施用的內建服務
  * （health check、grpcurl 除錯），不需要身分即可呼叫。
+ *
+ * transuai.upload.v1.InternalJobService 是服務間（pipeline 下游）回呼用的內部 service，
+ * 呼叫方只有 job_id、沒有終端使用者身分，因此整個服務豁免——與 x-user-id 本身「只信任內部網路」
+ * 的設計前提一致，不另外加共享密鑰。
  */
 @Component
 @GlobalServerInterceptor
@@ -32,7 +36,8 @@ public class UserIdServerInterceptor implements ServerInterceptor {
     private static final Set<String> UNAUTHENTICATED_SERVICES = Set.of(
             "grpc.health.v1.Health",
             "grpc.reflection.v1.ServerReflection",
-            "grpc.reflection.v1alpha.ServerReflection");
+            "grpc.reflection.v1alpha.ServerReflection",
+            "transuai.upload.v1.InternalJobService");
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> call, Metadata headers,
