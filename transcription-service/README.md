@@ -4,16 +4,16 @@
 
 ## 技術棧
 
-| 項目 | 選擇 |
-|---|---|
-| 框架 | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework |
-| API | gRPC（`TranscriptionService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
-| 消費 | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed` |
-| 轉錄 | Groq Whisper API（`whisper-large-v3-turbo`），`verbose_json` 拿分段 timestamp |
-| 影片抽音軌 | moviepy（底層用 ffmpeg，經 `imageio-ffmpeg` 首次執行時自動下載 binary，本機不需另外安裝系統 ffmpeg） |
-| 資料庫 | PostgreSQL（`transcription_db`），SQLAlchemy，MVP 階段用 `create_all` 自動建表 |
-| 物件儲存 | S3 相容 API（`boto3`，本機開發打 MinIO） |
-| 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務） |
+| 項目          | 選擇                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 框架          | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework                                                                                |
+| API           | gRPC（`TranscriptionService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
+| 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed`                                                               |
+| 轉錄          | Groq Whisper API（`whisper-large-v3-turbo`），`verbose_json` 拿分段 timestamp                                                                    |
+| 影片抽音軌    | moviepy（底層用 ffmpeg，經 `imageio-ffmpeg` 首次執行時自動下載 binary，本機不需另外安裝系統 ffmpeg）                                             |
+| 資料庫        | PostgreSQL（`transcription_db`），SQLAlchemy，MVP 階段用 `create_all` 自動建表                                                                   |
+| 物件儲存      | S3 相容 API（`boto3`，本機開發打 MinIO）                                                                                                         |
+| 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務）                                                 |
 
 ## 前置需求
 
@@ -60,8 +60,8 @@ uv run python -m app.main
 
 `TranscriptionService`（`transuai.transcription.v1`，見 [`proto/transcription.proto`](proto/transcription.proto)）：
 
-| RPC | 說明 |
-|---|---|
+| RPC             | 說明                                                                                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
 | `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 分段 timestamp，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
@@ -93,8 +93,7 @@ MVC 風格分層，對照方式：`models` = Model，`controllers` = Controller�
 
 ```
 app/
-  main.py                       建立 gRPC server（TranscriptionService + health + reflection）、
-                                 lifespan（起 consumer thread、init_db）
+  main.py                       建立 gRPC server（TranscriptionService + health + reflection）、lifespan（起 consumer thread、init_db）
   core/
     config.py                    pydantic-settings，讀 .env
   models/

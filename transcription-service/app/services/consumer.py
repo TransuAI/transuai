@@ -13,24 +13,29 @@ def _connection_params() -> pika.ConnectionParameters:
     return pika.ConnectionParameters(
         host=settings.rabbitmq_host,
         port=settings.rabbitmq_port,
-        credentials=pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_password),
+        credentials=pika.PlainCredentials(
+            settings.rabbitmq_user, settings.rabbitmq_password),
     )
 
 
 def run_consumer() -> None:
     connection = pika.BlockingConnection(_connection_params())
     channel = connection.channel()
-    channel.queue_declare(queue=settings.transcription_requested_queue, durable=True)
-    channel.queue_declare(queue=settings.transcription_completed_queue, durable=True)
+    channel.queue_declare(
+        queue=settings.transcription_requested_queue, durable=True)
+    channel.queue_declare(
+        queue=settings.transcription_completed_queue, durable=True)
     channel.basic_qos(prefetch_count=1)
 
     def on_message(ch, method, _properties, body):
         try:
-            process_message(body, lambda job_id: publish_transcription_completed(ch, job_id))
+            process_message(
+                body, lambda job_id: publish_transcription_completed(ch, job_id))
         finally:
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
-    channel.basic_consume(queue=settings.transcription_requested_queue, on_message_callback=on_message)
+    channel.basic_consume(
+        queue=settings.transcription_requested_queue, on_message_callback=on_message)
     logger.info("consuming from %s", settings.transcription_requested_queue)
     try:
         channel.start_consuming()

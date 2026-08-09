@@ -27,6 +27,7 @@ def download_object(storage_path: str) -> Path:
     os.close(fd)
     tmp = Path(tmp_path)
 
-    logger.info("downloading %s from bucket %s", storage_path, settings.storage_bucket)
+    logger.info("downloading %s from bucket %s",
+                storage_path, settings.storage_bucket)
     _s3_client.download_file(settings.storage_bucket, storage_path, str(tmp))
     return tmp

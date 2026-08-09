@@ -8,7 +8,8 @@ from app.services.transcriber import TranscriptResult
 
 
 def save_transcript(session: Session, job_id: uuid.UUID, result: TranscriptResult) -> Transcript:
-    transcript = Transcript(job_id=job_id, language=result.language, full_text=result.full_text)
+    transcript = Transcript(
+        job_id=job_id, language=result.language, full_text=result.full_text)
     transcript.segments = [
         TranscriptSegment(
             start_time=seg.start,

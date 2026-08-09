@@ -35,7 +35,12 @@ uv run python -m grpc_tools.protoc \
 
 # grpc_tools 產生的是絕對 import（import xxx_pb2），在 app.proto_gen 這個子套件底下會
 # 找不到模組，改成套件內的相對 import。
+#
+# 另外產生出來的 servicer 靜態方法會用到 grpc.experimental.unary_unary，但單純 import grpc
+# 不會讓 grpc.experimental 這個 submodule 變成可用的 attribute（無論是執行期或型別檢查都一樣，
+# 要真的 import 過 grpc.experimental 才行），改成明確 import 讓兩邊都正確解析。
 sed -i \
+    -e 's/^import grpc$/import grpc\nimport grpc.experimental/' \
     -e 's/^import upload_pb2 as upload__pb2$/from . import upload_pb2 as upload__pb2/' \
     -e 's/^import transcription_pb2 as transcription__pb2$/from . import transcription_pb2 as transcription__pb2/' \
     "$OUT_DIR/upload_pb2_grpc.py" "$OUT_DIR/transcription_pb2_grpc.py"

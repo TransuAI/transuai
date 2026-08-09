@@ -25,7 +25,8 @@ def process_message(body: bytes, publish_completed: Callable[[str], None]) -> No
     storage_path: str = payload["storagePath"]
     file_type: str = payload["fileType"]
 
-    logger.info("processing job %s (%s) storage_path=%s", job_id, file_type, storage_path)
+    logger.info("processing job %s (%s) storage_path=%s",
+                job_id, file_type, storage_path)
 
     downloaded: Path | None = None
     audio_path: Path | None = None
@@ -33,7 +34,8 @@ def process_message(body: bytes, publish_completed: Callable[[str], None]) -> No
         job_status_client.update_status(job_id, "TRANSCRIBING")
 
         downloaded = download_object(storage_path)
-        audio_path = extract_audio_track(downloaded) if file_type == "VIDEO" else downloaded
+        audio_path = extract_audio_track(
+            downloaded) if file_type == "VIDEO" else downloaded
 
         result = transcribe(audio_path)
 
@@ -48,7 +50,8 @@ def process_message(body: bytes, publish_completed: Callable[[str], None]) -> No
         logger.info("job %s transcribed successfully", job_id)
     except Exception as exc:
         logger.exception("job %s failed", job_id)
-        job_status_client.update_status(job_id, "FAILED", error_reason=str(exc)[:500])
+        job_status_client.update_status(
+            job_id, "FAILED", error_reason=str(exc)[:500])
     finally:
         if downloaded is not None:
             downloaded.unlink(missing_ok=True)

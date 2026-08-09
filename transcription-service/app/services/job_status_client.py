@@ -21,7 +21,7 @@ class JobStatusClient:
     def update_status(self, job_id: str, status: str, error_reason: str = "") -> None:
         request = upload_pb2.UpdateJobStatusRequest(
             job_id=job_id,
-            status=upload_pb2.JobStatus.Value(status),
+            status=status,
             error_reason=error_reason,
         )
         self._stub.UpdateJobStatus(request)
