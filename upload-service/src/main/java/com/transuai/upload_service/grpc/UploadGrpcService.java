@@ -1,0 +1,203 @@
+package com.transuai.upload_service.grpc;
+
+import java.util.UUID;
+
+import com.transuai.upload.grpc.v1.CompleteUploadRequest;
+import com.transuai.upload.grpc.v1.DeleteJobRequest;
+import com.transuai.upload.grpc.v1.FileType;
+import com.transuai.upload.grpc.v1.GetJobRequest;
+import com.transuai.upload.grpc.v1.GetPresignedUploadUrlRequest;
+import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
+import com.transuai.upload.grpc.v1.Job;
+import com.transuai.upload.grpc.v1.ListJobsRequest;
+import com.transuai.upload.grpc.v1.ListJobsResponse;
+import com.transuai.upload.grpc.v1.UploadServiceGrpc;
+import com.transuai.upload_service.event.JobEventPublisher;
+import com.transuai.upload_service.event.TranscriptionRequestedEvent;
+import com.transuai.upload_service.grpc.auth.GrpcAuthContext;
+import com.transuai.upload_service.repository.JobRepository;
+import com.transuai.upload_service.service.StorageService;
+
+import com.google.protobuf.Empty;
+import io.grpc.Status;
+import io.grpc.stub.StreamObserver;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.grpc.server.service.GrpcService;
+
+// 例外映射統一處理留待後續 task（跨切面）補上。
+@GrpcService
+@RequiredArgsConstructor
+@Slf4j
+public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
+
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 100;
+
+    private final StorageService storageService;
+    private final JobRepository jobRepository;
+    private final JobEventPublisher jobEventPublisher;
+
+    @Override
+    public void getPresignedUploadUrl(GetPresignedUploadUrlRequest request,
+            StreamObserver<GetPresignedUploadUrlResponse> responseObserver) {
+        if (request.getFileName().isBlank()) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("file_name is required").asRuntimeException());
+            return;
+        }
+        if (request.getFileType() == FileType.FILE_TYPE_UNSPECIFIED) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("file_type is required").asRuntimeException());
+            return;
+        }
+        if (request.getFileSizeBytes() <= 0) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("file_size_bytes must be positive").asRuntimeException());
+            return;
+        }
+
+        UUID userId = GrpcAuthContext.currentUserId();
+        String objectKey = StorageService.buildObjectKey(userId, request.getFileName());
+        StorageService.PresignedUpload presigned = storageService.createPresignedUploadUrl(objectKey);
+
+        responseObserver.onNext(GetPresignedUploadUrlResponse.newBuilder()
+                .setUploadUrl(presigned.uploadUrl())
+                .setStoragePath(presigned.objectKey())
+                .setExpiresAt(GrpcTimestamps.toProto(presigned.expiresAt()))
+                .build());
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void completeUpload(CompleteUploadRequest request, StreamObserver<Job> responseObserver) {
+        if (request.getStoragePath().isBlank()) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("storage_path is required").asRuntimeException());
+            return;
+        }
+        if (request.getFileName().isBlank()) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("file_name is required").asRuntimeException());
+            return;
+        }
+        if (request.getFileType() == FileType.FILE_TYPE_UNSPECIFIED) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("file_type is required").asRuntimeException());
+            return;
+        }
+        if (request.getFileSizeBytes() <= 0) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("file_size_bytes must be positive").asRuntimeException());
+            return;
+        }
+
+        UUID userId = GrpcAuthContext.currentUserId();
+        String expectedPrefix = "uploads/" + userId + "/";
+        if (!request.getStoragePath().startsWith(expectedPrefix)) {
+            responseObserver.onError(Status.PERMISSION_DENIED
+                    .withDescription("storage_path does not belong to caller").asRuntimeException());
+            return;
+        }
+        if (!storageService.objectExists(request.getStoragePath())) {
+            responseObserver.onError(Status.FAILED_PRECONDITION
+                    .withDescription("object not found in storage; upload may not have completed yet")
+                    .asRuntimeException());
+            return;
+        }
+
+        com.transuai.upload_service.domain.Job job = com.transuai.upload_service.domain.Job.builder()
+                .userId(userId)
+                .fileName(request.getFileName())
+                .fileType(JobMapper.toDomain(request.getFileType()))
+                .fileSizeBytes(request.getFileSizeBytes())
+                .storagePath(request.getStoragePath())
+                .durationSeconds(request.getDurationSeconds() > 0 ? request.getDurationSeconds() : null)
+                .status(com.transuai.upload_service.domain.JobStatus.UPLOADED)
+                .build();
+        job = jobRepository.save(job);
+
+        jobEventPublisher.publishTranscriptionRequested(new TranscriptionRequestedEvent(
+                job.getId().toString(), job.getStoragePath(), job.getFileType().name()));
+
+        responseObserver.onNext(JobMapper.toProto(job));
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void getJob(GetJobRequest request, StreamObserver<Job> responseObserver) {
+        UUID userId = GrpcAuthContext.currentUserId();
+        UUID jobId = parseJobId(request.getJobId(), responseObserver);
+        if (jobId == null) {
+            return;
+        }
+
+        com.transuai.upload_service.domain.Job job = jobRepository.findByIdAndUserId(jobId, userId)
+                .orElse(null);
+        if (job == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("job not found").asRuntimeException());
+            return;
+        }
+
+        responseObserver.onNext(JobMapper.toProto(job));
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void listJobs(ListJobsRequest request, StreamObserver<ListJobsResponse> responseObserver) {
+        UUID userId = GrpcAuthContext.currentUserId();
+
+        int page = request.getPage() > 0 ? request.getPage() : 1;
+        int pageSize = request.getPageSize() > 0 ? Math.min(request.getPageSize(), MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+
+        Page<com.transuai.upload_service.domain.Job> result = jobRepository.findByUserIdOrderByCreatedAtDesc(userId,
+                PageRequest.of(page - 1, pageSize));
+
+        ListJobsResponse.Builder builder = ListJobsResponse.newBuilder()
+                .setTotalCount((int) result.getTotalElements())
+                .setPage(page)
+                .setPageSize(pageSize);
+        result.getContent().forEach(job -> builder.addJobs(JobMapper.toProto(job)));
+
+        responseObserver.onNext(builder.build());
+        responseObserver.onCompleted();
+    }
+
+    private static UUID parseJobId(String rawJobId, StreamObserver<?> responseObserver) {
+        try {
+            return UUID.fromString(rawJobId);
+        } catch (IllegalArgumentException e) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("job_id must be a valid UUID").asRuntimeException());
+            return null;
+        }
+    }
+
+    @Override
+    public void deleteJob(DeleteJobRequest request, StreamObserver<Empty> responseObserver) {
+        UUID userId = GrpcAuthContext.currentUserId();
+        UUID jobId = parseJobId(request.getJobId(), responseObserver);
+        if (jobId == null) {
+            return;
+        }
+
+        com.transuai.upload_service.domain.Job job = jobRepository.findByIdAndUserId(jobId, userId).orElse(null);
+        if (job == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("job not found").asRuntimeException());
+            return;
+        }
+
+        // 物件儲存刪除失敗只記警告、不擋刪除：使用者的刪除意圖優先，孤兒物件之後可靠背景清理排除。
+        try {
+            storageService.deleteObject(job.getStoragePath());
+        } catch (RuntimeException e) {
+            log.warn("failed to delete storage object {} for job {}", job.getStoragePath(), job.getId(), e);
+        }
+        jobRepository.delete(job);
+
+        responseObserver.onNext(Empty.getDefaultInstance());
+        responseObserver.onCompleted();
+    }
+}
