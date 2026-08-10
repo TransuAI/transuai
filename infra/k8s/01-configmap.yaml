@@ -1,0 +1,40 @@
+# 各服務共用的非機敏設定，對應每個服務 application.properties / core/config.py 裡
+# 同名的環境變數。DB_NAME 因為每個服務不同（auth_db/upload_db/transcription_db/ai_db），
+# 留在各自的 Deployment 裡設定，不放這裡。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: transuai
+data:
+  # Postgres
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+
+  # RabbitMQ
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+
+  # 物件儲存（MinIO，正式環境改指向 Cloudflare R2）
+  STORAGE_ENDPOINT: "http://minio:9000"
+  STORAGE_REGION: "us-east-1"
+  STORAGE_BUCKET: "media-uploads"
+  STORAGE_PATH_STYLE_ACCESS: "true"
+  STORAGE_PRESIGN_EXPIRY_MINUTES: "15"
+  MINIO_BUCKET: "media-uploads"
+
+  # 服務間 gRPC 位址（k8s Service DNS，同 namespace 內用短名即可解析）
+  AUTH_SERVICE_GRPC_TARGET: "auth-service:9091"
+  UPLOAD_SERVICE_GRPC_TARGET: "upload-service:9090"
+  TRANSCRIPTION_SERVICE_GRPC_TARGET: "transcription-service:8083"
+  AI_SERVICE_GRPC_TARGET: "ai-service:8084"
+
+  # RabbitMQ 佇列名稱
+  TRANSCRIPTION_REQUESTED_QUEUE: "transcription.requested"
+  TRANSCRIPTION_COMPLETED_QUEUE: "transcription.completed"
+  AI_COMPLETED_QUEUE: "ai.completed"
+  JOB_FAILED_QUEUE: "job.failed"
+
+  # 外部 API 型號（key 本身是機敏資訊，放在 02-secret.yaml）
+  GROQ_MODEL: "whisper-large-v3-turbo"
+  GEMINI_MODEL: "gemini-2.0-flash"

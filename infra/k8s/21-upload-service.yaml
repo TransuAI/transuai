@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: upload-service
+  namespace: transuai
+spec:
+  selector:
+    app: upload-service
+  ports:
+    - name: http
+      port: 8082
+      targetPort: 8082
+    - name: grpc
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: upload-service
+  namespace: transuai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: upload-service
+  template:
+    metadata:
+      labels:
+        app: upload-service
+    spec:
+      initContainers:
+        - name: wait-for-deps
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres 5432; do echo waiting for postgres; sleep 2; done
+              until nc -z rabbitmq 5672; do echo waiting for rabbitmq; sleep 2; done
+              until nc -z minio 9000; do echo waiting for minio; sleep 2; done
+      containers:
+        - name: upload-service
+          image: transuai/upload-service:dev
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8082
+            - containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          env:
+            - name: DB_NAME
+              value: upload_db
+          readinessProbe:
+            tcpSocket:
+              port: 9090
+            initialDelaySeconds: 15
+            periodSeconds: 5
