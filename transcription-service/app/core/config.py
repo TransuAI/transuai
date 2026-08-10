@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     rabbitmq_password: str = "0000"
     transcription_requested_queue: str = "transcription.requested"
     transcription_completed_queue: str = "transcription.completed"
+    job_failed_queue: str = "job.failed"
 
     storage_endpoint: str = "http://localhost:9000"
     storage_region: str = "us-east-1"

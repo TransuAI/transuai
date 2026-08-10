@@ -8,7 +8,7 @@
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 框架          | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework                                                                                |
 | API           | gRPC（`TranscriptionService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
-| 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed`                                                               |
+| 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed` / `job.failed`                                                |
 | 轉錄          | Groq Whisper API（`whisper-large-v3-turbo`），`verbose_json` 拿分段 timestamp                                                                    |
 | 影片抽音軌    | moviepy（底層用 ffmpeg，經 `imageio-ffmpeg` 首次執行時自動下載 binary，本機不需另外安裝系統 ffmpeg）                                             |
 | 資料庫        | PostgreSQL（`transcription_db`），SQLAlchemy，MVP 階段用 `create_all` 自動建表                                                                   |
@@ -50,8 +50,8 @@ uv run python -m app.main
   → UpdateJobStatus(TRANSCRIBED)
   → 發送 transcription.completed { jobId }
 
-任一步失敗 → UpdateJobStatus(FAILED, error_reason=<例外訊息>)，訊息照樣 ack（不 requeue），
-避免永久性失敗（壞檔、API 額度用盡）造成無窮重試。
+任一步失敗 → UpdateJobStatus(FAILED, error_reason=<例外訊息>) + 發送 job.failed { jobId, stage: "TRANSCRIBING", errorReason }，
+訊息照樣 ack（不 requeue），避免永久性失敗（壞檔、API 額度用盡）造成無窮重試。
 ```
 
 ## gRPC API
@@ -107,7 +107,7 @@ app/
     audio.py                            moviepy 抽音軌
     transcriber.py                       Groq Whisper API 呼叫
     job_status_client.py                  gRPC client，呼叫 Upload Service 的 UpdateJobStatus
-    event_publisher.py                     發送 transcription.completed
+    event_publisher.py                     發送 transcription.completed / job.failed
   repositories/
     transcript_repository.py               transcription_db 存取（transcripts / transcript_segments）
   db/

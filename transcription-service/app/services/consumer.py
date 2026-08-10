@@ -3,7 +3,7 @@ import logging
 import pika
 
 from app.core.config import settings
-from app.services.event_publisher import publish_transcription_completed
+from app.services.event_publisher import publish_job_failed, publish_transcription_completed
 from app.services.pipeline import process_message
 
 logger = logging.getLogger(__name__)
@@ -25,12 +25,18 @@ def run_consumer() -> None:
         queue=settings.transcription_requested_queue, durable=True)
     channel.queue_declare(
         queue=settings.transcription_completed_queue, durable=True)
+    channel.queue_declare(
+        queue=settings.job_failed_queue, durable=True)
     channel.basic_qos(prefetch_count=1)
 
     def on_message(ch, method, _properties, body):
         try:
             process_message(
-                body, lambda job_id: publish_transcription_completed(ch, job_id))
+                body,
+                lambda job_id: publish_transcription_completed(ch, job_id),
+                lambda job_id, stage, error_reason: publish_job_failed(
+                    ch, job_id, stage, error_reason),
+            )
         finally:
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
