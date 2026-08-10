@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package transuai.ai.v1;
+
+// AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
+// MVP 階段只做摘要生成，embedding/RAG 問答/章節分段/多格式輸出留待後續擴充。
+// 主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
+// 這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
+service AiService {
+  // 依 job_id 取得摘要，job_id 不合法回 INVALID_ARGUMENT，找不到回 NOT_FOUND。
+  rpc GetSummary(GetSummaryRequest) returns (Summary);
+}
+
+message Summary {
+  string job_id = 1;
+  string summary_text = 2;
+}
+
+message GetSummaryRequest {
+  string job_id = 1;
+}

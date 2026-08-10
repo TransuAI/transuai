@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package transuai.auth.v1;
+
+option java_multiple_files = true;
+option java_package = "com.transuai.auth.grpc.v1";
+
+import "google/protobuf/timestamp.proto";
+
+// AuthService 是純內部服務（僅供 API Gateway 呼叫），使用者註冊/登入/換發 token。
+// Register / Login / Refresh 三支不需要身分（呼叫時還沒有 token），GetMe 則跟其他內部服務
+// 一樣需要 gRPC metadata "x-user-id"（由 Gateway 驗證 JWT 後轉發）—— AuthService 自己簽發
+// access token，但不重新驗證別人轉發過來的 token，這支查詢一律信任 x-user-id。
+service AuthService {
+  // 建立帳號，email 已存在回 ALREADY_EXISTS。成功直接簽發 token，不需要再額外呼叫一次 Login。
+  rpc Register(RegisterRequest) returns (AuthResponse);
+
+  // email/password 其中一項錯誤都回 UNAUTHENTICATED（不細分，避免帳號列舉）。
+  rpc Login(LoginRequest) returns (AuthResponse);
+
+  // 用 refresh token 換發新的 access/refresh token 組合。refresh token 無效或過期回 UNAUTHENTICATED。
+  rpc Refresh(RefreshRequest) returns (AuthResponse);
+
+  // 依 x-user-id 查目前使用者資訊，找不到（例如帳號已被刪除）回 NOT_FOUND。
+  rpc GetMe(GetMeRequest) returns (User);
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string display_name = 3;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message RefreshRequest {
+  string refresh_token = 1;
+}
+
+message GetMeRequest {
+}
+
+message AuthResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  User user = 3;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string display_name = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
