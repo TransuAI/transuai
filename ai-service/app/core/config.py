@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     transcription_service_grpc_target: str = "localhost:8083"
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
 
     grpc_port: int = 8084
 
