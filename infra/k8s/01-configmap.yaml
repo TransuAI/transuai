@@ -42,4 +42,4 @@ data:
 
   # 外部 API 型號（key 本身是機敏資訊，放在 02-secret.yaml）
   GROQ_MODEL: "whisper-large-v3-turbo"
-  GEMINI_MODEL: "gemini-2.0-flash"
+  GEMINI_MODEL: "gemini-2.5-flash"
