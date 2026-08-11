@@ -88,6 +88,7 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 | `DB_HOST` / `DB_PORT` | `localhost` / `5432` | Postgres |
 | `DB_USER` / `DB_PASSWORD` | `admin` / `0000` | Postgres 帳密 |
 | `STORAGE_ENDPOINT` | `http://localhost:9000` | 物件儲存 endpoint（本機 MinIO，正式環境改 R2） |
+| `STORAGE_PUBLIC_ENDPOINT` | 同 `STORAGE_ENDPOINT` | presigned URL 簽給瀏覽器用，host 必須是瀏覽器連得到的位址；沒特別設就沿用 `STORAGE_ENDPOINT`（docker-compose 模式兩者相同，k8s 模式需另外指定，見 `infra/k8s/01-configmap.yaml`） |
 | `STORAGE_REGION` | `us-east-1` | 物件儲存 region（MinIO 用假值即可） |
 | `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | `admin` / `00000000` | 物件儲存帳密 |
 | `STORAGE_BUCKET` | `media-uploads` | bucket 名稱 |
