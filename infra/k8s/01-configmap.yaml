@@ -17,6 +17,11 @@ data:
 
   # 物件儲存（MinIO，正式環境改指向 Cloudflare R2）
   STORAGE_ENDPOINT: "http://minio:9000"
+  # presigned URL 簽給瀏覽器用；叢集內的 "minio" 這個 service DNS 瀏覽器解析不到，
+  # 要用本機能連到的位址（要搭配 kubectl port-forward svc/minio 9000:9000）
+  # localhost:9000 在這台機器上已被別的程序佔用（可能是 docker-compose 模式的 MinIO），
+  # 改用 19000 走 kubectl port-forward svc/minio 19000:9000，避免和它衝突/混用資料
+  STORAGE_PUBLIC_ENDPOINT: "http://localhost:19000"
   STORAGE_REGION: "us-east-1"
   STORAGE_BUCKET: "media-uploads"
   STORAGE_PATH_STYLE_ACCESS: "true"
