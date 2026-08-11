@@ -159,6 +159,17 @@ kind load docker-image transuai/auth-service:dev --name desktop
 kubectl -n transuai rollout restart deployment/auth-service
 ```
 
+上面這些手動步驟（以及本機接前端開發要開的 port-forward）都包成腳本放在 `scripts/`，呼叫端要先 `cd scripts` 再執行（用 `./xxx.sh`、`bash xxx.sh`、`sh xxx.sh` 都可以）：
+
+| 腳本 | 用途 |
+|---|---|
+| `forward.sh` | 一次開好前端開發要用的 port-forward：gateway `8080`、notification-service `8085`、minio `19000`。前景執行，`Ctrl-C` 全部關閉；對應 pod 重啟過的話連線會斷，重跑即可 |
+| `rebuild.sh <service>...` / `--all` | 改了程式碼後用：build image -> `kind load` -> `rollout restart` |
+| `restart.sh <service>...` / `--all` | 改了 `k8s/01-configmap.yaml` 或 `02-secret.yaml` 後用：重新 apply 設定並重啟，讓 pod 重新讀環境變數（只改程式碼用 `rebuild.sh`，不是這支） |
+| `status.sh` | 快速看目前 context / nodes / pods / 正在跑的 port-forward |
+
+`_env.sh` 是共用變數，被其他腳本 `.` source，不要直接執行。
+
 ### 重置環境
 
 ```bash
