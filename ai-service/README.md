@@ -13,7 +13,7 @@
 | 框架 | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework |
 | API | gRPC（`AiService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費 | RabbitMQ（`pika`），消費 `transcription.completed`，發送 `ai.completed` / `job.failed` |
-| 摘要 | Gemini API（`gemini-2.0-flash`），把逐字稿全文丟給模型產生摘要 |
+| 摘要 | Gemini API（`gemini-2.5-flash`），把逐字稿全文丟給模型產生摘要 |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy，MVP 階段用 `create_all` 自動建表 |
 | 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務） |
