@@ -1,0 +1,42 @@
+import type { FileType } from '@/types/api'
+
+export function detectFileType(file: File): FileType | null {
+  if (file.type.startsWith('audio/')) return 'AUDIO'
+  if (file.type.startsWith('video/')) return 'VIDEO'
+  return null
+}
+
+export function readMediaDuration(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement(file.type.startsWith('video/') ? 'video' : 'audio')
+    const url = URL.createObjectURL(file)
+    el.preload = 'metadata'
+    el.src = url
+    el.onloadedmetadata = () => {
+      URL.revokeObjectURL(url)
+      resolve(Math.round(el.duration))
+    }
+    el.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('無法讀取媒體檔案長度'))
+    }
+  })
+}
+
+export function formatDuration(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = Math.floor(totalSeconds % 60)
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`
+}
