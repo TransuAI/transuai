@@ -25,10 +25,12 @@ public class StorageConfig {
                 .build();
     }
 
+    // presigned URL 是簽給瀏覽器直接打的，host 必須是瀏覽器解析得到的位址；
+    // 跟 s3Client 用的內部 service DNS（如 k8s 裡的 "minio"）不一定相同，所以分開設定。
     @Bean
     public S3Presigner s3Presigner(StorageProperties properties) {
         return S3Presigner.builder()
-                .endpointOverride(URI.create(properties.endpoint()))
+                .endpointOverride(URI.create(properties.publicEndpoint()))
                 .region(Region.of(properties.region()))
                 .credentialsProvider(credentialsProvider(properties))
                 .serviceConfiguration(serviceConfiguration(properties))
