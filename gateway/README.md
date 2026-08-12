@@ -84,8 +84,9 @@ docker compose up -d
 | Method | Path | 說明 |
 |---|---|---|
 | `GET` | `/summary/{jobId}` | 取得摘要 |
+| `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
 
-`architecture-design.md` §3.4 還規劃了 `GET /chapters/{jobId}`、`POST /qa/{jobId}`、`POST /export/{jobId}`、`GET /export/{jobId}/{format}`——ai-service 目前只做了 `GetSummary`（見 [`../ai-service/README.md`](../ai-service/README.md) 已知限制），沒有對應的 rpc 可以轉發，這裡先不開，等 ai-service 補上再加。
+`architecture-design.md` §3.4 還規劃了 `POST /qa/{jobId}`、`POST /export/{jobId}`、`GET /export/{jobId}/{format}`——ai-service 目前還沒有對應的 rpc（見 [`../ai-service/README.md`](../ai-service/README.md) 已知限制），沒有 rpc 可以轉發，這裡先不開，等 ai-service 補上再加。
 
 ### 錯誤格式
 
@@ -122,8 +123,8 @@ src/main/java/com/transuai/gateway/
 
 ## 已知限制 / 待辦
 
-- **Transcription / AI 這兩個端點沒有 ownership 檢查**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary` 本身就不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解），Gateway 這裡只確保「有登入」，沒有像 Upload 那樣進一步確認「這個 job 是不是你的」。要補的話得先呼叫 `upload-service` 的 `GetJob` 確認 ownership，再決定要不要轉發——目前沒做，是整個平台目前唯一的越權查詢風險（可以用別人的 job_id 查到逐字稿/摘要）
-- Chapters（`GET /chapters/{jobId}`）、QA（`POST /qa/{jobId}`）、多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
+- **Transcription / AI 這幾個端點沒有 ownership 檢查**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters` 本身就不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解），Gateway 這裡只確保「有登入」，沒有像 Upload 那樣進一步確認「這個 job 是不是你的」。要補的話得先呼叫 `upload-service` 的 `GetJob` 確認 ownership，再決定要不要轉發——目前沒做，是整個平台目前唯一的越權查詢風險（可以用別人的 job_id 查到逐字稿/摘要/章節）
+- QA（`POST /qa/{jobId}`）、多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
 - 沒有限流（架構文件 §2 有提到 Gateway 要做「限流」），MVP 階段先不做
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
 - 沒有測試，目前只靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）

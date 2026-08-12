@@ -1,19 +1,24 @@
 package com.transuai.gateway.web;
 
+import java.util.List;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.transuai.gateway.web.dto.ChapterDto;
 import com.transuai.gateway.web.dto.SummaryDto;
 
 import lombok.RequiredArgsConstructor;
+import transuai.ai.v1.Ai.Chapter;
 import transuai.ai.v1.Ai.GetSummaryRequest;
+import transuai.ai.v1.Ai.ListChaptersRequest;
 import transuai.ai.v1.Ai.Summary;
 import transuai.ai.v1.AiServiceGrpc;
 
-// 對應 ../../architecture-design.md 3.4。AI Service MVP 階段只做了 GetSummary，
-// chapters/qa/export 那三支 architecture-design.md 列的端點還沒有對應的 rpc 可轉發，
-// 這裡先不開（見 ../../ai-service/README.md 已知限制、gateway 自己的 README 已知限制）。
+// 對應 ../../architecture-design.md 3.4。AI Service MVP 階段做了 GetSummary + ListChapters，
+// qa/export 那兩支 architecture-design.md 列的端點還沒有對應的 rpc 可轉發，這裡先不開
+// （見 ../../ai-service/README.md 已知限制、gateway 自己的 README 已知限制）。
 // 跟 TranscriptionController 一樣，AiService 不驗證 x-user-id，只擋「沒登入」。
 @RestController
 @RequiredArgsConstructor
@@ -25,5 +30,15 @@ public class AiController {
     public SummaryDto getSummary(@PathVariable String jobId) {
         Summary summary = aiServiceStub.getSummary(GetSummaryRequest.newBuilder().setJobId(jobId).build());
         return new SummaryDto(summary.getJobId(), summary.getSummaryText());
+    }
+
+    @GetMapping("/chapters/{jobId}")
+    public List<ChapterDto> getChapters(@PathVariable String jobId) {
+        List<Chapter> chapters = aiServiceStub
+                .listChapters(ListChaptersRequest.newBuilder().setJobId(jobId).build())
+                .getChaptersList();
+        return chapters.stream()
+                .map(c -> new ChapterDto(c.getId(), c.getJobId(), c.getTitle(), c.getStartTime(), c.getSequenceNo()))
+                .toList();
     }
 }
