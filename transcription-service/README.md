@@ -120,7 +120,7 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 ## 已知限制 / 待辦
 
 - Schema 用 SQLAlchemy `create_all` 自動建表，團隊變大或上正式環境前應改用 Alembic 做版本化 migration
-- 訊息處理失敗只記錄 `FAILED` + `error_reason`，不做重試/退避；暫時性錯誤（RabbitMQ 抖動、Groq 429）目前也不會自動重試
+- 訊息**處理**失敗（呼叫 Groq 時遇到 429 等）只記錄 `FAILED` + `error_reason`，不會重試/退避，要重新上傳才能重跑——這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線（RabbitMQ 重啟、DNS 暫時解析失敗等）現在有指數退避自動重連（見 `app/services/consumer.py`），不會再讓 consumer thread 永久掛掉
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——這是跟 ai-service 同樣的既有限制
 - 講者分離（`speaker_label`）欄位已預留但未實作
 - 沒有測試（upload-service 有 `UploadGrpcServiceIT` 這類整合測試，這裡目前只靠手動 smoke test）
