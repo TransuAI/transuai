@@ -116,14 +116,16 @@ docker compose exec rabbitmq rabbitmqctl list_queues
    ```
 4. 套用 manifests：`kubectl apply -f k8s`
 5. 等待所有 StatefulSet/Deployment 就緒（Postgres/RabbitMQ/MinIO 第一次起會比較慢，`minio-init` job 要等它們先起來才會 complete）。
-6. 把 `GROQ_API_KEY` / `GEMINI_API_KEY` 從各自服務的 `.env` 補進 k8s secret 並重啟對應服務（secret 套用時預設留白，避免 API key 進版控）：
+6. 把 `GROQ_API_KEY` / `HF_API_KEY` 從各自服務的 `.env` 補進 k8s secret 並重啟對應服務（secret 套用時預設留白，避免 API key 進版控）：
    ```bash
    kubectl -n transuai patch secret app-secrets --type merge -p \
      "{\"stringData\":{\"GROQ_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^GROQ_API_KEY= ../transcription-service/.env)")\"}}"
    kubectl -n transuai patch secret app-secrets --type merge -p \
-     "{\"stringData\":{\"GEMINI_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^GEMINI_API_KEY= ../ai-service/.env)")\"}}"
+     "{\"stringData\":{\"HF_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^HF_API_KEY= ../ai-service/.env)")\"}}"
    kubectl -n transuai rollout restart deployment transcription-service ai-service
    ```
+   `GROQ_API_KEY` 同時是 transcription-service（Whisper 轉錄）跟 ai-service（摘要/章節/RAG 問答）共用的
+   key；`HF_API_KEY` 只有 ai-service 的 embedding 會用到（見 [`../ai-service/README.md`](../ai-service/README.md)）。
 
 ### 從本機用 localhost 存取
 

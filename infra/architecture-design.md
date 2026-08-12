@@ -24,7 +24,7 @@ Transcription Service 消費訊息
   → 發送訊息「轉錄完成」到 MQ
 
 AI Service 消費訊息
-  → 讀取逐字稿，呼叫 Gemini API 產出摘要
+  → 讀取逐字稿，呼叫 Groq API 產出摘要
   → 更新 Job status: summarizing → completed
   → 發送訊息「處理完成」到 MQ
 
@@ -262,7 +262,8 @@ CREATE INDEX ix_chapters_job_id ON chapters(job_id);
 **沒有任何用到 vector 型別的表**，`ai-service` 程式碼裡也還沒有 embedding 相關邏輯。以下維持原規劃
 內容，作為未來要做 RAG 問答/多格式輸出時的 schema 參考，**尚未建立、不代表現在存在**：
 
-**規劃中（尚未建立）**：
+**實作現況**：已建立並在用（跟本節標題「規劃中」不同，這段文件沒跟上實作進度）。目前用
+`BAAI/bge-m3`，`vector(1024)`：
 
 ```sql
 CREATE TABLE embeddings (
@@ -271,7 +272,7 @@ CREATE TABLE embeddings (
     chunk_text TEXT NOT NULL,
     start_time NUMERIC(10,2),
     end_time NUMERIC(10,2),
-    embedding vector(768),                  -- 依所選 embedding model 維度調整
+    embedding vector(1024),                 -- 依所選 embedding model 維度調整，目前用 1024
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -331,7 +332,8 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
 | ASR | Groq Whisper API（`whisper-large-v3-turbo`） |
-| LLM（摘要） | Gemini API（`gemini-2.0-flash`，免費層） |
+| LLM（摘要/章節分段/RAG 問答） | Groq API（原規劃/早期實作用 Gemini API，開發時常撞到免費層 429/503，已改用 Groq，見 `ai-service/README.md`） |
+| Embedding | HF Inference API（`BAAI/bge-m3`，1024 維） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
 
@@ -352,7 +354,8 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 | **物件儲存**（音訊/影片檔案） | **Cloudflare R2** | 10GB 儲存空間、每月 100 萬次操作 | 超過額度另計費；免費層無 CDN 加速額外保證，大流量下載需注意頻寬成本 |
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
 | **ASR（語音轉文字）** | **Groq Whisper API** | 20 RPM、2,000 RPD（每日請求數）、7,200 秒/小時、28,800 秒/天 | 免費層檔案大小上限 25MB，30 分鐘音訊建議壓縮至 MP3 64-128kbps 以免超過限制 |
-| **LLM（摘要/問答/embedding）** | **Gemini API（AI Studio）** | 依模型而定，通常為每分鐘/每日請求數限制（RPM/RPD），無需信用卡即可申請 | 免費額度會隨 Google 政策調整而變動，需定期查閱官方文件確認當下額度；正式上線前建議做好額度用盡的降級/重試機制 |
+| **LLM（摘要/章節分段/問答）** | **Groq API** | 依模型而定，通常為每分鐘/每日請求數限制（RPM/RPD），無需信用卡即可申請 | 免費額度會隨政策調整而變動，需定期查閱官方文件確認當下額度；`qwen/qwen3.6-27b` 目前是 preview 模型，官方標註僅供評估用 |
+| **Embedding** | **HF Inference API** | 依 provider 而定，一般有免費額度，無需信用卡即可申請 | 特定模型是否有 provider 承載會隨時間變動，需留意 |
 
 **額度風險提醒**
 - 免費層額度通常是「組織/帳號」層級，不是「API Key」層級，開多組 Key 不會疊加額度
@@ -374,7 +377,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 4. **多格式輸出**：目前**一種格式都還沒做**（只有摘要），原規劃的「先做 1-2 種格式」還沒開始
 5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
-7. **免費 API 額度管理**：AI Service/Transcription Service 呼叫 Gemini/Groq 時需做 429 重試機制與額度監控，避免免費額度用盡導致服務中斷（實作程度未逐行確認，開發時留意）
+7. **免費 API 額度管理**：AI Service/Transcription Service 呼叫 Groq/HF Inference 時需做 429/503 重試機制與額度監控，避免免費額度用盡或暫時性過載導致服務中斷（目前沒有實作，見 `ai-service/README.md` 已知限制）
 
 ---
 
@@ -383,8 +386,8 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 - [ ] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制（例如 25MB 對齊 Groq 免費層檔案上限）
 - [ ] embedding model 選擇（決定 `embeddings.embedding` 欄位的 vector 維度）——embedding 功能本身都還沒開始做，見 8.5
 - [x] 章節自動分段的演算法/prompt 設計——**已解決**：純 LLM 判斷（把逐字稿分段連同時間戳丟給
-      Gemini，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見 `ai-service/app/services/chapter_generator.py`
-- [ ] 多格式輸出的模板內容（每種格式要問 Gemini 什麼樣的 prompt）——尚未實作
+      Groq，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見 `ai-service/app/services/chapter_generator.py`
+- [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**已解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
       靠背景清理排除）。embedding 部分因為功能還沒做，暫不適用。
