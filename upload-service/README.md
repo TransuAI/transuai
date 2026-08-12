@@ -10,7 +10,7 @@
 | API | gRPC（`org.springframework.boot:spring-boot-starter-grpc-server`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/) |
 | 資料庫 | PostgreSQL（`upload_db`），Hibernate `ddl-auto=update` 自動建表（MVP 階段，尚未導入 Flyway） |
 | 物件儲存 | S3 相容 API（本機開發打 MinIO，正式環境改指向 Cloudflare R2） |
-| 訊息佇列 | RabbitMQ（發送 `transcription.requested` 事件） |
+| 訊息佇列 | RabbitMQ（發送 `transcription.requested` 事件），`RabbitTemplate` 開了發送重試（`spring.rabbitmq.template.retry.*`：初始 1s、倍增、封頂 30s、最多 5 次），broker 暫時連不上時自動重試而不是直接丟例外給呼叫端 |
 | 身分傳遞 | Gateway 驗證 JWT 後，透過 gRPC metadata `x-user-id` 轉發，Upload Service 不重新驗證 JWT |
 
 ## 前置需求
