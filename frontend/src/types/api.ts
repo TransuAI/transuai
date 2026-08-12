@@ -69,6 +69,14 @@ export interface Summary {
   summaryText: string
 }
 
+export interface Chapter {
+  id: string
+  jobId: string
+  title: string
+  startTime: number
+  sequenceNo: number
+}
+
 export interface ApiErrorBody {
   error: string
   message: string

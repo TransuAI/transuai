@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, FileText, Sparkles } from 'lucide-react'
-import { jobsApi, summaryApi, transcriptApi } from '@/lib/api'
+import { ArrowLeft, FileText, List, Sparkles } from 'lucide-react'
+import { chapterApi, jobsApi, summaryApi, transcriptApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { formatBytes, formatDuration } from '@/lib/media'
 import { useJobSocket } from '@/hooks/use-job-socket'
@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { Job, JobStatusEvent, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobStatusEvent, Summary, Transcript } from '@/types/api'
 
 const MEDIA_BASE_URL = import.meta.env.VITE_MEDIA_BASE_URL as string | undefined
 
@@ -21,6 +21,7 @@ export function JobDetailPage() {
   const [job, setJob] = useState<Job | null>(null)
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [chapters, setChapters] = useState<Chapter[]>([])
   const [isLoadingJob, setIsLoadingJob] = useState(true)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
   const setMediaRef = (el: HTMLMediaElement | null) => {
@@ -71,6 +72,7 @@ export function JobDetailPage() {
     if (!jobId || !jobStatus) return
     if (jobStatus === 'COMPLETED') {
       summaryApi.get(jobId).then(setSummary).catch(() => setSummary(null))
+      chapterApi.list(jobId).then(setChapters).catch(() => setChapters([]))
     }
   }, [jobId, jobStatus])
 
@@ -155,6 +157,35 @@ export function JobDetailPage() {
           </CardHeader>
           <CardContent>
             <p className="whitespace-pre-wrap text-sm leading-relaxed">{summary.summaryText}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {chapters.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <List className="size-4" />
+              章節
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-2">
+              {chapters.map((chapter) => (
+                <button
+                  key={chapter.id}
+                  type="button"
+                  disabled={!mediaUrl}
+                  onClick={() => seekTo(chapter.startTime)}
+                  className="flex items-center gap-3 rounded text-left text-sm enabled:hover:text-accent-foreground disabled:opacity-60"
+                >
+                  <span className="h-fit shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                    {formatDuration(chapter.startTime)}
+                  </span>
+                  <span className="leading-relaxed">{chapter.title}</span>
+                </button>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}

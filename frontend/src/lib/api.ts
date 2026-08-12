@@ -1,6 +1,7 @@
 import { apiFetch, apiFetchVoid } from '@/lib/api-client'
 import type {
   AuthResponse,
+  Chapter,
   Job,
   JobListResponse,
   PresignResponse,
@@ -52,4 +53,8 @@ export const transcriptApi = {
 
 export const summaryApi = {
   get: (jobId: string) => apiFetch<Summary>(`/summary/${jobId}`),
+}
+
+export const chapterApi = {
+  list: (jobId: string) => apiFetch<Chapter[]>(`/chapters/${jobId}`),
 }
