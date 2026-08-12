@@ -28,7 +28,7 @@ if _version_not_supported:
 
 class AiServiceStub:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段只做摘要生成，embedding/RAG 問答/章節分段/多格式輸出留待後續擴充。
+    MVP 階段只做摘要生成，embedding/RAG 問答/多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
     這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
@@ -44,17 +44,30 @@ class AiServiceStub:
                 request_serializer=ai__pb2.GetSummaryRequest.SerializeToString,
                 response_deserializer=ai__pb2.Summary.FromString,
                 _registered_method=True)
+        self.ListChapters = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListChapters',
+                request_serializer=ai__pb2.ListChaptersRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListChaptersResponse.FromString,
+                _registered_method=True)
 
 
 class AiServiceServicer:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段只做摘要生成，embedding/RAG 問答/章節分段/多格式輸出留待後續擴充。
+    MVP 階段只做摘要生成，embedding/RAG 問答/多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
     這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
 
     def GetSummary(self, request, context):
         """依 job_id 取得摘要，job_id 不合法回 INVALID_ARGUMENT，找不到回 NOT_FOUND。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListChapters(self, request, context):
+        """依 job_id 取得章節列表（依 sequence_no 排序），job_id 不合法回 INVALID_ARGUMENT。
+        找不到對應 job 的章節時回空列表，不算錯誤（章節分段可能還沒跑完或這個 job 沒有章節）。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -68,6 +81,11 @@ def add_AiServiceServicer_to_server(servicer, server):
                     request_deserializer=ai__pb2.GetSummaryRequest.FromString,
                     response_serializer=ai__pb2.Summary.SerializeToString,
             ),
+            'ListChapters': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListChapters,
+                    request_deserializer=ai__pb2.ListChaptersRequest.FromString,
+                    response_serializer=ai__pb2.ListChaptersResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'transuai.ai.v1.AiService', rpc_method_handlers)
@@ -78,7 +96,7 @@ def add_AiServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class AiService:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段只做摘要生成，embedding/RAG 問答/章節分段/多格式輸出留待後續擴充。
+    MVP 階段只做摘要生成，embedding/RAG 問答/多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
     這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
@@ -100,6 +118,33 @@ class AiService:
             '/transuai.ai.v1.AiService/GetSummary',
             ai__pb2.GetSummaryRequest.SerializeToString,
             ai__pb2.Summary.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListChapters(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListChapters',
+            ai__pb2.ListChaptersRequest.SerializeToString,
+            ai__pb2.ListChaptersResponse.FromString,
             options,
             channel_credentials,
             insecure,

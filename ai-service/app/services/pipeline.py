@@ -4,7 +4,9 @@ import uuid
 from typing import Callable
 
 from app.db import new_session
+from app.repositories.chapter_repository import save_chapters
 from app.repositories.summary_repository import save_summary
+from app.services.chapter_generator import generate_chapters
 from app.services.job_status_client import job_status_client
 from app.services.summarizer import summarize
 from app.services.transcript_client import transcript_client
@@ -17,10 +19,11 @@ def process_message(
     publish_completed: Callable[[str], None],
     publish_failed: Callable[[str, str, str], None],
 ) -> None:
-    """處理一則 transcription.completed 訊息：取逐字稿 -> 摘要 -> 存摘要 -> 回寫狀態 -> 發 ai.completed。
+    """處理一則 transcription.completed 訊息：取逐字稿 -> 摘要 + 章節分段 -> 存 DB -> 回寫狀態 -> 發 ai.completed。
 
-    任何一步失敗都回寫 Job status=FAILED 並記錄 error_reason、發送 job.failed，
-    不把例外往外拋——讓 consumer 正常 ack 這則訊息，避免永久性失敗（例如逐字稿不存在、額度用盡）造成無窮 requeue。
+    章節分段目前沒有獨立的 Job status（見 architecture-design.md 3.4/4.4，還沒規劃新的 stage），
+    先併在既有的 SUMMARIZING 階段做，任何一步失敗都回寫 Job status=FAILED 並記錄 error_reason、
+    發送 job.failed，不把例外往外拋——讓 consumer 正常 ack 這則訊息，避免永久性失敗（例如逐字稿不存在、額度用盡）造成無窮 requeue。
     """
     payload = json.loads(body)
     job_id: str = payload["jobId"]
@@ -32,10 +35,12 @@ def process_message(
 
         transcript = transcript_client.get_transcript(job_id)
         summary_text = summarize(transcript.full_text)
+        chapters = generate_chapters(list(transcript.segments))
 
         session = new_session()
         try:
             save_summary(session, uuid.UUID(job_id), summary_text)
+            save_chapters(session, uuid.UUID(job_id), chapters)
         finally:
             session.close()
 

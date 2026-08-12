@@ -1,9 +1,7 @@
 import logging
-from functools import lru_cache
-
-from google import genai
 
 from app.core.config import settings
+from app.services.gemini_client import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -13,18 +11,11 @@ _PROMPT_TEMPLATE = (
 )
 
 
-@lru_cache(maxsize=1)
-def _client() -> genai.Client:
-    # 延遲到第一次真的呼叫才建立 client，避免 GEMINI_API_KEY 還沒填時
-    # 服務一啟動（import 這個模組）就直接噴錯，連 gRPC health check 都起不來。
-    return genai.Client(api_key=settings.gemini_api_key)
-
-
 def summarize(full_text: str) -> str:
     """呼叫 Gemini API，把逐字稿全文濃縮成一段摘要。"""
     logger.info("calling Gemini (%s) for summary, transcript length=%d",
                 settings.gemini_model, len(full_text))
-    response = _client().models.generate_content(
+    response = get_client().models.generate_content(
         model=settings.gemini_model,
         contents=_PROMPT_TEMPLATE.format(transcript=full_text),
     )

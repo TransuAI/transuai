@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出，但這裡先只做「消費事件 → 取逐字稿 → Gemini 摘要 → 回寫狀態 → 發完成事件」這條最短路徑（對應文件 §7 簡化建議：先做 1-2 種格式驗證需求）。`embeddings` / `chapters` / `qa_history` / `export_outputs` 對應的功能還沒做，`ai_db` 目前只有 `summaries` 一張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → Gemini 摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，用 Gemini 依逐字稿分段的時間戳切章節）。`embeddings` / `qa_history` / `export_outputs` 對應的功能還沒做，`ai_db` 目前只有 `summaries` 和 `chapters` 兩張表。
 
 ## 技術棧
 
@@ -14,6 +14,7 @@
 | API | gRPC（`AiService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費 | RabbitMQ（`pika`），消費 `transcription.completed`，發送 `ai.completed` / `job.failed` |
 | 摘要 | Gemini API（`gemini-2.5-flash`），把逐字稿全文丟給模型產生摘要 |
+| 章節分段 | 同一個 Gemini model，把逐字稿分段（含時間戳）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy，MVP 階段用 `create_all` 自動建表 |
 | 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務） |
@@ -47,14 +48,16 @@ uv run python -m app.main
 ```
 消費 transcription.completed { jobId }
   → UpdateJobStatus(SUMMARIZING)
-  → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文
+  → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文 + 分段
   → 呼叫 Gemini API 產生摘要
-  → 摘要存進 summaries
+  → 呼叫 Gemini API 依分段時間戳切章節（逐字稿沒有分段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
+  → 摘要存進 summaries，章節存進 chapters（覆蓋該 job 舊的章節列表）
   → UpdateJobStatus(COMPLETED)
   → 發送 ai.completed { jobId, status }
 
 任一步失敗 → UpdateJobStatus(FAILED, error_reason=<例外訊息>) + 發送 job.failed { jobId, stage: "SUMMARIZING", errorReason }，
 訊息照樣 ack（不 requeue），避免永久性失敗（逐字稿不存在、API 額度用盡）造成無窮重試。
+章節分段還沒有獨立的 Job status，暫時併在 SUMMARIZING 階段，失敗一樣算整個 job 失敗。
 ```
 
 ## gRPC API
@@ -66,6 +69,7 @@ uv run python -m app.main
 | RPC | 說明 |
 |---|---|
 | `GetSummary` | 依 `job_id` 取得摘要，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
+| `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService`、transcription-service 的 `TranscriptionService` 一樣只信任內部網路呼叫。
 
@@ -102,17 +106,21 @@ app/
     config.py                    pydantic-settings，讀 .env
   models/
     summary.py                    Summary（SQLAlchemy ORM）
+    chapter.py                    Chapter（SQLAlchemy ORM）
   controllers/
-    ai_controller.py               AiServiceServicer 實作（GetSummary）
+    ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters）
   services/
     consumer.py                      RabbitMQ consumer loop（pika）
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
-    summarizer.py                       Gemini API 呼叫
+    summarizer.py                       Gemini API 呼叫（摘要）
+    chapter_generator.py                 Gemini API 呼叫（章節分段）
+    gemini_client.py                     共用的 Gemini client（lazy init，摘要/章節分段共用）
     job_status_client.py                 gRPC client，呼叫 upload-service 的 UpdateJobStatus
     event_publisher.py                    發送 ai.completed / job.failed
   repositories/
     summary_repository.py                  ai_db 存取（summaries）
+    chapter_repository.py                  ai_db 存取（chapters）
   db/
     session.py                              engine / session / create_all
   proto_gen/                                 gRPC stub 產物（由 scripts/generate_grpc.sh 產生）
@@ -124,5 +132,7 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - Schema 用 SQLAlchemy `create_all` 自動建表，團隊變大或上正式環境前應改用 Alembic 做版本化 migration
 - 訊息處理失敗只記錄 `FAILED` + `error_reason`，不做重試/退避；暫時性錯誤（RabbitMQ 抖動、Gemini 429）目前也不會自動重試
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），例外不會被吞掉，會讓 consumer thread 整條掛掉（訊息仍然已經 ack，不會卡住 queue，但這個 process 之後就不會再消費新訊息，需要重啟）——這是跟 transcription-service 同樣的既有限制，還沒特別處理
-- Embedding（RAG 問答用）、章節分段、多格式輸出都還沒實作，`ai_db` 目前只有 `summaries` 一張表
+- Embedding（RAG 問答用）、多格式輸出都還沒實作
+- 章節分段的 prompt 沒有做輸出格式驗證，Gemini 回傳非預期 JSON（缺欄位、型別不對）時整個 job 會直接標成 `FAILED`，不會重試或降級成「沒有章節」
+- Gateway 目前還沒有對應 `ListChapters` 的 REST endpoint（`GET /chapters/{jobId}`），只有 gRPC 這一層
 - 沒有測試，目前只靠手動 smoke test
