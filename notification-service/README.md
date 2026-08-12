@@ -31,7 +31,7 @@ uv run python -m app.main
 
 啟動時會：
 
-1. 開一條背景 thread 消費 RabbitMQ 的 `ai.completed` / `job.failed`（主要業務入口，MQ 驅動）
+1. 開一條背景 thread 消費 RabbitMQ 的 `ai.completed` / `job.failed`（主要業務入口，MQ 驅動）；連線斷線（RabbitMQ 重啟、DNS 暫時解析失敗等）有指數退避自動重連，不會讓這條 thread 永久掛掉（見 `app/services/consumer.py`）
 2. 起 `uvicorn`,監聽 `8085`,提供 `GET /health` 與 `WS /ws/jobs/{jobId}`
 
 ## Pipeline
