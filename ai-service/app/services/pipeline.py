@@ -50,6 +50,13 @@ def process_message(
     except Exception as exc:
         logger.exception("job %s failed", job_id)
         error_reason = str(exc)[:500]
-        job_status_client.update_status(
-            job_id, "FAILED", error_reason=error_reason)
-        publish_failed(job_id, "SUMMARIZING", error_reason)
+        try:
+            job_status_client.update_status(
+                job_id, "FAILED", error_reason=error_reason)
+            publish_failed(job_id, "SUMMARIZING", error_reason)
+        except Exception:
+            # 回報失敗本身也失敗了（例如 job 在 upload-service 那邊已經不存在）。
+            # 這裡一定要接住，不能讓例外繼續往外冒——冒出去會直接把 consumer thread 弄死，
+            # 之後整個 process 都不會再消費新訊息（需要重啟才會恢復），比漏掉這一則訊息嚴重得多。
+            logger.exception(
+                "job %s: also failed to report FAILED status / publish job.failed, giving up on this message", job_id)

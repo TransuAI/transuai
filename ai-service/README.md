@@ -131,7 +131,7 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 
 - Schema 用 SQLAlchemy `create_all` 自動建表，團隊變大或上正式環境前應改用 Alembic 做版本化 migration
 - 訊息處理失敗只記錄 `FAILED` + `error_reason`，不做重試/退避；暫時性錯誤（RabbitMQ 抖動、Gemini 429）目前也不會自動重試
-- 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），例外不會被吞掉，會讓 consumer thread 整條掛掉（訊息仍然已經 ack，不會卡住 queue，但這個 process 之後就不會再消費新訊息，需要重啟）——這是跟 transcription-service 同樣的既有限制，還沒特別處理
+- 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——這是跟 transcription-service 同樣的既有限制
 - Embedding（RAG 問答用）、多格式輸出都還沒實作
 - 章節分段的 prompt 沒有做輸出格式驗證，Gemini 回傳非預期 JSON（缺欄位、型別不對）時整個 job 會直接標成 `FAILED`，不會重試或降級成「沒有章節」
 - Gateway 目前還沒有對應 `ListChapters` 的 REST endpoint（`GET /chapters/{jobId}`），只有 gRPC 這一層
