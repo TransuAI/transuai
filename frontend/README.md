@@ -74,6 +74,5 @@ src/
 ## 已知限制
 
 - **沒有播放/下載媒體檔案的 API**:`JobDto.storagePath` 只是內部物件儲存路徑,Gateway/Upload Service 目前沒有開「取得可播放 URL」的端點(對照 `upload.proto`,只有上傳用的 presigned **PUT** URL,沒有播放用的 presigned **GET** URL)。詳情頁的時間戳目前只是純文字顯示,設定 `VITE_MEDIA_BASE_URL` 才會嘗試直接組 URL 播放(僅適合本機開發、bucket 設為公開讀取的情境),正式功能要等後端補上對應 API。
-- **Transcription / AI 端點沒有 ownership 檢查**(對照 `gateway/README.md` 已知限制):理論上任何登入使用者都能查到別人的逐字稿/摘要,前端這裡沒有額外防護,完全依賴後端补上授權檢查。
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
 - 沒有寫測試,目前只靠手動跑 `npm run dev` 對照後端 API 驗證。
