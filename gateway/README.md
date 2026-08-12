@@ -23,7 +23,8 @@
 前端後續請求帶 Authorization: Bearer <access_token>
   → JwtAuthenticationFilter 用 app.jwt.secret 本地驗章/驗效期/驗 type=access，解出 user_id
   → controller 呼叫下游 gRPC 服務時，需要身分的（Auth/Upload）透過 GrpcMetadataSupport 帶 x-user-id metadata
-  → Transcription/AI 這兩個服務的 rpc 本身不驗證 x-user-id（見下方「已知限制」），呼叫時不帶
+  → Transcription/AI 這兩個服務的 rpc 本身不驗證 x-user-id（見下方「已知限制」），呼叫時不帶，
+    改由 Gateway 自己先用 JobOwnershipGuard 呼叫 upload-service 的 GetJob 確認 job 擁有者
 access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token，這裡不解析，原樣轉發給 AuthService.Refresh）
 ```
 
@@ -72,14 +73,14 @@ docker compose up -d
 | `GET` | `/jobs?page=&pageSize=` | 分頁查詢目前使用者的所有 Job |
 | `DELETE` | `/jobs/{jobId}` | 刪除 Job，成功回 `204 No Content`（前端 `apiFetchVoid` 依此判斷不去 parse body，別再改回預設的 200） |
 
-### Transcription（`TranscriptionController` → `transcription-service`）—— 需要登入，但沒有 ownership 檢查（見已知限制）
+### Transcription（`TranscriptionController` → `transcription-service`）—— 需要登入，Gateway 用 `JobOwnershipGuard` 做 ownership 檢查
 
 | Method | Path | 說明 |
 |---|---|---|
 | `GET` | `/transcripts/{jobId}` | 逐字稿全文 + 分段 timestamp |
 | `GET` | `/transcripts/{jobId}/segments` | 只要分段列表（用於前端字幕同步捲動），底層還是同一支 `GetTranscript`，這裡只是回應裁切成 `segments` 陣列 |
 
-### AI（`AiController` → `ai-service`）—— 需要登入，但沒有 ownership 檢查（見已知限制）
+### AI（`AiController` → `ai-service`）—— 需要登入，Gateway 用 `JobOwnershipGuard` 做 ownership 檢查
 
 | Method | Path | 說明 |
 |---|---|---|
@@ -118,12 +119,13 @@ src/main/java/com/transuai/gateway/
                        TranscriptionController、AiController
   web/dto/            REST 用的 JSON DTO（跟 proto message 分開，不直接把 protobuf 型別序列化給前端）
   web/advice/         GrpcExceptionAdvice（StatusRuntimeException → HTTP status + JSON error body）
-  grpc/               GrpcMetadataSupport（組 x-user-id metadata）、GrpcTimestamps、UploadMapper（proto ↔ DTO）
+  grpc/               GrpcMetadataSupport（組 x-user-id metadata）、JobOwnershipGuard（Transcription/AI 端點的 ownership 檢查）、
+                       GrpcTimestamps、UploadMapper（proto ↔ DTO）
 ```
 
 ## 已知限制 / 待辦
 
-- **Transcription / AI 這幾個端點沒有 ownership 檢查**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters` 本身就不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解），Gateway 這裡只確保「有登入」，沒有像 Upload 那樣進一步確認「這個 job 是不是你的」。要補的話得先呼叫 `upload-service` 的 `GetJob` 確認 ownership，再決定要不要轉發——目前沒做，是整個平台目前唯一的越權查詢風險（可以用別人的 job_id 查到逐字稿/摘要/章節）
+- **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解），Gateway 現在會在轉發前先呼叫 `upload-service` 的 `GetJob` 確認 ownership（`JobOwnershipGuard`，別人的 job 回 404），每個請求因此多一趟內部 gRPC 往返——量大的話可以考慮快取，MVP 階段先不做
 - QA（`POST /qa/{jobId}`）、多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
 - 沒有限流（架構文件 §2 有提到 Gateway 要做「限流」），MVP 階段先不做
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
