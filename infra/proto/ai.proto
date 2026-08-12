@@ -3,7 +3,7 @@ syntax = "proto3";
 package transuai.ai.v1;
 
 // AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-// MVP 階段只做摘要生成，embedding/RAG 問答/多格式輸出留待後續擴充。
+// MVP 階段做了摘要生成、章節分段、RAG 問答，多格式輸出留待後續擴充。
 // 主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
 // 這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
 service AiService {
@@ -13,6 +13,11 @@ service AiService {
   // 依 job_id 取得章節列表（依 sequence_no 排序），job_id 不合法回 INVALID_ARGUMENT。
   // 找不到對應 job 的章節時回空列表，不算錯誤（章節分段可能還沒跑完或這個 job 沒有章節）。
   rpc ListChapters(ListChaptersRequest) returns (ListChaptersResponse);
+
+  // 針對某個 job 的逐字稿內容做 RAG 問答。job_id/user_id 格式不合法回 INVALID_ARGUMENT，
+  // 這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回 NOT_FOUND。
+  // user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，只用來記錄 qa_history，不重新驗證。
+  rpc AskQuestion(AskQuestionRequest) returns (AskQuestionResponse);
 }
 
 message Summary {
@@ -38,4 +43,16 @@ message ListChaptersRequest {
 
 message ListChaptersResponse {
   repeated Chapter chapters = 1;
+}
+
+message AskQuestionRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string question = 3;
+}
+
+message AskQuestionResponse {
+  string answer = 1;
+  // 回答依據的逐字稿片段起始時間，供前端做時間戳跳轉；沒有特定排序保證。
+  repeated double source_timestamps = 2;
 }
