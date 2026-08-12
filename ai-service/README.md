@@ -145,7 +145,7 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 ## 已知限制 / 待辦
 
 - Schema 用 SQLAlchemy `create_all` 自動建表，團隊變大或上正式環境前應改用 Alembic 做版本化 migration
-- 訊息處理失敗只記錄 `FAILED` + `error_reason`，不做重試/退避；暫時性錯誤（RabbitMQ 抖動、Groq/HF 429/503）目前也不會自動重試——一次過載或短暫額度超限就會讓整個 job 直接判定失敗，要重新上傳才能重跑
+- 訊息**處理**失敗（呼叫 Groq/HF 時遇到 429/503 等）只記錄 `FAILED` + `error_reason`，不會重試/退避，一次過載或短暫額度超限就會讓整個 job 直接判定失敗，要重新上傳才能重跑——這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線（RabbitMQ 重啟、DNS 暫時解析失敗等）現在有指數退避自動重連（見 `app/services/consumer.py`），不會再讓 consumer thread 永久掛掉
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——這是跟 transcription-service 同樣的既有限制
 - 多格式輸出還沒實作
 - `embeddings` 沒有建 ivfflat 向量索引：MVP 資料量小、查詢一定先用 `job_id` 過濾縮小範圍，先不做這層優化；資料量大了之後要補
@@ -155,5 +155,4 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了；SQLAlchemy `create_all` 不會 ALTER 既有欄位，換維度時整張表要 DROP 掉重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
 - embedding model 選擇受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
 - `qwen/qwen3.6-27b` 回應會把完整 `<think>...</think>` chain-of-thought 混進 `content`（實測 `reasoning_format="hidden"` 參數對這個 preview 模型沒有作用），`groq_client.strip_thinking()` 用 regex 硬濾掉；換其他 Groq 模型時要重新確認是否還需要這層
-- Gateway 目前還沒有對應 `ListChapters` 的 REST endpoint（`GET /chapters/{jobId}`），只有 gRPC 這一層
 - 沒有測試，目前只靠手動 smoke test
