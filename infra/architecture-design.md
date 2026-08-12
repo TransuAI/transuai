@@ -68,10 +68,14 @@ Notification Service 消費訊息
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
 MQ 事件外互不直接呼叫，也不會有即時跨庫 join。
 
-> **已知授權缺口**：Gateway 驗證 JWT 後會把 user id 用 gRPC metadata（`x-user-id`）轉發給下游，
-> 但 transcription-service / ai-service 目前**不驗證這個 header**，只信任「呼叫方是內部網路」。
-> 也就是說 Gateway 只做到「必須登入」，沒有做到「只能存取自己的 job」——任何登入使用者都能用
-> 別人的 job id 查到逐字稿/摘要。MVP 階段先這樣，正式環境前要補上這層授權檢查。
+> **授權模型**：transcription-service / ai-service 本身**不驗證 `x-user-id`**，只信任「呼叫方是
+> 內部網路」（見兩邊 proto 的註解）——這點沒變，MVP 階段不打算讓每個下游服務各自重新實作一次
+> ownership 邏輯。實際的「只能存取自己的 job」檢查現在收斂在 Gateway 這一層：轉發
+> `GetTranscript`/`GetSummary`/`ListChapters` 前，Gateway 會先呼叫 upload-service 的 `GetJob`
+> 確認這個 job 是不是目前使用者的（`gateway/src/main/java/.../grpc/JobOwnershipGuard.java`），
+> 不是就回 404，不會再往下游打。代價是每個請求多一趟內部 gRPC 往返。這個檢查只存在於走 Gateway
+> 的路徑——如果之後有服務直接繞過 Gateway 打 transcription-service/ai-service，還是能查到任意
+> job，這種情境目前假設不存在（下游服務只監聽 cluster 內部網路）。
 
 ---
 
@@ -384,8 +388,9 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**已解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
       靠背景清理排除）。embedding 部分因為功能還沒做，暫不適用。
-- [ ] 授權缺口：transcription-service / ai-service 要不要驗證 `x-user-id`，讓使用者只能存取自己
-      的 job（見 2.1 已知授權缺口）——目前 MVP 階段還沒做
+- [x] 授權缺口：使用者只能存取自己的 job——**已解決**：Gateway 在轉發 Transcription/AI 的查詢
+      前先呼叫 upload-service 的 `GetJob` 做 ownership 檢查（見 2.1），但 transcription-service /
+      ai-service 本身仍不驗證 `x-user-id`，這個決定維持不變（見 2.1 授權模型）
 
 ## 8.5 未來規劃（尚未實作）
 
@@ -396,4 +401,4 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 - **多格式輸出**（會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作
 - **講者分離**：`transcript_segments.speaker_label` 欄位存在但目前一律是 `null`
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
-- **`x-user-id` 下游驗證**：Gateway 有轉發，但 transcription-service/ai-service 沒有驗證（見 2.1）
+- **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做
