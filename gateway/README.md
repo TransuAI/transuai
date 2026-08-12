@@ -86,8 +86,9 @@ docker compose up -d
 |---|---|---|
 | `GET` | `/summary/{jobId}` | 取得摘要 |
 | `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
+| `POST` | `/qa/{jobId}` | RAG 問答，body `{ "question": string }`，回傳 `{ answer, sourceTimestamps }`；還沒有 embedding（pipeline 沒跑完）回 404 |
 
-`architecture-design.md` §3.4 還規劃了 `POST /qa/{jobId}`、`POST /export/{jobId}`、`GET /export/{jobId}/{format}`——ai-service 目前還沒有對應的 rpc（見 [`../ai-service/README.md`](../ai-service/README.md) 已知限制），沒有 rpc 可以轉發，這裡先不開，等 ai-service 補上再加。
+`architecture-design.md` §3.4 還規劃了 `POST /export/{jobId}`、`GET /export/{jobId}/{format}`——ai-service 目前還沒有對應的 rpc（見 [`../ai-service/README.md`](../ai-service/README.md) 已知限制），沒有 rpc 可以轉發，這裡先不開，等 ai-service 補上再加。
 
 ### 錯誤格式
 
@@ -126,7 +127,7 @@ src/main/java/com/transuai/gateway/
 ## 已知限制 / 待辦
 
 - **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解），Gateway 現在會在轉發前先呼叫 `upload-service` 的 `GetJob` 確認 ownership（`JobOwnershipGuard`，別人的 job 回 404），每個請求因此多一趟內部 gRPC 往返——量大的話可以考慮快取，MVP 階段先不做
-- QA（`POST /qa/{jobId}`）、多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
+- 多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
 - 沒有限流（架構文件 §2 有提到 Gateway 要做「限流」），MVP 階段先不做
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
 - 沒有測試，目前只靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）
