@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, FileText, List, Sparkles } from 'lucide-react'
-import { chapterApi, jobsApi, summaryApi, transcriptApi } from '@/lib/api'
+import { ArrowLeft, FileText, List, MessageCircle, Sparkles } from 'lucide-react'
+import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { formatBytes, formatDuration } from '@/lib/media'
 import { useJobSocket } from '@/hooks/use-job-socket'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { Chapter, Job, JobStatusEvent, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobStatusEvent, QaAnswer, Summary, Transcript } from '@/types/api'
+
+interface QaEntry {
+  question: string
+  answer: QaAnswer
+}
 
 const MEDIA_BASE_URL = import.meta.env.VITE_MEDIA_BASE_URL as string | undefined
 
@@ -22,6 +28,9 @@ export function JobDetailPage() {
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
+  const [qaHistory, setQaHistory] = useState<QaEntry[]>([])
+  const [questionInput, setQuestionInput] = useState('')
+  const [isAsking, setIsAsking] = useState(false)
   const [isLoadingJob, setIsLoadingJob] = useState(true)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
   const setMediaRef = (el: HTMLMediaElement | null) => {
@@ -80,6 +89,21 @@ export function JobDetailPage() {
     if (mediaRef.current) {
       mediaRef.current.currentTime = seconds
       void mediaRef.current.play()
+    }
+  }
+
+  const handleAskQuestion = async () => {
+    const question = questionInput.trim()
+    if (!jobId || !question || isAsking) return
+    setIsAsking(true)
+    try {
+      const answer = await qaApi.ask(jobId, question)
+      setQaHistory((prev) => [...prev, { question, answer }])
+      setQuestionInput('')
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '問答失敗')
+    } finally {
+      setIsAsking(false)
     }
   }
 
@@ -186,6 +210,63 @@ export function JobDetailPage() {
                 </button>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {job.status === 'COMPLETED' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MessageCircle className="size-4" />
+              問答
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void handleAskQuestion()
+              }}
+            >
+              <Input
+                value={questionInput}
+                onChange={(e) => setQuestionInput(e.target.value)}
+                placeholder="針對這個內容提問..."
+                disabled={isAsking}
+              />
+              <Button type="submit" disabled={isAsking || !questionInput.trim()}>
+                {isAsking ? '思考中...' : '問'}
+              </Button>
+            </form>
+            {qaHistory.length > 0 && (
+              <div className="flex flex-col gap-4">
+                {qaHistory.map((entry, i) => (
+                  <div key={i} className="flex flex-col gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
+                    <p className="text-sm font-medium">{entry.question}</p>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                      {entry.answer.answer}
+                    </p>
+                    {entry.answer.sourceTimestamps.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {entry.answer.sourceTimestamps.map((ts, j) => (
+                          <button
+                            key={j}
+                            type="button"
+                            disabled={!mediaUrl}
+                            onClick={() => seekTo(ts)}
+                            className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground enabled:hover:bg-accent enabled:hover:text-accent-foreground disabled:opacity-60"
+                          >
+                            {formatDuration(ts)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

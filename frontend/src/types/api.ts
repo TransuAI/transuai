@@ -77,6 +77,11 @@ export interface Chapter {
   sequenceNo: number
 }
 
+export interface QaAnswer {
+  answer: string
+  sourceTimestamps: number[]
+}
+
 export interface ApiErrorBody {
   error: string
   message: string

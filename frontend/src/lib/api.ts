@@ -5,6 +5,7 @@ import type {
   Job,
   JobListResponse,
   PresignResponse,
+  QaAnswer,
   Summary,
   Transcript,
   User,
@@ -57,4 +58,9 @@ export const summaryApi = {
 
 export const chapterApi = {
   list: (jobId: string) => apiFetch<Chapter[]>(`/chapters/${jobId}`),
+}
+
+export const qaApi = {
+  ask: (jobId: string, question: string) =>
+    apiFetch<QaAnswer>(`/qa/${jobId}`, { method: 'POST', body: { question } }),
 }
