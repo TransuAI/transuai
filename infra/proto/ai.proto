@@ -3,12 +3,16 @@ syntax = "proto3";
 package transuai.ai.v1;
 
 // AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-// MVP 階段只做摘要生成，embedding/RAG 問答/章節分段/多格式輸出留待後續擴充。
+// MVP 階段只做摘要生成，embedding/RAG 問答/多格式輸出留待後續擴充。
 // 主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
 // 這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
 service AiService {
   // 依 job_id 取得摘要，job_id 不合法回 INVALID_ARGUMENT，找不到回 NOT_FOUND。
   rpc GetSummary(GetSummaryRequest) returns (Summary);
+
+  // 依 job_id 取得章節列表（依 sequence_no 排序），job_id 不合法回 INVALID_ARGUMENT。
+  // 找不到對應 job 的章節時回空列表，不算錯誤（章節分段可能還沒跑完或這個 job 沒有章節）。
+  rpc ListChapters(ListChaptersRequest) returns (ListChaptersResponse);
 }
 
 message Summary {
@@ -18,4 +22,20 @@ message Summary {
 
 message GetSummaryRequest {
   string job_id = 1;
+}
+
+message Chapter {
+  string id = 1;
+  string job_id = 2;
+  string title = 3;
+  double start_time = 4;
+  int32 sequence_no = 5;
+}
+
+message ListChaptersRequest {
+  string job_id = 1;
+}
+
+message ListChaptersResponse {
+  repeated Chapter chapters = 1;
 }

@@ -62,7 +62,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、分段 timestamp
-- `ai_db`：摘要結果（目前只有 `summaries` 一張表，embedding/章節/QA/多格式輸出的表都還沒建，見 8.5）
+- `ai_db`：摘要結果 + 章節分段（目前有 `summaries` / `chapters` 兩張表，embedding/QA/多格式輸出的表都還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -141,10 +141,12 @@ RPC 後，視需要只回傳 `segments` 欄位。轉錄本身完全是 **MQ 驅�
 
 ```
 GET    /summary/{jobId}                 取得摘要
+GET    /chapters/{jobId}                取得章節列表
 ```
 
-MVP 目前**只有這一支**。原規劃的章節/問答/多格式輸出 API（見下方 8.5）還沒實作，ai-service
-也還沒有對應的 gRPC method 可以讓 Gateway 轉發。
+`chapters` 對應 ai-service 的 gRPC `ListChapters`（已實作，見 `ai-service/README.md`），但 Gateway
+這邊還沒加對應的 REST endpoint 轉譯，目前只有 gRPC 這一層可以查。原規劃的問答/多格式輸出 API
+（見下方 8.5）還沒實作。
 
 ### 3.5 Notification（WebSocket，Gateway 不經手，前端直連 notification-service）
 
@@ -232,7 +234,7 @@ CREATE INDEX idx_segments_transcript_id ON transcript_segments(transcript_id);
 
 ### 4.4 ai_db
 
-**現況（已建立）**——目前只有這一張表：
+**現況（已建立）**：
 
 ```sql
 CREATE TABLE summaries (
@@ -241,11 +243,20 @@ CREATE TABLE summaries (
     summary_text TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE chapters (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id UUID NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    start_time NUMERIC(10,2) NOT NULL,
+    sequence_no INT NOT NULL
+);
+CREATE INDEX ix_chapters_job_id ON chapters(job_id);
 ```
 
 `pgvector` extension 有裝在 Postgres 上（docker-compose init script 有啟用），但 ai_db 目前
 **沒有任何用到 vector 型別的表**，`ai-service` 程式碼裡也還沒有 embedding 相關邏輯。以下維持原規劃
-內容，作為未來要做 RAG 問答/章節分段/多格式輸出時的 schema 參考，**尚未建立、不代表現在存在**：
+內容，作為未來要做 RAG 問答/多格式輸出時的 schema 參考，**尚未建立、不代表現在存在**：
 
 **規劃中（尚未建立）**：
 
@@ -262,14 +273,6 @@ CREATE TABLE embeddings (
 
 CREATE INDEX idx_embeddings_job_id ON embeddings(job_id);
 CREATE INDEX idx_embeddings_vector ON embeddings USING ivfflat (embedding vector_cosine_ops);
-
-CREATE TABLE chapters (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    job_id UUID NOT NULL,
-    title VARCHAR(200) NOT NULL,
-    start_time NUMERIC(10,2) NOT NULL,
-    sequence_no INT NOT NULL
-);
 
 CREATE TABLE qa_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -375,7 +378,8 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 
 - [ ] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制（例如 25MB 對齊 Groq 免費層檔案上限）
 - [ ] embedding model 選擇（決定 `embeddings.embedding` 欄位的 vector 維度）——embedding 功能本身都還沒開始做，見 8.5
-- [ ] 章節自動分段的演算法/prompt 設計（純 LLM 判斷 or 搭配語音停頓偵測）——尚未實作
+- [x] 章節自動分段的演算法/prompt 設計——**已解決**：純 LLM 判斷（把逐字稿分段連同時間戳丟給
+      Gemini，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見 `ai-service/app/services/chapter_generator.py`
 - [ ] 多格式輸出的模板內容（每種格式要問 Gemini 什麼樣的 prompt）——尚未實作
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**已解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
@@ -389,7 +393,6 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 
 - **Embedding / pgvector**：`ai_db` 沒有 `embeddings` 表，`ai-service` 沒有任何 embedding 產生邏輯
 - **RAG 問答**（`POST /qa/{jobId}`）：完全未實作，`ai.proto` 裡也沒有對應的 RPC
-- **自動章節分段**（`GET /chapters/{jobId}`）：完全未實作
 - **多格式輸出**（會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作
 - **講者分離**：`transcript_segments.speaker_label` 欄位存在但目前一律是 `null`
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
