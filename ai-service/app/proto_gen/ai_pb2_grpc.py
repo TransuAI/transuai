@@ -28,7 +28,7 @@ if _version_not_supported:
 
 class AiServiceStub:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段只做摘要生成，embedding/RAG 問答/多格式輸出留待後續擴充。
+    MVP 階段做了摘要生成、章節分段、RAG 問答，多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
     這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
@@ -49,11 +49,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.ListChaptersRequest.SerializeToString,
                 response_deserializer=ai__pb2.ListChaptersResponse.FromString,
                 _registered_method=True)
+        self.AskQuestion = channel.unary_unary(
+                '/transuai.ai.v1.AiService/AskQuestion',
+                request_serializer=ai__pb2.AskQuestionRequest.SerializeToString,
+                response_deserializer=ai__pb2.AskQuestionResponse.FromString,
+                _registered_method=True)
 
 
 class AiServiceServicer:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段只做摘要生成，embedding/RAG 問答/多格式輸出留待後續擴充。
+    MVP 階段做了摘要生成、章節分段、RAG 問答，多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
     這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
@@ -73,6 +78,15 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AskQuestion(self, request, context):
+        """針對某個 job 的逐字稿內容做 RAG 問答。job_id/user_id 格式不合法回 INVALID_ARGUMENT，
+        這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回 NOT_FOUND。
+        user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，只用來記錄 qa_history，不重新驗證。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AiServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -86,6 +100,11 @@ def add_AiServiceServicer_to_server(servicer, server):
                     request_deserializer=ai__pb2.ListChaptersRequest.FromString,
                     response_serializer=ai__pb2.ListChaptersResponse.SerializeToString,
             ),
+            'AskQuestion': grpc.unary_unary_rpc_method_handler(
+                    servicer.AskQuestion,
+                    request_deserializer=ai__pb2.AskQuestionRequest.FromString,
+                    response_serializer=ai__pb2.AskQuestionResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'transuai.ai.v1.AiService', rpc_method_handlers)
@@ -96,7 +115,7 @@ def add_AiServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class AiService:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段只做摘要生成，embedding/RAG 問答/多格式輸出留待後續擴充。
+    MVP 階段做了摘要生成、章節分段、RAG 問答，多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
     這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
@@ -145,6 +164,33 @@ class AiService:
             '/transuai.ai.v1.AiService/ListChapters',
             ai__pb2.ListChaptersRequest.SerializeToString,
             ai__pb2.ListChaptersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AskQuestion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/AskQuestion',
+            ai__pb2.AskQuestionRequest.SerializeToString,
+            ai__pb2.AskQuestionResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → Gemini 摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，用 Gemini 依逐字稿分段的時間戳切章節）。`embeddings` / `qa_history` / `export_outputs` 對應的功能還沒做，`ai_db` 目前只有 `summaries` 和 `chapters` 兩張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → Gemini 摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，用 Gemini 依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`，`AskQuestion` rpc 用 cosine similarity 找最相關片段餵給 Gemini 回答，回答連同來源時間戳存進 `qa_history`）。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history` 四張表。
 
 ## 技術棧
 
@@ -15,7 +15,9 @@
 | 消費 | RabbitMQ（`pika`），消費 `transcription.completed`，發送 `ai.completed` / `job.failed` |
 | 摘要 | Gemini API（`gemini-2.5-flash`），把逐字稿全文丟給模型產生摘要 |
 | 章節分段 | 同一個 Gemini model，把逐字稿分段（含時間戳）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
+| Embedding / RAG 問答 | Gemini `text-embedding-004`（768 維）：pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` 把問題轉成向量、用 pgvector cosine distance 找最相似的前 5 段，組成 context 餵給 `gemini-2.5-flash` 生成回答 |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
+| 向量儲存 | PostgreSQL + `pgvector` extension（`Vector(768)` 欄位，cosine distance 查詢，沒有建 ivfflat 索引——見已知限制） |
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy，MVP 階段用 `create_all` 自動建表 |
 | 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務） |
 
@@ -51,7 +53,8 @@ uv run python -m app.main
   → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文 + 分段
   → 呼叫 Gemini API 產生摘要
   → 呼叫 Gemini API 依分段時間戳切章節（逐字稿沒有分段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
-  → 摘要存進 summaries，章節存進 chapters（覆蓋該 job 舊的章節列表）
+  → 呼叫 Gemini embedding API 把逐字稿分段轉成向量
+  → 摘要存進 summaries，章節存進 chapters，向量存進 embeddings（都覆蓋該 job 舊的資料）
   → UpdateJobStatus(COMPLETED)
   → 發送 ai.completed { jobId, status }
 
@@ -70,6 +73,7 @@ uv run python -m app.main
 |---|---|
 | `GetSummary` | 依 `job_id` 取得摘要，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
+| `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答，`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`；`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，只用來記錄 `qa_history`，不重新驗證 |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService`、transcription-service 的 `TranscriptionService` 一樣只信任內部網路呼叫。
 
@@ -107,20 +111,26 @@ app/
   models/
     summary.py                    Summary（SQLAlchemy ORM）
     chapter.py                    Chapter（SQLAlchemy ORM）
+    embedding.py                  Embedding（SQLAlchemy ORM，pgvector Vector(768) 欄位）
+    qa_history.py                 QaHistory（SQLAlchemy ORM）
   controllers/
-    ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters）
+    ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters、AskQuestion）
   services/
     consumer.py                      RabbitMQ consumer loop（pika）
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
     summarizer.py                       Gemini API 呼叫（摘要）
     chapter_generator.py                 Gemini API 呼叫（章節分段）
-    gemini_client.py                     共用的 Gemini client（lazy init，摘要/章節分段共用）
+    embedder.py                          Gemini embedding API 呼叫（embed_documents / embed_query）
+    qa.py                                RAG 問答流程：embed 問題 → 向量搜尋 → 組 context 餵 Gemini
+    gemini_client.py                     共用的 Gemini client（lazy init，摘要/章節分段/embedding 共用）
     job_status_client.py                 gRPC client，呼叫 upload-service 的 UpdateJobStatus
     event_publisher.py                    發送 ai.completed / job.failed
   repositories/
     summary_repository.py                  ai_db 存取（summaries）
     chapter_repository.py                  ai_db 存取（chapters）
+    embedding_repository.py                ai_db 存取（embeddings，含向量相似度搜尋）
+    qa_repository.py                       ai_db 存取（qa_history）
   db/
     session.py                              engine / session / create_all
   proto_gen/                                 gRPC stub 產物（由 scripts/generate_grpc.sh 產生）
@@ -132,7 +142,9 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - Schema 用 SQLAlchemy `create_all` 自動建表，團隊變大或上正式環境前應改用 Alembic 做版本化 migration
 - 訊息處理失敗只記錄 `FAILED` + `error_reason`，不做重試/退避；暫時性錯誤（RabbitMQ 抖動、Gemini 429）目前也不會自動重試
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——這是跟 transcription-service 同樣的既有限制
-- Embedding（RAG 問答用）、多格式輸出都還沒實作
+- 多格式輸出還沒實作
+- `embeddings` 沒有建 ivfflat 向量索引：MVP 資料量小、查詢一定先用 `job_id` 過濾縮小範圍，先不做這層優化；資料量大了之後要補
+- `qa_history` 目前只寫入沒有查詢 rpc，之後要做「問答歷史」列表可以直接查這張表
 - 章節分段的 prompt 沒有做輸出格式驗證，Gemini 回傳非預期 JSON（缺欄位、型別不對）時整個 job 會直接標成 `FAILED`，不會重試或降級成「沒有章節」
 - Gateway 目前還沒有對應 `ListChapters` 的 REST endpoint（`GET /chapters/{jobId}`），只有 gRPC 這一層
 - 沒有測試，目前只靠手動 smoke test

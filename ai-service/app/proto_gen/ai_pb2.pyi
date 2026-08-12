@@ -45,3 +45,21 @@ class ListChaptersResponse(_message.Message):
     CHAPTERS_FIELD_NUMBER: _ClassVar[int]
     chapters: _containers.RepeatedCompositeFieldContainer[Chapter]
     def __init__(self, chapters: _Optional[_Iterable[_Union[Chapter, _Mapping]]] = ...) -> None: ...
+
+class AskQuestionRequest(_message.Message):
+    __slots__ = ("job_id", "user_id", "question")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    question: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., question: _Optional[str] = ...) -> None: ...
+
+class AskQuestionResponse(_message.Message):
+    __slots__ = ("answer", "source_timestamps")
+    ANSWER_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_TIMESTAMPS_FIELD_NUMBER: _ClassVar[int]
+    answer: str
+    source_timestamps: _containers.RepeatedScalarFieldContainer[float]
+    def __init__(self, answer: _Optional[str] = ..., source_timestamps: _Optional[_Iterable[float]] = ...) -> None: ...

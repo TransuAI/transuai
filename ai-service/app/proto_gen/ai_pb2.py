@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08\x61i.proto\x12\x0etransuai.ai.v1\"/\n\x07Summary\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x14\n\x0csummary_text\x18\x02 \x01(\t\"#\n\x11GetSummaryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"]\n\x07\x43hapter\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0e\n\x06job_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x12\n\nstart_time\x18\x04 \x01(\x01\x12\x13\n\x0bsequence_no\x18\x05 \x01(\x05\"%\n\x13ListChaptersRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"A\n\x14ListChaptersResponse\x12)\n\x08\x63hapters\x18\x01 \x03(\x0b\x32\x17.transuai.ai.v1.Chapter2\xb0\x01\n\tAiService\x12H\n\nGetSummary\x12!.transuai.ai.v1.GetSummaryRequest\x1a\x17.transuai.ai.v1.Summary\x12Y\n\x0cListChapters\x12#.transuai.ai.v1.ListChaptersRequest\x1a$.transuai.ai.v1.ListChaptersResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08\x61i.proto\x12\x0etransuai.ai.v1\"/\n\x07Summary\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x14\n\x0csummary_text\x18\x02 \x01(\t\"#\n\x11GetSummaryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"]\n\x07\x43hapter\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0e\n\x06job_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x12\n\nstart_time\x18\x04 \x01(\x01\x12\x13\n\x0bsequence_no\x18\x05 \x01(\x05\"%\n\x13ListChaptersRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"A\n\x14ListChaptersResponse\x12)\n\x08\x63hapters\x18\x01 \x03(\x0b\x32\x17.transuai.ai.v1.Chapter\"G\n\x12\x41skQuestionRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x10\n\x08question\x18\x03 \x01(\t\"@\n\x13\x41skQuestionResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x19\n\x11source_timestamps\x18\x02 \x03(\x01\x32\x88\x02\n\tAiService\x12H\n\nGetSummary\x12!.transuai.ai.v1.GetSummaryRequest\x1a\x17.transuai.ai.v1.Summary\x12Y\n\x0cListChapters\x12#.transuai.ai.v1.ListChaptersRequest\x1a$.transuai.ai.v1.ListChaptersResponse\x12V\n\x0b\x41skQuestion\x12\".transuai.ai.v1.AskQuestionRequest\x1a#.transuai.ai.v1.AskQuestionResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -41,6 +41,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LISTCHAPTERSREQUEST']._serialized_end=246
   _globals['_LISTCHAPTERSRESPONSE']._serialized_start=248
   _globals['_LISTCHAPTERSRESPONSE']._serialized_end=313
-  _globals['_AISERVICE']._serialized_start=316
-  _globals['_AISERVICE']._serialized_end=492
+  _globals['_ASKQUESTIONREQUEST']._serialized_start=315
+  _globals['_ASKQUESTIONREQUEST']._serialized_end=386
+  _globals['_ASKQUESTIONRESPONSE']._serialized_start=388
+  _globals['_ASKQUESTIONRESPONSE']._serialized_end=452
+  _globals['_AISERVICE']._serialized_start=455
+  _globals['_AISERVICE']._serialized_end=719
 # @@protoc_insertion_point(module_scope)
