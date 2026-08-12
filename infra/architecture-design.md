@@ -25,6 +25,8 @@ Transcription Service 消費訊息
 
 AI Service 消費訊息
   → 讀取逐字稿，呼叫 Groq API 產出摘要
+  → 呼叫 Groq API 依分段時間戳切章節
+  → 呼叫 HF Inference API 把逐字稿分段轉成向量，存進 embeddings（供之後 RAG 問答用）
   → 更新 Job status: summarizing → completed
   → 發送訊息「處理完成」到 MQ
 
@@ -32,9 +34,9 @@ Notification Service 消費訊息
   → 透過 WebSocket 推播給前端，更新使用者介面
 ```
 
-> **實作現況**：目前只做到「摘要」這一步。embedding/pgvector、RAG 問答、自動章節分段、
-> 多格式輸出都還沒實作（`ai_db` 也只建了 `summaries` 一張表），下面規劃內容保留作為
-> 未來擴充方向，不代表現在能動。見 [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
+> **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
+> `summaries`/`chapters`/`embeddings`/`qa_history` 四張表）。只剩多格式輸出還沒做。見
+> [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 
 ---
 
@@ -46,7 +48,7 @@ Notification Service 消費訊息
 | **Auth Service** | 使用者註冊/登入、JWT 簽發與刷新 | Spring Boot + gRPC Server | 對內（僅供 Gateway 呼叫） |
 | **Upload Service** | 檔案上傳、產生 presigned URL、Job 建立與狀態管理 | Spring Boot + gRPC Server | 對內（僅供 Gateway / 下游服務呼叫） |
 | **Transcription Service** | 抽音軌（moviepy/ffmpeg）、呼叫 Groq Whisper、逐字稿產出與儲存 | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
-| **AI Service** | 摘要生成（MVP 範圍，見上方實作現況） | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
+| **AI Service** | 摘要生成、章節分段、embedding + RAG 問答（見上方實作現況） | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
 | **Notification Service** | Job 狀態即時推播 | Python + FastAPI（WebSocket）+ pika | 對內（WebSocket 對外） |
 | **Frontend** | 使用者介面、播放器、時間戳跳轉 | React | 對外 |
 
@@ -62,7 +64,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、分段 timestamp
-- `ai_db`：摘要結果 + 章節分段（目前有 `summaries` / `chapters` 兩張表，embedding/QA/多格式輸出的表都還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史（`summaries` / `chapters` / `embeddings` / `qa_history` 四張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -71,7 +73,7 @@ MQ 事件外互不直接呼叫，也不會有即時跨庫 join。
 > **授權模型**：transcription-service / ai-service 本身**不驗證 `x-user-id`**，只信任「呼叫方是
 > 內部網路」（見兩邊 proto 的註解）——這點沒變，MVP 階段不打算讓每個下游服務各自重新實作一次
 > ownership 邏輯。實際的「只能存取自己的 job」檢查現在收斂在 Gateway 這一層：轉發
-> `GetTranscript`/`GetSummary`/`ListChapters` 前，Gateway 會先呼叫 upload-service 的 `GetJob`
+> `GetTranscript`/`GetSummary`/`ListChapters`/`AskQuestion` 前，Gateway 會先呼叫 upload-service 的 `GetJob`
 > 確認這個 job 是不是目前使用者的（`gateway/src/main/java/.../grpc/JobOwnershipGuard.java`），
 > 不是就回 404，不會再往下游打。代價是每個請求多一趟內部 gRPC 往返。這個檢查只存在於走 Gateway
 > 的路徑——如果之後有服務直接繞過 Gateway 打 transcription-service/ai-service，還是能查到任意
@@ -146,11 +148,13 @@ RPC 後，視需要只回傳 `segments` 欄位。轉錄本身完全是 **MQ 驅�
 ```
 GET    /summary/{jobId}                 取得摘要
 GET    /chapters/{jobId}                取得章節列表
+POST   /qa/{jobId}                      RAG 問答，body { "question": string }
 ```
 
-`chapters` 對應 ai-service 的 gRPC `ListChapters`（已實作，見 `ai-service/README.md`），但 Gateway
-這邊還沒加對應的 REST endpoint 轉譯，目前只有 gRPC 這一層可以查。原規劃的問答/多格式輸出 API
-（見下方 8.5）還沒實作。
+三支都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`，細節見
+[`gateway/README.md`](../gateway/README.md) 的 API 表跟 [`ai-service/README.md`](../ai-service/README.md)。
+原規劃的多格式輸出 API（`POST /export/{jobId}`、`GET /export/{jobId}/{format}`，見下方 8.5）
+還沒實作，ai-service 沒有對應的 rpc，Gateway 這邊也還沒開。
 
 ### 3.5 Notification（WebSocket，Gateway 不經手，前端直連 notification-service）
 
@@ -238,7 +242,8 @@ CREATE INDEX idx_segments_transcript_id ON transcript_segments(transcript_id);
 
 ### 4.4 ai_db
 
-**現況（已建立）**：
+**現況（已建立，四張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+`BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
 CREATE TABLE summaries (
@@ -256,16 +261,7 @@ CREATE TABLE chapters (
     sequence_no INT NOT NULL
 );
 CREATE INDEX ix_chapters_job_id ON chapters(job_id);
-```
 
-`pgvector` extension 有裝在 Postgres 上（docker-compose init script 有啟用），但 ai_db 目前
-**沒有任何用到 vector 型別的表**，`ai-service` 程式碼裡也還沒有 embedding 相關邏輯。以下維持原規劃
-內容，作為未來要做 RAG 問答/多格式輸出時的 schema 參考，**尚未建立、不代表現在存在**：
-
-**實作現況**：已建立並在用（跟本節標題「規劃中」不同，這段文件沒跟上實作進度）。目前用
-`BAAI/bge-m3`，`vector(1024)`：
-
-```sql
 CREATE TABLE embeddings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_id UUID NOT NULL,
@@ -275,9 +271,8 @@ CREATE TABLE embeddings (
     embedding vector(1024),                 -- 依所選 embedding model 維度調整，目前用 1024
     created_at TIMESTAMPTZ DEFAULT now()
 );
-
 CREATE INDEX idx_embeddings_job_id ON embeddings(job_id);
-CREATE INDEX idx_embeddings_vector ON embeddings USING ivfflat (embedding vector_cosine_ops);
+-- ivfflat 向量索引還沒建：MVP 資料量小、查詢一定先用 job_id 過濾縮小範圍，先不做這層優化
 
 CREATE TABLE qa_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -288,7 +283,11 @@ CREATE TABLE qa_history (
     source_timestamps NUMERIC(10,2)[],
     created_at TIMESTAMPTZ DEFAULT now()
 );
+```
 
+**規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
+
+```sql
 CREATE TABLE export_outputs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_id UUID NOT NULL,
@@ -328,7 +327,7 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 服務間同步呼叫 | gRPC（proto 定義在 `infra/proto/`），Gateway 是唯一對外 REST facade |
 | 前端 | React |
 | 關聯式資料庫 | PostgreSQL（各服務獨立 schema，Java 用 Hibernate `ddl-auto=update`、Python 用 SQLAlchemy `create_all` 自動建表） |
-| 向量資料庫 | pgvector（extension 已裝在 Postgres 上，但目前沒有任何表使用，屬未來規劃，見 8.5） |
+| 向量資料庫 | pgvector（`ai_db.embeddings`，`BAAI/bge-m3` 1024 維，已在用） |
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
 | ASR | Groq Whisper API（`whisper-large-v3-turbo`） |
@@ -372,25 +371,31 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
    網路，k8s 部署則靠 namespace 內的 Service DNS（見 `infra/k8s/01-configmap.yaml` 的
    `*_GRPC_TARGET` 設定），兩種模式殊途同歸，都不需要額外的服務發現元件
 2. **訊息佇列**：實際採用 RabbitMQ（不是原規劃的 Redis Queue，見 5./6. 節），producer/consumer
-   沒有額外抽象一層 interface，各服務直接用 pika（Python）/ Spring AMQP（Java）
+   沒有額外抽象一層 interface，各服務直接用 pika（Python）/ Spring AMQP（Java）。三個 Python
+   consumer（ai-service/transcription-service/notification-service）連線斷線時有指數退避自動
+   重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
 3. **講者分離**：MVP 先不做，`speaker_label` 欄位保留但先不啟用，之後可接 Groq 或其他支援 diarization 的服務
-4. **多格式輸出**：目前**一種格式都還沒做**（只有摘要），原規劃的「先做 1-2 種格式」還沒開始
+4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始
 5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
-7. **免費 API 額度管理**：AI Service/Transcription Service 呼叫 Groq/HF Inference 時需做 429/503 重試機制與額度監控，避免免費額度用盡或暫時性過載導致服務中斷（目前沒有實作，見 `ai-service/README.md` 已知限制）
+7. **免費 API 額度管理**：AI Service/Transcription Service 呼叫 Groq/HF Inference 時遇到 429/503，目前是訊息**處理**失敗直接標記 job `FAILED`，不會重試（要重新上傳才能重跑），也沒有額度監控/告警——這跟上面第 2 點的 MQ **連線**重試是不同層級，連線重試已經做了，這裡的 API 呼叫重試還沒做（見 `ai-service/README.md` 已知限制）
 
 ---
 
 ## 8. 待確認事項（開發前建議先想清楚）
 
 - [ ] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制（例如 25MB 對齊 Groq 免費層檔案上限）
-- [ ] embedding model 選擇（決定 `embeddings.embedding` 欄位的 vector 維度）——embedding 功能本身都還沒開始做，見 8.5
+- [x] embedding model 選擇——**已解決**：`BAAI/bge-m3`（透過 HF Inference API），1024 維，
+      query/document 對稱不用加 instruction 前綴；選型過程見 `ai-service/README.md` 已知限制
+      （HF Inference Providers 當下有沒有 provider 實際托管該模型會隨時間變動，換模型前建議先查）
 - [x] 章節自動分段的演算法/prompt 設計——**已解決**：純 LLM 判斷（把逐字稿分段連同時間戳丟給
       Groq，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見 `ai-service/app/services/chapter_generator.py`
 - [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
-- [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**已解決**：`UploadService.DeleteJob` 會嘗試刪除
+- [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
-      靠背景清理排除）。embedding 部分因為功能還沒做，暫不適用。
+      靠背景清理排除）。但這只清 upload_db 自己的資料，**不會**連帶清 transcription_db / ai_db
+      的 `transcripts`/`summaries`/`chapters`/`embeddings`/`qa_history`——服務間沒有 `job.deleted`
+      事件，刪除 Job 後這些表會留下孤兒資料，是目前真實存在的缺口（不是設計決定，是還沒做）
 - [x] 授權缺口：使用者只能存取自己的 job——**已解決**：Gateway 在轉發 Transcription/AI 的查詢
       前先呼叫 upload-service 的 `GetJob` 做 ownership 檢查（見 2.1），但 transcription-service /
       ai-service 本身仍不驗證 `x-user-id`，這個決定維持不變（見 2.1 授權模型）
@@ -399,8 +404,6 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
-- **Embedding / pgvector**：`ai_db` 沒有 `embeddings` 表，`ai-service` 沒有任何 embedding 產生邏輯
-- **RAG 問答**（`POST /qa/{jobId}`）：完全未實作，`ai.proto` 裡也沒有對應的 RPC
 - **多格式輸出**（會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作
 - **講者分離**：`transcript_segments.speaker_label` 欄位存在但目前一律是 `null`
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
