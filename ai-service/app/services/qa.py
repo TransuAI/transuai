@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.repositories.embedding_repository import find_similar
 from app.services.embedder import embed_query
-from app.services.gemini_client import get_client
+from app.services.groq_client import get_client, strip_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class NoEmbeddingsError(Exception):
 
 
 def answer_question(session: Session, job_id: uuid.UUID, question: str) -> tuple[str, list[float]]:
-    """RAG 問答：把問題 embed 後找最相關的逐字稿片段，餵給 Gemini 生成回答。
+    """RAG 問答：把問題 embed 後找最相關的逐字稿片段，餵給 Groq 生成回答。
 
     回傳 (answer, source_timestamps)，source_timestamps 是拿來回答的片段的起始時間，
     給前端做時間戳跳轉用，沒有特定排序保證。
@@ -36,12 +36,14 @@ def answer_question(session: Session, job_id: uuid.UUID, question: str) -> tuple
     context = "\n\n".join(
         f"[{float(chunk.start_time):.1f}s] {chunk.chunk_text}" for chunk in chunks
     )
-    logger.info("calling Gemini (%s) to answer question for job %s, using %d chunks",
-                settings.gemini_model, job_id, len(chunks))
-    response = get_client().models.generate_content(
-        model=settings.gemini_model,
-        contents=_PROMPT_TEMPLATE.format(context=context, question=question),
+    logger.info("calling Groq (%s) to answer question for job %s, using %d chunks",
+                settings.ai_groq_model, job_id, len(chunks))
+    response = get_client().chat.completions.create(
+        model=settings.ai_groq_model,
+        messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(context=context, question=question)}],
+        # qwen/qwen3.6-27b 預設會把 <think> chain-of-thought 混進 content，這裡只要最終答案。
+        reasoning_format="hidden",
     )
-    answer = (response.text or "").strip()
+    answer = strip_thinking(response.choices[0].message.content or "")
     source_timestamps = [float(chunk.start_time) for chunk in chunks]
     return answer, source_timestamps

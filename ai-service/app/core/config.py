@@ -21,8 +21,13 @@ class Settings(BaseSettings):
     upload_service_grpc_target: str = "localhost:9090"
     transcription_service_grpc_target: str = "localhost:8083"
 
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    groq_api_key: str = ""
+    # 欄位刻意不叫 groq_model：transcription-service 也有一個 GROQ_MODEL（whisper 模型），
+    # 兩個服務共用同一份 configmap，撞名會讓這裡讀到 whisper 的型號字串。
+    ai_groq_model: str = "qwen/qwen3.6-27b"
+
+    hf_api_key: str = ""
+    hf_embedding_model: str = "BAAI/bge-m3"
 
     grpc_port: int = 8084
 
