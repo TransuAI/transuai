@@ -63,6 +63,17 @@ const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容'
 
 const mockChapters: Chapter[] = [{ id: 'ch-1', jobId: 'job-1', title: '開場', startTime: 12, sequenceNo: 0 }]
 
+async function renderCompletedJob() {
+  vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
+  vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
+  vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
+  vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
+
+  const view = renderJobDetail()
+  await screen.findByText('問答')
+  return view
+}
+
 describe('JobDetailPage status branches', () => {
   it('shows the simplified progress view for a non-COMPLETED job, without the three-pane workspace', async () => {
     vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'TRANSCRIBING' })
@@ -88,7 +99,7 @@ describe('JobDetailPage status branches', () => {
     expect(screen.getByText('轉錄服務逾時')).toBeInTheDocument()
   })
 
-  it('renders the Source, Chat, and Studio panes for a COMPLETED job', async () => {
+  it('shows the Chat pane by default for a COMPLETED job, with Source/Studio reachable via triggers', async () => {
     vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
     vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
     vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
@@ -96,27 +107,59 @@ describe('JobDetailPage status branches', () => {
 
     renderJobDetail()
 
+    expect(await screen.findByText('問答')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '來源' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Studio' })).toBeInTheDocument()
+  })
+})
+
+describe('JobDetailPage Source/Studio Sheets (COMPLETED, narrow viewport)', () => {
+  it('opens the Source Sheet when the Source trigger is clicked', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob()
+
+    expect(screen.queryByText('哈囉世界', { exact: false })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '來源' }))
+
     expect(await screen.findByText('哈囉世界', { exact: false })).toBeInTheDocument()
-    expect(screen.getByText('問答')).toBeInTheDocument()
-    expect(screen.getByText('Studio')).toBeInTheDocument()
-    expect(screen.getByText('這是摘要內容')).toBeInTheDocument()
+  })
+
+  it('opens the Studio Sheet when the Studio trigger is clicked', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob()
+
+    expect(screen.queryByText('這是摘要內容')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Studio' }))
+
+    expect(await screen.findByText('這是摘要內容')).toBeInTheDocument()
     expect(screen.getByText('開場')).toBeInTheDocument()
   })
 })
 
-describe('JobDetailPage Chat pane (COMPLETED)', () => {
-  async function renderCompletedJob() {
-    vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
-    vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
-    vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
-    vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
-
-    const view = renderJobDetail()
-    await screen.findByText('問答')
-    return view
+// The Source/Studio Sheets are modal on narrow viewports (matching the Sidebar's own
+// mobile drawer), so the media player they contain isn't necessarily mounted at the same
+// time as the Chat pane is interactive. These tests force the desktop layout, where
+// Source/Chat/Studio render inline simultaneously with no modal blocking, to exercise the
+// carried-over ask -> history -> citation-seek and segment/chapter-seek behavior.
+describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
+  function stubDesktopLayout() {
+    return vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query) =>
+        ({
+          matches: query === '(min-width: 1024px)',
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    )
   }
 
   it('asks a question, appends it to history, and seeks the media player from a citation timestamp', async () => {
+    const matchMediaSpy = stubDesktopLayout()
     const user = userEvent.setup()
     vi.mocked(qaApi.ask).mockResolvedValue({ answer: '答案內容', sourceTimestamps: [42] })
 
@@ -129,31 +172,38 @@ describe('JobDetailPage Chat pane (COMPLETED)', () => {
     expect(await screen.findByText('這段在說什麼?')).toBeInTheDocument()
     expect(screen.getByText('答案內容')).toBeInTheDocument()
 
-    const citation = screen.getByRole('button', { name: '0:42' })
-    await user.click(citation)
+    await user.click(screen.getByRole('button', { name: '0:42' }))
 
     const audio = document.querySelector('audio')
     expect(audio).not.toBeNull()
     expect(audio?.currentTime).toBe(42)
+
+    matchMediaSpy.mockRestore()
   })
 
   it('seeks the media player when a transcript segment is clicked', async () => {
+    const matchMediaSpy = stubDesktopLayout()
     const user = userEvent.setup()
-    await renderCompletedJob()
 
+    await renderCompletedJob()
     await user.click(await screen.findByRole('button', { name: '0:05' }))
 
     const audio = document.querySelector('audio')
     expect(audio?.currentTime).toBe(5)
+
+    matchMediaSpy.mockRestore()
   })
 
   it('seeks the media player when a chapter is clicked', async () => {
+    const matchMediaSpy = stubDesktopLayout()
     const user = userEvent.setup()
-    await renderCompletedJob()
 
+    await renderCompletedJob()
     await user.click(await screen.findByRole('button', { name: '0:12開場' }))
 
     const audio = document.querySelector('audio')
     expect(audio?.currentTime).toBe(12)
+
+    matchMediaSpy.mockRestore()
   })
 })

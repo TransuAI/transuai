@@ -11,9 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { SourcePane } from '@/pages/job-detail/source-pane'
-import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
-import { StudioPane } from '@/pages/job-detail/studio-pane'
+import { CompletedWorkspace } from '@/pages/job-detail/completed-workspace'
+import type { QaEntry } from '@/pages/job-detail/chat-pane'
 import type { Chapter, Job, JobStatusEvent, Summary, Transcript } from '@/types/api'
 
 const MEDIA_BASE_URL = import.meta.env.VITE_MEDIA_BASE_URL as string | undefined
@@ -29,8 +28,10 @@ export function JobDetailPage() {
   const [isAsking, setIsAsking] = useState(false)
   const [isLoadingJob, setIsLoadingJob] = useState(true)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
+  const [isMediaMounted, setIsMediaMounted] = useState(false)
   const setMediaRef = (el: HTMLMediaElement | null) => {
     mediaRef.current = el
+    setIsMediaMounted(el !== null)
   }
 
   const loadJob = useCallback(async () => {
@@ -174,27 +175,20 @@ export function JobDetailPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] min-h-[32rem] flex-col gap-4 md:h-[calc(100vh-3rem)]">
-      <Button asChild variant="ghost" size="sm" className="w-fit -ml-2 shrink-0">
-        <Link to="/jobs">
-          <ArrowLeft className="size-4" />
-          返回列表
-        </Link>
-      </Button>
-
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[20rem_minmax(0,1fr)_20rem]">
-        <SourcePane job={job} mediaUrl={mediaUrl} transcript={transcript} setMediaRef={setMediaRef} onSeek={seekTo} />
-        <ChatPane
-          qaHistory={qaHistory}
-          questionInput={questionInput}
-          onQuestionInputChange={setQuestionInput}
-          isAsking={isAsking}
-          onAsk={() => void handleAskQuestion()}
-          onSeek={seekTo}
-          mediaAvailable={Boolean(mediaUrl)}
-        />
-        <StudioPane summary={summary} chapters={chapters} onSeek={seekTo} mediaAvailable={Boolean(mediaUrl)} />
-      </div>
-    </div>
+    <CompletedWorkspace
+      job={job}
+      mediaUrl={mediaUrl}
+      mediaAvailable={Boolean(mediaUrl) && isMediaMounted}
+      transcript={transcript}
+      summary={summary}
+      chapters={chapters}
+      qaHistory={qaHistory}
+      questionInput={questionInput}
+      onQuestionInputChange={setQuestionInput}
+      isAsking={isAsking}
+      onAsk={() => void handleAskQuestion()}
+      onSeek={seekTo}
+      setMediaRef={setMediaRef}
+    />
   )
 }
