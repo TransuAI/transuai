@@ -4,6 +4,11 @@ trim 到這個服務目前真的用得到的部分——這裡沒有 HF 呼叫�
 
 架構理由（訊息層級 requeue 而非 in-process 重試）見 ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md——
 這裡是同一個已經做過的決定，套用到 transcription-service 自己的 Groq Whisper 呼叫，不是一個新的取捨。
+
+這個服務版本的取捨成本跟 ai-service 略有不同：重試會讓整個 pipeline 從頭重跑，包含
+`download_object()`（重新從物件儲存下載檔案）跟 VIDEO 檔案的 `extract_audio_track()`（重新跑一次
+ffmpeg），不只是重打 Groq API。跟 ai-service 的 ADR 0001 一樣，這是刻意接受的成本換取機制簡單——
+沒有任何中間結果會被存進資料庫，沒有部分進度可以保留。
 """
 
 from groq import (
