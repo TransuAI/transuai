@@ -102,6 +102,16 @@ grpcurl -plaintext -d '{"jobId":"<job_id>"}' \
 
 產物在 `app/proto_gen/`，有 commit 進版控，不用每個環境都拉 infra/transcription-service repo 才能跑。
 
+## 測試
+
+```bash
+uv run pytest
+```
+
+用 pytest，mocking 只用標準庫的 `unittest.mock`（沒有額外裝 `pytest-mock`）。測試不需要跑起 `infra`（Postgres/RabbitMQ）或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（Groq、HF、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
+
+Mock 一定要 patch 在 `app/services/pipeline.py`「使用端」import 進來的名稱（例如 `pipeline.summarize`、`pipeline.job_status_client`），不是「定義端」的原始模組（例如 `app.services.summarizer.summarize`）——`unittest.mock.patch` 只替換掉 name binding，patch 定義端不會影響 pipeline.py 實際呼叫到的是誰。
+
 ## 專案結構
 
 MVC 風格分層，跟 transcription-service 對照方式一致：
