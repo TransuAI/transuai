@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { DarkModeToggle } from '@/components/layout/dark-mode-toggle'
 
 const JOB_DETAIL_ROUTE_PATTERN = /^\/jobs\/[^/]+$/
 
@@ -141,6 +142,7 @@ function SidebarBody({
       </div>
       <div className="mt-auto flex flex-col gap-1 border-t p-2">
         <SidebarUserMenu collapsed={collapsed} />
+        <DarkModeToggle collapsed={collapsed} />
         {onToggleCollapsed && (
           <Button
             variant="ghost"
