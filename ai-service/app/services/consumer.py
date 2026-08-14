@@ -57,6 +57,12 @@ def _consume_once() -> None:
             # 斷線），這裡要讓例外繼續往外冒、不 ack 這則訊息——ack 之後才發現 retry queue 沒收到
             # 訊息，等於這則訊息平白消失。不 ack 的話，訊息會在連線斷掉時被 RabbitMQ 自動 requeue，
             # 交給 consumer.py 既有的重連邏輯處理，而不是在這裡假裝重試已經送出去。
+            #
+            # 但 process_message() 本身也可能 raise 其他跟這個重試機制無關的例外（例如 payload
+            # 根本不是合法 JSON、缺欄位——這幾行在 process_message() 自己的 try/except 之外，見
+            # pipeline.py），這種情況要照舊 ack 掉，不能讓它一路冒到 channel.start_consuming()：
+            # 這則訊息沒被 ack 會在重連後被 RabbitMQ 重新投遞，同一個 payload 錯誤會立刻再炸一次，
+            # 變成無窮 crash/reconnect 迴圈，而且 prefetch_count=1 會讓後面所有訊息一起卡住。
             retry_count = (properties.headers or {}).get(RETRY_COUNT_HEADER, 0)
             try:
                 process_message(
@@ -82,6 +88,12 @@ def _consume_once() -> None:
                 logger.info(
                     "requeueing message onto %s (retry_count %d -> %d)",
                     queue, retry_count, retry_count + 1)
+            except Exception:
+                logger.exception(
+                    "process_message raised an unexpected exception outside its own handling, "
+                    "acking to avoid a poison-message crash/reconnect loop")
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
         channel.basic_consume(
