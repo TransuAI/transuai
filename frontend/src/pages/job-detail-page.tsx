@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, FileText, List, MessageCircle, Sparkles } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { formatBytes, formatDuration } from '@/lib/media'
@@ -9,16 +9,12 @@ import { useJobSocket } from '@/hooks/use-job-socket'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import type { Chapter, Job, JobStatusEvent, QaAnswer, Summary, Transcript } from '@/types/api'
-
-interface QaEntry {
-  question: string
-  answer: QaAnswer
-}
+import { SourcePane } from '@/pages/job-detail/source-pane'
+import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
+import { StudioPane } from '@/pages/job-detail/studio-pane'
+import type { Chapter, Job, JobStatusEvent, Summary, Transcript } from '@/types/api'
 
 const MEDIA_BASE_URL = import.meta.env.VITE_MEDIA_BASE_URL as string | undefined
 
@@ -109,7 +105,7 @@ export function JobDetailPage() {
 
   if (isLoadingJob) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-40 w-full" />
       </div>
@@ -118,193 +114,87 @@ export function JobDetailPage() {
 
   if (!job) {
     return (
-      <Alert variant="destructive">
-        <AlertTitle>找不到這個 Job</AlertTitle>
-        <AlertDescription>它可能已被刪除,或不屬於你的帳號。</AlertDescription>
-      </Alert>
+      <div className="mx-auto w-full max-w-5xl">
+        <Alert variant="destructive">
+          <AlertTitle>找不到這個 Job</AlertTitle>
+          <AlertDescription>它可能已被刪除,或不屬於你的帳號。</AlertDescription>
+        </Alert>
+      </div>
     )
   }
 
   const mediaUrl = MEDIA_BASE_URL ? `${MEDIA_BASE_URL}/${job.storagePath}` : undefined
 
+  if (job.status !== 'COMPLETED') {
+    return (
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+        <Button asChild variant="ghost" size="sm" className="w-fit -ml-2">
+          <Link to="/jobs">
+            <ArrowLeft className="size-4" />
+            返回列表
+          </Link>
+        </Button>
+
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle className="break-all">{job.fileName}</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {formatBytes(job.fileSizeBytes)} · {formatDuration(job.durationSeconds)} ·{' '}
+                {new Date(job.createdAt).toLocaleString()}
+              </p>
+            </div>
+            <JobStatusBadge status={job.status} />
+          </CardHeader>
+          {job.status === 'FAILED' && job.errorReason && (
+            <CardContent>
+              <Alert variant="destructive">
+                <AlertTitle>處理失敗</AlertTitle>
+                <AlertDescription>{job.errorReason}</AlertDescription>
+              </Alert>
+            </CardContent>
+          )}
+          {isJobInProgress(job.status) && (
+            <CardContent>
+              <p className="text-sm text-muted-foreground">處理中,完成後這裡會自動更新逐字稿與摘要...</p>
+            </CardContent>
+          )}
+          {mediaUrl && (
+            <CardContent>
+              {job.fileType === 'VIDEO' ? (
+                <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-md" />
+              ) : (
+                <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
+              )}
+            </CardContent>
+          )}
+        </Card>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-4">
-      <Button asChild variant="ghost" size="sm" className="w-fit -ml-2">
+    <div className="flex h-[calc(100vh-7rem)] min-h-[32rem] flex-col gap-4 md:h-[calc(100vh-3rem)]">
+      <Button asChild variant="ghost" size="sm" className="w-fit -ml-2 shrink-0">
         <Link to="/jobs">
           <ArrowLeft className="size-4" />
           返回列表
         </Link>
       </Button>
 
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle className="break-all">{job.fileName}</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {formatBytes(job.fileSizeBytes)} · {formatDuration(job.durationSeconds)} ·{' '}
-              {new Date(job.createdAt).toLocaleString()}
-            </p>
-          </div>
-          <JobStatusBadge status={job.status} />
-        </CardHeader>
-        {job.status === 'FAILED' && job.errorReason && (
-          <CardContent>
-            <Alert variant="destructive">
-              <AlertTitle>處理失敗</AlertTitle>
-              <AlertDescription>{job.errorReason}</AlertDescription>
-            </Alert>
-          </CardContent>
-        )}
-        {isJobInProgress(job.status) && (
-          <CardContent>
-            <p className="text-sm text-muted-foreground">處理中,完成後這裡會自動更新逐字稿與摘要...</p>
-          </CardContent>
-        )}
-        {mediaUrl && (
-          <CardContent>
-            {job.fileType === 'VIDEO' ? (
-              <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-md" />
-            ) : (
-              <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
-            )}
-          </CardContent>
-        )}
-      </Card>
-
-      {summary && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="size-4" />
-              AI 摘要
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">{summary.summaryText}</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {chapters.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <List className="size-4" />
-              章節
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-2">
-              {chapters.map((chapter) => (
-                <button
-                  key={chapter.id}
-                  type="button"
-                  disabled={!mediaUrl}
-                  onClick={() => seekTo(chapter.startTime)}
-                  className="flex items-center gap-3 rounded text-left text-sm enabled:hover:text-accent-foreground disabled:opacity-60"
-                >
-                  <span className="h-fit shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
-                    {formatDuration(chapter.startTime)}
-                  </span>
-                  <span className="leading-relaxed">{chapter.title}</span>
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {job.status === 'COMPLETED' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <MessageCircle className="size-4" />
-              問答
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault()
-                void handleAskQuestion()
-              }}
-            >
-              <Input
-                value={questionInput}
-                onChange={(e) => setQuestionInput(e.target.value)}
-                placeholder="針對這個內容提問..."
-                disabled={isAsking}
-              />
-              <Button type="submit" disabled={isAsking || !questionInput.trim()}>
-                {isAsking ? '思考中...' : '問'}
-              </Button>
-            </form>
-            {qaHistory.length > 0 && (
-              <div className="flex flex-col gap-4">
-                {qaHistory.map((entry, i) => (
-                  <div key={i} className="flex flex-col gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
-                    <p className="text-sm font-medium">{entry.question}</p>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                      {entry.answer.answer}
-                    </p>
-                    {entry.answer.sourceTimestamps.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-1">
-                        {entry.answer.sourceTimestamps.map((ts, j) => (
-                          <button
-                            key={j}
-                            type="button"
-                            disabled={!mediaUrl}
-                            onClick={() => seekTo(ts)}
-                            className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground enabled:hover:bg-accent enabled:hover:text-accent-foreground disabled:opacity-60"
-                          >
-                            {formatDuration(ts)}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {transcript && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileText className="size-4" />
-              逐字稿
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-96 pr-4">
-              <div className="flex flex-col gap-3">
-                {transcript.segments.map((segment, i) => (
-                  <div key={i} className="flex gap-3 text-sm">
-                    <button
-                      type="button"
-                      disabled={!mediaUrl}
-                      onClick={() => seekTo(segment.startTime)}
-                      className="h-fit shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground enabled:hover:bg-accent enabled:hover:text-accent-foreground disabled:opacity-60"
-                    >
-                      {formatDuration(segment.startTime)}
-                    </button>
-                    <p className="leading-relaxed">
-                      {segment.speakerLabel && (
-                        <span className="mr-1 font-medium">{segment.speakerLabel}:</span>
-                      )}
-                      {segment.text}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-      )}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[20rem_minmax(0,1fr)_20rem]">
+        <SourcePane job={job} mediaUrl={mediaUrl} transcript={transcript} setMediaRef={setMediaRef} onSeek={seekTo} />
+        <ChatPane
+          qaHistory={qaHistory}
+          questionInput={questionInput}
+          onQuestionInputChange={setQuestionInput}
+          isAsking={isAsking}
+          onAsk={() => void handleAskQuestion()}
+          onSeek={seekTo}
+          mediaAvailable={Boolean(mediaUrl)}
+        />
+        <StudioPane summary={summary} chapters={chapters} onSeek={seekTo} mediaAvailable={Boolean(mediaUrl)} />
+      </div>
     </div>
   )
 }
