@@ -2,6 +2,7 @@ package com.transuai.upload_service.service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -12,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -42,15 +44,18 @@ public class StorageService {
         return new PresignedUpload(presigned.url().toString(), objectKey, Instant.now().plus(expiry));
     }
 
-    public boolean objectExists(String objectKey) {
+    // completeUpload() 不能只信任呼叫端回報的 file_size_bytes——那個數字完全由 client 決定，
+    // 拿它來做大小限制形同沒有限制。這裡直接問物件儲存實際存了多大，回傳 Optional.empty() 代表
+    // 物件還不存在（呼叫端可能在上傳完成前就呼叫了 completeUpload）。
+    public Optional<Long> headObjectSize(String objectKey) {
         try {
-            s3Client.headObject(HeadObjectRequest.builder()
+            HeadObjectResponse response = s3Client.headObject(HeadObjectRequest.builder()
                     .bucket(storageProperties.bucket())
                     .key(objectKey)
                     .build());
-            return true;
+            return Optional.of(response.contentLength());
         } catch (NoSuchKeyException e) {
-            return false;
+            return Optional.empty();
         }
     }
 

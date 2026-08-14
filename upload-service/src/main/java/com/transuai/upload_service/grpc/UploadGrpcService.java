@@ -1,5 +1,6 @@
 package com.transuai.upload_service.grpc;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import com.transuai.upload.grpc.v1.CompleteUploadRequest;
@@ -12,6 +13,7 @@ import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.ListJobsRequest;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
+import com.transuai.upload_service.config.UploadLimitsProperties;
 import com.transuai.upload_service.event.JobEventPublisher;
 import com.transuai.upload_service.event.TranscriptionRequestedEvent;
 import com.transuai.upload_service.grpc.auth.GrpcAuthContext;
@@ -39,6 +41,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
     private final StorageService storageService;
     private final JobRepository jobRepository;
     private final JobEventPublisher jobEventPublisher;
+    private final UploadLimitsProperties uploadLimitsProperties;
 
     @Override
     public void getPresignedUploadUrl(GetPresignedUploadUrlRequest request,
@@ -56,6 +59,14 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
         if (request.getFileSizeBytes() <= 0) {
             responseObserver.onError(
                     Status.INVALID_ARGUMENT.withDescription("file_size_bytes must be positive").asRuntimeException());
+            return;
+        }
+        long presignMaxFileSizeBytes = uploadLimitsProperties.applicableMaxFileSizeBytes(request.getFileType());
+        if (request.getFileSizeBytes() > presignMaxFileSizeBytes) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("file_size_bytes exceeds the maximum allowed upload size for this file type (%d bytes)"
+                            .formatted(presignMaxFileSizeBytes))
+                    .asRuntimeException());
             return;
         }
 
@@ -101,9 +112,27 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
                     .withDescription("storage_path does not belong to caller").asRuntimeException());
             return;
         }
-        if (!storageService.objectExists(request.getStoragePath())) {
+        // request.getFileSizeBytes() 是呼叫端自己回報的數字，完全不可信——這裡改問物件儲存實際存了
+        // 多大，size 限制才是真的在擋東西，不是在擋一個呼叫端可以隨便亂填的欄位。
+        Optional<Long> actualFileSizeBytes = storageService.headObjectSize(request.getStoragePath());
+        if (actualFileSizeBytes.isEmpty()) {
             responseObserver.onError(Status.FAILED_PRECONDITION
                     .withDescription("object not found in storage; upload may not have completed yet")
+                    .asRuntimeException());
+            return;
+        }
+        long applicableMaxFileSizeBytes = uploadLimitsProperties.applicableMaxFileSizeBytes(request.getFileType());
+        if (actualFileSizeBytes.get() > applicableMaxFileSizeBytes) {
+            // 濫用防護上限用意在擋住真正上傳進來的東西，物件已經確定超標就沒有理由留著佔儲存空間——
+            // 跟 deleteJob() 同一套「刪除失敗只記警告、不擋主要流程」模式。
+            try {
+                storageService.deleteObject(request.getStoragePath());
+            } catch (RuntimeException e) {
+                log.warn("failed to delete oversized storage object {}", request.getStoragePath(), e);
+            }
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("uploaded object exceeds the maximum allowed size (%d bytes)"
+                            .formatted(applicableMaxFileSizeBytes))
                     .asRuntimeException());
             return;
         }
@@ -112,7 +141,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
                 .userId(userId)
                 .fileName(request.getFileName())
                 .fileType(JobMapper.toDomain(request.getFileType()))
-                .fileSizeBytes(request.getFileSizeBytes())
+                .fileSizeBytes(actualFileSizeBytes.get())
                 .storagePath(request.getStoragePath())
                 .durationSeconds(request.getDurationSeconds() > 0 ? request.getDurationSeconds() : null)
                 .status(com.transuai.upload_service.domain.JobStatus.UPLOADED)

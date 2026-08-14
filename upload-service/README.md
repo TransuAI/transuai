@@ -65,8 +65,8 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`src/main/proto/upl
 
 | RPC | 說明 |
 |---|---|
-| `GetPresignedUploadUrl` | 取得物件儲存的 presigned PUT URL，此階段尚未建立 Job |
-| `CompleteUpload` | 前端完成上傳後呼叫，建立 Job（status=`UPLOADED`）並發送 `transcription.requested` 事件 |
+| `GetPresignedUploadUrl` | 取得物件儲存的 presigned PUT URL，此階段尚未建立 Job；`file_size_bytes` 超過上傳大小限制會回 `INVALID_ARGUMENT`（見下方「上傳大小限制」） |
+| `CompleteUpload` | 前端完成上傳後呼叫，建立 Job（status=`UPLOADED`）並發送 `transcription.requested` 事件；會改問物件儲存實際存了多大（不信任請求帶的 `file_size_bytes`），超過限制回 `INVALID_ARGUMENT` 並刪除該物件 |
 | `GetJob` | 查詢單一 Job，強制 ownership 檢查（別人的 Job 回 `NOT_FOUND`） |
 | `ListJobs` | 分頁查詢目前使用者的所有 Job |
 | `DeleteJob` | 刪除 Job record 與物件儲存檔案 |
@@ -78,6 +78,15 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 | RPC | 說明 |
 |---|---|
 | `UpdateJobStatus` | 依 `job_id` 更新 Job 狀態，可選帶 `error_reason`（轉 `FAILED` 時使用） |
+
+### 上傳大小限制
+
+兩層限制，各自對應不同的目的（見 [`docs/adr/0001-upload-size-limit-is-file-type-aware.md`](docs/adr/0001-upload-size-limit-is-file-type-aware.md)）：
+
+- **一般濫用防護上限**（`app.upload.max-file-size-bytes`，預設 1GB）：不分檔案類型，套用在所有上傳。
+- **AUDIO 專用上限**（`app.upload.max-audio-file-size-bytes`，預設 20MB）：只套用在 `file_type == AUDIO`，對齊 Groq Whisper 免費層的檔案大小限制，因為只有 AUDIO 上傳的原始檔案大小才等於最終送進 Groq 的音軌大小。VIDEO 上傳不套用這條——時長限制（前端 `upload-page.tsx` 的 30 分鐘）才是 VIDEO 對應 Groq 限制的把關。
+
+`GetPresignedUploadUrl` 用呼叫端回報的 `file_size_bytes` 做早期擋檢查；`CompleteUpload` 改問物件儲存實際存了多大，不信任呼叫端回報的數字——這關沒過，物件會被立即刪除。
 
 ## 環境變數
 
@@ -94,6 +103,8 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 | `STORAGE_BUCKET` | `media-uploads` | bucket 名稱 |
 | `STORAGE_PATH_STYLE_ACCESS` | `true` | MinIO 需要 path-style，正式環境用 R2 也維持 `true` |
 | `STORAGE_PRESIGN_EXPIRY_MINUTES` | `15` | presigned URL 有效期限（分鐘） |
+| `MAX_UPLOAD_FILE_SIZE_BYTES` | `1073741824`（1GB） | 一般濫用防護上限，不分檔案類型，見「上傳大小限制」一節 |
+| `MAX_AUDIO_UPLOAD_FILE_SIZE_BYTES` | `20971520`（20MB） | AUDIO 專用上限，對齊 Groq Whisper 免費層限制，見「上傳大小限制」一節 |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `admin` / `0000` | RabbitMQ 帳密 |
 
