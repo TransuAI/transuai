@@ -384,7 +384,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 
 ## 8. 待確認事項（開發前建議先想清楚）
 
-- [ ] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制（例如 25MB 對齊 Groq 免費層檔案上限）
+- [x] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制——**已解決**：不是二選一，兩者對應不同的東西，分開處理（見 `upload-service/docs/adr/0001-upload-size-limit-is-file-type-aware.md`）。時長限制（30 分鐘，前端強制）維持現狀，是獨立的 MVP 產品決策，也是 VIDEO 上傳唯一有意義的 Groq 相關把關（VIDEO 原始檔案大小含容器/畫面編碼開銷，不等於最終送進 Groq 的音軌大小）。新增兩層後端強制的大小限制：AUDIO 專用上限（20MB，對齊 Groq 免費層）跟不分類型的濫用防護上限（1GB）——過去這兩層完全沒有後端驗證，`file_size_bytes` 只檢查是否為正數，繞過前端就能上傳任意大小。`GetPresignedUploadUrl` 用呼叫端回報的大小做早期擋檢查，`CompleteUpload` 改問物件儲存實際存了多大（不信任呼叫端回報的數字），超過限制立即刪除物件。
 - [x] embedding model 選擇——**已解決**：`BAAI/bge-m3`（透過 HF Inference API），1024 維，
       query/document 對稱不用加 instruction 前綴；選型過程見 `ai-service/README.md` 已知限制
       （HF Inference Providers 當下有沒有 provider 實際托管該模型會隨時間變動，換模型前建議先查）
