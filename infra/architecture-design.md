@@ -378,7 +378,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始
 5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
-7. **免費 API 額度管理**：AI Service/Transcription Service 呼叫 Groq/HF Inference 時遇到 429/503，目前是訊息**處理**失敗直接標記 job `FAILED`，不會重試（要重新上傳才能重跑），也沒有額度監控/告警——這跟上面第 2 點的 MQ **連線**重試是不同層級，連線重試已經做了，這裡的 API 呼叫重試還沒做（見 `ai-service/README.md` 已知限制）
+7. **免費 API 額度管理**：AI Service/Transcription Service 呼叫 Groq/HF Inference 時遇到 429/503，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了 Groq 呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。額度監控/告警仍然沒有，還是缺口
 
 ---
 
