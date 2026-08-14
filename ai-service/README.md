@@ -62,8 +62,18 @@ uv run python -m app.main
   → UpdateJobStatus(COMPLETED)
   → 發送 ai.completed { jobId, status }
 
-任一步失敗 → UpdateJobStatus(FAILED, error_reason=<例外訊息>) + 發送 job.failed { jobId, stage: "SUMMARIZING", errorReason }，
-訊息照樣 ack（不 requeue），避免永久性失敗（逐字稿不存在、API 額度用盡）造成無窮重試。
+任一步失敗，先判斷是不是暫時性失敗（Groq/HF SDK 例外型別、gRPC status code，見
+app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3 次嘗試）：
+  - 是 → 把訊息送進對應 TTL 的 retry queue（2 秒／4 秒），原始那份直接 ack，過一段時間後訊息
+    透過 dead-letter-exchange 自動送回原 queue，被當成全新訊息重新處理一次完整的 pipeline
+    （見 docs/adr/0001-message-level-retry-for-transient-external-failures.md）。整個過程
+    對使用者不可見，Job 狀態維持在處理中。
+  - 否（永久性失敗，或重試預算已用盡）→ UpdateJobStatus(FAILED, error_reason=<例外訊息>) +
+    發送 job.failed { jobId, stage: "SUMMARIZING", errorReason }，訊息照樣 ack（不 requeue）。
+    這個回報動作本身如果因為暫時性 gRPC 錯誤失敗，會用一個小型、快速的 in-process 重試（3 次
+    嘗試、200ms 起跳倍增、封頂 800ms）；仍然失敗的話記錄一則高嚴重度、好搜尋的 log
+    （AI_SERVICE_TERMINAL_FAILURE_REPORT_LOST），不會再讓 consumer thread 掛掉。
+
 章節分段還沒有獨立的 Job status，暫時併在 SUMMARIZING 階段，失敗一樣算整個 job 失敗。
 ```
 
@@ -155,8 +165,14 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 ## 已知限制 / 待辦
 
 - Schema 用 SQLAlchemy `create_all` 自動建表，團隊變大或上正式環境前應改用 Alembic 做版本化 migration
-- 訊息**處理**失敗（呼叫 Groq/HF 時遇到 429/503 等）只記錄 `FAILED` + `error_reason`，不會重試/退避，一次過載或短暫額度超限就會讓整個 job 直接判定失敗，要重新上傳才能重跑——這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線（RabbitMQ 重啟、DNS 暫時解析失敗等）現在有指數退避自動重連（見 `app/services/consumer.py`），不會再讓 consumer thread 永久掛掉
-- 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——這是跟 transcription-service 同樣的既有限制
+- 訊息處理遇到暫時性失敗（Groq/HF 429/503、內部 gRPC 服務短暫不可用）會自動重試（訊息層級 requeue，
+  最多 2 次、共 3 次嘗試，見上面 Pipeline 一節跟 `docs/adr/0001-...md`）；重試預算用盡、或失敗屬於永久性
+  （格式錯誤、認證失敗、job 真的不存在）才會直接判定 `FAILED`，要重新上傳才能重跑
+- 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗，會先做一次獨立、快速的 in-process 重試；只有連
+  這個重試都用盡（或失敗屬於永久性，例如 job 在 upload-service 那邊已經不存在）才會放棄，此時這則訊息
+  沒有任何後續動作（不會有 `job.failed` 事件），但會記錄一則高嚴重度、帶 `AI_SERVICE_TERMINAL_FAILURE_REPORT_LOST`
+  marker 的 log，方便跟一般 log 區分、手動搜尋處理——沒有額外的 dead-letter queue 或事件記錄這類遺失的回報，
+  這是目前接受的已知限制，之後若證明是實際的維運痛點再處理
 - 多格式輸出還沒實作
 - `embeddings` 沒有建 ivfflat 向量索引：MVP 資料量小、查詢一定先用 `job_id` 過濾縮小範圍，先不做這層優化；資料量大了之後要補
 - `qa_history` 目前只寫入沒有查詢 rpc，之後要做「問答歷史」列表可以直接查這張表

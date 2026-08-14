@@ -1,0 +1,122 @@
+import logging
+import time
+from typing import Callable
+
+import grpc
+from groq import (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
+from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError, OverloadedError
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+RETRY_COUNT_HEADER = "x-retry-count"
+MAX_RETRIES = 2  # 最多重試 2 次（1 次原始送達 + 2 次重試 = 3 次總嘗試），見 ADR 0001
+
+_RETRYABLE_GROQ_ERRORS = (RateLimitError, InternalServerError, APIConnectionError, APITimeoutError)
+_RETRYABLE_HF_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
+_RETRYABLE_GRPC_STATUS_CODES = {
+    grpc.StatusCode.UNAVAILABLE,
+    grpc.StatusCode.DEADLINE_EXCEEDED,
+    grpc.StatusCode.RESOURCE_EXHAUSTED,
+}
+
+_TERMINAL_RETRY_ATTEMPTS = 3
+_TERMINAL_RETRY_INITIAL_DELAY_SECONDS = 0.2
+_TERMINAL_RETRY_MAX_DELAY_SECONDS = 0.8
+
+TERMINAL_FAILURE_LOST_MARKER = "AI_SERVICE_TERMINAL_FAILURE_REPORT_LOST"
+
+
+class RetryableMessageError(Exception):
+    """process_message() 遇到暫時性失敗、且訊息還有重試預算時 raise 這個例外。
+
+    不會被 process_message() 自己吞掉，一路往外傳給 consumer.py 的 on_message callback，
+    由它決定把訊息送進哪一條 retry queue（見 retry_queue_for()），而不是走現有的 Job FAILED 路徑。
+    見 ADR 0001（docs/adr/0001-message-level-retry-for-transient-external-failures.md）。
+    """
+
+
+def retry_queue_for(retry_count: int) -> str | None:
+    """給定一則訊息目前已經重試過的次數，回傳下一次重試該送去哪條 queue；
+    重試預算（MAX_RETRIES 次）用盡則回傳 None。
+
+    retry_count 0 -> 第一次重試（2 秒 TTL queue）
+    retry_count 1 -> 第二次重試（4 秒 TTL queue）
+    retry_count >= MAX_RETRIES -> None（預算用盡，維持現狀走 FAILED 路徑）
+    """
+    if retry_count == 0:
+        return settings.retry_queue_2s
+    if retry_count == 1:
+        return settings.retry_queue_4s
+    return None
+
+
+def is_retryable_groq_error(exc: BaseException) -> bool:
+    """Groq typed SDK 例外分類：rate limit、伺服器錯誤、連線問題、逾時算暫時性失敗；
+    格式錯誤、認證/權限問題、找不到資源，以及其他未列出的例外一律視為永久性失敗。
+    """
+    return isinstance(exc, _RETRYABLE_GROQ_ERRORS)
+
+
+def is_retryable_hf_error(exc: BaseException) -> bool:
+    """Hugging Face 例外分類：專屬的 overload/timeout 型別直接算暫時性；其餘一律透過
+    通用的 HfHubHTTPError 檢查 HTTP status code 是否落在暫時性錯誤的集合裡，其他狀態碼
+    跟其他例外型別一律視為永久性失敗。
+    """
+    if isinstance(exc, (OverloadedError, InferenceTimeoutError)):
+        return True
+    if isinstance(exc, HfHubHTTPError):
+        return exc.response.status_code in _RETRYABLE_HF_HTTP_STATUS_CODES
+    return False
+
+
+def is_retryable_grpc_error(exc: BaseException) -> bool:
+    """內部 gRPC 呼叫（transcript-service / upload-service）例外分類，依 gRPC status code 判斷——
+    UNAVAILABLE/DEADLINE_EXCEEDED/RESOURCE_EXHAUSTED 是暫時性的；NOT_FOUND、INVALID_ARGUMENT
+    （job 真的不存在、ID 格式錯誤）等其他任何 code 都不重試。
+    """
+    if not isinstance(exc, grpc.RpcError):
+        return False
+    return exc.code() in _RETRYABLE_GRPC_STATUS_CODES
+
+
+def is_retryable_error(exc: BaseException) -> bool:
+    """process_message() 的統一分類入口。Groq、HF、內部 gRPC 三種例外來源的型別互不重疊，
+    依序檢查即可。"""
+    return (
+        is_retryable_groq_error(exc)
+        or is_retryable_hf_error(exc)
+        or is_retryable_grpc_error(exc)
+    )
+
+
+def retry_terminal_report(report: Callable[[], None]) -> bool:
+    """Job 已經確定失敗、回報 FAILED 狀態＋發送 job.failed 事件這個步驟專用的獨立重試。
+
+    刻意跟訊息層級的 requeue 機制（RetryableMessageError）分開：這個回報動作要嘛徹底成功、
+    要嘛徹底放棄，重跑整個 pipeline 對已經確定的失敗結果沒有任何幫助，只會浪費已經花掉的
+    Groq/HF 呼叫額度。只在失敗被分類為暫時性 gRPC 錯誤時才重試（3 次總嘗試，200ms 起跳、
+    每次 x2、封頂 800ms）；分類為永久性失敗（例如 job 在 upload-service 那邊已經不存在）
+    時立即放棄，不浪費重試次數。
+
+    回傳 True 表示 report() 成功（可能重試過），False 表示重試預算用盡或遇到永久性失敗——
+    呼叫端應該用清楚、好搜尋的方式記錄下來（見 TERMINAL_FAILURE_LOST_MARKER）。
+    """
+    delay = _TERMINAL_RETRY_INITIAL_DELAY_SECONDS
+    for attempt in range(1, _TERMINAL_RETRY_ATTEMPTS + 1):
+        try:
+            report()
+            return True
+        except Exception as exc:
+            is_last_attempt = attempt == _TERMINAL_RETRY_ATTEMPTS
+            if is_last_attempt or not is_retryable_grpc_error(exc):
+                return False
+            time.sleep(delay)
+            delay = min(delay * 2, _TERMINAL_RETRY_MAX_DELAY_SECONDS)
+    return False

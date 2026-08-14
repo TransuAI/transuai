@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     transcription_completed_queue: str = "transcription.completed"
     ai_completed_queue: str = "ai.completed"
     job_failed_queue: str = "job.failed"
+    # 由 ai-service 自己宣告跟擁有，不需要共用 RabbitMQ infra 的 exchange 設定變更，見 ADR 0001。
+    retry_queue_2s: str = "transcription.completed.retry.2s"
+    retry_queue_4s: str = "transcription.completed.retry.4s"
 
     upload_service_grpc_target: str = "localhost:9090"
     transcription_service_grpc_target: str = "localhost:8083"
