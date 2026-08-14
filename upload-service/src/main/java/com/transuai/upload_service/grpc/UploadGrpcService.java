@@ -14,6 +14,7 @@ import com.transuai.upload.grpc.v1.ListJobsRequest;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 import com.transuai.upload_service.config.UploadLimitsProperties;
+import com.transuai.upload_service.domain.JobEntity;
 import com.transuai.upload_service.event.JobEventPublisher;
 import com.transuai.upload_service.event.TranscriptionRequestedEvent;
 import com.transuai.upload_service.grpc.auth.GrpcAuthContext;
@@ -137,14 +138,14 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
             return;
         }
 
-        com.transuai.upload_service.domain.Job job = com.transuai.upload_service.domain.Job.builder()
+        JobEntity job = JobEntity.builder()
                 .userId(userId)
                 .fileName(request.getFileName())
                 .fileType(JobMapper.toDomain(request.getFileType()))
                 .fileSizeBytes(actualFileSizeBytes.get())
                 .storagePath(request.getStoragePath())
                 .durationSeconds(request.getDurationSeconds() > 0 ? request.getDurationSeconds() : null)
-                .status(com.transuai.upload_service.domain.JobStatus.UPLOADED)
+                .status(JobEntity.Status.UPLOADED)
                 .build();
         job = jobRepository.save(job);
 
@@ -163,7 +164,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
             return;
         }
 
-        com.transuai.upload_service.domain.Job job = jobRepository.findByIdAndUserId(jobId, userId)
+        JobEntity job = jobRepository.findByIdAndUserId(jobId, userId)
                 .orElse(null);
         if (job == null) {
             responseObserver.onError(Status.NOT_FOUND.withDescription("job not found").asRuntimeException());
@@ -181,7 +182,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
         int page = request.getPage() > 0 ? request.getPage() : 1;
         int pageSize = request.getPageSize() > 0 ? Math.min(request.getPageSize(), MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
 
-        Page<com.transuai.upload_service.domain.Job> result = jobRepository.findByUserIdOrderByCreatedAtDesc(userId,
+        Page<JobEntity> result = jobRepository.findByUserIdOrderByCreatedAtDesc(userId,
                 PageRequest.of(page - 1, pageSize));
 
         ListJobsResponse.Builder builder = ListJobsResponse.newBuilder()
@@ -212,7 +213,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
             return;
         }
 
-        com.transuai.upload_service.domain.Job job = jobRepository.findByIdAndUserId(jobId, userId).orElse(null);
+        JobEntity job = jobRepository.findByIdAndUserId(jobId, userId).orElse(null);
         if (job == null) {
             responseObserver.onError(Status.NOT_FOUND.withDescription("job not found").asRuntimeException());
             return;

@@ -5,6 +5,7 @@ import java.util.UUID;
 import com.transuai.upload.grpc.v1.InternalJobServiceGrpc;
 import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.UpdateJobStatusRequest;
+import com.transuai.upload_service.domain.JobEntity;
 import com.transuai.upload_service.repository.JobRepository;
 
 import io.grpc.Status;
@@ -31,7 +32,7 @@ public class InternalJobGrpcService extends InternalJobServiceGrpc.InternalJobSe
             return;
         }
 
-        com.transuai.upload_service.domain.Job job = jobRepository.findById(jobId).orElse(null);
+        JobEntity job = jobRepository.findById(jobId).orElse(null);
         if (job == null) {
             responseObserver.onError(Status.NOT_FOUND.withDescription("job not found").asRuntimeException());
             return;

@@ -1,5 +1,10 @@
 package com.transuai.upload_service.grpc;
 
+import com.transuai.upload.grpc.v1.FileType;
+import com.transuai.upload.grpc.v1.Job;
+import com.transuai.upload.grpc.v1.JobStatus;
+import com.transuai.upload_service.domain.JobEntity;
+
 import io.grpc.Status;
 
 public final class JobMapper {
@@ -7,44 +12,44 @@ public final class JobMapper {
     private JobMapper() {
     }
 
-    public static com.transuai.upload_service.domain.FileType toDomain(com.transuai.upload.grpc.v1.FileType fileType) {
+    public static JobEntity.FileType toDomain(FileType fileType) {
         return switch (fileType) {
-            case AUDIO -> com.transuai.upload_service.domain.FileType.AUDIO;
-            case VIDEO -> com.transuai.upload_service.domain.FileType.VIDEO;
+            case AUDIO -> JobEntity.FileType.AUDIO;
+            case VIDEO -> JobEntity.FileType.VIDEO;
             case FILE_TYPE_UNSPECIFIED, UNRECOGNIZED ->
                 throw Status.INVALID_ARGUMENT.withDescription("unsupported file_type: " + fileType)
                         .asRuntimeException();
         };
     }
 
-    public static com.transuai.upload.grpc.v1.FileType toProto(com.transuai.upload_service.domain.FileType fileType) {
+    public static FileType toProto(JobEntity.FileType fileType) {
         return switch (fileType) {
-            case AUDIO -> com.transuai.upload.grpc.v1.FileType.AUDIO;
-            case VIDEO -> com.transuai.upload.grpc.v1.FileType.VIDEO;
+            case AUDIO -> FileType.AUDIO;
+            case VIDEO -> FileType.VIDEO;
         };
     }
 
-    public static com.transuai.upload.grpc.v1.JobStatus toProto(com.transuai.upload_service.domain.JobStatus status) {
-        return com.transuai.upload.grpc.v1.JobStatus.valueOf(status.name());
+    public static JobStatus toProto(JobEntity.Status status) {
+        return JobStatus.valueOf(status.name());
     }
 
-    public static com.transuai.upload_service.domain.JobStatus toDomain(com.transuai.upload.grpc.v1.JobStatus status) {
+    public static JobEntity.Status toDomain(JobStatus status) {
         return switch (status) {
-            case PENDING -> com.transuai.upload_service.domain.JobStatus.PENDING;
-            case UPLOADING -> com.transuai.upload_service.domain.JobStatus.UPLOADING;
-            case UPLOADED -> com.transuai.upload_service.domain.JobStatus.UPLOADED;
-            case TRANSCRIBING -> com.transuai.upload_service.domain.JobStatus.TRANSCRIBING;
-            case TRANSCRIBED -> com.transuai.upload_service.domain.JobStatus.TRANSCRIBED;
-            case SUMMARIZING -> com.transuai.upload_service.domain.JobStatus.SUMMARIZING;
-            case COMPLETED -> com.transuai.upload_service.domain.JobStatus.COMPLETED;
-            case FAILED -> com.transuai.upload_service.domain.JobStatus.FAILED;
+            case PENDING -> JobEntity.Status.PENDING;
+            case UPLOADING -> JobEntity.Status.UPLOADING;
+            case UPLOADED -> JobEntity.Status.UPLOADED;
+            case TRANSCRIBING -> JobEntity.Status.TRANSCRIBING;
+            case TRANSCRIBED -> JobEntity.Status.TRANSCRIBED;
+            case SUMMARIZING -> JobEntity.Status.SUMMARIZING;
+            case COMPLETED -> JobEntity.Status.COMPLETED;
+            case FAILED -> JobEntity.Status.FAILED;
             case JOB_STATUS_UNSPECIFIED, UNRECOGNIZED ->
                 throw Status.INVALID_ARGUMENT.withDescription("unsupported status: " + status).asRuntimeException();
         };
     }
 
-    public static com.transuai.upload.grpc.v1.Job toProto(com.transuai.upload_service.domain.Job job) {
-        com.transuai.upload.grpc.v1.Job.Builder builder = com.transuai.upload.grpc.v1.Job.newBuilder()
+    public static Job toProto(JobEntity job) {
+        Job.Builder builder = Job.newBuilder()
                 .setJobId(job.getId().toString())
                 .setUserId(job.getUserId().toString())
                 .setFileName(job.getFileName())

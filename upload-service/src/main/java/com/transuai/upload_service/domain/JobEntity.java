@@ -21,6 +21,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+// 名字叫 JobEntity（不是 Job）、Status/FileType 巢狀在裡面（不是頂層 JobStatus/FileType），
+// 是刻意的：這個類別的欄位鏡射 infra/proto/upload.proto 的 Job/JobStatus/FileType message，
+// 兩邊在同一個檔案（尤其是 JobMapper）常常要同時出現，撞名字的話只能整檔用完整路徑寫，
+// 讀起來很難看也容易漏改。用不同的名字，兩邊都能乾淨地 import、不用寫完整路徑。
 @Entity
 @Table(name = "jobs", indexes = {
         @Index(name = "idx_jobs_user_id", columnList = "user_id"),
@@ -31,7 +35,7 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Job {
+public class JobEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -59,7 +63,7 @@ public class Job {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default
-    private JobStatus status = JobStatus.PENDING;
+    private Status status = Status.PENDING;
 
     @Column(name = "error_reason", columnDefinition = "TEXT")
     private String errorReason;
@@ -71,4 +75,22 @@ public class Job {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
+
+    // 狀態機：PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCRIBED
+    //        → SUMMARIZING → COMPLETED（任一階段可轉 FAILED，並記錄 error_reason）
+    public enum Status {
+        PENDING,
+        UPLOADING,
+        UPLOADED,
+        TRANSCRIBING,
+        TRANSCRIBED,
+        SUMMARIZING,
+        COMPLETED,
+        FAILED
+    }
+
+    public enum FileType {
+        AUDIO,
+        VIDEO
+    }
 }
