@@ -50,8 +50,12 @@ uv run python -m app.main
   → UpdateJobStatus(TRANSCRIBED)
   → 發送 transcription.completed { jobId }
 
-任一步失敗 → UpdateJobStatus(FAILED, error_reason=<例外訊息>) + 發送 job.failed { jobId, stage: "TRANSCRIBING", errorReason }，
-訊息照樣 ack（不 requeue），避免永久性失敗（壞檔、API 額度用盡）造成無窮重試。
+Groq Whisper 呼叫遇到暫時性錯誤（429/503 類）且訊息還有重試預算 → 送進 TTL retry queue，過一段
+時間後自動送回原 queue 重新處理整個 pipeline（訊息層級 requeue，最多 2 次、共 3 次嘗試，見下方
+「已知限制 / 待辦」跟 `app/services/retry.py`）。
+
+其他情況（永久性失敗、或重試預算已用盡）→ UpdateJobStatus(FAILED, error_reason=<例外訊息>) + 發送
+job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（不 requeue）。
 ```
 
 ## gRPC API
@@ -76,6 +80,23 @@ grpcurl -plaintext localhost:8083 list transuai.transcription.v1.TranscriptionSe
 grpcurl -plaintext -d '{"jobId":"<job_id>"}' \
   localhost:8083 transuai.transcription.v1.TranscriptionService/GetTranscript
 ```
+
+## 測試
+
+```bash
+uv run pytest
+```
+
+用 pytest，mocking 只用標準庫的 `unittest.mock`。測試不需要跑起 `infra`（Postgres/RabbitMQ/MinIO）
+或填任何 API key——`tests/test_pipeline_retry.py` 把 pipeline 會碰到的所有外部 I/O（Groq、下載、
+gRPC 狀態回報、DB session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯；
+`tests/test_retry.py` 直接測 Groq 例外分類跟 retry queue 路由這兩個純函式/邏輯，不碰真正的
+RabbitMQ/pika。
+
+Mock 一定要 patch 在 `app/services/pipeline.py`「使用端」import 進來的名稱（例如
+`pipeline.transcribe`、`pipeline.job_status_client`），不是「定義端」的原始模組——`unittest.mock.patch`
+只替換掉 name binding，patch 定義端不會影響 pipeline.py 實際呼叫到的是誰（跟 `ai-service` 同一個
+坑，見 `ai-service/README.md` 測試一節）。
 
 ## 重新產生 gRPC stub
 
@@ -120,7 +141,7 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 ## 已知限制 / 待辦
 
 - Schema 用 SQLAlchemy `create_all` 自動建表，團隊變大或上正式環境前應改用 Alembic 做版本化 migration
-- 訊息**處理**失敗（呼叫 Groq 時遇到 429 等）只記錄 `FAILED` + `error_reason`，不會重試/退避，要重新上傳才能重跑——這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線（RabbitMQ 重啟、DNS 暫時解析失敗等）現在有指數退避自動重連（見 `app/services/consumer.py`），不會再讓 consumer thread 永久掛掉
-- 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——這是跟 ai-service 同樣的既有限制
+- `transcribe()` 呼叫 Groq Whisper 遇到暫時性錯誤（429 rate limit、503 過載類）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、額度用盡等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
+- 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——`ai-service` 已經幫這一段補上獨立的 in-process 重試 + 高嚴重度 log marker，這裡還沒跟進，是目前真實存在的已知限制
 - 講者分離（`speaker_label`）欄位已預留但未實作
-- 沒有測試（upload-service 有 `UploadGrpcServiceIT` 這類整合測試，這裡目前只靠手動 smoke test）
+- 測試覆蓋率目前很低，只有 pipeline seam 跟 retry 分類/路由這兩塊（見上方「測試」一節）；`storage`/`audio`/`transcriber` 等模組本身、gRPC controller 層都還只靠手動 smoke test

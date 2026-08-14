@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     transcription_requested_queue: str = "transcription.requested"
     transcription_completed_queue: str = "transcription.completed"
     job_failed_queue: str = "job.failed"
+    # 由 transcription-service 自己宣告跟擁有，不需要共用 RabbitMQ infra 的 exchange 設定變更，
+    # 見 ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md。
+    retry_queue_2s: str = "transcription.requested.retry.2s"
+    retry_queue_4s: str = "transcription.requested.retry.4s"
 
     storage_endpoint: str = "http://localhost:9000"
     storage_region: str = "us-east-1"
