@@ -24,9 +24,9 @@ Transcription Service 消費訊息
   → 發送訊息「轉錄完成」到 MQ
 
 AI Service 消費訊息
-  → 讀取逐字稿，呼叫 Groq API 產出摘要
-  → 呼叫 Groq API 依分段時間戳切章節
-  → 呼叫 HF Inference API 把逐字稿分段轉成向量，存進 embeddings（供之後 RAG 問答用）
+  → 讀取逐字稿，呼叫 HF Inference Providers 產出摘要
+  → 呼叫 HF Inference Providers 依分段時間戳切章節
+  → 呼叫 HF Inference Providers 把逐字稿分段轉成向量，存進 embeddings（供之後 RAG 問答用）
   → 更新 Job status: summarizing → completed
   → 發送訊息「處理完成」到 MQ
 
@@ -148,11 +148,18 @@ RPC 後，視需要只回傳 `segments` 欄位。轉錄本身完全是 **MQ 驅�
 ```
 GET    /summary/{jobId}                 取得摘要
 GET    /chapters/{jobId}                取得章節列表
-POST   /qa/{jobId}                      RAG 問答，body { "question": string }
+GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料）
+POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string }，
+                                         回傳 text/event-stream（SSE，逐字串流），不是一次性 JSON
 ```
 
-三支都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`，細節見
-[`gateway/README.md`](../gateway/README.md) 的 API 表跟 [`ai-service/README.md`](../ai-service/README.md)。
+四支都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`，
+細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
+[`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
+（原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
+[`docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](./docs/adr/0001-sse-via-gateway-for-streaming-qa.md)。
+「對話」的範圍是整個 job，沒有獨立的 conversation/thread 概念，見
+[`ai-service/docs/adr/0002-single-conversation-per-job.md`](../ai-service/docs/adr/0002-single-conversation-per-job.md)。
 原規劃的多格式輸出 API（`POST /export/{jobId}`、`GET /export/{jobId}/{format}`，見下方 8.5）
 還沒實作，ai-service 沒有對應的 rpc，Gateway 這邊也還沒開。
 
@@ -330,9 +337,9 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 向量資料庫 | pgvector（`ai_db.embeddings`，`BAAI/bge-m3` 1024 維，已在用） |
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
-| ASR | Groq Whisper API（`whisper-large-v3-turbo`） |
-| LLM（摘要/章節分段/RAG 問答） | Groq API（原規劃/早期實作用 Gemini API，開發時常撞到免費層 429/503，已改用 Groq，見 `ai-service/README.md`） |
-| Embedding | HF Inference API（`BAAI/bge-m3`，1024 維） |
+| ASR | Groq Whisper API（`whisper-large-v3-turbo`，僅 transcription-service 使用） |
+| LLM（摘要/章節分段/RAG 問答） | HF Inference Providers（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
+| Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
 
@@ -352,9 +359,9 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 | **訊息佇列**（Redis） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；高頻率輪詢（如 worker 的 BRPOP loop）會快速消耗指令額度，MVP 階段要留意用量 |
 | **物件儲存**（音訊/影片檔案） | **Cloudflare R2** | 10GB 儲存空間、每月 100 萬次操作 | 超過額度另計費；免費層無 CDN 加速額外保證，大流量下載需注意頻寬成本 |
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
-| **ASR（語音轉文字）** | **Groq Whisper API** | 20 RPM、2,000 RPD（每日請求數）、7,200 秒/小時、28,800 秒/天 | 免費層檔案大小上限 25MB，30 分鐘音訊建議壓縮至 MP3 64-128kbps 以免超過限制 |
-| **LLM（摘要/章節分段/問答）** | **Groq API** | 依模型而定，通常為每分鐘/每日請求數限制（RPM/RPD），無需信用卡即可申請 | 免費額度會隨政策調整而變動，需定期查閱官方文件確認當下額度；`qwen/qwen3.6-27b` 目前是 preview 模型，官方標註僅供評估用 |
-| **Embedding** | **HF Inference API** | 依 provider 而定，一般有免費額度，無需信用卡即可申請 | 特定模型是否有 provider 承載會隨時間變動，需留意 |
+| **ASR（語音轉文字，transcription-service）** | **Groq Whisper API** | 20 RPM、2,000 RPD（每日請求數）、7,200 秒/小時、28,800 秒/天 | 免費層檔案大小上限 25MB，30 分鐘音訊建議壓縮至 MP3 64-128kbps 以免超過限制 |
+| **LLM（摘要/章節分段/問答，ai-service）** | **HF Inference Providers** | 依 provider 而定，沒有像 Groq 那樣公開逐模型的固定數字 | 免費額度會隨政策調整而變動，需定期查閱官方文件確認當下額度；特定模型是否有 provider 承載也會隨時間變動，換模型前建議先查（見 `ai-service/README.md` 已知限制） |
+| **Embedding（ai-service）** | **HF Inference Providers** | 依 provider 而定，一般有免費額度，無需信用卡即可申請 | 特定模型是否有 provider 承載會隨時間變動，需留意 |
 
 **額度風險提醒**
 - 免費層額度通常是「組織/帳號」層級，不是「API Key」層級，開多組 Key 不會疊加額度
@@ -378,7 +385,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始
 5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
-7. **免費 API 額度管理**：AI Service/Transcription Service 呼叫 Groq/HF Inference 時遇到 429/503，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了 Groq 呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。額度監控/告警仍然沒有，還是缺口
+7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Groq Whisper 時遇到 429/503，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了 Groq 呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。額度監控/告警仍然沒有，還是缺口
 
 ---
 
@@ -389,7 +396,8 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
       query/document 對稱不用加 instruction 前綴；選型過程見 `ai-service/README.md` 已知限制
       （HF Inference Providers 當下有沒有 provider 實際托管該模型會隨時間變動，換模型前建議先查）
 - [x] 章節自動分段的演算法/prompt 設計——**已解決**：純 LLM 判斷（把逐字稿分段連同時間戳丟給
-      Groq，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見 `ai-service/app/services/chapter_generator.py`
+      HF Inference Providers 的聊天模型，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見
+      `ai-service/app/services/chapter_generator.py`
 - [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
