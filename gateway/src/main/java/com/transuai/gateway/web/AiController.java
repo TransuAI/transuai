@@ -45,7 +45,12 @@ public class AiController {
 
     private final AiServiceGrpc.AiServiceBlockingStub aiServiceStub;
     private final JobOwnershipGuard jobOwnershipGuard;
-    private final ObjectMapper objectMapper;
+    // 不透過 Spring 注入 JacksonAutoConfiguration 產生的 ObjectMapper bean，理由跟
+    // JwtAuthenticationFilter 的同名欄位一樣：這個專案的 Spring context 初始化順序下，
+    // 依賴注入 ObjectMapper 會炸 UnsatisfiedDependencyException（開發時實測踩到，這裡是
+    // 目前第二個踩到的地方）。這裡只是把幾個基本型別（String/List<Double>）序列化成 JSON
+    // 字串塞進 SSE data 欄位，不需要專案自訂的 Jackson module，自己 new 最單純、最穩。
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @GetMapping("/summary/{jobId}")
     public SummaryDto getSummary(@CurrentUserId UUID userId, @PathVariable String jobId) {
