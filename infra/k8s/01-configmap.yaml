@@ -41,8 +41,10 @@ data:
   JOB_FAILED_QUEUE: "job.failed"
 
   # 外部 API 型號（key 本身是機敏資訊，放在 02-secret.yaml）
-  # GROQ_MODEL 是 transcription-service 的 Whisper 轉錄模型；ai-service 的 Groq 聊天模型
-  # 用另一個變數名 AI_GROQ_MODEL，避免共用同一份 configmap 時撞名讀到錯的型號字串
+  # GROQ_MODEL 是 transcription-service 的 Whisper 轉錄模型，ai-service 不再呼叫 Groq
+  # （摘要/章節分段/RAG 問答都改走 HF Inference Providers，見
+  # ai-service/docs/adr/0003-hf-inference-providers-for-generation.md），
+  # AI_HF_CHAT_MODEL 是 ai-service 用的聊天模型
   GROQ_MODEL: "whisper-large-v3-turbo"
-  AI_GROQ_MODEL: "qwen/qwen3.6-27b"
+  AI_HF_CHAT_MODEL: "Qwen/Qwen3.5-9B"
   HF_EMBEDDING_MODEL: "BAAI/bge-m3"
