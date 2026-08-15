@@ -86,7 +86,20 @@ docker compose up -d
 |---|---|---|
 | `GET` | `/summary/{jobId}` | 取得摘要 |
 | `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
-| `POST` | `/qa/{jobId}` | RAG 問答，body `{ "question": string }`，回傳 `{ answer, sourceTimestamps }`；還沒有 embedding（pipeline 沒跑完）回 404 |
+| `GET` | `/qa/{jobId}` | 取得這個 job 的完整問答紀錄（依時間升冪），回傳 `[{ question, answer, sourceTimestamps, createdAt }]`；一個 job 只有一段連續對話，沒有獨立的 conversation/thread（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)） |
+| `POST` | `/qa/{jobId}` | RAG 問答（含最近 5 輪對話記憶），body `{ "question": string }`，回傳 `text/event-stream`（SSE，見下方「問答 streaming」一節）；還沒有 embedding（pipeline 沒跑完）在串流開始前就回 404，不會是 SSE error event |
+
+#### 問答 streaming
+
+`POST /qa/{jobId}` 回傳 SSE，三種 event，`data` 一律是後端已經 JSON encode 過的單行字串：
+
+| event | data | 說明 |
+|---|---|---|
+| `sources` | `number[]` | 檢索到的來源時間戳，恰好一次，在文字開始生成之前送出 |
+| `delta` | `string` | 答案文字的其中一段，依生成順序送出任意數量次 |
+| `error` | `string` | 這輪問答中途失敗（改寫/檢索/生成任一步出錯），恰好一次；送出後 stream 結束，這輪不會寫進 `qa_history` |
+
+成功的話 stream 在最後一個 `delta` 後直接結束，沒有額外的「done」event——HTTP 連線關閉本身就是 done。前端不能用瀏覽器原生 `EventSource`（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）：這裡全部端點都是 Bearer JWT 驗證，`EventSource` 沒辦法附加 Authorization header，前端改用 `fetch()` + `ReadableStream` 手動解析（見 [`../frontend/README.md`](../frontend/README.md)）。
 
 `architecture-design.md` §3.4 還規劃了 `POST /export/{jobId}`、`GET /export/{jobId}/{format}`——ai-service 目前還沒有對應的 rpc（見 [`../ai-service/README.md`](../ai-service/README.md) 已知限制），沒有 rpc 可以轉發，這裡先不開，等 ai-service 補上再加。
 
@@ -126,8 +139,9 @@ src/main/java/com/transuai/gateway/
 
 ## 已知限制 / 待辦
 
-- **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 現在會在轉發前先呼叫 `upload-service` 的 `GetJob` 確認 ownership（`JobOwnershipGuard`，別人的 job 回 404），每個請求因此多一趟內部 gRPC 往返——量大的話可以考慮快取，MVP 階段先不做
+- **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 現在會在轉發前先呼叫 `upload-service` 的 `GetJob` 確認 ownership（`JobOwnershipGuard`，別人的 job 回 404），每個請求因此多一趟內部 gRPC 往返——量大的話可以考慮快取，MVP 階段先不做
 - 多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
 - 沒有限流（架構文件 §2 有提到 Gateway 要做「限流」），MVP 階段先不做
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
+- `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
 - 沒有測試，目前只靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）
