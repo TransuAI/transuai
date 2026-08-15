@@ -50,6 +50,11 @@ export interface PresignResponse {
   expiresAt: string
 }
 
+export interface MediaUrlResponse {
+  downloadUrl: string
+  expiresAt: string
+}
+
 export interface TranscriptSegment {
   startTime: number
   endTime: number

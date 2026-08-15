@@ -1,4 +1,4 @@
-import { AlertCircle, MessageCircle } from 'lucide-react'
+import { AlertCircle, Loader2Icon, MessageCircle } from 'lucide-react'
 import { formatDuration } from '@/lib/media'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,6 +17,7 @@ export interface QaEntry {
 
 interface ChatPaneProps {
   qaHistory: QaEntry[]
+  isLoadingHistory: boolean
   questionInput: string
   onQuestionInputChange: (value: string) => void
   isAsking: boolean
@@ -27,6 +28,7 @@ interface ChatPaneProps {
 
 export function ChatPane({
   qaHistory,
+  isLoadingHistory,
   questionInput,
   onQuestionInputChange,
   isAsking,
@@ -43,19 +45,24 @@ export function ChatPane({
         </CardTitle>
       </CardHeader>
       <CardContent className="min-h-0 flex-1 pt-4">
-        {qaHistory.length > 0 ? (
+        {isLoadingHistory ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : qaHistory.length > 0 ? (
           <ScrollArea className="h-full pr-4">
             <div className="flex flex-col gap-4">
               {qaHistory.map((entry) => (
                 <div key={entry.id} className="flex flex-col gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
                   <p className="text-sm font-medium">{entry.question}</p>
-                  {entry.answer ? (
+                  {entry.answer && (
                     <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
                       {entry.answer}
                     </p>
-                  ) : entry.status === 'streaming' ? (
-                    <p className="text-sm text-muted-foreground">思考中...</p>
-                  ) : null}
+                  )}
+                  {entry.status === 'streaming' && (
+                    <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                  )}
                   {entry.status === 'error' && (
                     <p className="flex items-center gap-1.5 text-sm text-destructive">
                       <AlertCircle className="size-3.5" />
@@ -102,7 +109,7 @@ export function ChatPane({
             disabled={isAsking}
           />
           <Button type="submit" disabled={isAsking || !questionInput.trim()}>
-            {isAsking ? '思考中...' : '問'}
+            {isAsking ? <Loader2Icon className="size-4 animate-spin" /> : '問'}
           </Button>
         </form>
       </CardFooter>

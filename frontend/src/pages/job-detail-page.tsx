@@ -15,15 +15,15 @@ import { CompletedWorkspace } from '@/pages/job-detail/completed-workspace'
 import type { QaEntry } from '@/pages/job-detail/chat-pane'
 import type { Chapter, Job, JobStatusEvent, Summary, Transcript } from '@/types/api'
 
-const MEDIA_BASE_URL = import.meta.env.VITE_MEDIA_BASE_URL as string | undefined
-
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
   const [job, setJob] = useState<Job | null>(null)
+  const [mediaUrl, setMediaUrl] = useState<string | undefined>(undefined)
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [qaHistory, setQaHistory] = useState<QaEntry[]>([])
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [questionInput, setQuestionInput] = useState('')
   const [isAsking, setIsAsking] = useState(false)
   const [isLoadingJob, setIsLoadingJob] = useState(true)
@@ -49,6 +49,17 @@ export function JobDetailPage() {
   useEffect(() => {
     void loadJob()
   }, [loadJob])
+
+  // 只抓一次，不跟著 loadJob 的 4 秒輪詢重複要 URL——storage_path 在 Job 建立時就固定了，
+  // 播放 URL 不會因為 job 狀態變化而變，且 presigned URL 有效期遠長於一般頁面停留時間
+  // （見 docs/adr/0002-presigned-get-url-for-media-playback.md）。
+  useEffect(() => {
+    if (!jobId) return
+    jobsApi
+      .getMediaUrl(jobId)
+      .then((res) => setMediaUrl(res.downloadUrl))
+      .catch(() => setMediaUrl(undefined))
+  }, [jobId])
 
   useEffect(() => {
     if (!job || !isJobInProgress(job.status)) return
@@ -79,6 +90,7 @@ export function JobDetailPage() {
     if (jobStatus === 'COMPLETED') {
       summaryApi.get(jobId).then(setSummary).catch(() => setSummary(null))
       chapterApi.list(jobId).then(setChapters).catch(() => setChapters([]))
+      setIsLoadingHistory(true)
       qaApi
         .history(jobId)
         .then((turns) =>
@@ -93,6 +105,7 @@ export function JobDetailPage() {
           ),
         )
         .catch(() => setQaHistory([]))
+        .finally(() => setIsLoadingHistory(false))
     }
   }, [jobId, jobStatus])
 
@@ -162,8 +175,6 @@ export function JobDetailPage() {
     )
   }
 
-  const mediaUrl = MEDIA_BASE_URL ? `${MEDIA_BASE_URL}/${job.storagePath}` : undefined
-
   if (job.status !== 'COMPLETED') {
     return (
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
@@ -221,6 +232,7 @@ export function JobDetailPage() {
       summary={summary}
       chapters={chapters}
       qaHistory={qaHistory}
+      isLoadingHistory={isLoadingHistory}
       questionInput={questionInput}
       onQuestionInputChange={setQuestionInput}
       isAsking={isAsking}

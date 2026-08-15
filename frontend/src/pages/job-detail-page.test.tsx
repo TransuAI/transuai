@@ -1,12 +1,17 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
 import type { Chapter, Job, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
-  jobsApi: { get: vi.fn() },
+  jobsApi: {
+    get: vi.fn(),
+    getMediaUrl: vi
+      .fn()
+      .mockResolvedValue({ downloadUrl: 'https://media.example.com/uploads/interview.mp3', expiresAt: '2026-01-01T01:00:00Z' }),
+  },
   transcriptApi: { get: vi.fn() },
   summaryApi: { get: vi.fn() },
   chapterApi: { list: vi.fn() },
@@ -20,12 +25,7 @@ vi.mock('@/hooks/use-job-socket', () => ({
 let JobDetailPage: typeof import('./job-detail-page').JobDetailPage
 
 beforeAll(async () => {
-  vi.stubEnv('VITE_MEDIA_BASE_URL', 'https://media.example.com')
   ;({ JobDetailPage } = await import('./job-detail-page'))
-})
-
-afterAll(() => {
-  vi.unstubAllEnvs()
 })
 
 function renderJobDetail(jobId = 'job-1') {

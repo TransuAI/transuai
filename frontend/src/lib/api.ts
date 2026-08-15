@@ -4,6 +4,7 @@ import type {
   Chapter,
   Job,
   JobListResponse,
+  MediaUrlResponse,
   PresignResponse,
   QaTurn,
   Summary,
@@ -44,6 +45,8 @@ export const jobsApi = {
   },
 
   get: (jobId: string) => apiFetch<Job>(`/jobs/${jobId}`),
+
+  getMediaUrl: (jobId: string) => apiFetch<MediaUrlResponse>(`/jobs/${jobId}/media-url`),
 
   remove: (jobId: string) => apiFetchVoid(`/jobs/${jobId}`, { method: 'DELETE' }),
 }

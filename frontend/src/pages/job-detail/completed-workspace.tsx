@@ -17,6 +17,7 @@ interface CompletedWorkspaceProps {
   summary: Summary | null
   chapters: Chapter[]
   qaHistory: QaEntry[]
+  isLoadingHistory: boolean
   questionInput: string
   onQuestionInputChange: (value: string) => void
   isAsking: boolean
@@ -39,6 +40,7 @@ export function CompletedWorkspace({
   summary,
   chapters,
   qaHistory,
+  isLoadingHistory,
   questionInput,
   onQuestionInputChange,
   isAsking,
@@ -62,6 +64,7 @@ export function CompletedWorkspace({
   const chatPane = (
     <ChatPane
       qaHistory={qaHistory}
+      isLoadingHistory={isLoadingHistory}
       questionInput={questionInput}
       onQuestionInputChange={onQuestionInputChange}
       isAsking={isAsking}

@@ -50,7 +50,6 @@ Vitest + React Testing Library + `jsdom`。測試一律 mock `src/lib/api.ts`（
 |---|---|---|
 | `VITE_API_BASE_URL` | `/api` | Gateway REST base URL,dev 模式靠 vite proxy 轉發到 `localhost:8080` |
 | `VITE_WS_BASE_URL` | `ws://localhost:8085` | notification-service WebSocket base URL |
-| `VITE_MEDIA_BASE_URL` | 未設定 | 選填。Job 詳情頁的音訊/影片播放器（含逐字稿時間戳跳轉)需要能讀到原始檔案,但目前 Gateway/Upload Service 還沒有「取得播放/下載 URL」的 API(見已知限制),沒設這個變數的話詳情頁就不會顯示播放器,只顯示逐字稿文字 |
 
 ## 專案結構
 
@@ -83,6 +82,5 @@ src/
 
 ## 已知限制
 
-- **沒有播放/下載媒體檔案的 API**:`JobDto.storagePath` 只是內部物件儲存路徑,Gateway/Upload Service 目前沒有開「取得可播放 URL」的端點(對照 `upload.proto`,只有上傳用的 presigned **PUT** URL,沒有播放用的 presigned **GET** URL)。詳情頁的時間戳目前只是純文字顯示,設定 `VITE_MEDIA_BASE_URL` 才會嘗試直接組 URL 播放(僅適合本機開發、bucket 設為公開讀取的情境),正式功能要等後端補上對應 API。
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
 - 測試覆蓋率目前很低（只有 `jobs-page.test.tsx` 一個 smoke test,證明測試基礎建設本身可用),大部分頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
