@@ -8,8 +8,9 @@ from sqlalchemy import Numeric, Text
 from app.models.summary import Base
 
 # Schema 對應 ../../infra/architecture-design.md 4.4 ai_db.qa_history。
-# 目前只寫入、沒有對應的查詢 RPC（architecture-design.md 3.4 也只規劃了 POST /qa/{jobId}），
-# 純粹留作紀錄，之後要做「問答歷史」列表可以直接查這張表。
+# 依 job_id 讀取（見 qa_repository.find_by_job_id）同時供兩種用途：ListQaHistory RPC 回傳
+# 完整歷史給前端顯示，AskQuestion 只取最近幾輪當作對話記憶餵給 LLM。一個 job 只有一段連續
+# 對話，沒有獨立的 conversation/thread 概念，見 docs/adr/0002-single-conversation-per-job.md。
 
 
 class QaHistory(Base):

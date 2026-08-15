@@ -28,9 +28,9 @@ if _version_not_supported:
 
 class AiServiceStub:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段做了摘要生成、章節分段、RAG 問答，多格式輸出留待後續擴充。
+    MVP 階段做了摘要生成、章節分段、RAG 問答（含對話記憶、streaming），多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
-    這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
+    這幾支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
 
     def __init__(self, channel):
@@ -49,18 +49,23 @@ class AiServiceStub:
                 request_serializer=ai__pb2.ListChaptersRequest.SerializeToString,
                 response_deserializer=ai__pb2.ListChaptersResponse.FromString,
                 _registered_method=True)
-        self.AskQuestion = channel.unary_unary(
+        self.AskQuestion = channel.unary_stream(
                 '/transuai.ai.v1.AiService/AskQuestion',
                 request_serializer=ai__pb2.AskQuestionRequest.SerializeToString,
-                response_deserializer=ai__pb2.AskQuestionResponse.FromString,
+                response_deserializer=ai__pb2.AskQuestionChunk.FromString,
+                _registered_method=True)
+        self.ListQaHistory = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListQaHistory',
+                request_serializer=ai__pb2.ListQaHistoryRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListQaHistoryResponse.FromString,
                 _registered_method=True)
 
 
 class AiServiceServicer:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段做了摘要生成、章節分段、RAG 問答，多格式輸出留待後續擴充。
+    MVP 階段做了摘要生成、章節分段、RAG 問答（含對話記憶、streaming），多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
-    這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
+    這幾支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
 
     def GetSummary(self, request, context):
@@ -79,9 +84,25 @@ class AiServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def AskQuestion(self, request, context):
-        """針對某個 job 的逐字稿內容做 RAG 問答。job_id/user_id 格式不合法回 INVALID_ARGUMENT，
-        這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回 NOT_FOUND。
-        user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，只用來記錄 qa_history，不重新驗證。
+        """針對某個 job 的逐字稿內容做 RAG 問答，server-streaming。job_id/user_id 格式不合法回
+        INVALID_ARGUMENT，這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回
+        NOT_FOUND。user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，只用來記錄 qa_history，
+        不重新驗證。對話記憶的範圍是「這個 job 底下所有問答」，沒有獨立的 conversation/thread 概念
+        （見 ai-service/docs/adr/ 對話範圍的 ADR）；一個 job 的問答串只要 job_id 就能定位。
+
+        stream 保證的順序：最多一個 sources chunk（在檢索完成、生成答案文字之前送出），接著任意數量
+        的 delta chunk（依生成順序），最後如果中途失敗會有恰好一個 error chunk 並結束 stream（这轮
+        不會有對應的 qa_history 紀錄）；成功的話 stream 在最後一個 delta 後直接結束，不送額外的
+        「done」訊號——gRPC stream 本身結束就是 done，這輪已經在結束前存進 qa_history。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListQaHistory(self, request, context):
+        """依 job_id 取得這個 job 的完整問答紀錄（依 created_at 升冪），job_id 不合法回
+        INVALID_ARGUMENT。沒有問答紀錄回空列表，不算錯誤。不分頁——跟 ListChapters 一樣，MVP
+        資料量小。user_id 驗證邏輯跟 AskQuestion 一致，Gateway 已經做過 ownership 檢查。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -100,10 +121,15 @@ def add_AiServiceServicer_to_server(servicer, server):
                     request_deserializer=ai__pb2.ListChaptersRequest.FromString,
                     response_serializer=ai__pb2.ListChaptersResponse.SerializeToString,
             ),
-            'AskQuestion': grpc.unary_unary_rpc_method_handler(
+            'AskQuestion': grpc.unary_stream_rpc_method_handler(
                     servicer.AskQuestion,
                     request_deserializer=ai__pb2.AskQuestionRequest.FromString,
-                    response_serializer=ai__pb2.AskQuestionResponse.SerializeToString,
+                    response_serializer=ai__pb2.AskQuestionChunk.SerializeToString,
+            ),
+            'ListQaHistory': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListQaHistory,
+                    request_deserializer=ai__pb2.ListQaHistoryRequest.FromString,
+                    response_serializer=ai__pb2.ListQaHistoryResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -115,9 +141,9 @@ def add_AiServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class AiService:
     """AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-    MVP 階段做了摘要生成、章節分段、RAG 問答，多格式輸出留待後續擴充。
+    MVP 階段做了摘要生成、章節分段、RAG 問答（含對話記憶、streaming），多格式輸出留待後續擴充。
     主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
-    這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
+    這幾支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
     """
 
     @staticmethod
@@ -185,12 +211,39 @@ class AiService:
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/transuai.ai.v1.AiService/AskQuestion',
             ai__pb2.AskQuestionRequest.SerializeToString,
-            ai__pb2.AskQuestionResponse.FromString,
+            ai__pb2.AskQuestionChunk.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListQaHistory(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListQaHistory',
+            ai__pb2.ListQaHistoryRequest.SerializeToString,
+            ai__pb2.ListQaHistoryResponse.FromString,
             options,
             channel_credentials,
             insecure,

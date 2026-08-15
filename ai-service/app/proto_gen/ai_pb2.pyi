@@ -1,3 +1,6 @@
+import datetime
+
+from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -56,10 +59,42 @@ class AskQuestionRequest(_message.Message):
     question: str
     def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., question: _Optional[str] = ...) -> None: ...
 
-class AskQuestionResponse(_message.Message):
-    __slots__ = ("answer", "source_timestamps")
+class AskQuestionChunk(_message.Message):
+    __slots__ = ("sources", "delta", "error")
+    SOURCES_FIELD_NUMBER: _ClassVar[int]
+    DELTA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    sources: SourceTimestamps
+    delta: str
+    error: str
+    def __init__(self, sources: _Optional[_Union[SourceTimestamps, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class SourceTimestamps(_message.Message):
+    __slots__ = ("source_timestamps",)
+    SOURCE_TIMESTAMPS_FIELD_NUMBER: _ClassVar[int]
+    source_timestamps: _containers.RepeatedScalarFieldContainer[float]
+    def __init__(self, source_timestamps: _Optional[_Iterable[float]] = ...) -> None: ...
+
+class ListQaHistoryRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class QaTurn(_message.Message):
+    __slots__ = ("question", "answer", "source_timestamps", "created_at")
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
     ANSWER_FIELD_NUMBER: _ClassVar[int]
     SOURCE_TIMESTAMPS_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    question: str
     answer: str
     source_timestamps: _containers.RepeatedScalarFieldContainer[float]
-    def __init__(self, answer: _Optional[str] = ..., source_timestamps: _Optional[_Iterable[float]] = ...) -> None: ...
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, question: _Optional[str] = ..., answer: _Optional[str] = ..., source_timestamps: _Optional[_Iterable[float]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class ListQaHistoryResponse(_message.Message):
+    __slots__ = ("turns",)
+    TURNS_FIELD_NUMBER: _ClassVar[int]
+    turns: _containers.RepeatedCompositeFieldContainer[QaTurn]
+    def __init__(self, turns: _Optional[_Iterable[_Union[QaTurn, _Mapping]]] = ...) -> None: ...
