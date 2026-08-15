@@ -9,7 +9,7 @@ from app.models import QaHistory
 from app.repositories.embedding_repository import find_similar
 from app.repositories.qa_repository import find_by_job_id
 from app.services.embedder import embed_query
-from app.services.hf_client import get_client, strip_thinking, stream_without_thinking
+from app.services.hf_client import DISABLE_THINKING, get_client, strip_thinking, stream_without_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +32,13 @@ _CONDENSE_PROMPT_TEMPLATE = (
 _TOP_K = 5
 _MEMORY_TURNS = 5
 
-# HF Inference Providers 的免費層沒有像 Groq 那樣公開逐模型的 TPM 數字（見
-# docs/adr/0003-hf-inference-providers-for-generation.md），但這不代表沒有限制——
-# 這裡沿用原本為了 Groq TPM=8000 加的兩層預算控制，當作沒有公開數字時的保守預設。
-# 歷史對話的答案長度沒有上限——一段很長的舊答案，就算只有一輪歷史也可能單獨把預算吃光，
-# 所以每輪歷史塞進 prompt 前都先截斷，跟 _MEMORY_TURNS（要塞幾輪）是兩個獨立的預算控制，
-# 不能只靠調輪數解決。
+# 歷史對話的答案長度沒有上限——一段很長的舊答案，就算只有一輪歷史也可能單獨把 prompt
+# 撐得很大，所以每輪歷史塞進 prompt 前都先截斷，跟 _MEMORY_TURNS（要塞幾輪）是兩個獨立的
+# 控制，不能只靠調輪數解決。
 _MAX_HISTORY_ANSWER_CHARS = 300
-# 完全不設 max_tokens 的話，有些 provider 會用模型的預設值（可能很大）當作保留的 completion
-# 預算。這裡的值要留夠 reasoning model 內部的 <think> chain-of-thought 用量（Qwen3 系列預設
-# 可能開啟 thinking mode，見 hf_client.strip_thinking() 的註解），不能只算「使用者真正會看到
-# 的答案」需要多少字——設太小的話有可能整段配額被 thinking 用完，答案還沒生成就被截斷。
+# 這兩個呼叫都帶 DISABLE_THINKING（見 hf_client.py），thinking mode 關掉之後模型不會把
+# 大量 token 燒在思考過程上，這裡的值只需要夠放「使用者真正會看到的答案」，不用像開著
+# thinking mode 時那樣另外預留一大段給 chain-of-thought。
 _ANSWER_MAX_TOKENS = 1024
 _CONDENSE_MAX_TOKENS = 400
 
@@ -79,6 +75,7 @@ def _condense_question(question: str, history: list[QaHistory]) -> str:
             "content": _CONDENSE_PROMPT_TEMPLATE.format(history=history_text, question=question),
         }],
         max_tokens=_CONDENSE_MAX_TOKENS,
+        extra_body=DISABLE_THINKING,
     )
     condensed = strip_thinking(response.choices[0].message.content or "").strip()
     return condensed or question
@@ -120,6 +117,7 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
         model=settings.ai_hf_chat_model,
         messages=messages,
         max_tokens=_ANSWER_MAX_TOKENS,
+        extra_body=DISABLE_THINKING,
         stream=True,
     )
     raw_deltas = (chunk.choices[0].delta.content for chunk in stream)

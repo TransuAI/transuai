@@ -3,7 +3,7 @@ import logging
 
 from app.core.config import settings
 from app.proto_gen.transcription_pb2 import TranscriptSegment
-from app.services.hf_client import get_client, strip_thinking
+from app.services.hf_client import DISABLE_THINKING, get_client, strip_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,9 @@ _PROMPT_TEMPLATE = (
     "只回傳 JSON 陣列，不要 Markdown code fence、不要其他文字，"
     '每個元素格式為 {{"title": string, "start_time": number}}，依 start_time 由小到大排序：\n\n{segments}'
 )
+
+
+_MAX_TOKENS = 2048
 
 
 def _format_segments(segments: list[TranscriptSegment]) -> str:
@@ -45,9 +48,9 @@ def generate_chapters(segments: list[TranscriptSegment]) -> list[tuple[str, floa
     response = get_client().chat.completions.create(
         model=settings.ai_hf_chat_model,
         messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(segments=_format_segments(segments))}],
+        max_tokens=_MAX_TOKENS,
+        extra_body=DISABLE_THINKING,
     )
-    # reasoning model（見 hf_client.strip_thinking）可能把 <think> chain-of-thought 混進
-    # content，害 JSON 解析失敗，這裡只要最終答案。
     raw_chapters = _parse_response(strip_thinking(response.choices[0].message.content or "") or "[]")
     chapters = [(str(item["title"]), float(item["start_time"])) for item in raw_chapters]
     chapters.sort(key=lambda chapter: chapter[1])
