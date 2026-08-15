@@ -2,10 +2,12 @@ syntax = "proto3";
 
 package transuai.ai.v1;
 
+import "google/protobuf/timestamp.proto";
+
 // AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
-// MVP 階段做了摘要生成、章節分段、RAG 問答，多格式輸出留待後續擴充。
+// MVP 階段做了摘要生成、章節分段、RAG 問答（含對話記憶、streaming），多格式輸出留待後續擴充。
 // 主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
-// 這支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
+// 這幾支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
 service AiService {
   // 依 job_id 取得摘要，job_id 不合法回 INVALID_ARGUMENT，找不到回 NOT_FOUND。
   rpc GetSummary(GetSummaryRequest) returns (Summary);
@@ -14,10 +16,22 @@ service AiService {
   // 找不到對應 job 的章節時回空列表，不算錯誤（章節分段可能還沒跑完或這個 job 沒有章節）。
   rpc ListChapters(ListChaptersRequest) returns (ListChaptersResponse);
 
-  // 針對某個 job 的逐字稿內容做 RAG 問答。job_id/user_id 格式不合法回 INVALID_ARGUMENT，
-  // 這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回 NOT_FOUND。
-  // user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，只用來記錄 qa_history，不重新驗證。
-  rpc AskQuestion(AskQuestionRequest) returns (AskQuestionResponse);
+  // 針對某個 job 的逐字稿內容做 RAG 問答，server-streaming。job_id/user_id 格式不合法回
+  // INVALID_ARGUMENT，這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回
+  // NOT_FOUND。user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，只用來記錄 qa_history，
+  // 不重新驗證。對話記憶的範圍是「這個 job 底下所有問答」，沒有獨立的 conversation/thread 概念
+  // （見 ai-service/docs/adr/ 對話範圍的 ADR）；一個 job 的問答串只要 job_id 就能定位。
+  //
+  // stream 保證的順序：最多一個 sources chunk（在檢索完成、生成答案文字之前送出），接著任意數量
+  // 的 delta chunk（依生成順序），最後如果中途失敗會有恰好一個 error chunk 並結束 stream（这轮
+  // 不會有對應的 qa_history 紀錄）；成功的話 stream 在最後一個 delta 後直接結束，不送額外的
+  // 「done」訊號——gRPC stream 本身結束就是 done，這輪已經在結束前存進 qa_history。
+  rpc AskQuestion(AskQuestionRequest) returns (stream AskQuestionChunk);
+
+  // 依 job_id 取得這個 job 的完整問答紀錄（依 created_at 升冪），job_id 不合法回
+  // INVALID_ARGUMENT。沒有問答紀錄回空列表，不算錯誤。不分頁——跟 ListChapters 一樣，MVP
+  // 資料量小。user_id 驗證邏輯跟 AskQuestion 一致，Gateway 已經做過 ownership 檢查。
+  rpc ListQaHistory(ListQaHistoryRequest) returns (ListQaHistoryResponse);
 }
 
 message Summary {
@@ -51,8 +65,36 @@ message AskQuestionRequest {
   string question = 3;
 }
 
-message AskQuestionResponse {
-  string answer = 1;
-  // 回答依據的逐字稿片段起始時間，供前端做時間戳跳轉；沒有特定排序保證。
-  repeated double source_timestamps = 2;
+message AskQuestionChunk {
+  oneof payload {
+    // 檢索完成後、生成答案文字之前送出恰好一次。回答依據的逐字稿片段起始時間，
+    // 供前端做時間戳跳轉；沒有特定排序保證。
+    SourceTimestamps sources = 1;
+    // 答案文字的其中一段 token/片段，依生成順序送出，前端接到就直接 append 顯示。
+    string delta = 2;
+    // 這輪問答中途失敗（改寫、檢索、生成任一步出錯）時送出恰好一次，stream 隨即結束，
+    // 這輪不會寫進 qa_history。
+    string error = 3;
+  }
+}
+
+message SourceTimestamps {
+  repeated double source_timestamps = 1;
+}
+
+message ListQaHistoryRequest {
+  string job_id = 1;
+}
+
+message QaTurn {
+  string question = 1;
+  string answer = 2;
+  // 回答依據的逐字稿片段起始時間，沒有特定排序保證（跟 AskQuestionChunk.sources 同義）。
+  repeated double source_timestamps = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message ListQaHistoryResponse {
+  // 依 created_at 升冪排序。
+  repeated QaTurn turns = 1;
 }
