@@ -120,6 +120,9 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
         extra_body=DISABLE_THINKING,
         stream=True,
     )
-    raw_deltas = (chunk.choices[0].delta.content for chunk in stream)
+    # 有些 chunk（實測至少是收尾、只帶 usage 統計的那個）choices 是空陣列，不是每個 chunk
+    # 都有 delta 可以拿——直接 chunk.choices[0] 會在 stream 快結束時炸 IndexError，這時候
+    # 前面的 delta 通常已經送給使用者了，讓這輪問答整個被判定失敗、卻沒真的存進 qa_history。
+    raw_deltas = (chunk.choices[0].delta.content for chunk in stream if chunk.choices)
     for delta in stream_without_thinking(raw_deltas):
         yield ("delta", delta)
