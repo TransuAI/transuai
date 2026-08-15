@@ -109,6 +109,7 @@ auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user
 POST   /uploads/presign         取得物件儲存的 presigned upload URL（尚未建立 Job）
 POST   /uploads/complete        前端上傳完成後呼叫，建立 Job record 並發送 transcription.requested 事件
 GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊
+GET    /jobs/{jobId}/media-url  取得該 Job 媒體檔案的 presigned 播放 URL（見 docs/adr/0002-presigned-get-url-for-media-playback.md）
 GET    /jobs                    查詢使用者所有 Job（分頁，query: page, pageSize）
 DELETE /jobs/{jobId}            刪除 Job 與相關資料
 ```

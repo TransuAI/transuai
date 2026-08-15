@@ -21,6 +21,10 @@ service UploadService {
   // 查詢單一 Job。
   rpc GetJob(GetJobRequest) returns (Job);
 
+  // 取得該 Job 媒體檔案的 presigned download URL，供前端播放器直接讀取；ownership 檢查
+  // 方式跟 GetJob 一樣（找不到屬於呼叫端的 Job 就回 NOT_FOUND），不額外驗證。
+  rpc GetPresignedDownloadUrl(GetPresignedDownloadUrlRequest) returns (GetPresignedDownloadUrlResponse);
+
   // 查詢使用者所有 Job（分頁）。
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
 
@@ -90,6 +94,15 @@ message CompleteUploadRequest {
 
 message GetJobRequest {
   string job_id = 1;
+}
+
+message GetPresignedDownloadUrlRequest {
+  string job_id = 1;
+}
+
+message GetPresignedDownloadUrlResponse {
+  string download_url = 1;
+  google.protobuf.Timestamp expires_at = 2;
 }
 
 message ListJobsRequest {
