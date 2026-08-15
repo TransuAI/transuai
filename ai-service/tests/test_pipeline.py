@@ -15,7 +15,7 @@ class FakeSegment:
 
 
 def test_process_message_happy_path_calls_everything_in_order_and_persists_results():
-    """驅動 process_message() 的 happy path，全部四個外部 I/O 邊界（Groq/HF/兩個 gRPC client）
+    """驅動 process_message() 的 happy path，全部三個外部 I/O 邊界（HF、兩個 gRPC client）
     加上資料庫層都用 mock 取代，證明這個 seam 真的能用——之後的重試相關票券會直接複用同一套
     mocking 方式來注入失敗情境。
 

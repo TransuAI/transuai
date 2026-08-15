@@ -7,8 +7,7 @@ from unittest.mock import MagicMock, patch
 import grpc
 import httpx
 import pytest
-from groq import BadRequestError, RateLimitError
-from huggingface_hub.errors import OverloadedError
+from huggingface_hub.errors import HfHubHTTPError, OverloadedError
 
 from app.services import pipeline
 from app.services.retry import RetryableMessageError, TERMINAL_FAILURE_LOST_MARKER
@@ -74,12 +73,14 @@ def mocks():
         )
 
 
-# --- Groq/HF 呼叫點：可重試例外 vs 永久性例外 vs 預算用盡（ai-service-groq-hf-retry）---
+# --- HF 呼叫點（摘要/章節分段/embedding 都走同一個 provider）：可重試例外 vs 永久性例外 vs
+# 預算用盡（原始 spec 是 ai-service-groq-hf-retry，寫的當下摘要/章節分段還在用 Groq，
+# 現在全部改走 HF，spec 名稱維持不變只是歷史記錄）---
 
 
-def test_transient_groq_error_in_summarize_within_budget_raises_retryable(mocks):
+def test_transient_hf_error_in_summarize_within_budget_raises_retryable(mocks):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = RateLimitError("rate limited", response=_response(429), body=None)
+    mocks.summarize.side_effect = HfHubHTTPError("rate limited", response=_response(429))
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     with pytest.raises(RetryableMessageError):
@@ -90,9 +91,9 @@ def test_transient_groq_error_in_summarize_within_budget_raises_retryable(mocks)
     publish_completed.assert_not_called()
 
 
-def test_transient_groq_error_in_summarize_budget_exhausted_falls_back_to_failed(mocks):
+def test_transient_hf_error_in_summarize_budget_exhausted_falls_back_to_failed(mocks):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = RateLimitError("rate limited", response=_response(429), body=None)
+    mocks.summarize.side_effect = HfHubHTTPError("rate limited", response=_response(429))
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     pipeline.process_message(body, publish_completed, publish_failed, retry_count=2)
@@ -102,9 +103,9 @@ def test_transient_groq_error_in_summarize_budget_exhausted_falls_back_to_failed
     publish_completed.assert_not_called()
 
 
-def test_permanent_groq_error_in_summarize_falls_back_to_failed_regardless_of_budget(mocks):
+def test_permanent_hf_error_in_summarize_falls_back_to_failed_regardless_of_budget(mocks):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = BadRequestError("malformed request", response=_response(400), body=None)
+    mocks.summarize.side_effect = HfHubHTTPError("malformed request", response=_response(400))
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     pipeline.process_message(body, publish_completed, publish_failed, retry_count=0)
@@ -113,9 +114,9 @@ def test_permanent_groq_error_in_summarize_falls_back_to_failed_regardless_of_bu
     publish_completed.assert_not_called()
 
 
-def test_transient_groq_error_in_generate_chapters_raises_retryable(mocks):
+def test_transient_hf_error_in_generate_chapters_raises_retryable(mocks):
     _, body = _job_body()
-    mocks.generate_chapters.side_effect = RateLimitError("rate limited", response=_response(429), body=None)
+    mocks.generate_chapters.side_effect = HfHubHTTPError("rate limited", response=_response(429))
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     with pytest.raises(RetryableMessageError):
@@ -191,7 +192,7 @@ def test_transient_grpc_error_marking_completed_raises_retryable(mocks):
 
 def test_terminal_report_retries_transient_failures_then_succeeds(mocks):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = BadRequestError("malformed", response=_response(400), body=None)
+    mocks.summarize.side_effect = HfHubHTTPError("malformed", response=_response(400))
 
     failed_attempts = {"n": 0}
 
@@ -213,7 +214,7 @@ def test_terminal_report_retries_transient_failures_then_succeeds(mocks):
 
 def test_terminal_report_exhausted_logs_marker_and_does_not_publish_failed(mocks, caplog):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = BadRequestError("malformed", response=_response(400), body=None)
+    mocks.summarize.side_effect = HfHubHTTPError("malformed", response=_response(400))
 
     def fake_update_status(job_id_arg, status, error_reason=""):
         if status == "FAILED":
@@ -232,7 +233,7 @@ def test_terminal_report_exhausted_logs_marker_and_does_not_publish_failed(mocks
 
 def test_terminal_report_gives_up_immediately_on_permanent_failure_of_report_itself(mocks, caplog):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = BadRequestError("malformed", response=_response(400), body=None)
+    mocks.summarize.side_effect = HfHubHTTPError("malformed", response=_response(400))
 
     report_attempts = {"n": 0}
 

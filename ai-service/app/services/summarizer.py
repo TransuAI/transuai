@@ -1,7 +1,7 @@
 import logging
 
 from app.core.config import settings
-from app.services.groq_client import get_client, strip_thinking
+from app.services.hf_client import get_client, strip_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -12,13 +12,11 @@ _PROMPT_TEMPLATE = (
 
 
 def summarize(full_text: str) -> str:
-    """呼叫 Groq API，把逐字稿全文濃縮成一段摘要。"""
-    logger.info("calling Groq (%s) for summary, transcript length=%d",
-                settings.ai_groq_model, len(full_text))
+    """呼叫 HF Inference Providers，把逐字稿全文濃縮成一段摘要。"""
+    logger.info("calling HF Inference (%s) for summary, transcript length=%d",
+                settings.ai_hf_chat_model, len(full_text))
     response = get_client().chat.completions.create(
-        model=settings.ai_groq_model,
+        model=settings.ai_hf_chat_model,
         messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(transcript=full_text)}],
-        # qwen/qwen3.6-27b 預設會把 <think> chain-of-thought 混進 content，這裡只要最終答案。
-        reasoning_format="hidden",
     )
     return strip_thinking(response.choices[0].message.content or "")

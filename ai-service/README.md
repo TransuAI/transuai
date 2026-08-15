@@ -1,12 +1,12 @@
 # ai-service
 
-音訊/影片逐字稿 + AI 分析平台的 AI Service。消費 Transcription Service 發出的 `transcription.completed` 事件，取得逐字稿、呼叫 Groq API 產生摘要，存進自己的 `ai_db`，並回寫 Job 狀態、發送 `ai.completed` 事件。是純內部服務（MQ 驅動），只暴露 gRPC 給其他內部服務查詢——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service)、[`transcription-service`](../transcription-service) 一致）。
+音訊/影片逐字稿 + AI 分析平台的 AI Service。消費 Transcription Service 發出的 `transcription.completed` 事件，取得逐字稿、呼叫 HF Inference Providers 產生摘要，存進自己的 `ai_db`，並回寫 Job 狀態、發送 `ai.completed` 事件。是純內部服務（MQ 驅動），只暴露 gRPC 給其他內部服務查詢——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service)、[`transcription-service`](../transcription-service) 一致）。
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → Groq 摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，用 Groq 依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`，`AskQuestion` rpc 用 cosine similarity 找最相關片段餵給 Groq 回答，回答連同來源時間戳存進 `qa_history`）。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history` 四張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history` 四張表。
 
-原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。改成生成用 Groq（跟 transcription-service 的 Whisper 共用同一把 key，免費層額度寬很多）、embedding 改用 HF Inference API 的開源多語模型，不再依賴 Gemini。
+原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部走同一個 HF 帳號、同一支 `hf_client.py`。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。
 
 ## 技術棧
 
@@ -15,9 +15,10 @@
 | 框架 | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework |
 | API | gRPC（`AiService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費 | RabbitMQ（`pika`），消費 `transcription.completed`，發送 `ai.completed` / `job.failed` |
-| 摘要 | Groq API（預設 `qwen/qwen3.6-27b`，可用 `AI_GROQ_MODEL` 換模型；跟 transcription-service 的 Whisper 模型設定分開，避免共用 configmap 撞名），把逐字稿全文丟給模型產生摘要 |
-| 章節分段 | 同一個 Groq model，把逐字稿分段（含時間戳）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
-| Embedding / RAG 問答 | HF Inference API 的 `BAAI/bge-m3`（1024 維，query/document 對稱，不用加任何 instruction 前綴）：pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` 把問題轉成向量、用 pgvector cosine distance 找最相似的前 5 段，組成 context 餵給 Groq 生成回答 |
+| 摘要 | HF Inference Providers（預設 `Qwen/Qwen3.5-9B`，可用 `AI_HF_CHAT_MODEL` 換模型），把逐字稿全文丟給模型產生摘要 |
+| 章節分段 | 同一個 HF 聊天模型，把逐字稿分段（含時間戳）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
+| Embedding | HF Inference Providers 的 `BAAI/bge-m3`（1024 維，query/document 對稱，不用加任何 instruction 前綴）：pipeline 內把逐字稿分段轉成向量存進 `embeddings` |
+| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個 HF 聊天模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段，組成 context 連同最近 5 輪對話歷史一起餵給模型，用 `stream=True` 逐字串流生成回答 |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
 | 向量儲存 | PostgreSQL + `pgvector` extension（`Vector(1024)` 欄位，cosine distance 查詢，沒有建 ivfflat 索引——見已知限制） |
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy，MVP 階段用 `create_all` 自動建表 |
@@ -28,12 +29,11 @@
 - 先啟動基礎設施：`cd ../infra && docker compose up -d`
 - Upload Service 要跑在 `localhost:9090`（見 [`../upload-service`](../upload-service)），因為要呼叫它的 `InternalJobService.UpdateJobStatus`
 - Transcription Service 要跑在 `localhost:8083`（見 [`../transcription-service`](../transcription-service)），因為要呼叫它的 `TranscriptionService.GetTranscript`
-- 一組 Groq API Key（[console.groq.com/keys](https://console.groq.com/keys)），填進 `.env` 的 `GROQ_API_KEY`（跟 transcription-service 共用同一把也可以）
-- 一組 HF Inference API Key（[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)，建立 fine-grained token 時勾選「Make calls to Inference Providers」），填進 `.env` 的 `HF_API_KEY`
-- 沒填的話服務照樣能啟動（health check 正常），但實際消費到訊息、呼叫 Groq/HF 時會失敗，Job 會被標成 `FAILED`
+- 一組 HF Inference API Key（[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)，建立 fine-grained token 時勾選「Make calls to Inference Providers」），填進 `.env` 的 `HF_API_KEY`——embedding 跟摘要/章節分段/RAG 問答共用同一把
+- 沒填的話服務照樣能啟動（health check 正常），但實際消費到訊息、呼叫 HF 時會失敗，Job 會被標成 `FAILED`
 
 ```bash
-cp .env.example .env   # 第一次使用才需要，填入 GROQ_API_KEY / HF_API_KEY
+cp .env.example .env   # 第一次使用才需要，填入 HF_API_KEY
 uv sync
 ```
 
@@ -55,14 +55,14 @@ uv run python -m app.main
 消費 transcription.completed { jobId }
   → UpdateJobStatus(SUMMARIZING)
   → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文 + 分段
-  → 呼叫 Groq API 產生摘要
-  → 呼叫 Groq API 依分段時間戳切章節（逐字稿沒有分段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
-  → 呼叫 HF Inference API 把逐字稿分段轉成向量
+  → 呼叫 HF Inference Providers 產生摘要
+  → 呼叫 HF Inference Providers 依分段時間戳切章節（逐字稿沒有分段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
+  → 呼叫 HF Inference Providers 把逐字稿分段轉成向量
   → 摘要存進 summaries，章節存進 chapters，向量存進 embeddings（都覆蓋該 job 舊的資料）
   → UpdateJobStatus(COMPLETED)
   → 發送 ai.completed { jobId, status }
 
-任一步失敗，先判斷是不是暫時性失敗（Groq/HF SDK 例外型別、gRPC status code，見
+任一步失敗，先判斷是不是暫時性失敗（HF SDK 例外型別、gRPC status code，見
 app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3 次嘗試）：
   - 是 → 把訊息送進對應 TTL 的 retry queue（2 秒／4 秒），原始那份直接 ack，過一段時間後訊息
     透過 dead-letter-exchange 自動送回原 queue，被當成全新訊息重新處理一次完整的 pipeline
@@ -87,7 +87,8 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 |---|---|
 | `GetSummary` | 依 `job_id` 取得摘要，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
-| `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答，`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`；`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，只用來記錄 `qa_history`，不重新驗證 |
+| `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`）。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，只用來記錄 `qa_history`，不重新驗證 |
+| `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService`、transcription-service 的 `TranscriptionService` 一樣只信任內部網路呼叫。
 
@@ -118,7 +119,7 @@ grpcurl -plaintext -d '{"jobId":"<job_id>"}' \
 uv run pytest
 ```
 
-用 pytest，mocking 只用標準庫的 `unittest.mock`（沒有額外裝 `pytest-mock`）。測試不需要跑起 `infra`（Postgres/RabbitMQ）或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（Groq、HF、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
+用 pytest，mocking 只用標準庫的 `unittest.mock`（沒有額外裝 `pytest-mock`）。測試不需要跑起 `infra`（Postgres/RabbitMQ）或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（HF、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
 
 Mock 一定要 patch 在 `app/services/pipeline.py`「使用端」import 進來的名稱（例如 `pipeline.summarize`、`pipeline.job_status_client`），不是「定義端」的原始模組（例如 `app.services.summarizer.summarize`）——`unittest.mock.patch` 只替換掉 name binding，patch 定義端不會影響 pipeline.py 實際呼叫到的是誰。
 
@@ -138,17 +139,16 @@ app/
     embedding.py                  Embedding（SQLAlchemy ORM，pgvector Vector(1024) 欄位）
     qa_history.py                 QaHistory（SQLAlchemy ORM）
   controllers/
-    ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters、AskQuestion）
+    ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters、AskQuestion、ListQaHistory）
   services/
     consumer.py                      RabbitMQ consumer loop（pika）
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
-    summarizer.py                       Groq API 呼叫（摘要）
-    chapter_generator.py                 Groq API 呼叫（章節分段）
-    embedder.py                          HF Inference API 呼叫（embed_documents / embed_query）
-    qa.py                                RAG 問答流程：embed 問題 → 向量搜尋 → 組 context 餵 Groq
-    groq_client.py                       共用的 Groq client（lazy init）+ strip_thinking()（濾掉 reasoning model 的 <think> 區塊）
-    hf_client.py                         共用的 HF InferenceClient（lazy init，embedding 用）
+    summarizer.py                       HF Inference Providers 呼叫（摘要）
+    chapter_generator.py                 HF Inference Providers 呼叫（章節分段）
+    embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
+    qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context + 對話歷史 → streaming 生成回答
+    hf_client.py                         共用的 HF InferenceClient（lazy init，embedding + chat completion 共用同一個 client）+ strip_thinking()／stream_without_thinking()（濾掉 reasoning model 的 <think> 區塊，後者是 streaming 版）
     job_status_client.py                 gRPC client，呼叫 upload-service 的 UpdateJobStatus
     event_publisher.py                    發送 ai.completed / job.failed
   repositories/
@@ -165,7 +165,7 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 ## 已知限制 / 待辦
 
 - Schema 用 SQLAlchemy `create_all` 自動建表，團隊變大或上正式環境前應改用 Alembic 做版本化 migration
-- 訊息處理遇到暫時性失敗（Groq/HF 429/503、內部 gRPC 服務短暫不可用）會自動重試（訊息層級 requeue，
+- 訊息處理遇到暫時性失敗（HF 429/503、內部 gRPC 服務短暫不可用）會自動重試（訊息層級 requeue，
   最多 2 次、共 3 次嘗試，見上面 Pipeline 一節跟 `docs/adr/0001-...md`）；重試預算用盡、或失敗屬於永久性
   （格式錯誤、認證失敗、job 真的不存在）才會直接判定 `FAILED`，要重新上傳才能重跑
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗，會先做一次獨立、快速的 in-process 重試；只有連
@@ -175,10 +175,11 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
   這是目前接受的已知限制，之後若證明是實際的維運痛點再處理
 - 多格式輸出還沒實作
 - `embeddings` 沒有建 ivfflat 向量索引：MVP 資料量小、查詢一定先用 `job_id` 過濾縮小範圍，先不做這層優化；資料量大了之後要補
-- `qa_history` 目前只寫入沒有查詢 rpc，之後要做「問答歷史」列表可以直接查這張表
 - 章節分段的 prompt 沒有做輸出格式驗證，模型回傳非預期 JSON（缺欄位、型別不對）時整個 job 會直接標成 `FAILED`，不會重試或降級成「沒有章節」
-- `qwen/qwen3.6-27b` 目前是 Groq 的 preview 模型（官方標註僅供評估用），之後 Groq 下架或改名要記得換 `AI_GROQ_MODEL`
+- 對話記憶只取最近 5 輪（`app/services/qa.py` 的 `_MEMORY_TURNS`），沒有依 token 數動態調整；長對話裡更早的內容不會被 LLM 看到
+- HF Inference Providers 免費層沒有像 Groq 那樣公開逐模型的 TPM 數字，實際額度未知；`qa.py` 沿用原本為了 Groq TPM=8000 加的兩層固定上限（每輪歷史答案截斷到 `_MAX_HISTORY_ANSWER_CHARS` 字元、`max_tokens` 明確設定）當作保守預設，沒有做真正依 tokenizer 精算的動態預算控制，理論上極端情況（RAG 片段本身很長）還是有機會撞到類似 `413`/`429` 的限制；這個呼叫沒有套用 `retry.py` 的訊息層級重試（見上面另一條已知限制），撞到當下這輪問答會直接失敗
+- 問答的改寫/生成呼叫沒有套用 `app/services/retry.py` 的訊息層級 requeue 機制（那套是為 MQ 驅動的 pipeline 設計的）——`AskQuestion` 是同步查詢 RPC，中途失敗直接送一個 `error` chunk 讓這輪問答失敗，不會自動重試；使用者要自己重新送出問題
+- chat/embedding model 選擇都受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 embedding 模型 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `AI_HF_CHAT_MODEL`／`HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
 - 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了；SQLAlchemy `create_all` 不會 ALTER 既有欄位，換維度時整張表要 DROP 掉重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
-- embedding model 選擇受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
-- `qwen/qwen3.6-27b` 回應會把完整 `<think>...</think>` chain-of-thought 混進 `content`（實測 `reasoning_format="hidden"` 參數對這個 preview 模型沒有作用），`groq_client.strip_thinking()` 用 regex 硬濾掉；換其他 Groq 模型時要重新確認是否還需要這層
+- `Qwen/Qwen3.5-9B` 屬於 Qwen3 系列，可能預設開啟 thinking mode，把完整 `<think>...</think>` chain-of-thought 混進 `content`；HF 的 chat completion 介面沒有像 Groq `reasoning_format` 這種請求參數可以要求隱藏，`hf_client.strip_thinking()`／`stream_without_thinking()` 用 regex 硬濾掉；換其他 HF 聊天模型時要重新確認是否還需要這層
 - 沒有測試，目前只靠手動 smoke test

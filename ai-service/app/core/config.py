@@ -24,13 +24,11 @@ class Settings(BaseSettings):
     upload_service_grpc_target: str = "localhost:9090"
     transcription_service_grpc_target: str = "localhost:8083"
 
-    groq_api_key: str = ""
-    # 欄位刻意不叫 groq_model：transcription-service 也有一個 GROQ_MODEL（whisper 模型），
-    # 兩個服務共用同一份 configmap，撞名會讓這裡讀到 whisper 的型號字串。
-    ai_groq_model: str = "qwen/qwen3.6-27b"
-
     hf_api_key: str = ""
     hf_embedding_model: str = "BAAI/bge-m3"
+    # 摘要/章節分段/RAG 問答共用同一個 HF Inference Providers 聊天模型，見
+    # docs/adr/0003-hf-inference-providers-for-generation.md。
+    ai_hf_chat_model: str = "Qwen/Qwen3.5-9B"
 
     grpc_port: int = 8084
 

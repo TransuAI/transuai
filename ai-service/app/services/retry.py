@@ -3,12 +3,6 @@ import time
 from typing import Callable
 
 import grpc
-from groq import (
-    APIConnectionError,
-    APITimeoutError,
-    InternalServerError,
-    RateLimitError,
-)
 from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError, OverloadedError
 
 from app.core.config import settings
@@ -18,7 +12,6 @@ logger = logging.getLogger(__name__)
 RETRY_COUNT_HEADER = "x-retry-count"
 MAX_RETRIES = 2  # 最多重試 2 次（1 次原始送達 + 2 次重試 = 3 次總嘗試），見 ADR 0001
 
-_RETRYABLE_GROQ_ERRORS = (RateLimitError, InternalServerError, APIConnectionError, APITimeoutError)
 _RETRYABLE_HF_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
 _RETRYABLE_GRPC_STATUS_CODES = {
     grpc.StatusCode.UNAVAILABLE,
@@ -57,13 +50,6 @@ def retry_queue_for(retry_count: int) -> str | None:
     return None
 
 
-def is_retryable_groq_error(exc: BaseException) -> bool:
-    """Groq typed SDK 例外分類：rate limit、伺服器錯誤、連線問題、逾時算暫時性失敗；
-    格式錯誤、認證/權限問題、找不到資源，以及其他未列出的例外一律視為永久性失敗。
-    """
-    return isinstance(exc, _RETRYABLE_GROQ_ERRORS)
-
-
 def is_retryable_hf_error(exc: BaseException) -> bool:
     """Hugging Face 例外分類：專屬的 overload/timeout 型別直接算暫時性；其餘一律透過
     通用的 HfHubHTTPError 檢查 HTTP status code 是否落在暫時性錯誤的集合裡，其他狀態碼
@@ -87,13 +73,9 @@ def is_retryable_grpc_error(exc: BaseException) -> bool:
 
 
 def is_retryable_error(exc: BaseException) -> bool:
-    """process_message() 的統一分類入口。Groq、HF、內部 gRPC 三種例外來源的型別互不重疊，
-    依序檢查即可。"""
-    return (
-        is_retryable_groq_error(exc)
-        or is_retryable_hf_error(exc)
-        or is_retryable_grpc_error(exc)
-    )
+    """process_message() 的統一分類入口。HF（摘要/章節分段/RAG 問答/embedding 都走同一個
+    provider）、內部 gRPC 兩種例外來源的型別互不重疊，依序檢查即可。"""
+    return is_retryable_hf_error(exc) or is_retryable_grpc_error(exc)
 
 
 def retry_terminal_report(report: Callable[[], None]) -> bool:
@@ -101,7 +83,7 @@ def retry_terminal_report(report: Callable[[], None]) -> bool:
 
     刻意跟訊息層級的 requeue 機制（RetryableMessageError）分開：這個回報動作要嘛徹底成功、
     要嘛徹底放棄，重跑整個 pipeline 對已經確定的失敗結果沒有任何幫助，只會浪費已經花掉的
-    Groq/HF 呼叫額度。只在失敗被分類為暫時性 gRPC 錯誤時才重試（3 次總嘗試，200ms 起跳、
+    HF 呼叫額度。只在失敗被分類為暫時性 gRPC 錯誤時才重試（3 次總嘗試，200ms 起跳、
     每次 x2、封頂 800ms）；分類為永久性失敗（例如 job 在 upload-service 那邊已經不存在）
     時立即放棄，不浪費重試次數。
 

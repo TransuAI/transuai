@@ -36,7 +36,7 @@ def process_message(
 
     `retry_count` 是這則訊息目前已經被重新投遞過幾次（由 consumer.py 從訊息 header 讀出、傳進來），
     第一次送達永遠是 0。任一步失敗時：
-    - 失敗被分類為暫時性（Groq/HF/gRPC，見 app/services/retry.py）且還沒到重試預算上限
+    - 失敗被分類為暫時性（HF/gRPC，見 app/services/retry.py）且還沒到重試預算上限
       -> raise RetryableMessageError，不落入下面的 FAILED 路徑，交給 consumer.py 決定送去哪條 retry queue。
     - 其他情況（永久性失敗、或暫時性失敗但預算已用盡）-> 維持現狀回寫 Job status=FAILED、記錄
       error_reason、發送 job.failed；這個回報動作本身也可能因為暫時性 gRPC 錯誤失敗，用

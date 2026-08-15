@@ -9,7 +9,7 @@ from app.models import QaHistory
 from app.repositories.embedding_repository import find_similar
 from app.repositories.qa_repository import find_by_job_id
 from app.services.embedder import embed_query
-from app.services.groq_client import get_client, strip_thinking, stream_without_thinking
+from app.services.hf_client import get_client, strip_thinking, stream_without_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +32,19 @@ _CONDENSE_PROMPT_TEMPLATE = (
 _TOP_K = 5
 _MEMORY_TURNS = 5
 
-# qwen/qwen3.6-27b 免費層 TPM（tokens per minute）只有 8000（見 README 已知限制），單一請求的
-# prompt + 保留的 completion 預算都算在裡面。歷史對話的答案長度沒有上限——一段很長的舊答案，
-# 就算只有一輪歷史也可能單獨把預算吃光，所以每輪歷史塞進 prompt 前都先截斷，跟 _MEMORY_TURNS
-# （要塞幾輪）是兩個獨立的預算控制，不能只靠調輪數解決。
+# HF Inference Providers 的免費層沒有像 Groq 那樣公開逐模型的 TPM 數字（見
+# docs/adr/0003-hf-inference-providers-for-generation.md），但這不代表沒有限制——
+# 這裡沿用原本為了 Groq TPM=8000 加的兩層預算控制，當作沒有公開數字時的保守預設。
+# 歷史對話的答案長度沒有上限——一段很長的舊答案，就算只有一輪歷史也可能單獨把預算吃光，
+# 所以每輪歷史塞進 prompt 前都先截斷，跟 _MEMORY_TURNS（要塞幾輪）是兩個獨立的預算控制，
+# 不能只靠調輪數解決。
 _MAX_HISTORY_ANSWER_CHARS = 300
-# 完全不設 max_completion_tokens 的話，Groq 的 TPM 預估會把「這個模型剩餘的 context 空間」
-# 整段算進 Requested 用量（qwen3.6-27b 是 reasoning model，預留空間本來就大），輕易就超過
-# 8000 的免費層上限。這裡的值要留夠 reasoning model 內部的 <think> chain-of-thought 用量
-# （reasoning_format="hidden" 對這個 preview 模型沒作用，thinking 照樣佔掉 completion tokens，
-# 見 groq_client.strip_thinking() 的註解），不能只算「使用者真正會看到的答案」需要多少字。
-_ANSWER_MAX_COMPLETION_TOKENS = 1024
-_CONDENSE_MAX_COMPLETION_TOKENS = 400
+# 完全不設 max_tokens 的話，有些 provider 會用模型的預設值（可能很大）當作保留的 completion
+# 預算。這裡的值要留夠 reasoning model 內部的 <think> chain-of-thought 用量（Qwen3 系列預設
+# 可能開啟 thinking mode，見 hf_client.strip_thinking() 的註解），不能只算「使用者真正會看到
+# 的答案」需要多少字——設太小的話有可能整段配額被 thinking 用完，答案還沒生成就被截斷。
+_ANSWER_MAX_TOKENS = 1024
+_CONDENSE_MAX_TOKENS = 400
 
 
 class NoEmbeddingsError(Exception):
@@ -72,13 +73,12 @@ def _condense_question(question: str, history: list[QaHistory]) -> str:
         f"問：{turn.question}\n答：{_truncate(turn.answer, _MAX_HISTORY_ANSWER_CHARS)}" for turn in history
     )
     response = get_client().chat.completions.create(
-        model=settings.ai_groq_model,
+        model=settings.ai_hf_chat_model,
         messages=[{
             "role": "user",
             "content": _CONDENSE_PROMPT_TEMPLATE.format(history=history_text, question=question),
         }],
-        reasoning_format="hidden",
-        max_completion_tokens=_CONDENSE_MAX_COMPLETION_TOKENS,
+        max_tokens=_CONDENSE_MAX_TOKENS,
     )
     condensed = strip_thinking(response.choices[0].message.content or "").strip()
     return condensed or question
@@ -113,14 +113,13 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
     messages.append({"role": "user", "content": question})
 
     logger.info(
-        "calling Groq (%s) to stream-answer question for job %s, using %d chunks, %d history turns",
-        settings.ai_groq_model, job_id, len(chunks), len(history),
+        "calling HF Inference (%s) to stream-answer question for job %s, using %d chunks, %d history turns",
+        settings.ai_hf_chat_model, job_id, len(chunks), len(history),
     )
     stream = get_client().chat.completions.create(
-        model=settings.ai_groq_model,
+        model=settings.ai_hf_chat_model,
         messages=messages,
-        reasoning_format="hidden",
-        max_completion_tokens=_ANSWER_MAX_COMPLETION_TOKENS,
+        max_tokens=_ANSWER_MAX_TOKENS,
         stream=True,
     )
     raw_deltas = (chunk.choices[0].delta.content for chunk in stream)

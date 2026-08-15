@@ -3,16 +3,6 @@ from unittest.mock import call, patch
 import grpc
 import httpx
 import pytest
-from groq import (
-    APIConnectionError,
-    APITimeoutError,
-    AuthenticationError,
-    BadRequestError,
-    InternalServerError,
-    NotFoundError,
-    PermissionDeniedError,
-    RateLimitError,
-)
 from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError, OverloadedError
 
 from app.core.config import settings
@@ -52,36 +42,6 @@ def test_retry_queue_for_second_retry_routes_to_4s_queue():
 @pytest.mark.parametrize("retry_count", [2, 3, 100])
 def test_retry_queue_for_exhausted_budget_returns_none(retry_count):
     assert retry.retry_queue_for(retry_count) is None
-
-
-# --- Groq 例外分類 ---
-
-
-@pytest.mark.parametrize(
-    "exc",
-    [
-        RateLimitError("rate limited", response=_httpx_response(429), body=None),
-        InternalServerError("boom", response=_httpx_response(500), body=None),
-        APIConnectionError(request=_httpx_request()),
-        APITimeoutError(request=_httpx_request()),
-    ],
-)
-def test_is_retryable_groq_error_true_for_transient_types(exc):
-    assert retry.is_retryable_groq_error(exc) is True
-
-
-@pytest.mark.parametrize(
-    "exc",
-    [
-        BadRequestError("bad", response=_httpx_response(400), body=None),
-        AuthenticationError("auth", response=_httpx_response(401), body=None),
-        PermissionDeniedError("denied", response=_httpx_response(403), body=None),
-        NotFoundError("missing", response=_httpx_response(404), body=None),
-        ValueError("not even a groq error"),
-    ],
-)
-def test_is_retryable_groq_error_false_for_permanent_types(exc):
-    assert retry.is_retryable_groq_error(exc) is False
 
 
 # --- HF 例外分類 ---
