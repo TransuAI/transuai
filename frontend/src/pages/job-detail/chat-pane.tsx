@@ -1,14 +1,18 @@
-import { MessageCircle } from 'lucide-react'
+import { AlertCircle, MessageCircle } from 'lucide-react'
 import { formatDuration } from '@/lib/media'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { QaAnswer } from '@/types/api'
+
+export type QaEntryStatus = 'streaming' | 'done' | 'error'
 
 export interface QaEntry {
+  id: string
   question: string
-  answer: QaAnswer
+  answer: string
+  sourceTimestamps: number[]
+  status: QaEntryStatus
 }
 
 interface ChatPaneProps {
@@ -42,15 +46,25 @@ export function ChatPane({
         {qaHistory.length > 0 ? (
           <ScrollArea className="h-full pr-4">
             <div className="flex flex-col gap-4">
-              {qaHistory.map((entry, i) => (
-                <div key={i} className="flex flex-col gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
+              {qaHistory.map((entry) => (
+                <div key={entry.id} className="flex flex-col gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
                   <p className="text-sm font-medium">{entry.question}</p>
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                    {entry.answer.answer}
-                  </p>
-                  {entry.answer.sourceTimestamps.length > 0 && (
+                  {entry.answer ? (
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                      {entry.answer}
+                    </p>
+                  ) : entry.status === 'streaming' ? (
+                    <p className="text-sm text-muted-foreground">思考中...</p>
+                  ) : null}
+                  {entry.status === 'error' && (
+                    <p className="flex items-center gap-1.5 text-sm text-destructive">
+                      <AlertCircle className="size-3.5" />
+                      回答失敗，請重新提問
+                    </p>
+                  )}
+                  {entry.sourceTimestamps.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 pt-1">
-                      {entry.answer.sourceTimestamps.map((ts, j) => (
+                      {entry.sourceTimestamps.map((ts, j) => (
                         <button
                           key={j}
                           type="button"

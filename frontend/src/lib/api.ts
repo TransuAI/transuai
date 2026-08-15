@@ -1,11 +1,11 @@
-import { apiFetch, apiFetchVoid } from '@/lib/api-client'
+import { apiFetch, apiFetchVoid, requestSse } from '@/lib/api-client'
 import type {
   AuthResponse,
   Chapter,
   Job,
   JobListResponse,
   PresignResponse,
-  QaAnswer,
+  QaTurn,
   Summary,
   Transcript,
   User,
@@ -60,7 +60,36 @@ export const chapterApi = {
   list: (jobId: string) => apiFetch<Chapter[]>(`/chapters/${jobId}`),
 }
 
+export interface QaStreamHandlers {
+  onSources: (sourceTimestamps: number[]) => void
+  onDelta: (text: string) => void
+  onError: (message: string) => void
+  signal?: AbortSignal
+}
+
 export const qaApi = {
-  ask: (jobId: string, question: string) =>
-    apiFetch<QaAnswer>(`/qa/${jobId}`, { method: 'POST', body: { question } }),
+  history: (jobId: string) => apiFetch<QaTurn[]>(`/qa/${jobId}`),
+
+  // Resolve 不代表「答案正確送達」，只代表串流正常結束——中途失敗會透過 onError 回報一個
+  // error event，stream 本身還是乾淨結束（見 ai-service AskQuestion 的設計），呼叫端要自己
+  // 用 onError 有沒有被呼叫過來判斷這輪問答到底成不成功，不能只看 promise 有沒有 reject。
+  ask: (jobId: string, question: string, handlers: QaStreamHandlers) =>
+    requestSse(
+      `/qa/${jobId}`,
+      { method: 'POST', body: { question } },
+      (event, data) => {
+        switch (event) {
+          case 'sources':
+            handlers.onSources(JSON.parse(data) as number[])
+            break
+          case 'delta':
+            handlers.onDelta(JSON.parse(data) as string)
+            break
+          case 'error':
+            handlers.onError(JSON.parse(data) as string)
+            break
+        }
+      },
+      handlers.signal,
+    ),
 }

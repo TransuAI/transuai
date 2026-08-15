@@ -10,7 +10,7 @@ vi.mock('@/lib/api', () => ({
   transcriptApi: { get: vi.fn() },
   summaryApi: { get: vi.fn() },
   chapterApi: { list: vi.fn() },
-  qaApi: { ask: vi.fn() },
+  qaApi: { ask: vi.fn(), history: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -68,6 +68,7 @@ async function renderCompletedJob() {
   vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
   vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
   vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
+  vi.mocked(qaApi.history).mockResolvedValue([])
 
   const view = renderJobDetail()
   await screen.findByText('問答')
@@ -104,6 +105,7 @@ describe('JobDetailPage status branches', () => {
     vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
     vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
     vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
+    vi.mocked(qaApi.history).mockResolvedValue([])
 
     renderJobDetail()
 
@@ -161,14 +163,25 @@ describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
   it('asks a question, appends it to history, and seeks the media player from a citation timestamp', async () => {
     const matchMediaSpy = stubDesktopLayout()
     const user = userEvent.setup()
-    vi.mocked(qaApi.ask).mockResolvedValue({ answer: '答案內容', sourceTimestamps: [42] })
+    vi.mocked(qaApi.ask).mockImplementation(async (_jobId, _question, handlers) => {
+      handlers.onSources([42])
+      handlers.onDelta('答案內容')
+    })
 
     await renderCompletedJob()
 
     await user.type(screen.getByPlaceholderText('針對這個內容提問...'), '這段在說什麼?')
     await user.click(screen.getByRole('button', { name: '問' }))
 
-    expect(qaApi.ask).toHaveBeenCalledWith('job-1', '這段在說什麼?')
+    expect(qaApi.ask).toHaveBeenCalledWith(
+      'job-1',
+      '這段在說什麼?',
+      expect.objectContaining({
+        onSources: expect.any(Function),
+        onDelta: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    )
     expect(await screen.findByText('這段在說什麼?')).toBeInTheDocument()
     expect(screen.getByText('答案內容')).toBeInTheDocument()
 

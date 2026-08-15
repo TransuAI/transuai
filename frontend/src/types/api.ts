@@ -77,9 +77,13 @@ export interface Chapter {
   sequenceNo: number
 }
 
-export interface QaAnswer {
+// 一個 job 底下的一筆問答紀錄；「對話」的範圍就是整個 job，沒有獨立的 conversation/thread
+// 概念，見 ai-service/docs/adr/ 對話範圍的 ADR。
+export interface QaTurn {
+  question: string
   answer: string
   sourceTimestamps: number[]
+  createdAt: string
 }
 
 export interface ApiErrorBody {

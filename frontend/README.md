@@ -12,7 +12,7 @@
 | UI | Tailwind CSS v4 + shadcn/ui（Nova preset：Radix + Geist 字型） |
 | 路由 | react-router-dom v7 |
 | 狀態 | 沒有拉 Redux/Zustand,登入狀態用一個簡單的 `AuthContext`（`src/context/auth-context.tsx`），Job 資料用各頁面自己的 `useState`/`useEffect`,規模還不需要全域 data-fetching 套件 |
-| API 呼叫 | 手刻的 `fetch` wrapper（`src/lib/api-client.ts`），處理 401 → 自動 refresh token → 重試一次 |
+| API 呼叫 | 手刻的 `fetch` wrapper（`src/lib/api-client.ts`），處理 401 → 自動 refresh token → 重試一次；問答走 SSE（`requestSse`），不用原生 `EventSource`——它沒辦法附加 Authorization header，見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md) |
 | 即時更新 | 原生 `WebSocket`（`src/hooks/use-job-socket.ts`）直連 notification-service |
 
 ## 前置需求
@@ -66,7 +66,7 @@ src/
   hooks/
     use-job-socket.ts  WebSocket 訂閱單一 job 狀態更新,斷線自動重連
   lib/
-    api-client.ts     fetch wrapper(auth header、401 refresh-and-retry、錯誤格式)
+    api-client.ts     fetch wrapper(auth header、401 refresh-and-retry、錯誤格式)+ requestSse(手動解析 SSE frame,問答 streaming 用)
     api.ts            對應 Gateway 每支 REST API 的函式
     auth-storage.ts    token/user 存 localStorage
     media.ts           檔案型別判斷、讀取媒體長度、格式化工具
@@ -74,7 +74,7 @@ src/
     login-page.tsx / register-page.tsx
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete
     jobs-page.tsx           Job 列表、分頁、刪除
-    job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿、AI 摘要
+    job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
   test/
     setup.ts            Vitest 共用設定(目前只掛 @testing-library/jest-dom 的 matcher)
   types/

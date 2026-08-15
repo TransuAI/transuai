@@ -79,6 +79,20 @@ export function JobDetailPage() {
     if (jobStatus === 'COMPLETED') {
       summaryApi.get(jobId).then(setSummary).catch(() => setSummary(null))
       chapterApi.list(jobId).then(setChapters).catch(() => setChapters([]))
+      qaApi
+        .history(jobId)
+        .then((turns) =>
+          setQaHistory(
+            turns.map((turn) => ({
+              id: crypto.randomUUID(),
+              question: turn.question,
+              answer: turn.answer,
+              sourceTimestamps: turn.sourceTimestamps,
+              status: 'done',
+            })),
+          ),
+        )
+        .catch(() => setQaHistory([]))
     }
   }, [jobId, jobStatus])
 
@@ -89,19 +103,43 @@ export function JobDetailPage() {
     }
   }
 
-  const handleAskQuestion = async () => {
+  const handleAskQuestion = () => {
     const question = questionInput.trim()
     if (!jobId || !question || isAsking) return
+
+    const id = crypto.randomUUID()
+    setQaHistory((prev) => [...prev, { id, question, answer: '', sourceTimestamps: [], status: 'streaming' }])
+    setQuestionInput('')
     setIsAsking(true)
-    try {
-      const answer = await qaApi.ask(jobId, question)
-      setQaHistory((prev) => [...prev, { question, answer }])
-      setQuestionInput('')
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '問答失敗')
-    } finally {
-      setIsAsking(false)
-    }
+
+    const patchEntry = (patch: Partial<QaEntry>) =>
+      setQaHistory((prev) => prev.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)))
+
+    // failed 這個 flag 是必要的：中途失敗時 onError 會先把狀態標成 error，但 requestSse()
+    // 之後還是會正常 resolve（error event 之後 stream 乾淨結束，不是 fetch 層級的失敗），
+    // 沒有這個 flag，下面的 .then() 會把 status 蓋回 'done'。
+    let failed = false
+    qaApi
+      .ask(jobId, question, {
+        onSources: (sourceTimestamps) => patchEntry({ sourceTimestamps }),
+        onDelta: (text) =>
+          setQaHistory((prev) =>
+            prev.map((entry) => (entry.id === id ? { ...entry, answer: entry.answer + text } : entry)),
+          ),
+        onError: () => {
+          failed = true
+          patchEntry({ status: 'error' })
+          toast.error('問答失敗')
+        },
+      })
+      .then(() => {
+        if (!failed) patchEntry({ status: 'done' })
+      })
+      .catch((err) => {
+        patchEntry({ status: 'error' })
+        toast.error(err instanceof ApiError ? err.message : '問答失敗')
+      })
+      .finally(() => setIsAsking(false))
   }
 
   if (isLoadingJob) {
@@ -186,7 +224,7 @@ export function JobDetailPage() {
       questionInput={questionInput}
       onQuestionInputChange={setQuestionInput}
       isAsking={isAsking}
-      onAsk={() => void handleAskQuestion()}
+      onAsk={handleAskQuestion}
       onSeek={seekTo}
       setMediaRef={setMediaRef}
     />

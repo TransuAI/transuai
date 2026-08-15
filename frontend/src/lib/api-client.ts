@@ -51,23 +51,31 @@ interface RequestOptions {
   auth?: boolean
 }
 
-// 送出請求、處理 401 refresh 與錯誤 status，回傳「已確認 res.ok」的 raw Response。
-// 要不要 parse body 交給呼叫端決定，這裡不對 body 做任何假設。
-async function request(path: string, options: RequestOptions = {}): Promise<Response> {
+function buildHeaders(auth: boolean): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (auth) {
+    const session = loadSession()
+    if (session) headers.Authorization = `Bearer ${session.accessToken}`
+  }
+  return headers
+}
+
+// 送出請求，401 時嘗試 refresh 一次再重打；不對 res.ok 做任何假設，交給呼叫端決定——
+// request() 跟 requestSse() 對「不 ok 怎麼辦」的處理不一樣（後者還要檢查 res.body）。
+async function fetchWithAuthRetry(
+  path: string,
+  options: RequestOptions,
+  signal?: AbortSignal,
+): Promise<Response> {
   const { method = 'GET', body, auth = true } = options
 
-  const doFetch = async (): Promise<Response> => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (auth) {
-      const session = loadSession()
-      if (session) headers.Authorization = `Bearer ${session.accessToken}`
-    }
-    return fetch(`${API_BASE_URL}${path}`, {
+  const doFetch = () =>
+    fetch(`${API_BASE_URL}${path}`, {
       method,
-      headers,
+      headers: buildHeaders(auth),
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
     })
-  }
 
   let res = await doFetch()
 
@@ -78,17 +86,65 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
     } else {
       clearSession()
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
-      const errBody = await safeParseError(res)
-      throw new ApiError(401, errBody)
     }
   }
 
+  return res
+}
+
+// 送出請求、處理 401 refresh 與錯誤 status，回傳「已確認 res.ok」的 raw Response。
+// 要不要 parse body 交給呼叫端決定，這裡不對 body 做任何假設。
+async function request(path: string, options: RequestOptions = {}): Promise<Response> {
+  const res = await fetchWithAuthRetry(path, options)
   if (!res.ok) {
     const errBody = await safeParseError(res)
     throw new ApiError(res.status, errBody)
   }
-
   return res
+}
+
+// 讀 SSE（Server-Sent Events）串流，逐個 frame 呼叫 onEvent。刻意不用瀏覽器原生的
+// EventSource——它沒辦法附加 Authorization header，這個 API 全部端點都是 Bearer JWT 驗證，
+// 只能自己用 fetch + ReadableStream 手動解析。data 欄位預期一律是後端已經 JSON encode 過的
+// 單行字串（見 gateway AiController 的註解），呼叫端自己 JSON.parse。
+export async function requestSse(
+  path: string,
+  options: RequestOptions,
+  onEvent: (event: string, data: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetchWithAuthRetry(path, options, signal)
+  if (!res.ok || !res.body) {
+    const errBody = await safeParseError(res)
+    throw new ApiError(res.status, errBody)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    let frameEnd = buffer.indexOf('\n\n')
+    while (frameEnd !== -1) {
+      parseSseFrame(buffer.slice(0, frameEnd), onEvent)
+      buffer = buffer.slice(frameEnd + 2)
+      frameEnd = buffer.indexOf('\n\n')
+    }
+  }
+}
+
+function parseSseFrame(frame: string, onEvent: (event: string, data: string) => void) {
+  let eventName = 'message'
+  const dataLines: string[] = []
+  for (const line of frame.split('\n')) {
+    if (line.startsWith('event:')) eventName = line.slice(6).trim()
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+  }
+  if (dataLines.length > 0) onEvent(eventName, dataLines.join('\n'))
 }
 
 // 給「回應一定有 JSON body」的端點用。
