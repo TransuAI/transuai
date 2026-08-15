@@ -18,12 +18,15 @@ import com.transuai.gateway.grpc.UploadMapper;
 import com.transuai.gateway.web.dto.CompleteUploadRequestDto;
 import com.transuai.gateway.web.dto.JobDto;
 import com.transuai.gateway.web.dto.JobListResponseDto;
+import com.transuai.gateway.web.dto.MediaUrlDto;
 import com.transuai.gateway.web.dto.PresignRequestDto;
 import com.transuai.gateway.web.dto.PresignResponseDto;
 import com.transuai.upload.grpc.v1.CompleteUploadRequest;
 import com.transuai.upload.grpc.v1.DeleteJobRequest;
 import com.transuai.upload.grpc.v1.FileType;
 import com.transuai.upload.grpc.v1.GetJobRequest;
+import com.transuai.upload.grpc.v1.GetPresignedDownloadUrlRequest;
+import com.transuai.upload.grpc.v1.GetPresignedDownloadUrlResponse;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlRequest;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
 import com.transuai.upload.grpc.v1.Job;
@@ -70,6 +73,14 @@ public class UploadController {
                 Job job = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .getJob(GetJobRequest.newBuilder().setJobId(jobId).build());
                 return UploadMapper.toDto(job);
+        }
+
+        @GetMapping("/jobs/{jobId}/media-url")
+        public MediaUrlDto getMediaUrl(@CurrentUserId UUID userId, @PathVariable String jobId) {
+                GetPresignedDownloadUrlResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
+                                .getPresignedDownloadUrl(
+                                                GetPresignedDownloadUrlRequest.newBuilder().setJobId(jobId).build());
+                return new MediaUrlDto(response.getDownloadUrl(), GrpcTimestamps.toInstant(response.getExpiresAt()));
         }
 
         @GetMapping("/jobs")
