@@ -15,8 +15,11 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
@@ -42,6 +45,22 @@ public class StorageService {
 
         PresignedPutObjectRequest presigned = s3Presigner.presignPutObject(presignRequest);
         return new PresignedUpload(presigned.url().toString(), objectKey, Instant.now().plus(expiry));
+    }
+
+    public PresignedDownload createPresignedDownloadUrl(String objectKey) {
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(storageProperties.bucket())
+                .key(objectKey)
+                .build();
+
+        Duration expiry = Duration.ofMinutes(storageProperties.presignDownloadExpiryMinutes());
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(expiry)
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+        PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(presignRequest);
+        return new PresignedDownload(presigned.url().toString(), Instant.now().plus(expiry));
     }
 
     // completeUpload() 不能只信任呼叫端回報的 file_size_bytes——那個數字完全由 client 決定，
@@ -79,5 +98,8 @@ public class StorageService {
     }
 
     public record PresignedUpload(String uploadUrl, String objectKey, Instant expiresAt) {
+    }
+
+    public record PresignedDownload(String downloadUrl, Instant expiresAt) {
     }
 }

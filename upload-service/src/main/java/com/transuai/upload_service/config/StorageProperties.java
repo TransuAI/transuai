@@ -11,5 +11,6 @@ public record StorageProperties(
         String secretKey,
         String bucket,
         boolean pathStyleAccess,
-        int presignExpiryMinutes) {
+        int presignExpiryMinutes,
+        int presignDownloadExpiryMinutes) {
 }

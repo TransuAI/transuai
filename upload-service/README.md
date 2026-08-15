@@ -68,6 +68,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`src/main/proto/upl
 | `GetPresignedUploadUrl` | 取得物件儲存的 presigned PUT URL，此階段尚未建立 Job；`file_size_bytes` 超過上傳大小限制會回 `INVALID_ARGUMENT`（見下方「上傳大小限制」） |
 | `CompleteUpload` | 前端完成上傳後呼叫，建立 Job（status=`UPLOADED`）並發送 `transcription.requested` 事件；會改問物件儲存實際存了多大（不信任請求帶的 `file_size_bytes`），超過限制回 `INVALID_ARGUMENT` 並刪除該物件 |
 | `GetJob` | 查詢單一 Job，強制 ownership 檢查（別人的 Job 回 `NOT_FOUND`） |
+| `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md` |
 | `ListJobs` | 分頁查詢目前使用者的所有 Job |
 | `DeleteJob` | 刪除 Job record 與物件儲存檔案 |
 
@@ -102,7 +103,8 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 | `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | `admin` / `00000000` | 物件儲存帳密 |
 | `STORAGE_BUCKET` | `media-uploads` | bucket 名稱 |
 | `STORAGE_PATH_STYLE_ACCESS` | `true` | MinIO 需要 path-style，正式環境用 R2 也維持 `true` |
-| `STORAGE_PRESIGN_EXPIRY_MINUTES` | `15` | presigned URL 有效期限（分鐘） |
+| `STORAGE_PRESIGN_EXPIRY_MINUTES` | `15` | 上傳用 presigned **PUT** URL 有效期限（分鐘） |
+| `STORAGE_PRESIGN_DOWNLOAD_EXPIRY_MINUTES` | `360` | 播放用 presigned **GET** URL 有效期限（分鐘），跟上傳分開設定，見 `docs/adr/0002-presigned-get-url-for-media-playback.md` |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | `1073741824`（1GB） | 一般濫用防護上限，不分檔案類型，見「上傳大小限制」一節 |
 | `MAX_AUDIO_UPLOAD_FILE_SIZE_BYTES` | `20971520`（20MB） | AUDIO 專用上限，對齊 Groq Whisper 免費層限制，見「上傳大小限制」一節 |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ |

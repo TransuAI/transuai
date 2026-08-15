@@ -7,6 +7,8 @@ import com.transuai.upload.grpc.v1.CompleteUploadRequest;
 import com.transuai.upload.grpc.v1.DeleteJobRequest;
 import com.transuai.upload.grpc.v1.FileType;
 import com.transuai.upload.grpc.v1.GetJobRequest;
+import com.transuai.upload.grpc.v1.GetPresignedDownloadUrlRequest;
+import com.transuai.upload.grpc.v1.GetPresignedDownloadUrlResponse;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlRequest;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
 import com.transuai.upload.grpc.v1.Job;
@@ -172,6 +174,30 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
         }
 
         responseObserver.onNext(JobMapper.toProto(job));
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void getPresignedDownloadUrl(GetPresignedDownloadUrlRequest request,
+            StreamObserver<GetPresignedDownloadUrlResponse> responseObserver) {
+        UUID userId = GrpcAuthContext.currentUserId();
+        UUID jobId = parseJobId(request.getJobId(), responseObserver);
+        if (jobId == null) {
+            return;
+        }
+
+        JobEntity job = jobRepository.findByIdAndUserId(jobId, userId).orElse(null);
+        if (job == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("job not found").asRuntimeException());
+            return;
+        }
+
+        StorageService.PresignedDownload presigned = storageService.createPresignedDownloadUrl(job.getStoragePath());
+
+        responseObserver.onNext(GetPresignedDownloadUrlResponse.newBuilder()
+                .setDownloadUrl(presigned.downloadUrl())
+                .setExpiresAt(GrpcTimestamps.toProto(presigned.expiresAt()))
+                .build());
         responseObserver.onCompleted();
     }
 
