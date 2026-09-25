@@ -54,6 +54,11 @@ class UploadServiceStub:
                 request_serializer=upload__pb2.GetJobRequest.SerializeToString,
                 response_deserializer=upload__pb2.Job.FromString,
                 _registered_method=True)
+        self.GetPresignedDownloadUrl = channel.unary_unary(
+                '/transuai.upload.v1.UploadService/GetPresignedDownloadUrl',
+                request_serializer=upload__pb2.GetPresignedDownloadUrlRequest.SerializeToString,
+                response_deserializer=upload__pb2.GetPresignedDownloadUrlResponse.FromString,
+                _registered_method=True)
         self.ListJobs = channel.unary_unary(
                 '/transuai.upload.v1.UploadService/ListJobs',
                 request_serializer=upload__pb2.ListJobsRequest.SerializeToString,
@@ -93,6 +98,16 @@ class UploadServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetPresignedDownloadUrl(self, request, context):
+        """取得該 Job 媒體檔案的 presigned download URL，供前端播放器直接讀取；ownership 檢查
+        方式跟 GetJob 一樣（找不到屬於呼叫端的 Job 就回 NOT_FOUND），不額外驗證。
+        as_attachment=true 時，URL 會要求物件儲存回 Content-Disposition: attachment（檔名＝Job 的
+        原始檔名），供「匯出 → 下載原始檔」使用；預設 false 是給播放器 inline 讀取。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListJobs(self, request, context):
         """查詢使用者所有 Job（分頁）。
         """
@@ -124,6 +139,11 @@ def add_UploadServiceServicer_to_server(servicer, server):
                     servicer.GetJob,
                     request_deserializer=upload__pb2.GetJobRequest.FromString,
                     response_serializer=upload__pb2.Job.SerializeToString,
+            ),
+            'GetPresignedDownloadUrl': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetPresignedDownloadUrl,
+                    request_deserializer=upload__pb2.GetPresignedDownloadUrlRequest.FromString,
+                    response_serializer=upload__pb2.GetPresignedDownloadUrlResponse.SerializeToString,
             ),
             'ListJobs': grpc.unary_unary_rpc_method_handler(
                     servicer.ListJobs,
@@ -220,6 +240,33 @@ class UploadService:
             '/transuai.upload.v1.UploadService/GetJob',
             upload__pb2.GetJobRequest.SerializeToString,
             upload__pb2.Job.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetPresignedDownloadUrl(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.upload.v1.UploadService/GetPresignedDownloadUrl',
+            upload__pb2.GetPresignedDownloadUrlRequest.SerializeToString,
+            upload__pb2.GetPresignedDownloadUrlResponse.FromString,
             options,
             channel_credentials,
             insecure,
