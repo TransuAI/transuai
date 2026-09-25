@@ -10,6 +10,7 @@ from app.services.audio import extract_audio_track
 from app.services.job_status_client import job_status_client
 from app.services.retry import RetryableMessageError, is_retryable_groq_error, retry_queue_for
 from app.services.storage import download_object
+from app.services.traditional_chinese import to_traditional_if_chinese
 from app.services.transcriber import transcribe
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ def process_message(
     publish_failed: Callable[[str, str, str], None],
     retry_count: int = 0,
 ) -> None:
-    """處理一則 transcription.requested 訊息：抽音軌 -> 轉錄 -> 存逐字稿 -> 回寫狀態 -> 發 transcription.completed。
+    """處理一則 transcription.requested 訊息：抽音軌 -> 轉錄 -> 中文轉繁體 -> 存逐字稿 -> 回寫狀態 -> 發 transcription.completed。
 
     `retry_count` 是這則訊息目前已經被重新投遞過幾次（由 consumer.py 從訊息 header 讀出、傳進來），
     第一次送達永遠是 0。`transcribe()` 遇到 Groq 暫時性錯誤（429/503 類，見 app/services/retry.py）
@@ -49,7 +50,7 @@ def process_message(
         audio_path = extract_audio_track(
             downloaded) if file_type == "VIDEO" else downloaded
 
-        result = transcribe(audio_path)
+        result = to_traditional_if_chinese(transcribe(audio_path))
 
         session = new_session()
         try:

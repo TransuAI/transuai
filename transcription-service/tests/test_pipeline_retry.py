@@ -1,7 +1,6 @@
 import json
 import uuid
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -20,34 +19,6 @@ def _job_body() -> tuple[str, bytes]:
     body = json.dumps(
         {"jobId": job_id, "storagePath": "uploads/foo.mp3", "fileType": "AUDIO"}).encode("utf-8")
     return job_id, body
-
-
-@pytest.fixture
-def mocks():
-    """套上跟 ai-service/tests/test_pipeline_retry.py 同一種 mocking boundary（patch 在 pipeline
-    模組「使用端」import 進來的名稱），並預先設好 happy-path 的回傳值。"""
-    mock_session = MagicMock(name="session")
-    fake_downloaded = Path("/tmp/fake-download.mp3")
-    with (
-        patch.object(pipeline, "job_status_client") as job_status_client,
-        patch.object(pipeline, "download_object", return_value=fake_downloaded) as download_object,
-        patch.object(pipeline, "extract_audio_track") as extract_audio_track,
-        patch.object(pipeline, "transcribe") as transcribe,
-        patch.object(pipeline, "new_session", return_value=mock_session),
-        patch.object(pipeline, "save_transcript"),
-        patch("pathlib.Path.unlink"),
-    ):
-        transcribe.return_value = MagicMock(name="TranscriptResult")
-        yield type(
-            "Mocks",
-            (),
-            {
-                "job_status_client": job_status_client,
-                "download_object": download_object,
-                "extract_audio_track": extract_audio_track,
-                "transcribe": transcribe,
-            },
-        )
 
 
 def test_transient_groq_error_in_transcribe_within_budget_raises_retryable(mocks):

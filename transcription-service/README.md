@@ -9,8 +9,9 @@
 | 框架          | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework                                                                                |
 | API           | gRPC（`TranscriptionService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed` / `job.failed`                                                |
-| 轉錄          | Groq Whisper API（`whisper-large-v3-turbo`），`verbose_json` 拿分段 timestamp                                                                    |
+| 轉錄          | Groq Whisper API（`whisper-large-v3-turbo`），`verbose_json` 拿片段 timestamp                                                                    |
 | 影片抽音軌    | moviepy（底層用 ffmpeg，經 `imageio-ffmpeg` 首次執行時自動下載 binary，本機不需另外安裝系統 ffmpeg）                                             |
+| 繁體轉換      | OpenCC（`opencc`，`s2tw` 逐字轉台灣標準字形，離線執行、預編譯 wheel），只套用在中文逐字稿                                                         |
 | 資料庫        | PostgreSQL（`transcription_db`），SQLAlchemy，MVP 階段用 `create_all` 自動建表                                                                   |
 | 物件儲存      | S3 相容 API（`boto3`，本機開發打 MinIO）                                                                                                         |
 | 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務）                                                 |
@@ -45,7 +46,8 @@ uv run python -m app.main
   → UpdateJobStatus(TRANSCRIBING)
   → 從物件儲存下載檔案
   → file_type == VIDEO 才用 moviepy 抽音軌，AUDIO 直接用原始檔案
-  → 呼叫 Groq Whisper API（verbose_json，含分段 timestamp）
+  → 呼叫 Groq Whisper API（verbose_json，含片段 timestamp）
+  → 偵測語言是中文才轉成繁體（OpenCC s2tw，只換字形不換詞；其他語言原樣）
   → 逐字稿存進 transcripts / transcript_segments
   → UpdateJobStatus(TRANSCRIBED)
   → 發送 transcription.completed { jobId }
@@ -66,7 +68,7 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 
 | RPC             | 說明                                                                                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 分段 timestamp，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
+| `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 片段 timestamp，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
 
@@ -88,10 +90,11 @@ uv run pytest
 ```
 
 用 pytest，mocking 只用標準庫的 `unittest.mock`。測試不需要跑起 `infra`（Postgres/RabbitMQ/MinIO）
-或填任何 API key——`tests/test_pipeline_retry.py` 把 pipeline 會碰到的所有外部 I/O（Groq、下載、
-gRPC 狀態回報、DB session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯；
-`tests/test_retry.py` 直接測 Groq 例外分類跟 retry queue 路由這兩個純函式/邏輯，不碰真正的
-RabbitMQ/pika。
+或填任何 API key——`tests/conftest.py` 的 `mocks` fixture 把 pipeline 會碰到的所有外部 I/O（Groq、下載、
+抽音軌、gRPC 狀態回報、DB session / 存檔）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯：
+`tests/test_pipeline_retry.py` 驗證重試分流，`tests/test_pipeline_traditional_chinese.py` 驗證存進去的
+逐字稿有轉成繁體（以及非中文不轉、只換字形不換詞）；`tests/test_retry.py` 直接測 Groq 例外分類跟
+retry queue 路由這兩個純函式/邏輯，不碰真正的 RabbitMQ/pika。
 
 Mock 一定要 patch 在 `app/services/pipeline.py`「使用端」import 進來的名稱（例如
 `pipeline.transcribe`、`pipeline.job_status_client`），不是「定義端」的原始模組——`unittest.mock.patch`
@@ -127,6 +130,7 @@ app/
     storage.py                         從 MinIO/R2 下載檔案
     audio.py                            moviepy 抽音軌
     transcriber.py                       Groq Whisper API 呼叫
+    traditional_chinese.py                中文逐字稿轉繁體（OpenCC s2tw），pipeline 在轉錄與存檔之間呼叫
     job_status_client.py                  gRPC client，呼叫 Upload Service 的 UpdateJobStatus
     event_publisher.py                     發送 transcription.completed / job.failed
   repositories/
@@ -144,4 +148,5 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - `transcribe()` 呼叫 Groq Whisper 遇到暫時性錯誤（429 rate limit、503 過載類）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、額度用盡等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——`ai-service` 已經幫這一段補上獨立的 in-process 重試 + 高嚴重度 log marker，這裡還沒跟進，是目前真實存在的已知限制
 - 講者分離（`speaker_label`）欄位已預留但未實作
+- 繁體轉換只套用在新轉錄的 Job，這個功能上線前存進去的簡體逐字稿不回填
 - 測試覆蓋率目前很低，只有 pipeline seam 跟 retry 分類/路由這兩塊（見上方「測試」一節）；`storage`/`audio`/`transcriber` 等模組本身、gRPC controller 層都還只靠手動 smoke test

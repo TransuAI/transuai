@@ -26,7 +26,7 @@ class TranscriptResult:
 
 
 def transcribe(audio_path: Path) -> TranscriptResult:
-    """呼叫 Groq Whisper API，回傳含分段 timestamp 的逐字稿。"""
+    """呼叫 Groq Whisper API，回傳含片段 timestamp 的逐字稿。"""
     logger.info("calling Groq Whisper (%s) for %s", settings.groq_model, audio_path)
     with audio_path.open("rb") as f:
         response = _client.audio.transcriptions.create(
