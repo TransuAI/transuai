@@ -6,6 +6,7 @@ import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api
 import { ApiError } from '@/lib/api-client'
 import { findCurrentSegmentIndex } from '@/lib/current-segment'
 import { formatBytes, formatDuration } from '@/lib/media'
+import { useAutoFollow } from '@/hooks/use-auto-follow'
 import { useJobSocket } from '@/hooks/use-job-socket'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Button } from '@/components/ui/button'
@@ -30,6 +31,8 @@ export function JobDetailPage() {
   const [isLoadingJob, setIsLoadingJob] = useState(true)
   const [mediaElement, setMediaElement] = useState<HTMLMediaElement | null>(null)
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState<number | null>(null)
+  const autoFollow = useAutoFollow()
+  const resumeFollow = autoFollow.resume
 
   const loadJob = useCallback(async () => {
     if (!jobId) return
@@ -92,14 +95,20 @@ export function JobDetailPage() {
       return
     }
     const sync = () => setCurrentSegmentIndex(findCurrentSegmentIndex(transcript.segments, mediaElement.currentTime))
+    // Seeking with the player's own progress bar is also "take me to that point in time",
+    // so it resumes auto-follow just like clicking a timestamp does.
+    const syncAndResume = () => {
+      sync()
+      resumeFollow()
+    }
     sync()
     mediaElement.addEventListener('timeupdate', sync)
-    mediaElement.addEventListener('seeked', sync)
+    mediaElement.addEventListener('seeked', syncAndResume)
     return () => {
       mediaElement.removeEventListener('timeupdate', sync)
-      mediaElement.removeEventListener('seeked', sync)
+      mediaElement.removeEventListener('seeked', syncAndResume)
     }
-  }, [mediaElement, transcript])
+  }, [mediaElement, transcript, resumeFollow])
 
   useEffect(() => {
     if (!jobId || !jobStatus) return
@@ -133,6 +142,9 @@ export function JobDetailPage() {
     // Don't wait for the player's `seeked` event: with a remote media URL it only fires once
     // enough data has buffered, and the highlight should move the moment the user jumps.
     if (transcript) setCurrentSegmentIndex(findCurrentSegmentIndex(transcript.segments, seconds))
+    // Jumping to a timestamp (transcript, chapter, citation) is an explicit "take me to the
+    // playback position", so it resumes auto-follow too.
+    resumeFollow()
   }
 
   const handleAskQuestion = () => {
@@ -249,6 +261,7 @@ export function JobDetailPage() {
       mediaAvailable={Boolean(mediaUrl) && mediaElement !== null}
       transcript={transcript}
       currentSegmentIndex={currentSegmentIndex}
+      autoFollow={autoFollow}
       summary={summary}
       chapters={chapters}
       qaHistory={qaHistory}

@@ -1,9 +1,9 @@
 import { FileText } from 'lucide-react'
 import { formatBytes, formatDuration } from '@/lib/media'
-import { cn } from '@/lib/utils'
+import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { JobStatusBadge } from '@/components/job-status-badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { TranscriptView } from '@/pages/job-detail/transcript-view'
 import type { Job, Transcript } from '@/types/api'
 
 interface SourcePaneProps {
@@ -11,11 +11,20 @@ interface SourcePaneProps {
   mediaUrl: string | undefined
   transcript: Transcript | null
   currentSegmentIndex: number | null
+  autoFollow: AutoFollow
   setMediaRef: (el: HTMLMediaElement | null) => void
   onSeek: (seconds: number) => void
 }
 
-export function SourcePane({ job, mediaUrl, transcript, currentSegmentIndex, setMediaRef, onSeek }: SourcePaneProps) {
+export function SourcePane({
+  job,
+  mediaUrl,
+  transcript,
+  currentSegmentIndex,
+  autoFollow,
+  setMediaRef,
+  onSeek,
+}: SourcePaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="gap-2 border-b pb-4">
@@ -36,33 +45,13 @@ export function SourcePane({ job, mediaUrl, transcript, currentSegmentIndex, set
       </CardHeader>
       <CardContent className="min-h-0 flex-1 pt-4">
         {transcript ? (
-          <ScrollArea className="h-full pr-4">
-            <div className="flex flex-col gap-3">
-              {transcript.segments.map((segment, i) => (
-                <div
-                  key={i}
-                  aria-current={i === currentSegmentIndex ? 'true' : undefined}
-                  className={cn(
-                    '-mx-2 flex gap-3 rounded-md px-2 py-1 text-sm transition-colors',
-                    i === currentSegmentIndex && 'bg-primary/10',
-                  )}
-                >
-                  <button
-                    type="button"
-                    disabled={!mediaUrl}
-                    onClick={() => onSeek(segment.startTime)}
-                    className="h-fit shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground enabled:hover:bg-accent enabled:hover:text-accent-foreground disabled:opacity-60"
-                  >
-                    {formatDuration(segment.startTime)}
-                  </button>
-                  <p className="leading-relaxed">
-                    {segment.speakerLabel && <span className="mr-1 font-medium">{segment.speakerLabel}:</span>}
-                    {segment.text}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
+          <TranscriptView
+            segments={transcript.segments}
+            currentSegmentIndex={currentSegmentIndex}
+            autoFollow={autoFollow}
+            mediaAvailable={Boolean(mediaUrl)}
+            onSeek={onSeek}
+          />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
             <FileText className="size-4" />

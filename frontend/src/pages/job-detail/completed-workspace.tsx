@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, FileText, Sparkles } from 'lucide-react'
+import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
@@ -15,6 +16,7 @@ interface CompletedWorkspaceProps {
   mediaAvailable: boolean
   transcript: Transcript | null
   currentSegmentIndex: number | null
+  autoFollow: AutoFollow
   summary: Summary | null
   chapters: Chapter[]
   qaHistory: QaEntry[]
@@ -39,6 +41,7 @@ export function CompletedWorkspace({
   mediaAvailable,
   transcript,
   currentSegmentIndex,
+  autoFollow,
   summary,
   chapters,
   qaHistory,
@@ -69,6 +72,7 @@ export function CompletedWorkspace({
       mediaUrl={mediaUrl}
       transcript={transcript}
       currentSegmentIndex={currentSegmentIndex}
+      autoFollow={autoFollow}
       setMediaRef={setMediaRef}
       onSeek={onSeek}
     />

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
-import type { Chapter, Job, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, QaTurn, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -23,6 +23,10 @@ vi.mock('@/hooks/use-job-socket', () => ({
 }))
 
 let JobDetailPage: typeof import('./job-detail-page').JobDetailPage
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 beforeAll(async () => {
   ;({ JobDetailPage } = await import('./job-detail-page'))
@@ -63,12 +67,12 @@ const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容'
 
 const mockChapters: Chapter[] = [{ id: 'ch-1', jobId: 'job-1', title: '開場', startTime: 12, sequenceNo: 0 }]
 
-async function renderCompletedJob(transcript: Transcript = mockTranscript) {
+async function renderCompletedJob(transcript: Transcript = mockTranscript, qaHistory: QaTurn[] = []) {
   vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
   vi.mocked(transcriptApi.get).mockResolvedValue(transcript)
   vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
   vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
-  vi.mocked(qaApi.history).mockResolvedValue([])
+  vi.mocked(qaApi.history).mockResolvedValue(qaHistory)
 
   const view = renderJobDetail()
   await screen.findByText('問答')
@@ -234,6 +238,13 @@ const gappedTranscript: Transcript = {
   ],
 }
 
+async function renderGappedTranscriptOnDesktop(qaHistory: QaTurn[] = []) {
+  stubDesktopLayout()
+  await renderCompletedJob(gappedTranscript, qaHistory)
+  await screen.findByText('第一句')
+  return renderedMediaElement()
+}
+
 function renderedMediaElement() {
   const media = document.querySelector('audio')
   if (!media) throw new Error('media element not rendered')
@@ -250,19 +261,8 @@ function currentSegmentText() {
 }
 
 describe('JobDetailPage current segment (COMPLETED, desktop layout)', () => {
-  async function renderWithTranscriptVisible() {
-    stubDesktopLayout()
-    await renderCompletedJob(gappedTranscript)
-    await screen.findByText('第一句')
-    return renderedMediaElement()
-  }
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
   it('marks the segment whose time range contains the playback time as the current segment', async () => {
-    const media = await renderWithTranscriptVisible()
+    const media = await renderGappedTranscriptOnDesktop()
 
     playTo(media, 9)
 
@@ -271,7 +271,7 @@ describe('JobDetailPage current segment (COMPLETED, desktop layout)', () => {
   })
 
   it('keeps the previous segment as current while playback is in a gap between two segments', async () => {
-    const media = await renderWithTranscriptVisible()
+    const media = await renderGappedTranscriptOnDesktop()
 
     playTo(media, 11)
 
@@ -279,7 +279,7 @@ describe('JobDetailPage current segment (COMPLETED, desktop layout)', () => {
   })
 
   it('has no current segment before the first segment starts', async () => {
-    const media = await renderWithTranscriptVisible()
+    const media = await renderGappedTranscriptOnDesktop()
 
     playTo(media, 2)
 
@@ -287,7 +287,7 @@ describe('JobDetailPage current segment (COMPLETED, desktop layout)', () => {
   })
 
   it('has no current segment after the last segment ends', async () => {
-    const media = await renderWithTranscriptVisible()
+    const media = await renderGappedTranscriptOnDesktop()
 
     playTo(media, 20)
 
@@ -296,7 +296,7 @@ describe('JobDetailPage current segment (COMPLETED, desktop layout)', () => {
 
   it('moves the current segment immediately when a transcript timestamp is clicked', async () => {
     const user = userEvent.setup()
-    await renderWithTranscriptVisible()
+    await renderGappedTranscriptOnDesktop()
 
     await user.click(screen.getByRole('button', { name: '0:12' }))
 
@@ -304,7 +304,7 @@ describe('JobDetailPage current segment (COMPLETED, desktop layout)', () => {
   })
 
   it('moves the current segment when the user seeks with the player', async () => {
-    const media = await renderWithTranscriptVisible()
+    const media = await renderGappedTranscriptOnDesktop()
     playTo(media, 6)
 
     media.currentTime = 13
@@ -341,5 +341,116 @@ describe('JobDetailPage current segment (COMPLETED, narrow viewport)', () => {
 
     // The reopened Sheet mounts a fresh player at 0s, before the first segment starts.
     expect(currentSegmentText()).toBeNull()
+  })
+})
+
+describe('JobDetailPage auto-follow (COMPLETED, desktop layout)', () => {
+  async function renderPlayingAt(seconds: number) {
+    const media = await renderGappedTranscriptOnDesktop([
+      { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z' },
+    ])
+    playTo(media, seconds)
+    return media
+  }
+
+  it('pauses auto-follow and offers a way back when the user scrolls the transcript', async () => {
+    await renderPlayingAt(9)
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
+
+    fireEvent.wheel(screen.getByText('第一句'))
+
+    expect(screen.getByRole('button', { name: '回到播放位置' })).toBeInTheDocument()
+  })
+
+  it('resumes auto-follow when the user asks to go back to the playback position', async () => {
+    const user = userEvent.setup()
+    await renderPlayingAt(9)
+    fireEvent.wheel(screen.getByText('第一句'))
+
+    await user.click(screen.getByRole('button', { name: '回到播放位置' }))
+
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['a transcript timestamp', '0:05'],
+    ['a chapter', '0:12開場'],
+    ['a Q&A citation', '0:13'],
+  ])('resumes auto-follow when the user jumps to %s', async (_what, buttonName) => {
+    const user = userEvent.setup()
+    await renderPlayingAt(9)
+    fireEvent.wheel(screen.getByText('第一句'))
+
+    await user.click(screen.getByRole('button', { name: buttonName }))
+
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
+  })
+
+  it('does not offer the way back while there is no current segment', async () => {
+    await renderPlayingAt(2)
+
+    fireEvent.wheel(screen.getByText('第一句'))
+
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
+  })
+
+  it('pauses auto-follow when the user scrolls the transcript by touch', async () => {
+    await renderPlayingAt(9)
+
+    fireEvent.touchMove(screen.getByText('第一句'))
+
+    expect(screen.getByRole('button', { name: '回到播放位置' })).toBeInTheDocument()
+  })
+
+  it.each(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '])(
+    'pauses auto-follow when the user clicks into the transcript and scrolls with the %j key',
+    async (key) => {
+      const user = userEvent.setup()
+      await renderPlayingAt(9)
+
+      await user.click(screen.getByText('第一句'))
+      await user.keyboard(key === ' ' ? '{ }' : `{${key}}`)
+
+      expect(screen.getByRole('button', { name: '回到播放位置' })).toBeInTheDocument()
+    },
+  )
+
+  it('treats Space on a focused timestamp as a click (a jump), not as scrolling', async () => {
+    const user = userEvent.setup()
+    await renderPlayingAt(9)
+    fireEvent.wheel(screen.getByText('第一句'))
+
+    screen.getByRole('button', { name: '0:05' }).focus()
+    await user.keyboard('{ }')
+
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
+  })
+
+  it('does not treat ctrl+wheel (zooming the page) as scrolling the transcript', async () => {
+    await renderPlayingAt(9)
+
+    fireEvent.wheel(screen.getByText('第一句'), { ctrlKey: true })
+
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
+  })
+
+  it('resumes auto-follow when the user seeks with the player itself', async () => {
+    const media = await renderPlayingAt(9)
+    fireEvent.wheel(screen.getByText('第一句'))
+
+    media.currentTime = 13
+    fireEvent.seeked(media)
+
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
+  })
+
+  it('keeps following when the user presses a key that does not scroll', async () => {
+    const user = userEvent.setup()
+    await renderPlayingAt(9)
+
+    await user.click(screen.getByText('第一句'))
+    await user.keyboard('{Tab}')
+
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
   })
 })

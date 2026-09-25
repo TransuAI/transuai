@@ -32,3 +32,7 @@ window.matchMedia ??= ((query: string) => ({
   removeEventListener: () => {},
   dispatchEvent: () => false,
 })) as unknown as typeof window.matchMedia
+
+// jsdom has no layout, so it doesn't implement element scrolling. The transcript's
+// auto-follow (自動跟隨) calls scrollTo; tests assert on visible state, not scroll offsets.
+Element.prototype.scrollTo ??= function scrollTo() {}

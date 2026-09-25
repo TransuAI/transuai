@@ -74,9 +74,15 @@ src/
     login-page.tsx / register-page.tsx
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete
     jobs-page.tsx           Job 列表、分頁、刪除
-    job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
+    job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked;自動跟隨的狀態也在這層)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
+    job-detail/
+      completed-workspace.tsx  COMPLETED 的三欄工作區(桌面 grid / 手機 Sheet,確保同時只有一個 media element)
+      source-pane.tsx          來源欄:檔案資訊、播放器、逐字稿
+      chat-pane.tsx            問答欄
+      studio-pane.tsx          Studio 欄:AI 摘要、章節
+      transcript-view.tsx      逐字稿列表:目前片段高亮、自動跟隨(目前片段離開視野中段才平滑捲回中間;使用者滾輪 / 觸控 / 捲動鍵 / 拖曳捲軸時暫停,顯示「回到播放位置」)
   test/
-    setup.ts            Vitest 共用設定(目前只掛 @testing-library/jest-dom 的 matcher)
+    setup.ts            Vitest 共用設定:jest-dom matcher、每則測試後 cleanup,以及 jsdom 沒實作的 ResizeObserver / matchMedia / 元素 scrollTo stub
   types/
     api.ts             對齊 gateway `web/dto/*.java` 的 TS 型別
 ```
@@ -84,4 +90,4 @@ src/
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
-- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮)跟 sidebar / 深色模式;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
+- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復)跟 sidebar / 深色模式;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
