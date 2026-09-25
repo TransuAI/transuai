@@ -68,12 +68,13 @@ src/
     api-client.ts     fetch wrapper(auth header、401 refresh-and-retry、錯誤格式)+ requestSse(手動解析 SSE frame,問答 streaming 用)
     api.ts            對應 Gateway 每支 REST API 的函式
     auth-storage.ts    token/user 存 localStorage
+    current-segment.ts 依播放時間找出「目前片段」(定義見 CONTEXT.md),二分搜尋
     media.ts           檔案型別判斷、讀取媒體長度、格式化工具
   pages/
     login-page.tsx / register-page.tsx
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete
     jobs-page.tsx           Job 列表、分頁、刪除
-    job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
+    job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
   test/
     setup.ts            Vitest 共用設定(目前只掛 @testing-library/jest-dom 的 matcher)
   types/
@@ -83,4 +84,4 @@ src/
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
-- 測試覆蓋率目前很低（只有 `jobs-page.test.tsx` 一個 smoke test,證明測試基礎建設本身可用),大部分頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
+- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮)跟 sidebar / 深色模式;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft } from 'lucide-react'
 import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
+import { findCurrentSegmentIndex } from '@/lib/current-segment'
 import { formatBytes, formatDuration } from '@/lib/media'
 import { useJobSocket } from '@/hooks/use-job-socket'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
@@ -27,12 +28,8 @@ export function JobDetailPage() {
   const [questionInput, setQuestionInput] = useState('')
   const [isAsking, setIsAsking] = useState(false)
   const [isLoadingJob, setIsLoadingJob] = useState(true)
-  const mediaRef = useRef<HTMLMediaElement | null>(null)
-  const [isMediaMounted, setIsMediaMounted] = useState(false)
-  const setMediaRef = (el: HTMLMediaElement | null) => {
-    mediaRef.current = el
-    setIsMediaMounted(el !== null)
-  }
+  const [mediaElement, setMediaElement] = useState<HTMLMediaElement | null>(null)
+  const [currentSegmentIndex, setCurrentSegmentIndex] = useState<number | null>(null)
 
   const loadJob = useCallback(async () => {
     if (!jobId) return
@@ -85,6 +82,25 @@ export function JobDetailPage() {
     }
   }, [jobId, jobStatus])
 
+  // Only the current segment index is kept in state (not the raw playback time), so the
+  // workspace re-renders when playback crosses into another segment, not on every
+  // ~250ms timeupdate. Syncing once on attach matters: a remounted player (Sheet reopened,
+  // layout switch) starts from its own currentTime, not the previous element's.
+  useEffect(() => {
+    if (!mediaElement || !transcript) {
+      setCurrentSegmentIndex(null)
+      return
+    }
+    const sync = () => setCurrentSegmentIndex(findCurrentSegmentIndex(transcript.segments, mediaElement.currentTime))
+    sync()
+    mediaElement.addEventListener('timeupdate', sync)
+    mediaElement.addEventListener('seeked', sync)
+    return () => {
+      mediaElement.removeEventListener('timeupdate', sync)
+      mediaElement.removeEventListener('seeked', sync)
+    }
+  }, [mediaElement, transcript])
+
   useEffect(() => {
     if (!jobId || !jobStatus) return
     if (jobStatus === 'COMPLETED') {
@@ -110,10 +126,13 @@ export function JobDetailPage() {
   }, [jobId, jobStatus])
 
   const seekTo = (seconds: number) => {
-    if (mediaRef.current) {
-      mediaRef.current.currentTime = seconds
-      void mediaRef.current.play()
+    if (mediaElement) {
+      mediaElement.currentTime = seconds
+      void mediaElement.play()
     }
+    // Don't wait for the player's `seeked` event: with a remote media URL it only fires once
+    // enough data has buffered, and the highlight should move the moment the user jumps.
+    if (transcript) setCurrentSegmentIndex(findCurrentSegmentIndex(transcript.segments, seconds))
   }
 
   const handleAskQuestion = () => {
@@ -212,9 +231,9 @@ export function JobDetailPage() {
           {mediaUrl && (
             <CardContent>
               {job.fileType === 'VIDEO' ? (
-                <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-md" />
+                <video ref={setMediaElement} src={mediaUrl} controls className="w-full rounded-md" />
               ) : (
-                <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
+                <audio ref={setMediaElement} src={mediaUrl} controls className="w-full" />
               )}
             </CardContent>
           )}
@@ -227,8 +246,9 @@ export function JobDetailPage() {
     <CompletedWorkspace
       job={job}
       mediaUrl={mediaUrl}
-      mediaAvailable={Boolean(mediaUrl) && isMediaMounted}
+      mediaAvailable={Boolean(mediaUrl) && mediaElement !== null}
       transcript={transcript}
+      currentSegmentIndex={currentSegmentIndex}
       summary={summary}
       chapters={chapters}
       qaHistory={qaHistory}
@@ -238,7 +258,7 @@ export function JobDetailPage() {
       isAsking={isAsking}
       onAsk={handleAskQuestion}
       onSeek={seekTo}
-      setMediaRef={setMediaRef}
+      setMediaRef={setMediaElement}
     />
   )
 }

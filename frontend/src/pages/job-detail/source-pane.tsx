@@ -1,5 +1,6 @@
 import { FileText } from 'lucide-react'
 import { formatBytes, formatDuration } from '@/lib/media'
+import { cn } from '@/lib/utils'
 import { JobStatusBadge } from '@/components/job-status-badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -9,11 +10,12 @@ interface SourcePaneProps {
   job: Job
   mediaUrl: string | undefined
   transcript: Transcript | null
+  currentSegmentIndex: number | null
   setMediaRef: (el: HTMLMediaElement | null) => void
   onSeek: (seconds: number) => void
 }
 
-export function SourcePane({ job, mediaUrl, transcript, setMediaRef, onSeek }: SourcePaneProps) {
+export function SourcePane({ job, mediaUrl, transcript, currentSegmentIndex, setMediaRef, onSeek }: SourcePaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="gap-2 border-b pb-4">
@@ -37,7 +39,14 @@ export function SourcePane({ job, mediaUrl, transcript, setMediaRef, onSeek }: S
           <ScrollArea className="h-full pr-4">
             <div className="flex flex-col gap-3">
               {transcript.segments.map((segment, i) => (
-                <div key={i} className="flex gap-3 text-sm">
+                <div
+                  key={i}
+                  aria-current={i === currentSegmentIndex ? 'true' : undefined}
+                  className={cn(
+                    '-mx-2 flex gap-3 rounded-md px-2 py-1 text-sm transition-colors',
+                    i === currentSegmentIndex && 'bg-primary/10',
+                  )}
+                >
                   <button
                     type="button"
                     disabled={!mediaUrl}

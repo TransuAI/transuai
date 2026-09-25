@@ -14,6 +14,7 @@ interface CompletedWorkspaceProps {
   mediaUrl: string | undefined
   mediaAvailable: boolean
   transcript: Transcript | null
+  currentSegmentIndex: number | null
   summary: Summary | null
   chapters: Chapter[]
   qaHistory: QaEntry[]
@@ -37,6 +38,7 @@ export function CompletedWorkspace({
   mediaUrl,
   mediaAvailable,
   transcript,
+  currentSegmentIndex,
   summary,
   chapters,
   qaHistory,
@@ -60,6 +62,17 @@ export function CompletedWorkspace({
       setStudioOpen(false)
     }
   }
+
+  const sourcePane = (
+    <SourcePane
+      job={job}
+      mediaUrl={mediaUrl}
+      transcript={transcript}
+      currentSegmentIndex={currentSegmentIndex}
+      setMediaRef={setMediaRef}
+      onSeek={onSeek}
+    />
+  )
 
   const chatPane = (
     <ChatPane
@@ -98,7 +111,7 @@ export function CompletedWorkspace({
 
       {isDesktop ? (
         <div className="grid min-h-0 flex-1 grid-cols-[20rem_minmax(0,1fr)_20rem] gap-4">
-          <SourcePane job={job} mediaUrl={mediaUrl} transcript={transcript} setMediaRef={setMediaRef} onSeek={onSeek} />
+          {sourcePane}
           {chatPane}
           <StudioPane summary={summary} chapters={chapters} onSeek={onSeek} mediaAvailable={mediaAvailable} />
         </div>
@@ -109,7 +122,7 @@ export function CompletedWorkspace({
       <Sheet open={sourceOpen} onOpenChange={setSourceOpen}>
         <SheetContent side="left" className="w-full gap-0 p-0 sm:max-w-md">
           <SheetTitle className="sr-only">Source</SheetTitle>
-          <SourcePane job={job} mediaUrl={mediaUrl} transcript={transcript} setMediaRef={setMediaRef} onSeek={onSeek} />
+          {sourcePane}
         </SheetContent>
       </Sheet>
 

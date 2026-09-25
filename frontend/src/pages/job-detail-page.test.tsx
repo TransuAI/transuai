@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
 import type { Chapter, Job, Summary, Transcript } from '@/types/api'
 
@@ -63,9 +63,9 @@ const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容'
 
 const mockChapters: Chapter[] = [{ id: 'ch-1', jobId: 'job-1', title: '開場', startTime: 12, sequenceNo: 0 }]
 
-async function renderCompletedJob() {
+async function renderCompletedJob(transcript: Transcript = mockTranscript) {
   vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
-  vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
+  vi.mocked(transcriptApi.get).mockResolvedValue(transcript)
   vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
   vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
   vi.mocked(qaApi.history).mockResolvedValue([])
@@ -73,6 +73,20 @@ async function renderCompletedJob() {
   const view = renderJobDetail()
   await screen.findByText('問答')
   return view
+}
+
+function stubDesktopLayout() {
+  return vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query) =>
+      ({
+        matches: query === '(min-width: 1024px)',
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  )
 }
 
 describe('JobDetailPage status branches', () => {
@@ -146,20 +160,6 @@ describe('JobDetailPage Source/Studio Sheets (COMPLETED, narrow viewport)', () =
 // Source/Chat/Studio render inline simultaneously with no modal blocking, to exercise the
 // carried-over ask -> history -> citation-seek and segment/chapter-seek behavior.
 describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
-  function stubDesktopLayout() {
-    return vi.spyOn(window, 'matchMedia').mockImplementation(
-      (query) =>
-        ({
-          matches: query === '(min-width: 1024px)',
-          media: query,
-          onchange: null,
-          addEventListener: () => {},
-          removeEventListener: () => {},
-          dispatchEvent: () => false,
-        }) as unknown as MediaQueryList,
-    )
-  }
-
   it('asks a question, appends it to history, and seeks the media player from a citation timestamp', async () => {
     const matchMediaSpy = stubDesktopLayout()
     const user = userEvent.setup()
@@ -218,5 +218,128 @@ describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
     expect(audio?.currentTime).toBe(12)
 
     matchMediaSpy.mockRestore()
+  })
+})
+
+// The segments deliberately leave a 10–12s gap to exercise the gap rule of the current
+// segment (目前片段, see frontend CONTEXT.md).
+const gappedTranscript: Transcript = {
+  jobId: 'job-1',
+  language: 'Chinese',
+  fullText: '第一句 第二句 第三句',
+  segments: [
+    { startTime: 5, endTime: 8, speakerLabel: null, text: '第一句' },
+    { startTime: 8, endTime: 10, speakerLabel: null, text: '第二句' },
+    { startTime: 12, endTime: 15, speakerLabel: null, text: '第三句' },
+  ],
+}
+
+function renderedMediaElement() {
+  const media = document.querySelector('audio')
+  if (!media) throw new Error('media element not rendered')
+  return media
+}
+
+function playTo(media: HTMLMediaElement, seconds: number) {
+  media.currentTime = seconds
+  fireEvent.timeUpdate(media)
+}
+
+function currentSegmentText() {
+  return document.querySelector('[aria-current="true"]')?.textContent ?? null
+}
+
+describe('JobDetailPage current segment (COMPLETED, desktop layout)', () => {
+  async function renderWithTranscriptVisible() {
+    stubDesktopLayout()
+    await renderCompletedJob(gappedTranscript)
+    await screen.findByText('第一句')
+    return renderedMediaElement()
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('marks the segment whose time range contains the playback time as the current segment', async () => {
+    const media = await renderWithTranscriptVisible()
+
+    playTo(media, 9)
+
+    expect(currentSegmentText()).toContain('第二句')
+    expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(1)
+  })
+
+  it('keeps the previous segment as current while playback is in a gap between two segments', async () => {
+    const media = await renderWithTranscriptVisible()
+
+    playTo(media, 11)
+
+    expect(currentSegmentText()).toContain('第二句')
+  })
+
+  it('has no current segment before the first segment starts', async () => {
+    const media = await renderWithTranscriptVisible()
+
+    playTo(media, 2)
+
+    expect(currentSegmentText()).toBeNull()
+  })
+
+  it('has no current segment after the last segment ends', async () => {
+    const media = await renderWithTranscriptVisible()
+
+    playTo(media, 20)
+
+    expect(currentSegmentText()).toBeNull()
+  })
+
+  it('moves the current segment immediately when a transcript timestamp is clicked', async () => {
+    const user = userEvent.setup()
+    await renderWithTranscriptVisible()
+
+    await user.click(screen.getByRole('button', { name: '0:12' }))
+
+    expect(currentSegmentText()).toContain('第三句')
+  })
+
+  it('moves the current segment when the user seeks with the player', async () => {
+    const media = await renderWithTranscriptVisible()
+    playTo(media, 6)
+
+    media.currentTime = 13
+    fireEvent.seeked(media)
+
+    expect(currentSegmentText()).toContain('第三句')
+  })
+})
+
+describe('JobDetailPage current segment (COMPLETED, narrow viewport)', () => {
+  async function openSourceSheet(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: '來源' }))
+    await screen.findByText('第一句')
+    return renderedMediaElement()
+  }
+
+  it('highlights the current segment inside the Source Sheet too', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob(gappedTranscript)
+    const media = await openSourceSheet(user)
+
+    playTo(media, 13)
+
+    expect(currentSegmentText()).toContain('第三句')
+  })
+
+  it('re-derives the current segment from the new player when the Source Sheet is reopened', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob(gappedTranscript)
+    playTo(await openSourceSheet(user), 13)
+
+    await user.keyboard('{Escape}')
+    await openSourceSheet(user)
+
+    // The reopened Sheet mounts a fresh player at 0s, before the first segment starts.
+    expect(currentSegmentText()).toBeNull()
   })
 })
