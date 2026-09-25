@@ -189,8 +189,8 @@ WS     /ws/jobs/{jobId}         訂閱單一 Job 的狀態更新事件
 ## 4. 資料庫 Schema
 
 > 下面的表都是實際跑起來的 schema（Java 服務由 Hibernate `ddl-auto=update` 依 JPA entity
-> 自動建表，Python 服務由 SQLAlchemy `create_all` 依 model 自動建表，這裡列出的 SQL 是對應內容，
-> 不是手寫 migration）。
+> 自動建表；transcription-service 用 Alembic 版本化 migration（`app/db/migrations`，啟動時自動升級）；
+> ai-service 仍由 SQLAlchemy `create_all` 依 model 自動建表。這裡列出的 SQL 是對應內容，不是 migration 原文）。
 
 ### 4.1 auth_db
 
@@ -339,7 +339,7 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 即時通訊服務（Notification） | Python + FastAPI（純 WebSocket + `/health`）+ pika 消費 MQ |
 | 服務間同步呼叫 | gRPC（proto 定義在 `infra/proto/`），Gateway 是唯一對外 REST facade |
 | 前端 | React |
-| 關聯式資料庫 | PostgreSQL（各服務獨立 schema，Java 用 Hibernate `ddl-auto=update`、Python 用 SQLAlchemy `create_all` 自動建表） |
+| 關聯式資料庫 | PostgreSQL（各服務獨立 schema，Java 用 Hibernate `ddl-auto=update`；transcription-service 用 Alembic migration；ai-service 仍用 SQLAlchemy `create_all` 自動建表） |
 | 向量資料庫 | pgvector（`ai_db.embeddings`，`BAAI/bge-m3` 1024 維，已在用） |
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
