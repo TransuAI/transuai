@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { downloadTextFile } from '@/lib/download'
 import {
   buildExportContent,
   exportFileName,
+  markdownReportFormat,
   PLAIN_TEXT_FORMAT,
   SRT_FORMAT,
   TIMESTAMPED_TEXT_FORMAT,
@@ -14,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -26,6 +29,8 @@ const TRANSCRIPT_FORMATS: ExportFormat[] = [PLAIN_TEXT_FORMAT, TIMESTAMPED_TEXT_
 // The export content is only assembled when a format is picked, not on every workspace render.
 export function ExportMenu({ source }: { source: ExportSource }) {
   const hasTranscript = source.transcript !== null
+  const [reportIncludesQa, setReportIncludesQa] = useState(false)
+  const reportFormat = markdownReportFormat({ includeQa: reportIncludesQa })
   const download = (format: ExportFormat) => {
     const content = buildExportContent(source)
     downloadTextFile({
@@ -54,6 +59,16 @@ export function ExportMenu({ source }: { source: ExportSource }) {
             {format.label}
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => download(reportFormat)}>{reportFormat.label}</DropdownMenuItem>
+        <DropdownMenuCheckboxItem
+          checked={reportIncludesQa}
+          onCheckedChange={(checked) => setReportIncludesQa(checked === true)}
+          // Keep the menu open so the user can go on to download the report.
+          onSelect={(event) => event.preventDefault()}
+        >
+          報告包含問答紀錄
+        </DropdownMenuCheckboxItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={!hasTranscript}

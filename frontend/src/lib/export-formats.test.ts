@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   exportFileName,
   formatClock,
+  buildExportContent,
+  markdownReportFormat,
+  toMarkdownReport,
   toPlainText,
   toSrt,
   toTimestampedText,
   toVtt,
+  type ExportContent,
   type ExportSegment,
 } from '@/lib/export-formats'
 
@@ -154,5 +158,101 @@ describe('toTimestampedText', () => {
 
   it('names the speaker only on the line where the speaker changes', () => {
     expect(toTimestampedText(conversation)).toBe('[00:00] 王小明：大家好\n[00:02] 今天來聊預算\n[00:06] 李小華：好的\n')
+  })
+})
+
+describe('toMarkdownReport', () => {
+  const content: ExportContent = {
+    fileName: '週會.m4a',
+    durationSeconds: 3725,
+    // Built from local date parts so the expected local time below holds in any time zone.
+    createdAt: new Date(2026, 8, 1, 9, 5).toISOString(),
+    segments: [segment(0, 2, '大家好', '王小明'), segment(2, 4, '', '王小明'), segment(400, 402, '預算要再確認', '李小華')],
+    summary: { text: '討論了預算。', isStale: false },
+    chapters: [
+      { title: '開場', startTime: 0 },
+      { title: '預算', startTime: 400 },
+    ],
+    qaHistory: [],
+  }
+
+  it('writes the title, job info, summary, chapters and transcript in that order', () => {
+    expect(toMarkdownReport(content)).toBe(
+      [
+        '# 週會.m4a',
+        '',
+        '- 長度：1:02:05',
+        '- 建立時間：2026-09-01 09:05',
+        '',
+        '## 摘要',
+        '',
+        '討論了預算。',
+        '',
+        '## 章節',
+        '',
+        '- [00:00] 開場',
+        '- [06:40] 預算',
+        '',
+        '## 逐字稿',
+        '',
+        '[00:00] 王小明：大家好',
+        '',
+        '[06:40] 李小華：預算要再確認',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('flags a summary that is 過時 (the transcript was edited after it was generated)', () => {
+    const report = toMarkdownReport({ ...content, summary: { text: '討論了預算。', isStale: true } })
+
+    expect(report).toContain('## 摘要\n\n> 逐字稿在摘要產生後有修改，摘要與章節可能過時\n\n討論了預算。\n')
+  })
+
+  it('still exports when there is no summary or no chapters yet', () => {
+    const report = toMarkdownReport({ ...content, summary: null, chapters: [] })
+
+    expect(report).toContain('## 摘要\n\n尚無摘要\n')
+    expect(report).toContain('## 章節\n\n尚無章節\n')
+  })
+
+  it('appends the Q&A history, with the cited timestamps, when it is included', () => {
+    const report = toMarkdownReport({
+      ...content,
+      qaHistory: [{ question: '預算怎麼了?', answer: '要再確認。', sourceTimestamps: [400, 3725] }],
+    })
+
+    expect(report.endsWith('## 問答紀錄\n\n### 預算怎麼了?\n\n要再確認。\n\n引用：[06:40]、[1:02:05]\n')).toBe(true)
+  })
+
+  it('keeps a multi-line question on its heading line', () => {
+    const report = toMarkdownReport({ ...content, qaHistory: [{ question: '第一行\n第二行', answer: '答', sourceTimestamps: [] }] })
+
+    expect(report).toContain('### 第一行 第二行\n\n答\n')
+  })
+
+  it('leaves the Q&A history out of the report unless asked to include it', () => {
+    const withQa = { ...content, qaHistory: [{ question: '問?', answer: '答', sourceTimestamps: [] }] }
+
+    expect(markdownReportFormat({ includeQa: false }).render(withQa)).not.toContain('## 問答紀錄')
+    expect(markdownReportFormat({ includeQa: true }).render(withQa)).toContain('## 問答紀錄')
+  })
+})
+
+describe('buildExportContent', () => {
+  it('only exports Q&A turns whose answer has finished', () => {
+    const content = buildExportContent({
+      job: { jobId: 'job-1', userId: 'u', fileName: 'a.mp3', fileType: 'AUDIO', fileSizeBytes: 1, storagePath: 'p', durationSeconds: 1, status: 'COMPLETED', errorReason: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      transcript: null,
+      summary: null,
+      chapters: [],
+      qaHistory: [
+        { question: '完成的', answer: '答', sourceTimestamps: [], status: 'done' },
+        { question: '還在串流', answer: '答…', sourceTimestamps: [], status: 'streaming' },
+        { question: '失敗的', answer: '', sourceTimestamps: [], status: 'error' },
+      ],
+    })
+
+    expect(content.qaHistory.map((turn) => turn.question)).toEqual(['完成的'])
   })
 })

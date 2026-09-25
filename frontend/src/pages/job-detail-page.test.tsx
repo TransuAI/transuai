@@ -852,4 +852,27 @@ describe('JobDetailPage export menu', () => {
 
     expect(await screen.findByText('複製失敗')).toBeInTheDocument()
   })
+
+  it('downloads a Markdown report, leaving the Q&A history out unless the user opts in', async () => {
+    const user = userEvent.setup()
+    const downloads = captureDownloads()
+    await renderGappedTranscriptOnDesktop([
+      { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z' },
+    ])
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載報告（Markdown）' }))
+
+    expect(downloads[0].fileName).toBe('interview-報告.md')
+    const report = await downloads[0].blob?.text()
+    expect(report).toContain('## 摘要\n\n這是摘要內容\n')
+    expect(report).toContain('## 逐字稿\n\n[00:05] 第一句\n')
+    expect(report).not.toContain('## 問答紀錄')
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: '報告包含問答紀錄' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載報告（Markdown）' }))
+
+    expect(await downloads[1].blob?.text()).toContain('## 問答紀錄\n\n### 第三句在說什麼?\n\n在說第三句\n\n引用：[00:13]\n')
+  })
 })

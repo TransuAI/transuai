@@ -28,7 +28,8 @@ export interface ExportSource {
   transcript: Transcript | null
   summary: Summary | null
   chapters: Chapter[]
-  qaHistory: { question: string; answer: string; sourceTimestamps: number[] }[]
+  /** Q&A turns as shown in the Chat pane; a turn with a status other than 'done' is left out. */
+  qaHistory: { question: string; answer: string; sourceTimestamps: number[]; status?: string }[]
 }
 
 export function buildExportContent(source: ExportSource): ExportContent {
@@ -48,7 +49,10 @@ export function buildExportContent(source: ExportSource): ExportContent {
     // Whether the summary is 過時 comes from transcript editing (not built yet).
     summary: summary ? { text: summary.summaryText, isStale: false } : null,
     chapters: chapters.map((chapter) => ({ title: chapter.title, startTime: chapter.startTime })),
-    qaHistory: qaHistory.map(({ question, answer, sourceTimestamps }) => ({ question, answer, sourceTimestamps })),
+    // A half-streamed or failed answer isn't something to hand to other people.
+    qaHistory: qaHistory
+      .filter((turn) => turn.status === undefined || turn.status === 'done')
+      .map(({ question, answer, sourceTimestamps }) => ({ question, answer, sourceTimestamps })),
   }
 }
 
@@ -122,8 +126,8 @@ export function toVtt(segments: ExportSegment[]): string {
   return 'WEBVTT\n\n' + cues.join('')
 }
 
-// 文字格式：一個片段一行；多位講者時只在換人的那一行加「名稱：」，同一人連續的片段不重複。
-function textFormatLines(segments: ExportSegment[], linePrefix: (segment: ExportSegment) => string): string {
+// 文字格式的逐字稿行：一個片段一行；多位講者時只在換人的那一行加「名稱：」，同一人連續的片段不重複。
+function textFormatLines(segments: ExportSegment[], linePrefix: (segment: ExportSegment) => string): string[] {
   const exportable = exportableSegments(segments)
   const labelSpeakers = hasMultipleSpeakers(exportable)
   let previousSpeaker: string | null = null
@@ -132,15 +136,63 @@ function textFormatLines(segments: ExportSegment[], linePrefix: (segment: Export
     previousSpeaker = segment.speakerName
     return linePrefix(segment) + (speakerChanged ? `${segment.speakerName}：` : '') + segment.text
   })
+  return lines
+}
+
+const timestampPrefix = (segment: ExportSegment) => `[${formatClock(segment.startTime)}] `
+
+function asTextFile(lines: string[]) {
   return lines.map((line) => line + '\n').join('')
 }
 
 export function toPlainText(segments: ExportSegment[]): string {
-  return textFormatLines(segments, () => '')
+  return asTextFile(textFormatLines(segments, () => ''))
 }
 
 export function toTimestampedText(segments: ExportSegment[]): string {
-  return textFormatLines(segments, (segment) => `[${formatClock(segment.startTime)}] `)
+  return asTextFile(textFormatLines(segments, timestampPrefix))
+}
+
+// 建立時間用閱讀者的本地時間，跟工作區畫面上顯示的一致。
+function localDateTime(isoTimestamp: string) {
+  const date = new Date(isoTimestamp)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+// Markdown 報告：標題、長度與建立時間、摘要、章節、逐字稿，最後是（有的話）問答紀錄。每一節都是一
+// 個個以空行分隔的段落——Markdown 會把連續的行併成一段，所以逐字稿每個片段之間也空一行（行的內容
+// 跟含時間戳 TXT 相同，只是多了空行）。
+export function toMarkdownReport(content: ExportContent): string {
+  const blocks: string[] = [`# ${content.fileName}`]
+  blocks.push(`- 長度：${formatClock(content.durationSeconds)}\n- 建立時間：${localDateTime(content.createdAt)}`)
+
+  blocks.push('## 摘要')
+  if (content.summary?.isStale) blocks.push('> 逐字稿在摘要產生後有修改，摘要與章節可能過時')
+  blocks.push(content.summary?.text ?? '尚無摘要')
+
+  blocks.push('## 章節')
+  blocks.push(
+    content.chapters.length > 0
+      ? content.chapters.map((chapter) => `- [${formatClock(chapter.startTime)}] ${chapter.title}`).join('\n')
+      : '尚無章節',
+  )
+
+  blocks.push('## 逐字稿')
+  const transcriptLines = textFormatLines(content.segments, timestampPrefix)
+  blocks.push(...(transcriptLines.length > 0 ? transcriptLines : ['尚無逐字稿']))
+
+  if (content.qaHistory.length > 0) {
+    blocks.push('## 問答紀錄')
+    for (const turn of content.qaHistory) {
+      // A Markdown heading is a single line.
+      blocks.push(`### ${turn.question.replace(/\s*\n\s*/g, ' ')}`, turn.answer)
+      if (turn.sourceTimestamps.length > 0) {
+        blocks.push(`引用：${turn.sourceTimestamps.map((seconds) => `[${formatClock(seconds)}]`).join('、')}`)
+      }
+    }
+  }
+
+  return blocks.join('\n\n') + '\n'
 }
 
 export const SRT_FORMAT: ExportFormat = {
@@ -169,6 +221,16 @@ export const TIMESTAMPED_TEXT_FORMAT: ExportFormat = {
   fileSuffix: '-含時間戳.txt',
   mimeType: 'text/plain',
   render: (content) => toTimestampedText(content.segments),
+}
+
+// The Q&A history only goes into the report when the user opts in (it may not be meant for sharing).
+export function markdownReportFormat({ includeQa }: { includeQa: boolean }): ExportFormat {
+  return {
+    label: '下載報告（Markdown）',
+    fileSuffix: '-報告.md',
+    mimeType: 'text/markdown',
+    render: (content) => toMarkdownReport(includeQa ? content : { ...content, qaHistory: [] }),
+  }
 }
 
 // 匯出檔名：原始檔名去掉最後一個副檔名，再接上格式自己的結尾（例如 `.srt`、`-含時間戳.txt`）。
