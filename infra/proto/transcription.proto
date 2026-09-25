@@ -2,18 +2,29 @@ syntax = "proto3";
 
 package transuai.transcription.v1;
 
-// TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿。
-// 跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫。
-// 主要處理流程是 MQ 驅動（消費 transcription.requested，見 ../README.md），這支 RPC 只是查詢用。
+// TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿，以及（經 Gateway）保存使用者對
+// 逐字稿的編輯。跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫——
+// 「只能改自己的 job」由 Gateway 的 ownership 檢查把關。轉錄本身是 MQ 驅動（消費 transcription.requested）。
 service TranscriptionService {
   rpc GetTranscript(GetTranscriptRequest) returns (Transcript);
+
+  // 編輯一個片段的文字（見 transcription-service/CONTEXT.md「編輯」）。文字會先去掉前後空白，
+  // 空字串＝清空這個片段（已清空片段）；還原＝把 original_text 送回來。文字跟目前相同時什麼都
+  // 不做（revision 不變）；否則更新文字、revision +1、以未清空片段重組 full_text。片段的起訖時間
+  // 永遠不變。job_id / segment_id 格式不對回 INVALID_ARGUMENT；job 沒有逐字稿、片段不存在或不屬於
+  // 這個 job 回 NOT_FOUND；文字超過長度上限回 INVALID_ARGUMENT。同時編輯以最後寫入為準。
+  rpc UpdateSegmentText(UpdateSegmentTextRequest) returns (UpdateSegmentTextResponse);
 }
 
 message TranscriptSegment {
   double start_time = 1;
   double end_time = 2;
   string speaker_label = 3;
+  // 目前的文字；空字串代表已清空片段。
   string text = 4;
+  string id = 5;
+  // 人工編輯前的機器產出（原始文字），供還原使用。
+  string original_text = 6;
 }
 
 message Transcript {
@@ -21,8 +32,22 @@ message Transcript {
   string language = 2;
   string full_text = 3;
   repeated TranscriptSegment segments = 4;
+  // 每次實際改動逐字稿（編輯）就 +1，從 0 開始。目的是讓 AI 產出（摘要/章節）記錄自己依據的版本，
+  // 比對出是否過時。
+  int32 revision = 5;
 }
 
 message GetTranscriptRequest {
   string job_id = 1;
+}
+
+message UpdateSegmentTextRequest {
+  string job_id = 1;
+  string segment_id = 2;
+  string text = 3;
+}
+
+message UpdateSegmentTextResponse {
+  TranscriptSegment segment = 1;
+  int32 revision = 2;
 }

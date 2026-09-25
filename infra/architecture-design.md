@@ -128,10 +128,13 @@ pending → uploading → uploaded → transcribing → transcribed
 ```
 GET    /transcripts/{jobId}            取得逐字稿全文（含片段 timestamp）
 GET    /transcripts/{jobId}/segments   只取片段列表（前端目前沒有用這支：播放同步直接用上面那支的 segments）
+PATCH  /transcripts/{jobId}/segments/{segmentId}   編輯片段文字，body { "text": string }（空字串＝清空、
+                                   送回 originalText＝還原），回傳 { segment, revision }
 ```
 
-底層對應 gRPC 只有一支 `GetTranscript`（查詢用），兩個 REST endpoint 都是 Gateway 呼叫同一支
-RPC 後，視需要只回傳 `segments` 欄位。轉錄本身完全是 **MQ 驅動**（消費 `transcription.requested`），
+兩個 GET 都是 Gateway 呼叫同一支 gRPC `GetTranscript` 後，視需要只回傳 `segments` 欄位；PATCH 對應
+`UpdateSegmentText`（使用者**編輯**逐字稿：只能改片段文字，起訖時間與切分永遠不變；每次實際改動
+`revision` +1、以未清空片段重組 `fullText`）。轉錄本身完全是 **MQ 驅動**（消費 `transcription.requested`），
 沒有另外開一支「觸發轉錄」的 API。
 
 逐字稿回傳格式範例（`language` 是轉錄模型回傳的語言名稱原樣，不是 locale 代碼；中文逐字稿在存檔前
@@ -141,9 +144,11 @@ RPC 後，視需要只回傳 `segments` 欄位。轉錄本身完全是 **MQ 驅�
   "jobId": "uuid",
   "language": "Chinese",
   "segments": [
-    { "startTime": 12.3, "endTime": 15.8, "speakerLabel": null, "text": "今天想聊的主題是..." }
+    { "id": "uuid", "startTime": 12.3, "endTime": 15.8, "speakerLabel": "",
+      "text": "今天想聊的主題是...", "originalText": "今天想聊的主題是..." }
   ],
-  "fullText": "..."
+  "fullText": "...",
+  "revision": 0
 }
 ```
 
@@ -232,25 +237,27 @@ CREATE INDEX idx_jobs_status ON jobs(status);
 ### 4.3 transcription_db
 
 ```sql
+-- id 由應用程式產生（uuid4），不靠資料庫預設值
 CREATE TABLE transcripts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     job_id UUID NOT NULL,
     language VARCHAR(10),
-    full_text TEXT,
-    created_at TIMESTAMPTZ DEFAULT now()
+    full_text TEXT,                         -- 以未清空片段依換行重組（編輯後）
+    revision INT NOT NULL DEFAULT 0,        -- 每次編輯 +1，供 AI 產出比對依據的版本、判斷是否過時
+    created_at TIMESTAMP NOT NULL
 );
+CREATE INDEX ix_transcripts_job_id ON transcripts(job_id);
 
 CREATE TABLE transcript_segments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     transcript_id UUID NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
     start_time NUMERIC(10,2) NOT NULL,
     end_time NUMERIC(10,2) NOT NULL,
     speaker_label VARCHAR(50),              -- 講者分離功能預留欄位
-    text TEXT NOT NULL,
+    text TEXT NOT NULL,                     -- 目前的文字；空字串＝已清空片段
+    original_text TEXT NOT NULL,            -- 人工編輯前的機器產出，供還原
     sequence_no INT NOT NULL
 );
-
-CREATE INDEX idx_segments_transcript_id ON transcript_segments(transcript_id);
 ```
 
 ### 4.4 ai_db
