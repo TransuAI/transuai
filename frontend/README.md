@@ -74,7 +74,7 @@ src/
     api.ts            對應 Gateway 每支 REST API 的函式
     auth-storage.ts    token/user 存 localStorage
     current-segment.ts 依播放時間找出「目前片段」(定義見 CONTEXT.md),二分搜尋
-    download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>)
+    download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>);開啟伺服器給的下載 URL(跨網域 presigned 連結靠回應的 Content-Disposition 下載)
     export-formats.ts  匯出格式轉換(不依賴畫面):`buildExportContent` 把工作區內容組成匯出輸入,每種格式是一個 `ExportFormat`(檔名結尾、MIME、render):TXT 純文字 / 含時間戳、SRT、VTT、Markdown 報告(長度與建立時間、摘要、章節、逐字稿,可選問答紀錄——只匯出已完成的回答;摘要過時時附註);共用規則——已清空片段不匯出、兩位以上講者才標示講者、文字格式時間戳 mm:ss / h:mm:ss、檔名取原始檔名去副檔名
     media.ts           檔案型別判斷、讀取媒體長度、格式化工具
     transcript-search.ts 逐字稿搜尋比對:只比對片段文字、英文不分大小寫、不跨片段;依片段分組
@@ -84,7 +84,7 @@ src/
     jobs-page.tsx           Job 列表、分頁、刪除
     job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked;自動跟隨的狀態也在這層;版面切換重新掛載 media element 時用 use-playback-continuity 接著播)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
     job-detail/
-      export-menu.tsx          工作區頂列的「匯出」下拉選單(桌面 / 手機都有):下載各格式(報告可勾選是否包含問答紀錄)、複製逐字稿 / 摘要,全部在瀏覽器產生
+      export-menu.tsx          工作區頂列的「匯出」下拉選單(桌面 / 手機都有):下載各格式(報告可勾選是否包含問答紀錄)、複製逐字稿 / 摘要(以上全部在瀏覽器產生),以及下載原始檔(向 Gateway 要 `media-url?download=true` 的附件 URL)
       completed-workspace.tsx  COMPLETED 的三欄工作區(桌面 grid / 手機 Sheet,確保同時只有一個 media element:桌面在來源欄、手機在迷你播放器;來源 Sheet 打開時聚焦 Sheet 本身而非搜尋框,Esc 先清空搜尋再關 Sheet)
       mini-player.tsx          手機版常駐底部播放列:播放 / 暫停、進度條、時間、一行目前片段文字,影片顯示 16:9 小畫面
       source-pane.tsx          來源欄:檔案資訊、播放器(只有桌面 grid 那份有,由 completed-workspace 以 player slot 傳入)、逐字稿

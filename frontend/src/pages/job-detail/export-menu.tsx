@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
-import { downloadTextFile } from '@/lib/download'
+import { jobsApi } from '@/lib/api'
+import { ApiError } from '@/lib/api-client'
+import { downloadTextFile, openDownloadUrl } from '@/lib/download'
 import {
   buildExportContent,
   exportFileName,
@@ -39,6 +41,11 @@ export function ExportMenu({ source }: { source: ExportSource }) {
       mimeType: format.mimeType,
     })
   }
+  const downloadOriginal = () =>
+    jobsApi.getMediaUrl(source.job.jobId, { download: true }).then(
+      (response) => openDownloadUrl(response.downloadUrl),
+      (err) => toast.error(err instanceof ApiError ? err.message : '無法下載原始檔'),
+    )
   const copy = (text: string, label: string) =>
     navigator.clipboard.writeText(text).then(
       () => toast.success(`已複製${label}`),
@@ -86,6 +93,8 @@ export function ExportMenu({ source }: { source: ExportSource }) {
         >
           複製摘要
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => void downloadOriginal()}>下載原始檔</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

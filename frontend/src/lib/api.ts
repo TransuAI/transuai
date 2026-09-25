@@ -46,7 +46,9 @@ export const jobsApi = {
 
   get: (jobId: string) => apiFetch<Job>(`/jobs/${jobId}`),
 
-  getMediaUrl: (jobId: string) => apiFetch<MediaUrlResponse>(`/jobs/${jobId}/media-url`),
+  // download: true 要的是「存成原始檔名」的附件 URL（匯出 → 下載原始檔）；預設是給播放器的 inline URL。
+  getMediaUrl: (jobId: string, options: { download?: boolean } = {}) =>
+    apiFetch<MediaUrlResponse>(`/jobs/${jobId}/media-url${options.download ? '?download=true' : ''}`),
 
   remove: (jobId: string) => apiFetchVoid(`/jobs/${jobId}`, { method: 'DELETE' }),
 }

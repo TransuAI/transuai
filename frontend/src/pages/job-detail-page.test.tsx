@@ -875,4 +875,27 @@ describe('JobDetailPage export menu', () => {
 
     expect(await downloads[1].blob?.text()).toContain('## 問答紀錄\n\n### 第三句在說什麼?\n\n在說第三句\n\n引用：[00:13]\n')
   })
+
+  it('downloads the original media file through an attachment URL from the Gateway', async () => {
+    const user = userEvent.setup()
+    const opened: { href: string; download: string }[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      opened.push({ href: this.href, download: this.download })
+    })
+    await renderGappedTranscriptOnDesktop()
+    vi.mocked(jobsApi.getMediaUrl).mockResolvedValueOnce({
+      downloadUrl: 'https://media.example.com/uploads/interview.mp3?response-content-disposition=attachment',
+      expiresAt: '2026-01-01T01:00:00Z',
+    })
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載原始檔' }))
+
+    expect(jobsApi.getMediaUrl).toHaveBeenLastCalledWith('job-1', { download: true })
+    await waitFor(() =>
+      expect(opened).toEqual([
+        { href: 'https://media.example.com/uploads/interview.mp3?response-content-disposition=attachment', download: '' },
+      ]),
+    )
+  })
 })
