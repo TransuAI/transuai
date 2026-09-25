@@ -19,14 +19,15 @@
 Transcription Service 消費訊息
   → 抽音軌（若為影片，用 FFmpeg）
   → 呼叫 Groq Whisper API 轉錄（含 timestamp）
+  → 偵測語言是中文時轉成繁體（OpenCC s2tw，只換字形不換詞）
   → 更新 Job status: transcribing → transcribed
-  → 逐字稿存入 DB（含分段 timestamp）
+  → 逐字稿存入 DB（含片段 timestamp）
   → 發送訊息「轉錄完成」到 MQ
 
 AI Service 消費訊息
   → 讀取逐字稿，呼叫 HF Inference Providers 產出摘要
-  → 呼叫 HF Inference Providers 依分段時間戳切章節
-  → 呼叫 HF Inference Providers 把逐字稿分段轉成向量，存進 embeddings（供之後 RAG 問答用）
+  → 呼叫 HF Inference Providers 依片段時間戳切章節
+  → 呼叫 HF Inference Providers 把逐字稿片段轉成向量，存進 embeddings（供之後 RAG 問答用）
   → 更新 Job status: summarizing → completed
   → 發送訊息「處理完成」到 MQ
 
@@ -63,7 +64,7 @@ Notification Service 消費訊息
 
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
-- `transcription_db`：逐字稿內容、分段 timestamp
+- `transcription_db`：逐字稿內容、片段 timestamp
 - `ai_db`：摘要、章節分段、embedding、問答歷史（`summaries` / `chapters` / `embeddings` / `qa_history` 四張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
@@ -124,21 +125,22 @@ pending → uploading → uploaded → transcribing → transcribed
 ### 3.3 Transcription Service
 
 ```
-GET    /transcripts/{jobId}            取得逐字稿全文（含分段 timestamp）
-GET    /transcripts/{jobId}/segments   取得分段列表（用於前端字幕同步捲動）
+GET    /transcripts/{jobId}            取得逐字稿全文（含片段 timestamp）
+GET    /transcripts/{jobId}/segments   取得片段列表（用於前端字幕同步捲動）
 ```
 
 底層對應 gRPC 只有一支 `GetTranscript`（查詢用），兩個 REST endpoint 都是 Gateway 呼叫同一支
 RPC 後，視需要只回傳 `segments` 欄位。轉錄本身完全是 **MQ 驅動**（消費 `transcription.requested`），
 沒有另外開一支「觸發轉錄」的 API。
 
-逐字稿回傳格式範例：
+逐字稿回傳格式範例（`language` 是轉錄模型回傳的語言名稱原樣，不是 locale 代碼；中文逐字稿在存檔前
+已轉成繁體，見 `transcription-service/README.md` Pipeline 一節）：
 ```json
 {
   "jobId": "uuid",
-  "language": "zh-TW",
+  "language": "Chinese",
   "segments": [
-    { "start": 12.3, "end": 15.8, "speaker": null, "text": "今天想聊的主題是..." }
+    { "startTime": 12.3, "endTime": 15.8, "speakerLabel": null, "text": "今天想聊的主題是..." }
   ],
   "fullText": "..."
 }
@@ -338,7 +340,7 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 向量資料庫 | pgvector（`ai_db.embeddings`，`BAAI/bge-m3` 1024 維，已在用） |
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
-| ASR | Groq Whisper API（`whisper-large-v3-turbo`，僅 transcription-service 使用） |
+| ASR | Groq Whisper API（`whisper-large-v3-turbo`，僅 transcription-service 使用）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體 |
 | LLM（摘要/章節分段/RAG 問答） | HF Inference Providers（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
@@ -396,7 +398,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 - [x] embedding model 選擇——**已解決**：`BAAI/bge-m3`（透過 HF Inference API），1024 維，
       query/document 對稱不用加 instruction 前綴；選型過程見 `ai-service/README.md` 已知限制
       （HF Inference Providers 當下有沒有 provider 實際托管該模型會隨時間變動，換模型前建議先查）
-- [x] 章節自動分段的演算法/prompt 設計——**已解決**：純 LLM 判斷（把逐字稿分段連同時間戳丟給
+- [x] 章節自動分段的演算法/prompt 設計——**已解決**：純 LLM 判斷（把逐字稿片段連同時間戳丟給
       HF Inference Providers 的聊天模型，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見
       `ai-service/app/services/chapter_generator.py`
 - [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
