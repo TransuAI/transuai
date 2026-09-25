@@ -4,16 +4,23 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.web.dto.SegmentDto;
+import com.transuai.gateway.web.dto.SegmentUpdateDto;
 import com.transuai.gateway.web.dto.TranscriptDto;
+import com.transuai.gateway.web.dto.UpdateSegmentTextRequestDto;
 
 import lombok.RequiredArgsConstructor;
 import transuai.transcription.v1.Transcription.GetTranscriptRequest;
 import transuai.transcription.v1.Transcription.Transcript;
+import transuai.transcription.v1.Transcription.TranscriptSegment;
+import transuai.transcription.v1.Transcription.UpdateSegmentTextRequest;
+import transuai.transcription.v1.Transcription.UpdateSegmentTextResponse;
 import transuai.transcription.v1.TranscriptionServiceGrpc;
 
 // 對應 ../../architecture-design.md 3.3。TranscriptionService 不驗證 x-user-id
@@ -38,15 +45,38 @@ public class TranscriptionController {
         return toDto(fetchTranscript(jobId)).segments();
     }
 
+    // 編輯片段文字（空字串＝清空、送回 originalText＝還原），見 transcription.proto 的 UpdateSegmentText。
+    @PatchMapping("/transcripts/{jobId}/segments/{segmentId}")
+    public SegmentUpdateDto updateSegmentText(@CurrentUserId UUID userId, @PathVariable String jobId,
+            @PathVariable String segmentId, @RequestBody UpdateSegmentTextRequestDto request) {
+        if (request == null || request.text() == null) {
+            // Without this a body like {} or a misspelt key would silently clear the segment.
+            throw new IllegalArgumentException("text is required"); // → 400 via GrpcExceptionAdvice
+        }
+        jobOwnershipGuard.check(userId, jobId);
+        UpdateSegmentTextResponse response = transcriptionServiceStub.updateSegmentText(
+                UpdateSegmentTextRequest.newBuilder()
+                        .setJobId(jobId)
+                        .setSegmentId(segmentId)
+                        .setText(request.text())
+                        .build());
+        return new SegmentUpdateDto(toDto(response.getSegment()), response.getRevision());
+    }
+
     private Transcript fetchTranscript(String jobId) {
         return transcriptionServiceStub.getTranscript(GetTranscriptRequest.newBuilder().setJobId(jobId).build());
     }
 
     private static TranscriptDto toDto(Transcript transcript) {
         List<SegmentDto> segments = transcript.getSegmentsList().stream()
-                .map(s -> new SegmentDto(s.getStartTime(), s.getEndTime(), s.getSpeakerLabel(), s.getText()))
+                .map(TranscriptionController::toDto)
                 .toList();
         return new TranscriptDto(transcript.getJobId(), transcript.getLanguage(), transcript.getFullText(),
-                segments);
+                segments, transcript.getRevision());
+    }
+
+    private static SegmentDto toDto(TranscriptSegment s) {
+        return new SegmentDto(s.getId(), s.getStartTime(), s.getEndTime(), s.getSpeakerLabel(), s.getText(),
+                s.getOriginalText());
     }
 }

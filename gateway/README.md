@@ -78,8 +78,9 @@ docker compose up -d
 
 | Method | Path | 說明 |
 |---|---|---|
-| `GET` | `/transcripts/{jobId}` | 逐字稿全文 + 分段 timestamp |
-| `GET` | `/transcripts/{jobId}/segments` | 只要分段列表（用於前端字幕同步捲動），底層還是同一支 `GetTranscript`，這裡只是回應裁切成 `segments` 陣列 |
+| `GET` | `/transcripts/{jobId}` | 逐字稿全文 + 片段（id、timestamp、目前文字、原始文字）+ `revision` |
+| `GET` | `/transcripts/{jobId}/segments` | 只要片段列表，底層還是同一支 `GetTranscript`，這裡只是回應裁切成 `segments` 陣列（前端目前沒有用這支） |
+| `PATCH` | `/transcripts/{jobId}/segments/{segmentId}` | 編輯片段文字，body `{ text }`（空字串＝清空、送回 `originalText`＝還原），回傳 `{ segment, revision }`，轉給 `UpdateSegmentText` |
 
 ### AI（`AiController` → `ai-service`）—— 需要登入，Gateway 用 `JobOwnershipGuard` 做 ownership 檢查
 
