@@ -1,5 +1,6 @@
 package com.transuai.upload_service.service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -47,12 +48,24 @@ public class StorageService {
         return new PresignedUpload(presigned.url().toString(), objectKey, Instant.now().plus(expiry));
     }
 
+    // 給播放器 inline 讀取的 URL。
     public PresignedDownload createPresignedDownloadUrl(String objectKey) {
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+        return presignGet(GetObjectRequest.builder()
                 .bucket(storageProperties.bucket())
                 .key(objectKey)
-                .build();
+                .build());
+    }
 
+    // 要求物件儲存以 Content-Disposition: attachment 回應的 URL：瀏覽器直接下載、存成 fileName。
+    public PresignedDownload createPresignedAttachmentUrl(String objectKey, String fileName) {
+        return presignGet(GetObjectRequest.builder()
+                .bucket(storageProperties.bucket())
+                .key(objectKey)
+                .responseContentDisposition(attachmentContentDisposition(fileName))
+                .build());
+    }
+
+    private PresignedDownload presignGet(GetObjectRequest getObjectRequest) {
         Duration expiry = Duration.ofMinutes(storageProperties.presignDownloadExpiryMinutes());
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
                 .signatureDuration(expiry)
@@ -61,6 +74,23 @@ public class StorageService {
 
         PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(presignRequest);
         return new PresignedDownload(presigned.url().toString(), Instant.now().plus(expiry));
+    }
+
+    // RFC 6266：ASCII 備援檔名（非 ASCII、引號、反斜線換成 _）＋ RFC 5987 的 UTF-8 檔名（percent-encoded），
+    // 讓中文檔名在現代瀏覽器正確顯示，老舊 client 也至少拿到一個合法的檔名。
+    private static String attachmentContentDisposition(String fileName) {
+        StringBuilder asciiFallback = new StringBuilder();
+        fileName.codePoints().forEach(cp -> asciiFallback.append(
+                cp >= 0x20 && cp < 0x7f && cp != '"' && cp != '\\' ? Character.toString(cp) : "_"));
+
+        StringBuilder encoded = new StringBuilder();
+        for (byte b : fileName.getBytes(StandardCharsets.UTF_8)) {
+            int c = b & 0xff;
+            boolean attrChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                    || "!#$&+-.^_`|~".indexOf(c) >= 0;
+            encoded.append(attrChar ? Character.toString(c) : String.format("%%%02X", c));
+        }
+        return "attachment; filename=\"" + asciiFallback + "\"; filename*=UTF-8''" + encoded;
     }
 
     // completeUpload() 不能只信任呼叫端回報的 file_size_bytes——那個數字完全由 client 決定，

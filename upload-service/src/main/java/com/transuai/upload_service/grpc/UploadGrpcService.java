@@ -192,7 +192,9 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
             return;
         }
 
-        StorageService.PresignedDownload presigned = storageService.createPresignedDownloadUrl(job.getStoragePath());
+        StorageService.PresignedDownload presigned = request.getAsAttachment()
+                ? storageService.createPresignedAttachmentUrl(job.getStoragePath(), job.getFileName())
+                : storageService.createPresignedDownloadUrl(job.getStoragePath());
 
         responseObserver.onNext(GetPresignedDownloadUrlResponse.newBuilder()
                 .setDownloadUrl(presigned.downloadUrl())

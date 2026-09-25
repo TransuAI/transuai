@@ -57,7 +57,7 @@ Upload Service 沒有 Swagger/OpenAPI —— 那是 REST 專屬的規格，gRPC 
     localhost:9090 transuai.upload.v1.UploadService/GetPresignedUploadUrl
   ```
 
-Proto 定義（等同於這個服務的 API 規格書）在 [`src/main/proto/upload.proto`](src/main/proto/upload.proto)。
+Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/upload.proto`](../infra/proto/upload.proto)（集中放在 infra，供 transcription-service / ai-service / Gateway 共用，`build.gradle` 直接從那裡編）。
 
 ### API 一覽
 
@@ -68,7 +68,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`src/main/proto/upl
 | `GetPresignedUploadUrl` | 取得物件儲存的 presigned PUT URL，此階段尚未建立 Job；`file_size_bytes` 超過上傳大小限制會回 `INVALID_ARGUMENT`（見下方「上傳大小限制」） |
 | `CompleteUpload` | 前端完成上傳後呼叫，建立 Job（status=`UPLOADED`）並發送 `transcription.requested` 事件；會改問物件儲存實際存了多大（不信任請求帶的 `file_size_bytes`），超過限制回 `INVALID_ARGUMENT` 並刪除該物件 |
 | `GetJob` | 查詢單一 Job，強制 ownership 檢查（別人的 Job 回 `NOT_FOUND`） |
-| `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md` |
+| `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md`。`as_attachment=true` 時 URL 會覆寫回應的 `Content-Disposition` 為 attachment、檔名＝Job 原始檔名（RFC 6266 ASCII 備援＋RFC 5987 UTF-8），供前端「匯出 → 下載原始檔」 |
 | `ListJobs` | 分頁查詢目前使用者的所有 Job |
 | `DeleteJob` | 刪除 Job record 與物件儲存檔案 |
 
@@ -121,7 +121,6 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 ## 專案結構
 
 ```
-src/main/proto/upload.proto          gRPC API 定義（唯一的 API 規格來源）
 src/main/java/com/transuai/upload_service/
   domain/          Job entity、FileType / JobStatus enum（狀態機）
   repository/       Spring Data JPA repository
@@ -137,4 +136,5 @@ src/main/java/com/transuai/upload_service/
 
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
 - Upload Service 不驗證 JWT，完全信任呼叫端轉發的 `x-user-id` metadata —— 前提是網路層保證只有 Gateway 能直接打到這個服務的 9090 port
+- 「下載原始檔」靠 presigned URL 帶 `response-content-disposition` 覆寫回應標頭；MinIO 支援（整合測試有驗證），正式環境規劃的 Cloudflare R2 是否支援這個覆寫參數，上雲前要實測確認——不支援的話，前端點「下載原始檔」會在同一分頁直接打開媒體網址、離開 app，而不是下載
 - 刪除 Job 時只清 Upload Service 自己的資料（DB row + 物件儲存），不會連帶清除其他服務的逐字稿/embedding（見 [`architecture-design.md`](../architecture-design.md) 第 8 節待確認事項）

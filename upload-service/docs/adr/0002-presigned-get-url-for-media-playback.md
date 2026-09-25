@@ -43,3 +43,5 @@ URL 也讓 bucket 的內部佈局變成前端要知道的細節。
 **沒有做的事**：沒有限制同一個 job 可以簽發幾次播放 URL，也沒有做速率限制——跟 `GetJob` 一樣，
 信任 gRPC 層的身份驗證跟這個 endpoint 本身的 ownership 檢查就夠，這條路徑不會比直接呼叫
 `GetJob` 更容易被濫用。
+
+後續：同一支 rpc 之後加了 `as_attachment`，讓前端「匯出 → 下載原始檔」拿到覆寫 `Content-Disposition: attachment`（檔名＝原始檔名）的 URL；預設仍是給播放器 inline 讀取，本 ADR 的決定不變。

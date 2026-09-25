@@ -22,6 +22,7 @@ import com.transuai.upload.grpc.v1.CompleteUploadRequest;
 import com.transuai.upload.grpc.v1.DeleteJobRequest;
 import com.transuai.upload.grpc.v1.FileType;
 import com.transuai.upload.grpc.v1.GetJobRequest;
+import com.transuai.upload.grpc.v1.GetPresignedDownloadUrlRequest;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlRequest;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
 import com.transuai.upload.grpc.v1.Job;
@@ -184,6 +185,38 @@ class UploadGrpcServiceIT {
         assertThat(jobRepository.findById(UUID.fromString(job.getJobId()))).isEmpty();
     }
 
+    @Test
+    void getPresignedDownloadUrl_asAttachment_servesTheFileAsADownloadNamedAfterTheOriginal() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job job = createJob(userId, "週會 錄音.mp3");
+
+        String url = stubFor(userId).getPresignedDownloadUrl(GetPresignedDownloadUrlRequest.newBuilder()
+                .setJobId(job.getJobId())
+                .setAsAttachment(true)
+                .build()).getDownloadUrl();
+        HttpResponse<String> response = get(url);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).isEqualTo("bytes");
+        // RFC 6266 / 5987：ASCII 備援檔名，加上 percent-encode 過的 UTF-8 原始檔名。
+        assertThat(response.headers().firstValue("Content-Disposition")).hasValue(
+                "attachment; filename=\"__ __.mp3\"; filename*=UTF-8''%E9%80%B1%E6%9C%83%20%E9%8C%84%E9%9F%B3.mp3");
+    }
+
+    @Test
+    void getPresignedDownloadUrl_withoutAttachment_isStillServedInlineForThePlayer() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job job = createJob(userId, "inline.mp3");
+
+        String url = stubFor(userId).getPresignedDownloadUrl(GetPresignedDownloadUrlRequest.newBuilder()
+                .setJobId(job.getJobId())
+                .build()).getDownloadUrl();
+        HttpResponse<String> response = get(url);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.headers().firstValue("Content-Disposition")).isEmpty();
+    }
+
     private Job createJob(UUID userId, String fileName) throws Exception {
         UploadServiceGrpc.UploadServiceBlockingStub stub = stubFor(userId);
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
@@ -207,6 +240,11 @@ class UploadGrpcServiceIT {
         Channel channel = channelFactory.createChannel("upload-service");
         return UploadServiceGrpc.newBlockingStub(channel)
                 .withInterceptors(new UserIdHeaderInterceptor(userId.toString()));
+    }
+
+    private static HttpResponse<String> get(String url) throws Exception {
+        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(url)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
     }
 
     private static void putBytes(String uploadUrl) throws Exception {
