@@ -134,7 +134,7 @@ PATCH  /transcripts/{jobId}/segments/{segmentId}   編輯片段文字，body { "
 
 兩個 GET 都是 Gateway 呼叫同一支 gRPC `GetTranscript` 後，視需要只回傳 `segments` 欄位；PATCH 對應
 `UpdateSegmentText`（使用者**編輯**逐字稿：只能改片段文字，起訖時間與切分永遠不變；每次實際改動
-`revision` +1、以未清空片段重組 `fullText`）。轉錄本身完全是 **MQ 驅動**（消費 `transcription.requested`），
+`revision` +1、以未清空片段重組 `fullText`，並發出 `transcript.edited` 讓 ai-service 更新問答用的 embedding，見 5.）。轉錄本身完全是 **MQ 驅動**（消費 `transcription.requested`），
 沒有另外開一支「觸發轉錄」的 API。
 
 逐字稿回傳格式範例（`language` 是轉錄模型回傳的語言名稱原樣，不是 locale 代碼；中文逐字稿在存檔前
@@ -328,9 +328,11 @@ CREATE TABLE export_outputs (
 | `transcription.completed` | Transcription Service | AI Service | `{ jobId }` |
 | `ai.completed` | AI Service | Notification Service | `{ jobId, status }` |
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
+| `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
 
-**實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），四個 queue 的名稱/payload
-都跟上表一致，`job.failed` 目前由 transcription-service、ai-service 各自在 pipeline 失敗時發送。
+**實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
+都跟實作一致，`job.failed` 目前由 transcription-service、ai-service 各自在 pipeline 失敗時發送。
+ai-service 消費的每個 queue 各有一組自己的 retry queue（`<queue>.retry.2s`／`.4s`，見 ai-service ADR 0001）。
 Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何服務真的連線使用，純粹佔位保留給
 未來的 cache/rate limit 用途。
 
