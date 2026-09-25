@@ -1,6 +1,6 @@
 # transcription-service
 
-音訊/影片逐字稿 + AI 分析平台的 Transcription Service。消費 Upload Service 發出的 `transcription.requested` 事件，抽音軌、呼叫 Groq Whisper API 轉錄、把逐字稿存進自己的 `transcription_db`，並回寫 Job 狀態、發送 `transcription.completed` 事件給下游的 AI Service。是純內部服務（MQ 驅動），只暴露 gRPC 給其他內部服務查詢——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service) 一致）。
+音訊/影片逐字稿 + AI 分析平台的 Transcription Service。消費 Upload Service 發出的 `transcription.requested` 事件，抽音軌、呼叫 Groq Whisper API 轉錄、把逐字稿存進自己的 `transcription_db`，並回寫 Job 狀態、發送 `transcription.completed` 事件給下游的 AI Service；也保存使用者對逐字稿的**編輯**（見 [`CONTEXT.md`](CONTEXT.md)）。是純內部服務（轉錄由 MQ 驅動），只暴露 gRPC 給其他內部服務查詢與編輯——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service) 一致）。
 
 ## 技術棧
 
@@ -68,7 +68,8 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 
 | RPC             | 說明                                                                                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 片段 timestamp，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
+| `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 片段（id、timestamp、目前文字、原始文字）+ `revision`，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
+| `UpdateSegmentText` | 編輯一個片段的文字：去前後空白，空字串＝清空；跟目前相同則不動作；否則更新文字、`revision` +1、以未清空片段依換行重組全文（逐字稿那列 `SELECT … FOR UPDATE`，同時編輯以最後寫入為準但 revision 各加一次）。id 格式錯誤 / 超過 2,000 字回 `INVALID_ARGUMENT`，逐字稿或片段不存在、片段不屬於該 job 回 `NOT_FOUND` |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
 
@@ -108,7 +109,7 @@ uv run pytest
 
 用 pytest，mocking 只用標準庫的 `unittest.mock`。
 
-gRPC 服務本身（`tests/test_transcript_grpc.py`）是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
+gRPC 服務本身（`tests/test_transcript_grpc.py`：查詢與啟動 migration；`tests/test_segment_editing.py`：編輯）是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
 fixture 會在同一個 Postgres 上建（或清空重建）一個獨立的 `transcription_test_db`，用服務啟動時同一套
 `init_db()` 跑 migration，再在 process 裡起一個真的 gRPC server 給測試呼叫（參考 upload-service 的 IT 做法）；
 絕對不會碰到 `transcription_db`。
@@ -146,7 +147,7 @@ app/
   models/
     transcript.py                 Transcript / TranscriptSegment（SQLAlchemy ORM）
   controllers/
-    transcript_controller.py       TranscriptionServiceServicer 實作（GetTranscript）
+    transcript_controller.py       TranscriptionServiceServicer 實作（GetTranscript、UpdateSegmentText）
   services/
     consumer.py                      RabbitMQ consumer loop（pika）
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
@@ -160,7 +161,7 @@ app/
     transcript_repository.py               transcription_db 存取（transcripts / transcript_segments）
   db/
     session.py                               engine / session / init_db（Alembic upgrade，含接手舊 create_all 資料庫）
-    migrations/                              Alembic migration（`versions/0001_baseline.py` 是導入前 create_all 建出的 schema）
+    migrations/                              Alembic migration（`0001_baseline` 是導入前 create_all 建出的 schema；`0002_segment_editing` 加 `original_text`、`revision`）
   proto_gen/                                  gRPC stub 產物（由 scripts/generate_grpc.sh 產生）
 scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```
@@ -171,4 +172,4 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——`ai-service` 已經幫這一段補上獨立的 in-process 重試 + 高嚴重度 log marker，這裡還沒跟進，是目前真實存在的已知限制
 - 講者分離（`speaker_label`）欄位已預留但未實作
 - 繁體轉換只套用在新轉錄的 Job，這個功能上線前存進去的簡體逐字稿不回填
-- 測試覆蓋率目前很低，只有 pipeline seam 跟 retry 分類/路由這兩塊（見上方「測試」一節）；`storage`/`audio`/`transcriber` 等模組本身、gRPC controller 層都還只靠手動 smoke test
+- 測試涵蓋 pipeline seam、retry 分類/路由、gRPC 服務（查詢、編輯、啟動 migration，對真的 Postgres）；`storage`/`audio`/`transcriber` 等跟外部服務打交道的模組本身還只靠手動 smoke test

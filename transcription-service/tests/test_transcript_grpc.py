@@ -49,26 +49,48 @@ def test_startup_brings_the_schema_under_versioned_migrations(test_database):
     assert len(versions) == 1
 
 
+# The DDL SQLAlchemy create_all issued before migrations existed (frozen here on purpose: the
+# models keep changing, a database from back then doesn't).
+PRE_MIGRATION_SCHEMA = """
+CREATE TABLE transcripts (
+    id UUID PRIMARY KEY, job_id UUID NOT NULL, language VARCHAR(10), full_text TEXT,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL);
+CREATE INDEX ix_transcripts_job_id ON transcripts (job_id);
+CREATE TABLE transcript_segments (
+    id UUID PRIMARY KEY,
+    transcript_id UUID NOT NULL REFERENCES transcripts (id) ON DELETE CASCADE,
+    start_time NUMERIC(10, 2) NOT NULL, end_time NUMERIC(10, 2) NOT NULL, speaker_label VARCHAR(50),
+    text TEXT NOT NULL, sequence_no INTEGER NOT NULL);
+"""
+
+
 def test_startup_adopts_a_database_created_before_migrations_existed(empty_schema):
     """Existing dev databases were built by SQLAlchemy create_all; startup must take them over
-    as the baseline instead of failing on tables that already exist."""
+    as the baseline, then apply the later migrations, keeping their rows."""
     from app.db import init_db
-    from app.models import Base
 
-    Base.metadata.create_all(bind=empty_schema)  # how the schema was created before Alembic
+    transcript_id, job_id = uuid.uuid4(), uuid.uuid4()
+    with empty_schema.begin() as conn:
+        conn.execute(text(PRE_MIGRATION_SCHEMA))
+        conn.execute(text("INSERT INTO transcripts VALUES (:id, :job, 'Chinese', '大家好', now())"),
+                     {"id": transcript_id, "job": job_id})
+        conn.execute(text("INSERT INTO transcript_segments VALUES (:id, :t, 0, 1.5, NULL, '大家好', 0)"),
+                     {"id": uuid.uuid4(), "t": transcript_id})
 
     init_db()
 
     with empty_schema.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM alembic_version")).scalar() == 1
-    assert {"transcripts", "transcript_segments"} <= set(inspect(empty_schema).get_table_names())
+        assert conn.execute(text("SELECT revision FROM transcripts")).scalar() == 0
+        # Nothing was edited before, so the original text is the current text.
+        assert conn.execute(text("SELECT original_text FROM transcript_segments")).scalar() == "大家好"
 
 
 def test_startup_refuses_a_database_with_only_part_of_the_baseline_tables(empty_schema):
     from app.db import init_db
-    from app.models import Base
 
-    Base.metadata.tables["transcripts"].create(bind=empty_schema)  # transcripts without transcript_segments
+    with empty_schema.begin() as conn:  # transcripts without transcript_segments
+        conn.execute(text(PRE_MIGRATION_SCHEMA.split("CREATE TABLE transcript_segments")[0]))
 
     with pytest.raises(RuntimeError, match="transcript_segments"):
         init_db()

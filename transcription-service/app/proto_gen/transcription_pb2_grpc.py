@@ -27,9 +27,9 @@ if _version_not_supported:
 
 
 class TranscriptionServiceStub:
-    """TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿。
-    跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫。
-    主要處理流程是 MQ 驅動（消費 transcription.requested，見 ../README.md），這支 RPC 只是查詢用。
+    """TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿，以及（經 Gateway）保存使用者對
+    逐字稿的編輯。跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫——
+    「只能改自己的 job」由 Gateway 的 ownership 檢查把關。轉錄本身是 MQ 驅動（消費 transcription.requested）。
     """
 
     def __init__(self, channel):
@@ -43,16 +43,32 @@ class TranscriptionServiceStub:
                 request_serializer=transcription__pb2.GetTranscriptRequest.SerializeToString,
                 response_deserializer=transcription__pb2.Transcript.FromString,
                 _registered_method=True)
+        self.UpdateSegmentText = channel.unary_unary(
+                '/transuai.transcription.v1.TranscriptionService/UpdateSegmentText',
+                request_serializer=transcription__pb2.UpdateSegmentTextRequest.SerializeToString,
+                response_deserializer=transcription__pb2.UpdateSegmentTextResponse.FromString,
+                _registered_method=True)
 
 
 class TranscriptionServiceServicer:
-    """TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿。
-    跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫。
-    主要處理流程是 MQ 驅動（消費 transcription.requested，見 ../README.md），這支 RPC 只是查詢用。
+    """TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿，以及（經 Gateway）保存使用者對
+    逐字稿的編輯。跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫——
+    「只能改自己的 job」由 Gateway 的 ownership 檢查把關。轉錄本身是 MQ 驅動（消費 transcription.requested）。
     """
 
     def GetTranscript(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateSegmentText(self, request, context):
+        """編輯一個片段的文字（見 transcription-service/CONTEXT.md「編輯」）。文字會先去掉前後空白，
+        空字串＝清空這個片段（已清空片段）；還原＝把 original_text 送回來。文字跟目前相同時什麼都
+        不做（revision 不變）；否則更新文字、revision +1、以未清空片段重組 full_text。片段的起訖時間
+        永遠不變。job_id / segment_id 格式不對回 INVALID_ARGUMENT；job 沒有逐字稿、片段不存在或不屬於
+        這個 job 回 NOT_FOUND；文字超過長度上限回 INVALID_ARGUMENT。同時編輯以最後寫入為準。
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -65,6 +81,11 @@ def add_TranscriptionServiceServicer_to_server(servicer, server):
                     request_deserializer=transcription__pb2.GetTranscriptRequest.FromString,
                     response_serializer=transcription__pb2.Transcript.SerializeToString,
             ),
+            'UpdateSegmentText': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateSegmentText,
+                    request_deserializer=transcription__pb2.UpdateSegmentTextRequest.FromString,
+                    response_serializer=transcription__pb2.UpdateSegmentTextResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'transuai.transcription.v1.TranscriptionService', rpc_method_handlers)
@@ -74,9 +95,9 @@ def add_TranscriptionServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class TranscriptionService:
-    """TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿。
-    跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫。
-    主要處理流程是 MQ 驅動（消費 transcription.requested，見 ../README.md），這支 RPC 只是查詢用。
+    """TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿，以及（經 Gateway）保存使用者對
+    逐字稿的編輯。跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫——
+    「只能改自己的 job」由 Gateway 的 ownership 檢查把關。轉錄本身是 MQ 驅動（消費 transcription.requested）。
     """
 
     @staticmethod
@@ -96,6 +117,33 @@ class TranscriptionService:
             '/transuai.transcription.v1.TranscriptionService/GetTranscript',
             transcription__pb2.GetTranscriptRequest.SerializeToString,
             transcription__pb2.Transcript.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateSegmentText(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.transcription.v1.TranscriptionService/UpdateSegmentText',
+            transcription__pb2.UpdateSegmentTextRequest.SerializeToString,
+            transcription__pb2.UpdateSegmentTextResponse.FromString,
             options,
             channel_credentials,
             insecure,
