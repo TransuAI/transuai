@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     transcription_completed_queue: str = "transcription.completed"
     ai_completed_queue: str = "ai.completed"
     job_failed_queue: str = "job.failed"
+    transcript_edited_queue: str = "transcript.edited"
 
     upload_service_grpc_target: str = "localhost:9090"
     transcription_service_grpc_target: str = "localhost:8083"

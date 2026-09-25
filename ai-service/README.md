@@ -46,7 +46,7 @@ uv run python -m app.main
 啟動時會：
 
 1. 把 `ai_db` 的 schema 升級到最新的 Alembic migration（多個副本同時啟動時用 Postgres advisory lock 排隊）。導入 Alembic 前用 `create_all` 建的資料庫可能只有部分表（例如只有 `summaries`），baseline（`0001`）只補建缺少的表、不動既有的表跟資料，不需要刪庫重建；唯一例外是還停在 768 維的舊 `embeddings` 表，會拒絕啟動並提示整張表 DROP 掉、重跑 pipeline
-2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）
+2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）跟 `transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding）
 3. 起 gRPC server，監聽 `8084`
 
 ## Pipeline
@@ -76,6 +76,20 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 
 章節分段還沒有獨立的 Job status，暫時併在 SUMMARIZING 階段，失敗一樣算整個 job 失敗。
 ```
+
+### 逐字稿被編輯之後（`transcript.edited`）
+
+```
+消費 transcript.edited { jobId }（見根目錄 docs/adr/0003）
+  → gRPC GetTranscript(jobId) 取最新的片段
+  → 以片段的起訖時間（NUMERIC(10,2)）對應這個 job 現有的 embedding：
+      文字變了 → 重算；被清空（空字串）→ 刪掉；從清空還原（沒有對應的列）→ 算一筆新的；都沒變 → 不呼叫 embedder
+  → 只寫入 / 刪除有變的那幾列
+```
+
+暫時性失敗一樣走訊息層級重試（`transcript.edited.retry.2s`／`.4s`）。預算用盡或永久性失敗只記 log——這不是 Job
+的 pipeline，不回寫 Job 狀態、不發 `job.failed`，問答的檢索資料就先維持舊的，等下一次編輯。存檔到 embedding 更新之間
+有約一秒的空窗，這段時間問答可能還用到舊文字（ADR 0003 刻意接受）。
 
 ## gRPC API
 
@@ -132,7 +146,7 @@ uv run pytest
 
 用 pytest，mocking 只用標準庫的 `unittest.mock`（沒有額外裝 `pytest-mock`）。
 
-資料庫 migration 的測試（`tests/test_db_migrations.py`）是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
+碰資料庫的測試——migration（`tests/test_db_migrations.py`）跟逐字稿編輯後重算 embedding（`tests/test_reembed.py`，只 mock gRPC client 跟 HF embedder）——是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
 `tests/conftest.py` 會在同一個 Postgres 上建（或清空重建）一個獨立的 `ai_test_db`，絕對不會碰到 `ai_db`。
 
 其餘測試不需要跑起 `infra`（Postgres/RabbitMQ）或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（HF、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
@@ -157,6 +171,7 @@ app/
   controllers/
     ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters、AskQuestion、ListQaHistory）
   services/
+    reembed.py                       消費 transcript.edited：只重算文字有變的片段的 embedding
     consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
@@ -198,4 +213,4 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - chat/embedding model 選擇都受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 embedding 模型 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `AI_HF_CHAT_MODEL`／`HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
 - 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了。還停在 768 維的舊表會讓服務拒絕啟動（baseline migration 檢查），要整張表 DROP 掉讓 migration 重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
 - `Qwen/Qwen3.5-9B` 屬於 Qwen3 系列，預設會開 thinking mode：完整思考過程另外算 completion tokens、放在 HF 回應的 `message.reasoning`（不是混進 `content` 的 `<think>` 標籤，這點實測跟原本 Groq `qwen3.6-27b` 的行為不同）。**已踩過的坑**：不設 `max_tokens` 時 provider 預設只給 2048，稍長的輸入光思考就把預算燒光，`content` 直接是空字串（`finish_reason="length"`）但整個呼叫不會報錯——摘要/章節分段因此曾經整段是空的，pipeline 卻顯示成功；而且單純拉高 `max_tokens` 治標不治本，實測 500+ 段的章節分段呼叫就算給到 32768 還是會在思考階段被 HF gateway 504 timeout 打斷。目前的做法是透過 `hf_client.DISABLE_THINKING`（chat template 的 `enable_thinking=False`）直接關掉 thinking mode，所有呼叫 `hf_client.get_client()` 做 chat completion 的地方都要帶上；`strip_thinking()`／`stream_without_thinking()` 保留作為防禦性 fallback（防之後換模型/provider 又變回把思考混進 `content` 的行為），正常情況下是 no-op。換其他 HF 聊天模型時要重新確認是否還會有類似的 thinking-mode 行為
-- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式，以及資料庫 migration（對真的 Postgres）；gRPC controller（問答 streaming 等）目前仍只靠手動 grpcurl smoke test
+- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；gRPC controller（問答 streaming 等）目前仍只靠手動 grpcurl smoke test

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Embedding
@@ -38,3 +38,28 @@ def find_similar(
             .limit(limit)
         )
     )
+
+
+def find_by_job_id(session: Session, job_id: uuid.UUID) -> list[Embedding]:
+    return list(session.scalars(select(Embedding).where(Embedding.job_id == job_id)))
+
+
+def apply_embedding_changes(
+    session: Session,
+    job_id: uuid.UUID,
+    upserts: list[tuple[str, float, float, list[float]]],
+    deletions: list[tuple[float, float]],
+) -> None:
+    """依片段的起訖時間（一個 job 內不會重複，編輯也不會改）替換 / 刪除個別片段的 embedding：upserts 是
+    (chunk_text, start_time, end_time, vector)，deletions 是 (start_time, end_time)。"""
+    keys = [(start, end) for _, start, end, _ in upserts] + deletions
+    if keys:
+        session.query(Embedding).filter(
+            Embedding.job_id == job_id,
+            or_(*(and_(Embedding.start_time == start, Embedding.end_time == end) for start, end in keys)),
+        ).delete(synchronize_session=False)
+    session.add_all(
+        Embedding(job_id=job_id, chunk_text=text, start_time=start, end_time=end, embedding=vector)
+        for text, start, end, vector in upserts
+    )
+    session.commit()

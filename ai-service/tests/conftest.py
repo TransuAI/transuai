@@ -11,7 +11,7 @@ TEST_DB_NAME = "ai_test_db"
 os.environ["DB_NAME"] = TEST_DB_NAME
 
 from app.core.config import settings  # noqa: E402
-from app.db import engine, init_db  # noqa: E402
+from app.db import engine, init_db, new_session  # noqa: E402
 
 
 def _reset_schema():
@@ -46,3 +46,13 @@ def empty_schema(test_database):
     yield test_database
     _reset_schema()
     init_db()
+
+
+@pytest.fixture
+def db_session(test_database):
+    """A session on the test database; tables are emptied after each test."""
+    session = new_session()
+    yield session
+    session.close()
+    with test_database.begin() as conn:
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history"))
