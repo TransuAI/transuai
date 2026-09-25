@@ -754,3 +754,47 @@ describe('JobDetailPage mini player (COMPLETED, narrow viewport)', () => {
     expect(document.querySelectorAll('audio, video')).toHaveLength(1)
   })
 })
+
+describe('JobDetailPage export menu', () => {
+  // jsdom doesn't navigate on link clicks: capture what would have been downloaded.
+  function captureDownloads() {
+    const blobsByUrl = new Map<string, Blob>()
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      const url = `blob:export-${blobsByUrl.size}`
+      blobsByUrl.set(url, blob as Blob)
+      return url
+    })
+    const downloads: { fileName: string; blob: Blob | undefined }[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push({ fileName: this.download, blob: blobsByUrl.get(this.href) })
+    })
+    return downloads
+  }
+
+  it('is offered in the workspace of a COMPLETED job', async () => {
+    await renderCompletedJob()
+
+    expect(screen.getByRole('button', { name: '匯出' })).toBeInTheDocument()
+  })
+
+  it('is not offered while the job is still processing', async () => {
+    vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'SUMMARIZING' })
+    renderJobDetail()
+
+    await screen.findByText('處理中,完成後這裡會自動更新逐字稿與摘要...')
+    expect(screen.queryByRole('button', { name: '匯出' })).not.toBeInTheDocument()
+  })
+
+  it('downloads the transcript as SRT subtitles named after the uploaded file', async () => {
+    const user = userEvent.setup()
+    const downloads = captureDownloads()
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載字幕（SRT）' }))
+
+    expect(downloads).toHaveLength(1)
+    expect(downloads[0].fileName).toBe('interview.srt')
+    expect(await downloads[0].blob?.text()).toContain('1\n00:00:05,000 --> 00:00:08,000\n第一句\n')
+  })
+})

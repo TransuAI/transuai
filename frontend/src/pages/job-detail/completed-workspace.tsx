@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { SourcePane } from '@/pages/job-detail/source-pane'
 import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
+import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
 import type { Chapter, Job, Summary, Transcript } from '@/types/api'
@@ -117,15 +118,18 @@ export function CompletedWorkspace({
           </Link>
         </Button>
 
-        <div className="flex items-center gap-2 lg:hidden">
-          <Button variant="outline" size="sm" onClick={() => setSourceOpen(true)}>
-            <FileText className="size-4" />
-            來源
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setStudioOpen(true)}>
-            <Sparkles className="size-4" />
-            Studio
-          </Button>
+        <div className="flex items-center gap-2">
+          <ExportMenu source={{ job, transcript, summary, chapters, qaHistory }} />
+          <div className="flex items-center gap-2 lg:hidden">
+            <Button variant="outline" size="sm" onClick={() => setSourceOpen(true)}>
+              <FileText className="size-4" />
+              來源
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setStudioOpen(true)}>
+              <Sparkles className="size-4" />
+              Studio
+            </Button>
+          </div>
         </div>
       </div>
 
