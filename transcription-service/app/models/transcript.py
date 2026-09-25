@@ -5,9 +5,8 @@ from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-# Schema 對應 ../architecture-design.md 4.3 transcription_db。
-# MVP 階段用 create_all 自動建表，跟 upload-service 的 Hibernate ddl-auto=update 一致，
-# 團隊/流量成長後再導入 Alembic 做版本化 migration。
+# Schema 對應 infra/architecture-design.md 4.3 transcription_db。改了這裡的欄位要一起新增 Alembic
+# migration（app/db/migrations，見 README「資料庫 migration」），服務啟動時才會套用到資料庫。
 
 
 class Base(DeclarativeBase):
