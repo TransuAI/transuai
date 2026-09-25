@@ -23,6 +23,8 @@ service UploadService {
 
   // 取得該 Job 媒體檔案的 presigned download URL，供前端播放器直接讀取；ownership 檢查
   // 方式跟 GetJob 一樣（找不到屬於呼叫端的 Job 就回 NOT_FOUND），不額外驗證。
+  // as_attachment=true 時，URL 會要求物件儲存回 Content-Disposition: attachment（檔名＝Job 的
+  // 原始檔名），供「匯出 → 下載原始檔」使用；預設 false 是給播放器 inline 讀取。
   rpc GetPresignedDownloadUrl(GetPresignedDownloadUrlRequest) returns (GetPresignedDownloadUrlResponse);
 
   // 查詢使用者所有 Job（分頁）。
@@ -98,6 +100,7 @@ message GetJobRequest {
 
 message GetPresignedDownloadUrlRequest {
   string job_id = 1;
+  bool as_attachment = 2;
 }
 
 message GetPresignedDownloadUrlResponse {

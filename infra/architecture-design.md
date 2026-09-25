@@ -110,7 +110,8 @@ auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user
 POST   /uploads/presign         取得物件儲存的 presigned upload URL（尚未建立 Job）
 POST   /uploads/complete        前端上傳完成後呼叫，建立 Job record 並發送 transcription.requested 事件
 GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊
-GET    /jobs/{jobId}/media-url  取得該 Job 媒體檔案的 presigned 播放 URL（見 docs/adr/0002-presigned-get-url-for-media-playback.md）
+GET    /jobs/{jobId}/media-url  取得該 Job 媒體檔案的 presigned 播放 URL（見 docs/adr/0002-presigned-get-url-for-media-playback.md）；
+                                  query download=true 時改給「以附件方式下載、存成原始檔名」的 URL（前端匯出 → 下載原始檔）
 GET    /jobs                    查詢使用者所有 Job（分頁，query: page, pageSize）
 DELETE /jobs/{jobId}            刪除 Job 與相關資料
 ```
@@ -163,8 +164,10 @@ POST   /qa/{jobId}                      RAG 問答（含對話記憶），body {
 [`docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](./docs/adr/0001-sse-via-gateway-for-streaming-qa.md)。
 「對話」的範圍是整個 job，沒有獨立的 conversation/thread 概念，見
 [`ai-service/docs/adr/0002-single-conversation-per-job.md`](../ai-service/docs/adr/0002-single-conversation-per-job.md)。
-原規劃的多格式輸出 API（`POST /export/{jobId}`、`GET /export/{jobId}/{format}`，見下方 8.5）
-還沒實作，ai-service 沒有對應的 rpc，Gateway 這邊也還沒開。
+多格式輸出（LLM 生成會議紀錄等新文件，見下方 8.5）還沒實作，ai-service 沒有對應的 rpc，API 路徑也還沒定——
+刻意**不用** `/export`：「匯出」這個詞已經指前端把既有內容（逐字稿、摘要、章節、問答、原始檔）轉成檔案下載，
+兩者不同（見 `frontend/CONTEXT.md`、`ai-service/CONTEXT.md`）。文字格式的匯出（TXT/SRT/VTT/Markdown、複製）
+在前端產生、沒有後端 API；唯一跟後端有關的是「下載原始檔」用的 media-url `download` 參數（見 3.2）。
 
 ### 3.5 Notification（WebSocket，Gateway 不經手，前端直連 notification-service）
 
@@ -385,7 +388,8 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
    consumer（ai-service/transcription-service/notification-service）連線斷線時有指數退避自動
    重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
 3. **講者分離**：MVP 先不做，`speaker_label` 欄位保留但先不啟用，之後可接 Groq 或其他支援 diarization 的服務
-4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始
+4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始。
+   不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown、複製、下載原始檔）混為一談
 5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
 7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Groq Whisper 時遇到 429/503，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了 Groq 呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。額度監控/告警仍然沒有，還是缺口
@@ -415,7 +419,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
-- **多格式輸出**（會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作
+- **多格式輸出**（LLM 生成會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作，API 路徑待定（不使用 `/export`，見 3.4）
 - **講者分離**：`transcript_segments.speaker_label` 欄位存在但目前一律是 `null`
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
 - **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做
