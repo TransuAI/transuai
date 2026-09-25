@@ -245,6 +245,10 @@ async function renderGappedTranscriptOnDesktop(qaHistory: QaTurn[] = []) {
   return renderedMediaElement()
 }
 
+function searchbox() {
+  return screen.getByRole('searchbox', { name: '搜尋逐字稿' })
+}
+
 function renderedMediaElement() {
   const media = document.querySelector('audio')
   if (!media) throw new Error('media element not rendered')
@@ -454,3 +458,161 @@ describe('JobDetailPage auto-follow (COMPLETED, desktop layout)', () => {
     expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
   })
 })
+
+const searchableTranscript: Transcript = {
+  jobId: 'job-1',
+  language: 'Chinese',
+  fullText: '',
+  segments: [
+    { startTime: 0, endTime: 4, speakerLabel: null, text: '今天先討論預算' },
+    { startTime: 4, endTime: 8, speakerLabel: null, text: '下一季的預算要再確認一次預算上限' },
+    { startTime: 8, endTime: 12, speakerLabel: null, text: '文件放在 API 規格裡' },
+    { startTime: 12, endTime: 16, speakerLabel: null, text: 'api 的版本下週定案' },
+  ],
+}
+
+describe('JobDetailPage transcript search (COMPLETED, desktop layout)', () => {
+  async function renderSearchable() {
+    stubDesktopLayout()
+    await renderCompletedJob(searchableTranscript)
+    await screen.findByText('今天先討論預算', { exact: false })
+    return renderedMediaElement()
+  }
+
+  function highlightedMatches() {
+    return [...document.querySelectorAll('mark')].map((mark) => mark.textContent)
+  }
+
+  it('highlights every match in the transcript and shows which match is selected', async () => {
+    const user = userEvent.setup()
+    await renderSearchable()
+
+    await user.type(searchbox(), '預算')
+
+    expect(highlightedMatches()).toEqual(['預算', '預算', '預算'])
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+  })
+
+  it('steps through matches with the next / previous buttons, wrapping around at either end', async () => {
+    const user = userEvent.setup()
+    await renderSearchable()
+    await user.type(searchbox(), '預算')
+
+    await user.click(screen.getByRole('button', { name: '下一個符合結果' }))
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '下一個符合結果' }))
+    await user.click(screen.getByRole('button', { name: '下一個符合結果' }))
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '上一個符合結果' }))
+    expect(screen.getByText('3 / 3')).toBeInTheDocument()
+  })
+
+  it('moves to the next match on Enter and the previous one on Shift+Enter', async () => {
+    const user = userEvent.setup()
+    await renderSearchable()
+    const input = searchbox()
+    await user.type(input, '預算')
+
+    await user.type(input, '{Enter}')
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    await user.type(input, '{Shift>}{Enter}{/Shift}')
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+  })
+
+  it('clears the search on Escape', async () => {
+    const user = userEvent.setup()
+    await renderSearchable()
+    const input = searchbox()
+    await user.type(input, '預算')
+
+    await user.type(input, '{Escape}')
+
+    expect(input).toHaveValue('')
+    expect(highlightedMatches()).toEqual([])
+    expect(screen.queryByText('1 / 3')).not.toBeInTheDocument()
+  })
+
+  it('only scrolls between matches, without moving the playback position', async () => {
+    const user = userEvent.setup()
+    const media = await renderSearchable()
+    playTo(media, 1)
+    await user.type(searchbox(), '預算')
+
+    await user.click(screen.getByRole('button', { name: '下一個符合結果' }))
+    await user.click(screen.getByRole('button', { name: '下一個符合結果' }))
+
+    expect(media.currentTime).toBe(1)
+  })
+
+  it('pauses auto-follow as soon as the user types a query, and clearing it does not resume', async () => {
+    const user = userEvent.setup()
+    const media = await renderSearchable()
+    playTo(media, 1)
+    const input = searchbox()
+    expect(screen.queryByRole('button', { name: '回到播放位置' })).not.toBeInTheDocument()
+
+    await user.type(input, '預')
+    expect(screen.getByRole('button', { name: '回到播放位置' })).toBeInTheDocument()
+
+    await user.clear(input)
+    expect(screen.getByRole('button', { name: '回到播放位置' })).toBeInTheDocument()
+  })
+
+  it('says so when nothing matches', async () => {
+    const user = userEvent.setup()
+    await renderSearchable()
+
+    await user.type(searchbox(), '颱風')
+
+    expect(screen.getByText('沒有符合的結果')).toBeInTheDocument()
+  })
+
+  it('matches English case-insensitively', async () => {
+    const user = userEvent.setup()
+    await renderSearchable()
+
+    await user.type(searchbox(), 'api')
+
+    expect(highlightedMatches()).toEqual(['API', 'api'])
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+  })
+
+  it('keeps auto-follow paused while stepping between matches, even after jumping to one of them', async () => {
+    const user = userEvent.setup()
+    await renderSearchable()
+    const input = searchbox()
+    await user.type(input, '預算')
+    await user.click(screen.getByRole('button', { name: '0:04' })) // jump to a match: resumes auto-follow
+
+    await user.type(input, '{Enter}')
+
+    expect(screen.getByRole('button', { name: '回到播放位置' })).toBeInTheDocument()
+  })
+})
+
+describe('JobDetailPage transcript search (COMPLETED, narrow viewport)', () => {
+  it('clears a non-empty search on Escape without closing the Source Sheet', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob(searchableTranscript)
+    await user.click(screen.getByRole('button', { name: '來源' }))
+    const input = await screen.findByRole('searchbox', { name: '搜尋逐字稿' })
+    await user.type(input, '預算')
+
+    await user.keyboard('{Escape}')
+
+    expect(searchbox()).toHaveValue('')
+    expect(screen.getByText('今天先討論預算')).toBeInTheDocument()
+  })
+
+  it('still closes the Source Sheet on Escape when the search box is empty', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob(searchableTranscript)
+    await user.click(screen.getByRole('button', { name: '來源' }))
+    await user.click(await screen.findByRole('searchbox', { name: '搜尋逐字稿' }))
+
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('searchbox', { name: '搜尋逐字稿' })).not.toBeInTheDocument()
+  })
+})
+

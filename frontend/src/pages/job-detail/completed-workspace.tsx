@@ -35,6 +35,14 @@ interface CompletedWorkspaceProps {
 // Sheets are force-closed the moment isDesktop flips, computed during render (not a
 // useEffect) so the close happens in the same commit as the grid mounting its own
 // media element, instead of a render later where both could briefly coexist.
+// Esc in a non-empty search box clears the search (TranscriptSearchBar); only an Esc with
+// nothing left to clear closes the Sheet. Radix handles Escape on the document in the capture
+// phase, i.e. before the search box sees it, so the Sheet has to opt out here.
+function keepOpenWhileClearingSearch(event: KeyboardEvent) {
+  const target = event.target
+  if (target instanceof HTMLInputElement && target.type === 'search' && target.value !== '') event.preventDefault()
+}
+
 export function CompletedWorkspace({
   job,
   mediaUrl,
@@ -124,7 +132,7 @@ export function CompletedWorkspace({
       )}
 
       <Sheet open={sourceOpen} onOpenChange={setSourceOpen}>
-        <SheetContent side="left" className="w-full gap-0 p-0 sm:max-w-md">
+        <SheetContent side="left" className="w-full gap-0 p-0 sm:max-w-md" onEscapeKeyDown={keepOpenWhileClearingSearch}>
           <SheetTitle className="sr-only">Source</SheetTitle>
           {sourcePane}
         </SheetContent>

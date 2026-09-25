@@ -57,19 +57,23 @@ Vitest + React Testing Library + `jsdom`。測試一律 mock `src/lib/api.ts`（
 src/
   components/
     ui/              shadcn/ui 元件(不手動改,要改用 npx shadcn add --overwrite)
-    layout/          AppShell(頂部導覽列 + 使用者選單)
+    layout/          AppShell、Sidebar(導覽、使用者選單;Job Detail 頁自動收成 icon rail)、深色模式切換
     job-status-badge.tsx
     protected-route.tsx
   context/
     auth-context.tsx  登入狀態、token 儲存、自動載入 /auth/me
   hooks/
+    use-auto-follow.ts 自動跟隨的兩態狀態(跟隨中 / 已暫停)與 pause / resume
     use-job-socket.ts  WebSocket 訂閱單一 job 狀態更新,斷線自動重連
+    use-media-query.ts matchMedia 的 hook(工作區用它判斷桌面 / 手機版面)
+    use-transcript-search.ts 逐字稿搜尋狀態(query、符合結果、選中的那個、上一個 / 下一個);輸入或切換結果時暫停自動跟隨
   lib/
     api-client.ts     fetch wrapper(auth header、401 refresh-and-retry、錯誤格式)+ requestSse(手動解析 SSE frame,問答 streaming 用)
     api.ts            對應 Gateway 每支 REST API 的函式
     auth-storage.ts    token/user 存 localStorage
     current-segment.ts 依播放時間找出「目前片段」(定義見 CONTEXT.md),二分搜尋
     media.ts           檔案型別判斷、讀取媒體長度、格式化工具
+    transcript-search.ts 逐字稿搜尋比對:只比對片段文字、英文不分大小寫、不跨片段;依片段分組
   pages/
     login-page.tsx / register-page.tsx
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete
@@ -80,7 +84,8 @@ src/
       source-pane.tsx          來源欄:檔案資訊、播放器、逐字稿
       chat-pane.tsx            問答欄
       studio-pane.tsx          Studio 欄:AI 摘要、章節
-      transcript-view.tsx      逐字稿列表:目前片段高亮、自動跟隨(目前片段離開視野中段才平滑捲回中間;使用者滾輪 / 觸控 / 捲動鍵 / 拖曳捲軸時暫停,顯示「回到播放位置」)
+      transcript-search-bar.tsx 逐字稿搜尋列(搜尋框、n / N、上一個 / 下一個;Enter / Shift+Enter / Esc)
+      transcript-view.tsx      逐字稿列表:目前片段高亮、自動跟隨(目前片段離開視野中段才平滑捲回中間;使用者滾輪 / 觸控 / 捲動鍵 / 拖曳捲軸時暫停,顯示「回到播放位置」)、搜尋結果的高亮與捲動(只捲動不改播放位置)
   test/
     setup.ts            Vitest 共用設定:jest-dom matcher、每則測試後 cleanup,以及 jsdom 沒實作的 ResizeObserver / matchMedia / 元素 scrollTo stub
   types/
@@ -90,4 +95,4 @@ src/
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
-- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復)跟 sidebar / 深色模式;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
+- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋)跟 sidebar / 深色模式;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
