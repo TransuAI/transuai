@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { Pencil } from 'lucide-react'
+import { Pencil, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDuration } from '@/lib/media'
 import type { TranscriptMatch } from '@/lib/transcript-search'
@@ -43,7 +43,9 @@ interface SegmentRowProps {
 }
 
 // One 片段 of the transcript: its timestamp (click to seek), its text (search matches
-// highlighted) and, while it's being edited (編輯), an in-place editor.
+// highlighted) and, while it's being edited (編輯), an in-place editor. An 已編輯片段 (text differs
+// from the original text) carries a small marker and can be restored; an 已清空片段 (empty text)
+// is a faint 「已清空 · 還原」 row that keeps its time range (it can still be the current segment).
 export function SegmentRow({
   segment,
   index,
@@ -65,6 +67,35 @@ export function SegmentRow({
     if (wasEditingRef.current && !isEditing) editButtonRef.current?.focus()
     wasEditingRef.current = isEditing
   }, [isEditing])
+  // Same after a restore: the 還原 button that had focus is gone once the text changes.
+  const focusEditButtonRef = useRef(false)
+  useEffect(() => {
+    if (focusEditButtonRef.current) {
+      editButtonRef.current?.focus()
+      focusEditButtonRef.current = false
+    }
+  })
+
+  const isCleared = segment.text === ''
+  const isEdited = !isCleared && segment.text !== segment.originalText
+  // A cleared segment the transcriber had already left empty has nothing to go back to. (An edited
+  // one always does — even if restoring it means clearing it again.)
+  const canRestoreCleared = isCleared && segment.originalText !== ''
+  const [isRestoring, setIsRestoring] = useState(false)
+  // Restoring is an edit like any other: the original text goes back through the same save.
+  const restore = async () => {
+    setIsRestoring(true)
+    try {
+      await onSave(segment.originalText)
+      focusEditButtonRef.current = true
+    } catch {
+      toast.error('還原失敗')
+    } finally {
+      setIsRestoring(false)
+    }
+  }
+  const hoverAction =
+    'h-fit shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 pointer-coarse:opacity-100'
 
   return (
     <div
@@ -85,12 +116,49 @@ export function SegmentRow({
       </button>
       {isEditing ? (
         <SegmentEditor initialText={segment.text} onSave={onSave} onDone={onEndEdit} />
+      ) : isCleared ? (
+        <p className="min-w-0 flex-1 leading-relaxed text-muted-foreground/70">
+          <span>已清空</span>
+          {canRestoreCleared && (
+            <>
+              {' · '}
+              <button
+                type="button"
+                // Named after what comes back, so a list of cleared rows can be told apart.
+                aria-label={`還原：${segment.originalText}`}
+                disabled={isRestoring}
+                onClick={() => void restore()}
+                className="underline-offset-2 hover:underline disabled:opacity-60"
+              >
+                還原
+              </button>
+            </>
+          )}
+        </p>
       ) : (
         <>
           <p className="min-w-0 flex-1 leading-relaxed">
             {segment.speakerLabel && <span className="mr-1 font-medium">{segment.speakerLabel}:</span>}
             <HighlightedText text={segment.text} matches={matches} activeStart={activeMatchStart} />
+            {isEdited && (
+              <span className="ml-1.5 rounded bg-muted px-1 align-middle text-xs text-muted-foreground">
+                {/* Read as 「…（已編輯）」 rather than run into the text. */}
+                <span className="sr-only">（</span>已編輯<span className="sr-only">）</span>
+              </span>
+            )}
           </p>
+          {isEdited && (
+            <button
+              type="button"
+              aria-label="還原成原始文字"
+              title={segment.originalText}
+              disabled={isRestoring}
+              onClick={() => void restore()}
+              className={cn(hoverAction, 'disabled:opacity-60')}
+            >
+              <Undo2 className="size-3.5" />
+            </button>
+          )}
           <button
             ref={editButtonRef}
             type="button"
@@ -98,7 +166,7 @@ export function SegmentRow({
             onClick={onStartEdit}
             // Shown on hover or when keyboard focus is anywhere in the segment; always shown on touch
             // screens, which have no hover.
-            className="h-fit shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 pointer-coarse:opacity-100"
+            className={hoverAction}
           >
             <Pencil className="size-3.5" />
           </button>

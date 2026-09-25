@@ -1058,3 +1058,131 @@ describe('JobDetailPage segment editing (COMPLETED, desktop layout)', () => {
     expect(await screen.findByText('2 / 2')).toBeInTheDocument()
   })
 })
+
+describe('JobDetailPage edited and cleared segments (COMPLETED, desktop layout)', () => {
+  const editedTranscript: Transcript = {
+    ...gappedTranscript,
+    revision: 2,
+    segments: [
+      { id: 'seg-a', startTime: 5, endTime: 8, speakerLabel: null, text: '強風豪雨', originalText: '強風好雨' },
+      { id: 'seg-b', startTime: 8, endTime: 10, speakerLabel: null, text: '', originalText: '請不吝點讚訂閱' },
+      { id: 'seg-c', startTime: 12, endTime: 15, speakerLabel: null, text: '沒改過', originalText: '沒改過' },
+    ],
+  }
+
+  async function renderEdited() {
+    stubDesktopLayout()
+    await renderCompletedJob(editedTranscript)
+    await screen.findByText('強風豪雨')
+  }
+
+  function row(index: number) {
+    const element = document.querySelector(`[data-segment-index="${index}"]`)
+    if (!(element instanceof HTMLElement)) throw new Error(`no segment row ${index}`)
+    return within(element)
+  }
+
+  it('marks a segment whose text differs from the original text, and only that one', async () => {
+    await renderEdited()
+
+    expect(row(0).getByText('已編輯')).toBeInTheDocument()
+    expect(row(2).queryByText('已編輯')).not.toBeInTheDocument()
+    expect(row(2).queryByRole('button', { name: '還原成原始文字' })).not.toBeInTheDocument()
+  })
+
+  it('restores an edited segment to its original text', async () => {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockResolvedValue({
+      segment: { ...editedTranscript.segments[0], text: '強風好雨' },
+      revision: 3,
+    })
+    await renderEdited()
+
+    await user.click(row(0).getByRole('button', { name: '還原成原始文字' }))
+
+    expect(transcriptApi.updateSegmentText).toHaveBeenCalledWith('job-1', 'seg-a', '強風好雨')
+    expect(await screen.findByText('強風好雨')).toBeInTheDocument()
+    expect(row(0).queryByText('已編輯')).not.toBeInTheDocument()
+  })
+
+  it('shows a cleared segment as a faint row that can be restored', async () => {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockResolvedValue({
+      segment: { ...editedTranscript.segments[1], text: '請不吝點讚訂閱' },
+      revision: 3,
+    })
+    await renderEdited()
+
+    expect(row(1).getByText('已清空')).toBeInTheDocument()
+    expect(screen.queryByText('請不吝點讚訂閱')).not.toBeInTheDocument()
+
+    await user.click(row(1).getByRole('button', { name: '還原：請不吝點讚訂閱' }))
+
+    expect(transcriptApi.updateSegmentText).toHaveBeenCalledWith('job-1', 'seg-b', '請不吝點讚訂閱')
+    expect(await screen.findByText('請不吝點讚訂閱')).toBeInTheDocument()
+  })
+
+  it('does not find a cleared segment when searching', async () => {
+    const user = userEvent.setup()
+    await renderEdited()
+
+    await user.type(searchbox(), '點讚')
+
+    expect(screen.getByText('沒有符合的結果')).toBeInTheDocument()
+  })
+
+  it('clears a segment when its text is saved empty', async () => {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockResolvedValue({
+      segment: { ...editedTranscript.segments[2], text: '' },
+      revision: 3,
+    })
+    await renderEdited()
+
+    await user.click(row(2).getByRole('button', { name: '編輯片段' }))
+    await user.clear(screen.getByRole('textbox', { name: '編輯片段文字' }))
+    await user.keyboard('{Enter}')
+
+    expect(transcriptApi.updateSegmentText).toHaveBeenCalledWith('job-1', 'seg-c', '')
+    expect(await row(2).findByText('已清空')).toBeInTheDocument()
+  })
+
+  it('still highlights a cleared segment when playback is inside it', async () => {
+    await renderEdited()
+
+    playTo(renderedMediaElement(), 9)
+
+    expect(currentSegmentText()).toContain('已清空')
+  })
+
+  it('gives focus back to the segment and blocks a second click while restoring', async () => {
+    const user = userEvent.setup()
+    let finishRestore: () => void = () => {}
+    vi.mocked(transcriptApi.updateSegmentText).mockReturnValue(
+      new Promise((resolve) => {
+        finishRestore = () => resolve({ segment: { ...editedTranscript.segments[0], text: '強風好雨' }, revision: 3 })
+      }),
+    )
+    await renderEdited()
+
+    const restore = row(0).getByRole('button', { name: '還原成原始文字' })
+    await user.click(restore)
+    expect(restore).toBeDisabled()
+    finishRestore()
+
+    await screen.findByText('強風好雨')
+    expect(row(0).getByRole('button', { name: '編輯片段' })).toHaveFocus()
+    expect(transcriptApi.updateSegmentText).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers no restore for a segment whose original text was empty to begin with', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob({
+      ...editedTranscript,
+      segments: [{ id: 'seg-z', startTime: 5, endTime: 8, speakerLabel: null, text: '', originalText: '' }],
+    })
+    await screen.findByText('已清空')
+
+    expect(row(0).queryByRole('button', { name: /^還原/ })).not.toBeInTheDocument()
+  })
+})
