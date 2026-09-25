@@ -75,11 +75,15 @@ public class UploadController {
                 return UploadMapper.toDto(job);
         }
 
+        // download=true：URL 會讓瀏覽器直接下載、存成原始檔名（匯出 → 下載原始檔）；預設給播放器 inline 讀取。
         @GetMapping("/jobs/{jobId}/media-url")
-        public MediaUrlDto getMediaUrl(@CurrentUserId UUID userId, @PathVariable String jobId) {
+        public MediaUrlDto getMediaUrl(@CurrentUserId UUID userId, @PathVariable String jobId,
+                        @RequestParam(defaultValue = "false") boolean download) {
                 GetPresignedDownloadUrlResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
-                                .getPresignedDownloadUrl(
-                                                GetPresignedDownloadUrlRequest.newBuilder().setJobId(jobId).build());
+                                .getPresignedDownloadUrl(GetPresignedDownloadUrlRequest.newBuilder()
+                                                .setJobId(jobId)
+                                                .setAsAttachment(download)
+                                                .build());
                 return new MediaUrlDto(response.getDownloadUrl(), GrpcTimestamps.toInstant(response.getExpiresAt()));
         }
 
