@@ -126,7 +126,7 @@ pending → uploading → uploaded → transcribing → transcribed
 
 ```
 GET    /transcripts/{jobId}            取得逐字稿全文（含片段 timestamp）
-GET    /transcripts/{jobId}/segments   取得片段列表（用於前端字幕同步捲動）
+GET    /transcripts/{jobId}/segments   只取片段列表（前端目前沒有用這支：播放同步直接用上面那支的 segments）
 ```
 
 底層對應 gRPC 只有一支 `GetTranscript`（查詢用），兩個 REST endpoint 都是 Gateway 呼叫同一支
