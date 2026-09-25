@@ -64,7 +64,7 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 
 不對外開放，純內部服務對服務呼叫（對應 [`architecture-design.md`](../architecture-design.md) 3.3，原本文件寫的是 REST，這裡改成跟平台其他服務一致的 gRPC）：
 
-`TranscriptionService`（`transuai.transcription.v1`，見 [`proto/transcription.proto`](proto/transcription.proto)）：
+`TranscriptionService`（`transuai.transcription.v1`，見 [`../infra/proto/transcription.proto`](../infra/proto/transcription.proto)）：
 
 | RPC             | 說明                                                                                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------- |
@@ -103,7 +103,7 @@ Mock 一定要 patch 在 `app/services/pipeline.py`「使用端」import 進來�
 
 ## 重新產生 gRPC stub
 
-兩份 proto 都要編：`upload.proto`（在 `../upload-service/src/main/proto/upload.proto`，呼叫它的 `InternalJobService`）跟 `proto/transcription.proto`（這個 repo 自己的 API 規格）：
+兩份 proto 都要編，都在 `../infra/proto`：`upload.proto`（呼叫 upload-service 的 `InternalJobService`）跟 `transcription.proto`（這個 repo 自己的 API 規格）：
 
 ```bash
 ./scripts/generate_grpc.sh
@@ -138,7 +138,6 @@ app/
   db/
     session.py                               engine / session / create_all
   proto_gen/                                  gRPC stub 產物（由 scripts/generate_grpc.sh 產生）
-proto/transcription.proto                   這個服務自己的 API 規格（唯一來源）
 scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```
 

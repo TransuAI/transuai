@@ -107,6 +107,22 @@ class GetJobRequest(_message.Message):
     job_id: str
     def __init__(self, job_id: _Optional[str] = ...) -> None: ...
 
+class GetPresignedDownloadUrlRequest(_message.Message):
+    __slots__ = ("job_id", "as_attachment")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    AS_ATTACHMENT_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    as_attachment: bool
+    def __init__(self, job_id: _Optional[str] = ..., as_attachment: _Optional[bool] = ...) -> None: ...
+
+class GetPresignedDownloadUrlResponse(_message.Message):
+    __slots__ = ("download_url", "expires_at")
+    DOWNLOAD_URL_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_AT_FIELD_NUMBER: _ClassVar[int]
+    download_url: str
+    expires_at: _timestamp_pb2.Timestamp
+    def __init__(self, download_url: _Optional[str] = ..., expires_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
 class ListJobsRequest(_message.Message):
     __slots__ = ("page", "page_size")
     PAGE_FIELD_NUMBER: _ClassVar[int]
