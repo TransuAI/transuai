@@ -13,7 +13,7 @@ vi.mock('@/lib/api', () => ({
       .fn()
       .mockResolvedValue({ downloadUrl: 'https://media.example.com/uploads/interview.mp3', expiresAt: '2026-01-01T01:00:00Z' }),
   },
-  transcriptApi: { get: vi.fn() },
+  transcriptApi: { get: vi.fn(), updateSegmentText: vi.fn() },
   summaryApi: { get: vi.fn() },
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
@@ -27,6 +27,8 @@ let JobDetailPage: typeof import('./job-detail-page').JobDetailPage
 
 afterEach(() => {
   vi.restoreAllMocks()
+  // Only forgets recorded calls (implementations stay), so "was not called" holds per test.
+  vi.clearAllMocks()
 })
 
 beforeAll(async () => {
@@ -62,7 +64,8 @@ const mockTranscript: Transcript = {
   jobId: 'job-1',
   language: 'zh',
   fullText: 'hello world',
-  segments: [{ startTime: 5, endTime: 8, speakerLabel: 'A', text: '哈囉世界' }],
+  revision: 0,
+  segments: [{ id: 'seg-1', startTime: 5, endTime: 8, speakerLabel: 'A', text: '哈囉世界', originalText: '哈囉世界' }],
 }
 
 const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容' }
@@ -266,10 +269,11 @@ const gappedTranscript: Transcript = {
   jobId: 'job-1',
   language: 'Chinese',
   fullText: '第一句 第二句 第三句',
+  revision: 0,
   segments: [
-    { startTime: 5, endTime: 8, speakerLabel: null, text: '第一句' },
-    { startTime: 8, endTime: 10, speakerLabel: null, text: '第二句' },
-    { startTime: 12, endTime: 15, speakerLabel: null, text: '第三句' },
+    { id: 'seg-2', startTime: 5, endTime: 8, speakerLabel: null, text: '第一句', originalText: '第一句' },
+    { id: 'seg-3', startTime: 8, endTime: 10, speakerLabel: null, text: '第二句', originalText: '第二句' },
+    { id: 'seg-4', startTime: 12, endTime: 15, speakerLabel: null, text: '第三句', originalText: '第三句' },
   ],
 }
 
@@ -500,11 +504,12 @@ const searchableTranscript: Transcript = {
   jobId: 'job-1',
   language: 'Chinese',
   fullText: '',
+  revision: 0,
   segments: [
-    { startTime: 0, endTime: 4, speakerLabel: null, text: '今天先討論預算' },
-    { startTime: 4, endTime: 8, speakerLabel: null, text: '下一季的預算要再確認一次預算上限' },
-    { startTime: 8, endTime: 12, speakerLabel: null, text: '文件放在 API 規格裡' },
-    { startTime: 12, endTime: 16, speakerLabel: null, text: 'api 的版本下週定案' },
+    { id: 'seg-5', startTime: 0, endTime: 4, speakerLabel: null, text: '今天先討論預算', originalText: '今天先討論預算' },
+    { id: 'seg-6', startTime: 4, endTime: 8, speakerLabel: null, text: '下一季的預算要再確認一次預算上限', originalText: '下一季的預算要再確認一次預算上限' },
+    { id: 'seg-7', startTime: 8, endTime: 12, speakerLabel: null, text: '文件放在 API 規格裡', originalText: '文件放在 API 規格裡' },
+    { id: 'seg-8', startTime: 12, endTime: 16, speakerLabel: null, text: 'api 的版本下週定案', originalText: 'api 的版本下週定案' },
   ],
 }
 
@@ -897,5 +902,159 @@ describe('JobDetailPage export menu', () => {
         { href: 'https://media.example.com/uploads/interview.mp3?response-content-disposition=attachment', download: '' },
       ]),
     )
+  })
+})
+
+describe('JobDetailPage segment editing (COMPLETED, desktop layout)', () => {
+  function editButtonFor(text: string) {
+    const row = screen.getByText(text).closest('[data-segment-index]')
+    if (!(row instanceof HTMLElement)) throw new Error(`no segment row for ${text}`)
+    return within(row).getByRole('button', { name: '編輯片段' })
+  }
+
+  it('edits a segment in place and saves it on Enter', async () => {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockResolvedValue({
+      segment: { id: 'seg-3', startTime: 8, endTime: 10, speakerLabel: null, text: '第二句改好了', originalText: '第二句' },
+      revision: 1,
+    })
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(editButtonFor('第二句'))
+    const editor = screen.getByRole('textbox', { name: '編輯片段文字' })
+    expect(editor).toHaveValue('第二句')
+    await user.clear(editor)
+    await user.type(editor, '第二句改好了{Enter}')
+
+    expect(transcriptApi.updateSegmentText).toHaveBeenCalledWith('job-1', 'seg-3', '第二句改好了')
+    expect(await screen.findByText('第二句改好了')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '編輯片段文字' })).not.toBeInTheDocument()
+  })
+
+  it('cancels editing on Escape without saving', async () => {
+    const user = userEvent.setup()
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(editButtonFor('第二句'))
+    await user.type(screen.getByRole('textbox', { name: '編輯片段文字' }), '亂打{Escape}')
+
+    expect(transcriptApi.updateSegmentText).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: '編輯片段文字' })).not.toBeInTheDocument()
+    expect(screen.getByText('第二句')).toBeInTheDocument()
+  })
+
+  it('keeps what the user typed and says so when saving fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockRejectedValue(new Error('network'))
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(editButtonFor('第二句'))
+    const editor = screen.getByRole('textbox', { name: '編輯片段文字' })
+    await user.clear(editor)
+    await user.type(editor, '沒存到{Enter}')
+
+    expect(await screen.findByText('儲存失敗')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '編輯片段文字' })).toHaveValue('沒存到')
+  })
+
+  it('shows that it is saving and blocks further input meanwhile', async () => {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockReturnValue(new Promise(() => {}))
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(editButtonFor('第二句'))
+    await user.type(screen.getByRole('textbox', { name: '編輯片段文字' }), '改{Enter}')
+
+    expect(screen.getByRole('textbox', { name: '編輯片段文字' })).toBeDisabled()
+    expect(screen.getByText('儲存中…')).toBeInTheDocument()
+  })
+
+  it('pauses auto-follow while editing, without pausing playback', async () => {
+    const user = userEvent.setup()
+    const media = await renderGappedTranscriptOnDesktop()
+    playTo(media, 9)
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause')
+
+    await user.click(editButtonFor('第一句'))
+
+    expect(screen.getByRole('button', { name: '回到播放位置' })).toBeInTheDocument()
+    expect(pause).not.toHaveBeenCalled()
+  })
+
+  it('cancels an edit on Escape inside the Source Sheet without closing the Sheet (narrow viewport)', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob(gappedTranscript)
+    await user.click(screen.getByRole('button', { name: '來源' }))
+    await screen.findByText('第二句')
+
+    await user.click(editButtonFor('第二句'))
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('textbox', { name: '編輯片段文字' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('第二句')).toBeInTheDocument()
+  })
+
+  it('does not close the editor of another segment when an earlier save finishes', async () => {
+    const user = userEvent.setup()
+    let finishFirstSave: () => void = () => {}
+    vi.mocked(transcriptApi.updateSegmentText).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishFirstSave = () =>
+          resolve({
+            segment: { id: 'seg-2', startTime: 5, endTime: 8, speakerLabel: null, text: '第一句改', originalText: '第一句' },
+            revision: 1,
+          })
+      }),
+    )
+    await renderGappedTranscriptOnDesktop()
+    await user.click(editButtonFor('第一句'))
+    await user.type(screen.getByRole('textbox', { name: '編輯片段文字' }), '改{Enter}')
+
+    await user.click(editButtonFor('第三句'))
+    finishFirstSave()
+
+    expect(await screen.findByText('第一句改')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '編輯片段文字' })).toHaveValue('第三句')
+  })
+
+  it('does not send anything when Enter is pressed without a change', async () => {
+    const user = userEvent.setup()
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(editButtonFor('第二句'))
+    await user.type(screen.getByRole('textbox', { name: '編輯片段文字' }), '{Enter}')
+
+    expect(transcriptApi.updateSegmentText).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: '編輯片段文字' })).not.toBeInTheDocument()
+  })
+
+  it("gives keyboard focus back to the segment's edit button when the editor closes", async () => {
+    const user = userEvent.setup()
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(editButtonFor('第二句'))
+    await user.keyboard('{Escape}')
+
+    expect(editButtonFor('第二句')).toHaveFocus()
+  })
+
+  it('keeps the search counter within the matches that remain after an edit', async () => {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockResolvedValue({
+      segment: { id: 'seg-4', startTime: 12, endTime: 15, speakerLabel: null, text: '最後一段', originalText: '第三句' },
+      revision: 1,
+    })
+    await renderGappedTranscriptOnDesktop()
+    await user.type(searchbox(), '句')
+    await user.click(screen.getByRole('button', { name: '上一個符合結果' }))
+    expect(screen.getByText('3 / 3')).toBeInTheDocument()
+
+    // The search highlights split 「第三句」 into several elements, so pick the third segment's button.
+    await user.click(screen.getAllByRole('button', { name: '編輯片段' })[2])
+    const editor = screen.getByRole('textbox', { name: '編輯片段文字' })
+    await user.clear(editor)
+    await user.type(editor, '最後一段{Enter}')
+
+    expect(await screen.findByText('2 / 2')).toBeInTheDocument()
   })
 })

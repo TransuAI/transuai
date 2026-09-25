@@ -28,15 +28,16 @@ interface CompletedWorkspaceProps {
   isAsking: boolean
   onAsk: () => void
   onSeek: (seconds: number) => void
+  onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   setMediaRef: (el: HTMLMediaElement | null) => void
 }
 
-// Esc in a non-empty search box clears the search (TranscriptSearchBar); only an Esc with
-// nothing left to clear closes the Sheet. Radix handles Escape on the document in the capture
-// phase, i.e. before the search box sees it, so the Sheet has to opt out here.
-function keepOpenWhileClearingSearch(event: KeyboardEvent) {
-  const target = event.target
-  if (target instanceof HTMLInputElement && target.type === 'search' && target.value !== '') event.preventDefault()
+// Some controls give Esc a meaning of their own and mark themselves with data-consumes-escape:
+// the search box while it has a query (Esc clears it), a segment editor (Esc cancels the edit).
+// Only an Esc from anywhere else closes the Sheet. Radix handles Escape on the document in the
+// capture phase, i.e. before those controls see it, so the Sheet has to opt out here.
+function keepOpenForControlsThatConsumeEscape(event: KeyboardEvent) {
+  if (event.target instanceof Element && event.target.closest('[data-consumes-escape]')) event.preventDefault()
 }
 
 // Radix focuses the first focusable element when a Sheet opens — for the Source Sheet that's
@@ -70,6 +71,7 @@ export function CompletedWorkspace({
   isAsking,
   onAsk,
   onSeek,
+  onSaveSegmentText,
   setMediaRef,
 }: CompletedWorkspaceProps) {
   const isDesktop = useMediaQuery('(min-width: 1024px)')
@@ -85,7 +87,7 @@ export function CompletedWorkspace({
     }
   }
 
-  const sourcePaneProps = { job, transcript, currentSegmentIndex, autoFollow, mediaAvailable, onSeek }
+  const sourcePaneProps = { job, transcript, currentSegmentIndex, autoFollow, mediaAvailable, onSeek, onSaveSegmentText }
   const desktopPlayer =
     mediaUrl &&
     (job.fileType === 'VIDEO' ? (
@@ -158,7 +160,7 @@ export function CompletedWorkspace({
         <SheetContent
           side="left"
           className="w-full gap-0 p-0 sm:max-w-md"
-          onEscapeKeyDown={keepOpenWhileClearingSearch}
+          onEscapeKeyDown={keepOpenForControlsThatConsumeEscape}
           onOpenAutoFocus={focusSheetInsteadOfSearch}
         >
           <SheetTitle className="sr-only">Source</SheetTitle>

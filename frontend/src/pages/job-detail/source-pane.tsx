@@ -16,6 +16,7 @@ interface SourcePaneProps {
   autoFollow: AutoFollow
   mediaAvailable: boolean
   onSeek: (seconds: number) => void
+  onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
 }
 
 export function SourcePane({
@@ -26,6 +27,7 @@ export function SourcePane({
   autoFollow,
   mediaAvailable,
   onSeek,
+  onSaveSegmentText,
 }: SourcePaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -48,6 +50,7 @@ export function SourcePane({
             autoFollow={autoFollow}
             mediaAvailable={mediaAvailable}
             onSeek={onSeek}
+            onSaveSegmentText={onSaveSegmentText}
           />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">

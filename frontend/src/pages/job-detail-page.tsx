@@ -152,6 +152,18 @@ export function JobDetailPage() {
     resumeFollow()
   }
 
+  // 編輯（見 transcription-service CONTEXT.md）：存檔後用回應的片段跟版本號更新逐字稿。失敗時
+  // 讓錯誤往外拋，編輯器會保留使用者打的字並提示。
+  const handleSaveSegmentText = async (segmentId: string, text: string) => {
+    if (!jobId) return
+    const { segment, revision } = await transcriptApi.updateSegmentText(jobId, segmentId, text)
+    setTranscript((prev) =>
+      prev
+        ? { ...prev, revision, segments: prev.segments.map((s) => (s.id === segment.id ? segment : s)) }
+        : prev,
+    )
+  }
+
   const handleAskQuestion = () => {
     const question = questionInput.trim()
     if (!jobId || !question || isAsking) return
@@ -276,6 +288,7 @@ export function JobDetailPage() {
       isAsking={isAsking}
       onAsk={handleAskQuestion}
       onSeek={seekTo}
+      onSaveSegmentText={handleSaveSegmentText}
       setMediaRef={setMediaElement}
     />
   )

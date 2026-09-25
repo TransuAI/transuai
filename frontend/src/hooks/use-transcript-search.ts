@@ -20,6 +20,8 @@ export function useTranscriptSearch(segments: TranscriptSegment[], pauseFollow: 
   const [activeMatchIndex, setActiveMatchIndex] = useState(0)
   const matches = useMemo(() => findTranscriptMatches(segments, query), [segments, query])
   const matchesBySegment = useMemo(() => groupMatchesBySegment(matches), [matches])
+  // Editing a segment can remove matches; keep the selection within the ones that remain.
+  const selectedIndex = matches.length === 0 ? 0 : Math.min(activeMatchIndex, matches.length - 1)
 
   const changeQuery = (value: string) => {
     setQuery(value)
@@ -29,7 +31,7 @@ export function useTranscriptSearch(segments: TranscriptSegment[], pauseFollow: 
 
   const step = (direction: 1 | -1) => {
     if (matches.length === 0) return
-    setActiveMatchIndex((index) => (index + direction + matches.length) % matches.length)
+    setActiveMatchIndex((selectedIndex + direction + matches.length) % matches.length)
     pauseFollow()
   }
 
@@ -37,8 +39,8 @@ export function useTranscriptSearch(segments: TranscriptSegment[], pauseFollow: 
     query,
     changeQuery,
     matchCount: matches.length,
-    activeMatchIndex,
-    activeMatch: matches[activeMatchIndex] ?? null,
+    activeMatchIndex: selectedIndex,
+    activeMatch: matches[selectedIndex] ?? null,
     matchesBySegment,
     step,
   }

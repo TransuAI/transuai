@@ -22,6 +22,8 @@ export function TranscriptSearchBar({ search }: { search: TranscriptSearch }) {
       <Input
         type="search"
         aria-label="搜尋逐字稿"
+        // While there's a query, Esc clears it instead of closing the Source Sheet.
+        data-consumes-escape={query !== '' ? '' : undefined}
         placeholder="搜尋逐字稿"
         value={query}
         onChange={(event) => changeQuery(event.target.value)}

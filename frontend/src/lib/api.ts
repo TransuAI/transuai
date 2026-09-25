@@ -7,6 +7,7 @@ import type {
   MediaUrlResponse,
   PresignResponse,
   QaTurn,
+  SegmentUpdate,
   Summary,
   Transcript,
   User,
@@ -55,6 +56,10 @@ export const jobsApi = {
 
 export const transcriptApi = {
   get: (jobId: string) => apiFetch<Transcript>(`/transcripts/${jobId}`),
+
+  // 編輯片段文字：空字串＝清空、送回 originalText＝還原。
+  updateSegmentText: (jobId: string, segmentId: string, text: string) =>
+    apiFetch<SegmentUpdate>(`/transcripts/${jobId}/segments/${segmentId}`, { method: 'PATCH', body: { text } }),
 }
 
 export const summaryApi = {

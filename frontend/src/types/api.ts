@@ -56,10 +56,14 @@ export interface MediaUrlResponse {
 }
 
 export interface TranscriptSegment {
+  id: string
   startTime: number
   endTime: number
   speakerLabel: string | null
+  /** Current text; an empty string is a cleared segment (已清空片段). */
   text: string
+  /** The machine output before any edit (原始文字), for restoring. */
+  originalText: string
 }
 
 export interface Transcript {
@@ -67,6 +71,13 @@ export interface Transcript {
   language: string | null
   fullText: string
   segments: TranscriptSegment[]
+  /** +1 on every edit — what an AI output's source revision is checked against to tell whether it's 過時. */
+  revision: number
+}
+
+export interface SegmentUpdate {
+  segment: TranscriptSegment
+  revision: number
 }
 
 export interface Summary {
