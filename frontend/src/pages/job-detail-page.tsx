@@ -8,6 +8,7 @@ import { findCurrentSegmentIndex } from '@/lib/current-segment'
 import { formatBytes, formatDuration } from '@/lib/media'
 import { useAutoFollow } from '@/hooks/use-auto-follow'
 import { useJobSocket } from '@/hooks/use-job-socket'
+import { usePlaybackContinuity } from '@/hooks/use-playback-continuity'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -85,10 +86,14 @@ export function JobDetailPage() {
     }
   }, [jobId, jobStatus])
 
+  // Must run before the current-segment sync below, so that sync already reads the position
+  // restored onto a remounted media element.
+  usePlaybackContinuity(mediaElement)
+
   // Only the current segment index is kept in state (not the raw playback time), so the
   // workspace re-renders when playback crosses into another segment, not on every
-  // ~250ms timeupdate. Syncing once on attach matters: a remounted player (Sheet reopened,
-  // layout switch) starts from its own currentTime, not the previous element's.
+  // ~250ms timeupdate. Syncing once on attach matters: a remounted player (layout switch)
+  // has to be read from its own, restored currentTime.
   useEffect(() => {
     if (!mediaElement || !transcript) {
       setCurrentSegmentIndex(null)

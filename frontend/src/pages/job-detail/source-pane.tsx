@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { FileText } from 'lucide-react'
 import { formatBytes, formatDuration } from '@/lib/media'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
@@ -8,21 +9,22 @@ import type { Job, Transcript } from '@/types/api'
 
 interface SourcePaneProps {
   job: Job
-  mediaUrl: string | undefined
+  /** The media element, when this copy of the pane owns it (the desktop grid); omitted in the Source Sheet. */
+  player?: ReactNode
   transcript: Transcript | null
   currentSegmentIndex: number | null
   autoFollow: AutoFollow
-  setMediaRef: (el: HTMLMediaElement | null) => void
+  mediaAvailable: boolean
   onSeek: (seconds: number) => void
 }
 
 export function SourcePane({
   job,
-  mediaUrl,
+  player,
   transcript,
   currentSegmentIndex,
   autoFollow,
-  setMediaRef,
+  mediaAvailable,
   onSeek,
 }: SourcePaneProps) {
   return (
@@ -36,12 +38,7 @@ export function SourcePane({
           {formatBytes(job.fileSizeBytes)} · {formatDuration(job.durationSeconds)} ·{' '}
           {new Date(job.createdAt).toLocaleString()}
         </p>
-        {mediaUrl &&
-          (job.fileType === 'VIDEO' ? (
-            <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-md" />
-          ) : (
-            <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
-          ))}
+        {player}
       </CardHeader>
       <CardContent className="min-h-0 flex-1 pt-4">
         {transcript ? (
@@ -49,7 +46,7 @@ export function SourcePane({
             segments={transcript.segments}
             currentSegmentIndex={currentSegmentIndex}
             autoFollow={autoFollow}
-            mediaAvailable={Boolean(mediaUrl)}
+            mediaAvailable={mediaAvailable}
             onSeek={onSeek}
           />
         ) : (

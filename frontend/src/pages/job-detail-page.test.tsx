@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -67,8 +67,12 @@ const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容'
 
 const mockChapters: Chapter[] = [{ id: 'ch-1', jobId: 'job-1', title: '開場', startTime: 12, sequenceNo: 0 }]
 
-async function renderCompletedJob(transcript: Transcript = mockTranscript, qaHistory: QaTurn[] = []) {
-  vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
+async function renderCompletedJob(
+  transcript: Transcript = mockTranscript,
+  qaHistory: QaTurn[] = [],
+  job: Partial<Job> = {},
+) {
+  vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, ...job, status: 'COMPLETED' })
   vi.mocked(transcriptApi.get).mockResolvedValue(transcript)
   vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
   vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
@@ -91,6 +95,32 @@ function stubDesktopLayout() {
         dispatchEvent: () => false,
       }) as unknown as MediaQueryList,
   )
+}
+
+// Like stubDesktopLayout, but the viewport can be switched mid-test; useMediaQuery listens
+// for the change and the workspace swaps layouts.
+function stubSwitchableLayout(initiallyDesktop: boolean) {
+  let isDesktop = initiallyDesktop
+  const listeners = new Set<() => void>()
+  vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query) =>
+      ({
+        get matches() {
+          return query === '(min-width: 1024px)' && isDesktop
+        },
+        media: query,
+        onchange: null,
+        addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  )
+  return {
+    switchTo(desktop: boolean) {
+      isDesktop = desktop
+      act(() => listeners.forEach((listener) => listener()))
+    },
+  }
 }
 
 describe('JobDetailPage status branches', () => {
@@ -158,10 +188,9 @@ describe('JobDetailPage Source/Studio Sheets (COMPLETED, narrow viewport)', () =
   })
 })
 
-// The Source/Studio Sheets are modal on narrow viewports (matching the Sidebar's own
-// mobile drawer), so the media player they contain isn't necessarily mounted at the same
-// time as the Chat pane is interactive. These tests force the desktop layout, where
-// Source/Chat/Studio render inline simultaneously with no modal blocking, to exercise the
+// On narrow viewports the Source/Studio panes live in modal Sheets, so the transcript and
+// the chapter list aren't on screen together with the Chat pane. These tests force the
+// desktop layout, where Source/Chat/Studio render inline simultaneously, to exercise the
 // carried-over ask -> history -> citation-seek and segment/chapter-seek behavior.
 describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
   it('asks a question, appends it to history, and seeks the media player from a citation timestamp', async () => {
@@ -335,16 +364,18 @@ describe('JobDetailPage current segment (COMPLETED, narrow viewport)', () => {
     expect(currentSegmentText()).toContain('第三句')
   })
 
-  it('re-derives the current segment from the new player when the Source Sheet is reopened', async () => {
+  it('keeps the same player, and so the current segment, when the Source Sheet is closed and reopened', async () => {
     const user = userEvent.setup()
     await renderCompletedJob(gappedTranscript)
-    playTo(await openSourceSheet(user), 13)
+    const media = renderedMediaElement()
+    await openSourceSheet(user)
+    playTo(media, 13)
 
     await user.keyboard('{Escape}')
     await openSourceSheet(user)
 
-    // The reopened Sheet mounts a fresh player at 0s, before the first segment starts.
-    expect(currentSegmentText()).toBeNull()
+    expect(renderedMediaElement()).toBe(media)
+    expect(currentSegmentText()).toContain('第三句')
   })
 })
 
@@ -601,7 +632,7 @@ describe('JobDetailPage transcript search (COMPLETED, narrow viewport)', () => {
     await user.keyboard('{Escape}')
 
     expect(searchbox()).toHaveValue('')
-    expect(screen.getByText('今天先討論預算')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('今天先討論預算')).toBeInTheDocument()
   })
 
   it('still closes the Source Sheet on Escape when the search box is empty', async () => {
@@ -614,5 +645,112 @@ describe('JobDetailPage transcript search (COMPLETED, narrow viewport)', () => {
 
     expect(screen.queryByRole('searchbox', { name: '搜尋逐字稿' })).not.toBeInTheDocument()
   })
+
+  it('does not focus the search box when the Source Sheet opens (no surprise on-screen keyboard)', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob(gappedTranscript)
+
+    await user.click(screen.getByRole('button', { name: '來源' }))
+    await screen.findByText('第一句')
+
+    expect(searchbox()).not.toHaveFocus()
+    expect(screen.getByRole('dialog')).toHaveFocus()
+  })
 })
 
+describe('JobDetailPage mini player (COMPLETED, narrow viewport)', () => {
+  const citedHistory: QaTurn[] = [
+    { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z' },
+  ]
+
+  it('lets a Q&A citation seek playback without opening the Source Sheet', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob(gappedTranscript, citedHistory)
+
+    await user.click(await screen.findByRole('button', { name: '0:13' }))
+
+    expect(renderedMediaElement().currentTime).toBe(13)
+  })
+
+  it('shows the current segment as a single line in the player, like lyrics', async () => {
+    await renderCompletedJob(gappedTranscript)
+
+    playTo(renderedMediaElement(), 13)
+
+    expect(await within(screen.getByRole('region', { name: '播放器' })).findByText('第三句')).toBeInTheDocument()
+  })
+
+  it('plays and pauses from the player, reflecting the actual playback state', async () => {
+    const user = userEvent.setup()
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    await renderCompletedJob(gappedTranscript)
+    const player = within(screen.getByRole('region', { name: '播放器' }))
+
+    await user.click(player.getByRole('button', { name: '播放' }))
+    expect(play).toHaveBeenCalled()
+
+    // jsdom doesn't implement playback; emulate the browser flipping `paused` before `play` fires.
+    const media = renderedMediaElement()
+    Object.defineProperty(media, 'paused', { value: false, configurable: true })
+    fireEvent.play(media)
+    await user.click(player.getByRole('button', { name: '暫停' }))
+    expect(pause).toHaveBeenCalled()
+  })
+
+  it('seeks when the user drags the progress bar, without the thumb snapping back while the seek is pending', async () => {
+    await renderCompletedJob(gappedTranscript)
+    const player = within(screen.getByRole('region', { name: '播放器' }))
+    const slider = player.getByRole('slider', { name: '播放進度' })
+
+    fireEvent.change(slider, { target: { value: '13' } })
+
+    expect(renderedMediaElement().currentTime).toBe(13)
+    // No timeupdate/seeked has arrived yet (a remote file may still be buffering).
+    expect(slider).toHaveValue('13')
+    expect(player.getByText('0:13 / 5:00')).toBeInTheDocument()
+  })
+
+  it('shows the playback position against the total length', async () => {
+    await renderCompletedJob(gappedTranscript)
+
+    playTo(renderedMediaElement(), 13)
+
+    expect(within(screen.getByRole('region', { name: '播放器' })).getByText('0:13 / 5:00')).toBeInTheDocument()
+  })
+
+  it('keeps playing from the same position when the layout switches between desktop and narrow', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    const layout = stubSwitchableLayout(true)
+    await renderCompletedJob(gappedTranscript)
+    await screen.findByText('第一句')
+    const desktopMedia = renderedMediaElement()
+    Object.defineProperty(desktopMedia, 'paused', { value: false, configurable: true })
+    fireEvent.play(desktopMedia)
+    playTo(desktopMedia, 13)
+
+    layout.switchTo(false)
+
+    const narrowMedia = renderedMediaElement()
+    expect(narrowMedia).not.toBe(desktopMedia)
+    expect(narrowMedia.currentTime).toBe(13)
+    expect(play.mock.contexts).toContain(narrowMedia)
+    expect(within(screen.getByRole('region', { name: '播放器' })).getByText('第三句')).toBeInTheDocument()
+  })
+
+  it('shows a small video picture in the player for a video job', async () => {
+    await renderCompletedJob(gappedTranscript, [], { fileType: 'VIDEO' })
+
+    const player = await screen.findByRole('region', { name: '播放器' })
+
+    await waitFor(() => expect(player.querySelector('video')).not.toBeNull())
+    expect(document.querySelectorAll('audio, video')).toHaveLength(1)
+  })
+
+  it('is not shown on desktop, where the player stays in the Source pane', async () => {
+    await renderGappedTranscriptOnDesktop()
+
+    expect(screen.queryByRole('region', { name: '播放器' })).not.toBeInTheDocument()
+    expect(document.querySelectorAll('audio, video')).toHaveLength(1)
+  })
+})

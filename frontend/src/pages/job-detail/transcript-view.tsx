@@ -22,13 +22,13 @@ const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home
 // auto-follow don't make the transcript jitter.
 const MIDDLE_BAND_EDGE = 0.3
 
-function centerIfOutsideMiddleBand(viewport: HTMLElement, segment: HTMLElement) {
+function centerIfOutsideMiddleBand(viewport: HTMLElement, segment: HTMLElement, behavior: ScrollBehavior) {
   const viewportRect = viewport.getBoundingClientRect()
   const segmentRect = segment.getBoundingClientRect()
   const segmentCenter = segmentRect.top + segmentRect.height / 2 - viewportRect.top
   const edge = viewport.clientHeight * MIDDLE_BAND_EDGE
   if (segmentCenter >= edge && segmentCenter <= viewport.clientHeight - edge) return
-  viewport.scrollTo({ top: viewport.scrollTop + segmentCenter - viewport.clientHeight / 2, behavior: 'smooth' })
+  viewport.scrollTo({ top: viewport.scrollTop + segmentCenter - viewport.clientHeight / 2, behavior })
 }
 
 function HighlightedText({ text, matches, activeStart }: { text: string; matches: TranscriptMatch[]; activeStart: number | null }) {
@@ -74,10 +74,14 @@ export function TranscriptView({ segments, currentSegmentIndex, autoFollow, medi
     scrollAreaRef.current?.querySelector(VIEWPORT_SELECTOR)?.setAttribute('tabindex', '-1')
   }, [])
 
+  // Positioning while mounting (e.g. opening the Source Sheet mid-recording) jumps straight
+  // there; smooth-scrolling past hundreds of segments would just look slow. Everything after
+  // that scrolls smoothly. isMountedRef flips in an effect declared after the positioning ones.
+  const isMountedRef = useRef(false)
   const centerSegment = (segmentIndex: number) => {
     const viewport = scrollAreaRef.current?.querySelector<HTMLElement>(VIEWPORT_SELECTOR)
     const segment = viewport?.querySelector<HTMLElement>(`[data-segment-index="${segmentIndex}"]`)
-    if (viewport && segment) centerIfOutsideMiddleBand(viewport, segment)
+    if (viewport && segment) centerIfOutsideMiddleBand(viewport, segment, isMountedRef.current ? 'smooth' : 'instant')
   }
 
   useEffect(() => {
@@ -88,6 +92,10 @@ export function TranscriptView({ segments, currentSegmentIndex, autoFollow, medi
   useEffect(() => {
     if (activeMatch) centerSegment(activeMatch.segmentIndex)
   }, [activeMatch])
+
+  useEffect(() => {
+    isMountedRef.current = true
+  }, [])
 
   // Only user-initiated scrolling pauses auto-follow. Listening for the input events rather
   // than `scroll` means our own programmatic scrollTo above can never pause itself.

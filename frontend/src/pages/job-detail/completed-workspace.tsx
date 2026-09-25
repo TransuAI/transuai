@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { SourcePane } from '@/pages/job-detail/source-pane'
 import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
+import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
 import type { Chapter, Job, Summary, Transcript } from '@/types/api'
 
@@ -29,12 +30,6 @@ interface CompletedWorkspaceProps {
   setMediaRef: (el: HTMLMediaElement | null) => void
 }
 
-// The desktop grid and the mobile Sheets are mutually exclusive mount points for
-// SourcePane/StudioPane (never both at once) so there is only ever one <audio>/<video>
-// element in the tree — otherwise the two instances would race to own mediaRef. The
-// Sheets are force-closed the moment isDesktop flips, computed during render (not a
-// useEffect) so the close happens in the same commit as the grid mounting its own
-// media element, instead of a render later where both could briefly coexist.
 // Esc in a non-empty search box clears the search (TranscriptSearchBar); only an Esc with
 // nothing left to clear closes the Sheet. Radix handles Escape on the document in the capture
 // phase, i.e. before the search box sees it, so the Sheet has to opt out here.
@@ -43,6 +38,21 @@ function keepOpenWhileClearingSearch(event: KeyboardEvent) {
   if (target instanceof HTMLInputElement && target.type === 'search' && target.value !== '') event.preventDefault()
 }
 
+// Radix focuses the first focusable element when a Sheet opens — for the Source Sheet that's
+// the search box, which on a phone pops the on-screen keyboard over the transcript. Focus the
+// Sheet itself instead (still inside the focus trap, still announced as a dialog).
+function focusSheetInsteadOfSearch(event: Event) {
+  event.preventDefault()
+  if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus()
+}
+
+// There is only ever one <audio>/<video> element in the tree — two would race to own the
+// page's media element. On desktop it lives in the Source pane of the grid; on narrow
+// viewports it lives in the MiniPlayer under the Chat pane, and the Source Sheet renders
+// the transcript without a player, so closing the Sheet doesn't stop playback. The page
+// restores the playback position when a layout switch remounts the element. The Sheets are
+// force-closed the moment isDesktop flips, computed during render (not a useEffect) so the
+// close happens in the same commit as the layout switch.
 export function CompletedWorkspace({
   job,
   mediaUrl,
@@ -74,17 +84,15 @@ export function CompletedWorkspace({
     }
   }
 
-  const sourcePane = (
-    <SourcePane
-      job={job}
-      mediaUrl={mediaUrl}
-      transcript={transcript}
-      currentSegmentIndex={currentSegmentIndex}
-      autoFollow={autoFollow}
-      setMediaRef={setMediaRef}
-      onSeek={onSeek}
-    />
-  )
+  const sourcePaneProps = { job, transcript, currentSegmentIndex, autoFollow, mediaAvailable, onSeek }
+  const desktopPlayer =
+    mediaUrl &&
+    (job.fileType === 'VIDEO' ? (
+      <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-md" />
+    ) : (
+      <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
+    ))
+  const currentSegment = currentSegmentIndex !== null ? transcript?.segments[currentSegmentIndex] : undefined
 
   const chatPane = (
     <ChatPane
@@ -123,18 +131,36 @@ export function CompletedWorkspace({
 
       {isDesktop ? (
         <div className="grid min-h-0 flex-1 grid-cols-[20rem_minmax(0,1fr)_20rem] gap-4">
-          {sourcePane}
+          <SourcePane {...sourcePaneProps} player={desktopPlayer} />
           {chatPane}
           <StudioPane summary={summary} chapters={chapters} onSeek={onSeek} mediaAvailable={mediaAvailable} />
         </div>
       ) : (
-        <div className="min-h-0 flex-1">{chatPane}</div>
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <div className="min-h-0 flex-1">{chatPane}</div>
+          {mediaUrl && (
+            <MiniPlayer
+              fileType={job.fileType}
+              mediaUrl={mediaUrl}
+              fallbackDuration={job.durationSeconds}
+              setMediaRef={setMediaRef}
+              currentSegmentText={currentSegment?.text ?? null}
+            />
+          )}
+        </div>
       )}
 
       <Sheet open={sourceOpen} onOpenChange={setSourceOpen}>
-        <SheetContent side="left" className="w-full gap-0 p-0 sm:max-w-md" onEscapeKeyDown={keepOpenWhileClearingSearch}>
+        <SheetContent
+          side="left"
+          className="w-full gap-0 p-0 sm:max-w-md"
+          onEscapeKeyDown={keepOpenWhileClearingSearch}
+          onOpenAutoFocus={focusSheetInsteadOfSearch}
+        >
           <SheetTitle className="sr-only">Source</SheetTitle>
-          {sourcePane}
+          {/* Never a player here: during the Sheet's exit animation after a switch to desktop it
+              would be a second media element next to the grid's. */}
+          <SourcePane {...sourcePaneProps} />
         </SheetContent>
       </Sheet>
 
