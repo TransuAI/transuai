@@ -8,7 +8,7 @@
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 框架          | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework                                                                                |
 | API           | gRPC（`TranscriptionService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
-| 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed` / `job.failed`                                                |
+| 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed` / `job.failed`；使用者編輯逐字稿後發送 `transcript.edited`     |
 | 轉錄          | Groq Whisper API（`whisper-large-v3-turbo`），`verbose_json` 拿片段 timestamp                                                                    |
 | 影片抽音軌    | moviepy（底層用 ffmpeg，經 `imageio-ffmpeg` 首次執行時自動下載 binary，本機不需另外安裝系統 ffmpeg）                                             |
 | 繁體轉換      | OpenCC（`opencc`，`s2tw` 逐字轉台灣標準字形，離線執行、預編譯 wheel），只套用在中文逐字稿                                                         |
@@ -69,7 +69,7 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 | RPC             | 說明                                                                                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------- |
 | `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 片段（id、timestamp、目前文字、原始文字）+ `revision`，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
-| `UpdateSegmentText` | 編輯一個片段的文字：去前後空白，空字串＝清空；跟目前相同則不動作；否則更新文字、`revision` +1、以未清空片段依換行重組全文（逐字稿那列 `SELECT … FOR UPDATE`，同時編輯以最後寫入為準但 revision 各加一次）。id 格式錯誤 / 超過 2,000 字回 `INVALID_ARGUMENT`，逐字稿或片段不存在、片段不屬於該 job 回 `NOT_FOUND` |
+| `UpdateSegmentText` | 編輯一個片段的文字：去前後空白，空字串＝清空；跟目前相同則不動作；否則更新文字、`revision` +1、以未清空片段依換行重組全文，並發送 `transcript.edited { jobId }`（逐字稿那列 `SELECT … FOR UPDATE`，同時編輯以最後寫入為準但 revision 各加一次）。id 格式錯誤 / 超過 2,000 字回 `INVALID_ARGUMENT`，逐字稿或片段不存在、片段不屬於該 job 回 `NOT_FOUND` |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
 
@@ -156,7 +156,8 @@ app/
     transcriber.py                       Groq Whisper API 呼叫
     traditional_chinese.py                中文逐字稿轉繁體（OpenCC s2tw），pipeline 在轉錄與存檔之間呼叫
     job_status_client.py                  gRPC client，呼叫 Upload Service 的 UpdateJobStatus
-    event_publisher.py                     發送 transcription.completed / job.failed
+    event_publisher.py                     發送 transcription.completed / job.failed（pipeline 用，走 consumer 的連線）
+    edit_events.py                         編輯後發送 transcript.edited { jobId }：gRPC handler 自己開短連線，失敗做 3 次小型重試，仍失敗記 TRANSCRIPTION_SERVICE_TRANSCRIPT_EDITED_EVENT_LOST 但編輯照樣成功
   repositories/
     transcript_repository.py               transcription_db 存取（transcripts / transcript_segments）
   db/

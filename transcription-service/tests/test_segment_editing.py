@@ -1,11 +1,37 @@
+import json
+import logging
 import uuid
+from unittest.mock import MagicMock, patch
 
 import grpc
 import pytest
+from pika.exceptions import AMQPConnectionError
 
 from app.proto_gen import transcription_pb2
 from app.repositories.transcript_repository import save_transcript
 from app.services.transcriber import TranscriptResult, TranscriptSegment
+
+
+@pytest.fixture(autouse=True)
+def rabbitmq():
+    """The RabbitMQ boundary: every connection the service opens to publish events is a fake whose
+    channel records what was published."""
+    with patch("app.services.edit_events.BlockingConnection") as connection_class:
+        channel = MagicMock(name="channel")
+        connection_class.return_value.channel.return_value = channel
+        yield FakeRabbitMQ(connection_class, channel)
+
+
+class FakeRabbitMQ:
+    def __init__(self, connection_class, channel):
+        self.connection_class = connection_class
+        self.channel = channel
+
+    def published(self):
+        return [
+            (call.kwargs["routing_key"], json.loads(call.kwargs["body"]))
+            for call in self.channel.basic_publish.call_args_list
+        ]
 
 
 @pytest.fixture
@@ -120,3 +146,32 @@ def test_text_over_the_length_limit_is_invalid(transcription_stub, saved_job):
 
     assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
     assert get_transcript(transcription_stub, saved_job).revision == 0
+
+
+def test_an_edit_publishes_transcript_edited_for_the_job(transcription_stub, saved_job, rabbitmq):
+    segment_id = get_transcript(transcription_stub, saved_job).segments[1].id
+
+    update_text(transcription_stub, saved_job, segment_id, "強風豪雨")
+
+    assert rabbitmq.published() == [("transcript.edited", {"jobId": saved_job})]
+
+
+def test_an_unchanged_save_publishes_nothing(transcription_stub, saved_job, rabbitmq):
+    segment_id = get_transcript(transcription_stub, saved_job).segments[1].id
+
+    update_text(transcription_stub, saved_job, segment_id, "強風好雨")
+
+    assert rabbitmq.published() == []
+
+
+def test_the_edit_is_kept_even_if_the_event_cannot_be_published(transcription_stub, saved_job, rabbitmq, caplog):
+    rabbitmq.connection_class.side_effect = AMQPConnectionError("broker down")
+    segment_id = get_transcript(transcription_stub, saved_job).segments[1].id
+
+    with patch("app.services.edit_events.time.sleep"), caplog.at_level(logging.ERROR):
+        response = update_text(transcription_stub, saved_job, segment_id, "強風豪雨")
+
+    assert response.revision == 1
+    assert get_transcript(transcription_stub, saved_job).segments[1].text == "強風豪雨"
+    assert rabbitmq.connection_class.call_count == 3
+    assert "TRANSCRIPTION_SERVICE_TRANSCRIPT_EDITED_EVENT_LOST" in caplog.text

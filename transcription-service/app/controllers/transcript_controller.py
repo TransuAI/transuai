@@ -8,6 +8,7 @@ from app.db import new_session
 from app.models import TranscriptSegment
 from app.proto_gen import transcription_pb2, transcription_pb2_grpc
 from app.repositories.transcript_repository import SegmentNotFound, find_by_job_id, update_segment_text
+from app.services.edit_events import publish_transcript_edited
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
                 edit = update_segment_text(session, job_id, segment_id, text)
             except SegmentNotFound:
                 _abort(context, grpc.StatusCode.NOT_FOUND, "segment not found in this job's transcript")
+            if edit.changed:
+                publish_transcript_edited(str(job_id))
             return transcription_pb2.UpdateSegmentTextResponse(
                 segment=_segment_to_proto(edit.segment), revision=edit.revision)
         finally:

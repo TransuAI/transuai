@@ -5,7 +5,7 @@ import pika
 from pika.adapters.blocking_connection import BlockingChannel
 
 from app.core.config import settings
-from app.services.event_publisher import publish_job_failed, publish_transcription_completed
+from app.services.event_publisher import connection_params, publish_job_failed, publish_transcription_completed
 from app.services.pipeline import process_message
 from app.services.retry import RETRY_COUNT_HEADER, RetryableMessageError, retry_queue_for
 
@@ -13,15 +13,6 @@ logger = logging.getLogger(__name__)
 
 _INITIAL_RETRY_DELAY_SECONDS = 1
 _MAX_RETRY_DELAY_SECONDS = 30
-
-
-def _connection_params() -> pika.ConnectionParameters:
-    return pika.ConnectionParameters(
-        host=settings.rabbitmq_host,
-        port=settings.rabbitmq_port,
-        credentials=pika.PlainCredentials(
-            settings.rabbitmq_user, settings.rabbitmq_password),
-    )
 
 
 def _declare_retry_queue(channel: BlockingChannel, queue: str, ttl_ms: int) -> None:
@@ -39,7 +30,7 @@ def _declare_retry_queue(channel: BlockingChannel, queue: str, ttl_ms: int) -> N
 
 
 def _consume_once() -> None:
-    connection = pika.BlockingConnection(_connection_params())
+    connection = pika.BlockingConnection(connection_params())
     try:
         channel = connection.channel()
         channel.queue_declare(
