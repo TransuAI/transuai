@@ -72,12 +72,12 @@ export function formatClock(seconds: number): string {
   return hours > 0 ? `${hours}:${minutesAndSeconds}` : minutesAndSeconds
 }
 
-// SRT 時間碼：HH:MM:SS,mmm
-function srtTimecode(seconds: number) {
+// 字幕時間碼：HH:MM:SS,mmm（SRT）或 HH:MM:SS.mmm（VTT）
+function subtitleTimecode(seconds: number, millisecondSeparator: ',' | '.') {
   const totalMs = Math.round(seconds * 1000)
   const ms = totalMs % 1000
   const totalSeconds = Math.floor(totalMs / 1000)
-  return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)},${pad(ms, 3)}`
+  return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)}${millisecondSeparator}${pad(ms, 3)}`
 }
 
 // 所有格式共用的規則：
@@ -97,10 +97,50 @@ export function toSrt(segments: ExportSegment[]): string {
   const cues = exportable.map((segment, i) => {
     // 字幕一條一條分開顯示，所以多位講者時每一條都要帶名稱。
     const text = labelSpeakers && segment.speakerName ? `${segment.speakerName}：${segment.text}` : segment.text
-    return `${i + 1}\n${srtTimecode(segment.startTime)} --> ${srtTimecode(segment.endTime)}\n${text}\n\n`
+    return `${i + 1}\n${subtitleTimecode(segment.startTime, ',')} --> ${subtitleTimecode(segment.endTime, ',')}\n${text}\n\n`
   })
   // BOM：舊版 Windows 播放器 / 剪輯軟體沒有 BOM 會把 UTF-8 中文當成 ANSI 讀成亂碼。
   return '﻿' + cues.join('')
+}
+
+// WebVTT 的字幕文字是 markup：& < > 要跳脫，否則會變成壞掉的標籤。
+function escapeVtt(text: string) {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+export function toVtt(segments: ExportSegment[]): string {
+  const exportable = exportableSegments(segments)
+  const labelSpeakers = hasMultipleSpeakers(exportable)
+  const cues = exportable.map((segment) => {
+    // 多位講者時用 WebVTT 標準的 voice span（<v 名稱>）標示誰在說話。
+    const text =
+      labelSpeakers && segment.speakerName
+        ? `<v ${escapeVtt(segment.speakerName)}>${escapeVtt(segment.text)}`
+        : escapeVtt(segment.text)
+    return `${subtitleTimecode(segment.startTime, '.')} --> ${subtitleTimecode(segment.endTime, '.')}\n${text}\n\n`
+  })
+  return 'WEBVTT\n\n' + cues.join('')
+}
+
+// 文字格式：一個片段一行；多位講者時只在換人的那一行加「名稱：」，同一人連續的片段不重複。
+function textFormatLines(segments: ExportSegment[], linePrefix: (segment: ExportSegment) => string): string {
+  const exportable = exportableSegments(segments)
+  const labelSpeakers = hasMultipleSpeakers(exportable)
+  let previousSpeaker: string | null = null
+  const lines = exportable.map((segment) => {
+    const speakerChanged = labelSpeakers && segment.speakerName !== null && segment.speakerName !== previousSpeaker
+    previousSpeaker = segment.speakerName
+    return linePrefix(segment) + (speakerChanged ? `${segment.speakerName}：` : '') + segment.text
+  })
+  return lines.map((line) => line + '\n').join('')
+}
+
+export function toPlainText(segments: ExportSegment[]): string {
+  return textFormatLines(segments, () => '')
+}
+
+export function toTimestampedText(segments: ExportSegment[]): string {
+  return textFormatLines(segments, (segment) => `[${formatClock(segment.startTime)}] `)
 }
 
 export const SRT_FORMAT: ExportFormat = {
@@ -108,6 +148,27 @@ export const SRT_FORMAT: ExportFormat = {
   fileSuffix: '.srt',
   mimeType: 'application/x-subrip',
   render: (content) => toSrt(content.segments),
+}
+
+export const VTT_FORMAT: ExportFormat = {
+  label: '下載字幕（VTT）',
+  fileSuffix: '.vtt',
+  mimeType: 'text/vtt',
+  render: (content) => toVtt(content.segments),
+}
+
+export const PLAIN_TEXT_FORMAT: ExportFormat = {
+  label: '下載逐字稿（TXT，純文字）',
+  fileSuffix: '.txt',
+  mimeType: 'text/plain',
+  render: (content) => toPlainText(content.segments),
+}
+
+export const TIMESTAMPED_TEXT_FORMAT: ExportFormat = {
+  label: '下載逐字稿（TXT，含時間戳）',
+  fileSuffix: '-含時間戳.txt',
+  mimeType: 'text/plain',
+  render: (content) => toTimestampedText(content.segments),
 }
 
 // 匯出檔名：原始檔名去掉最後一個副檔名，再接上格式自己的結尾（例如 `.srt`、`-含時間戳.txt`）。

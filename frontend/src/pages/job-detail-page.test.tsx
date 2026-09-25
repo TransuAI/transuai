@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Toaster } from '@/components/ui/sonner'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
 import type { Chapter, Job, QaTurn, Summary, Transcript } from '@/types/api'
@@ -38,6 +39,7 @@ function renderJobDetail(jobId = 'job-1') {
       <Routes>
         <Route path="/jobs/:jobId" element={<JobDetailPage />} />
       </Routes>
+      <Toaster />
     </MemoryRouter>,
   )
 }
@@ -98,27 +100,31 @@ function stubDesktopLayout() {
 }
 
 // Like stubDesktopLayout, but the viewport can be switched mid-test; useMediaQuery listens
-// for the change and the workspace swaps layouts.
+// for the change and the workspace swaps layouts. Listeners get a MediaQueryListEvent-like
+// `{ matches }`, which sonner's Toaster (watching prefers-color-scheme) destructures.
 function stubSwitchableLayout(initiallyDesktop: boolean) {
   let isDesktop = initiallyDesktop
-  const listeners = new Set<() => void>()
+  const matches = (query: string) => query === '(min-width: 1024px)' && isDesktop
+  const listeners = new Set<{ query: string; listener: (event: { matches: boolean }) => void }>()
   vi.spyOn(window, 'matchMedia').mockImplementation(
     (query) =>
       ({
         get matches() {
-          return query === '(min-width: 1024px)' && isDesktop
+          return matches(query)
         },
         media: query,
         onchange: null,
-        addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
-        removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+        addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) =>
+          listeners.add({ query, listener }),
+        removeEventListener: (_type: string, listener: (event: { matches: boolean }) => void) =>
+          listeners.forEach((entry) => entry.listener === listener && listeners.delete(entry)),
         dispatchEvent: () => false,
       }) as unknown as MediaQueryList,
   )
   return {
     switchTo(desktop: boolean) {
       isDesktop = desktop
-      act(() => listeners.forEach((listener) => listener()))
+      act(() => listeners.forEach(({ query, listener }) => listener({ matches: matches(query) })))
     },
   }
 }
@@ -796,5 +802,54 @@ describe('JobDetailPage export menu', () => {
     expect(downloads).toHaveLength(1)
     expect(downloads[0].fileName).toBe('interview.srt')
     expect(await downloads[0].blob?.text()).toContain('1\n00:00:05,000 --> 00:00:08,000\n第一句\n')
+  })
+
+  it.each([
+    ['下載字幕（VTT）', 'interview.vtt', 'WEBVTT\n\n00:00:05.000 --> 00:00:08.000\n第一句\n'],
+    ['下載逐字稿（TXT，純文字）', 'interview.txt', '第一句\n第二句\n第三句\n'],
+    ['下載逐字稿（TXT，含時間戳）', 'interview-含時間戳.txt', '[00:05] 第一句\n[00:08] 第二句\n'],
+  ])('%s downloads %s', async (item, fileName, expectedContent) => {
+    const user = userEvent.setup()
+    const downloads = captureDownloads()
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: item }))
+
+    expect(downloads.map((download) => download.fileName)).toEqual([fileName])
+    expect(await downloads[0].blob?.text()).toContain(expectedContent)
+  })
+
+  it('copies the transcript as plain text and confirms it', async () => {
+    const user = userEvent.setup()
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '複製逐字稿' }))
+
+    expect(await navigator.clipboard.readText()).toBe('第一句\n第二句\n第三句\n')
+    expect(await screen.findByText('已複製逐字稿')).toBeInTheDocument()
+  })
+
+  it('copies the summary and confirms it', async () => {
+    const user = userEvent.setup()
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '複製摘要' }))
+
+    expect(await navigator.clipboard.readText()).toBe('這是摘要內容')
+    expect(await screen.findByText('已複製摘要')).toBeInTheDocument()
+  })
+
+  it('tells the user when copying fails', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'))
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '複製摘要' }))
+
+    expect(await screen.findByText('複製失敗')).toBeInTheDocument()
   })
 })

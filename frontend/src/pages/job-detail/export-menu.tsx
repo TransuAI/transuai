@@ -1,15 +1,26 @@
 import { Download } from 'lucide-react'
+import { toast } from 'sonner'
 import { downloadTextFile } from '@/lib/download'
-import { buildExportContent, exportFileName, SRT_FORMAT, type ExportFormat, type ExportSource } from '@/lib/export-formats'
+import {
+  buildExportContent,
+  exportFileName,
+  PLAIN_TEXT_FORMAT,
+  SRT_FORMAT,
+  TIMESTAMPED_TEXT_FORMAT,
+  VTT_FORMAT,
+  type ExportFormat,
+  type ExportSource,
+} from '@/lib/export-formats'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-const TRANSCRIPT_FORMATS: ExportFormat[] = [SRT_FORMAT]
+const TRANSCRIPT_FORMATS: ExportFormat[] = [PLAIN_TEXT_FORMAT, TIMESTAMPED_TEXT_FORMAT, SRT_FORMAT, VTT_FORMAT]
 
 // 匯出（見 frontend CONTEXT.md）：把工作區已經載入的內容轉成檔案，全部在瀏覽器裡完成。
 // The export content is only assembled when a format is picked, not on every workspace render.
@@ -23,6 +34,11 @@ export function ExportMenu({ source }: { source: ExportSource }) {
       mimeType: format.mimeType,
     })
   }
+  const copy = (text: string, label: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => toast.success(`已複製${label}`),
+      () => toast.error('複製失敗'),
+    )
 
   return (
     <DropdownMenu>
@@ -32,12 +48,29 @@ export function ExportMenu({ source }: { source: ExportSource }) {
           匯出
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-48">
+      <DropdownMenuContent align="end" className="min-w-64">
         {TRANSCRIPT_FORMATS.map((format) => (
           <DropdownMenuItem key={format.fileSuffix} disabled={!hasTranscript} onSelect={() => download(format)}>
             {format.label}
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={!hasTranscript}
+          // 複製逐字稿＝TXT 純文字的內容。
+          onSelect={() => copy(PLAIN_TEXT_FORMAT.render(buildExportContent(source)), '逐字稿')}
+        >
+          複製逐字稿
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!source.summary}
+          onSelect={() => {
+            const { summary } = buildExportContent(source)
+            if (summary) void copy(summary.text, '摘要')
+          }}
+        >
+          複製摘要
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

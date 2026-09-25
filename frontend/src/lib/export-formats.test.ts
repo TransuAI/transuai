@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { exportFileName, formatClock, toSrt, type ExportSegment } from '@/lib/export-formats'
+import {
+  exportFileName,
+  formatClock,
+  toPlainText,
+  toSrt,
+  toTimestampedText,
+  toVtt,
+  type ExportSegment,
+} from '@/lib/export-formats'
 
 function segment(startTime: number, endTime: number, text: string, speakerName: string | null = null): ExportSegment {
   return { startTime, endTime, text, speakerName }
@@ -79,5 +87,72 @@ describe('formatClock', () => {
     [3725.5, '1:02:05'],
   ])('writes %s seconds as %s (mm:ss under an hour, h:mm:ss from an hour on)', (seconds, expected) => {
     expect(formatClock(seconds)).toBe(expected)
+  })
+})
+
+const conversation = [
+  segment(0, 2.5, '大家好', '王小明'),
+  segment(2.5, 4, '今天來聊預算', '王小明'),
+  segment(4, 6, '', '李小華'),
+  segment(6, 3605, '好的', '李小華'),
+]
+
+describe('toVtt', () => {
+  it('writes a WEBVTT file with dot-separated milliseconds and no BOM', () => {
+    const vtt = toVtt([segment(5, 8, '第一句'), segment(8, 10.5, '第二句')])
+
+    expect(vtt).toBe('WEBVTT\n\n00:00:05.000 --> 00:00:08.000\n第一句\n\n00:00:08.000 --> 00:00:10.500\n第二句\n\n')
+  })
+
+  it('marks who is speaking with a voice span when two or more speakers are talking, and skips cleared segments', () => {
+    expect(toVtt(conversation)).toBe(
+      'WEBVTT\n\n' +
+        '00:00:00.000 --> 00:00:02.500\n<v 王小明>大家好\n\n' +
+        '00:00:02.500 --> 00:00:04.000\n<v 王小明>今天來聊預算\n\n' +
+        '00:00:06.000 --> 01:00:05.000\n<v 李小華>好的\n\n',
+    )
+  })
+
+  it('escapes characters that WebVTT would read as markup, in the text and in the voice name', () => {
+    const vtt = toVtt([segment(0, 2, 'A<B & C>D', 'R&D <1>'), segment(2, 4, '好', '王小明')])
+
+    expect(vtt).toContain('<v R&amp;D &lt;1&gt;>A&lt;B &amp; C&gt;D\n')
+  })
+
+  it('does not use voice spans for a single speaker', () => {
+    expect(toVtt([segment(0, 2, '大家好', '講者 1'), segment(2, 4, '開始吧', '講者 1')])).not.toContain('<v')
+  })
+})
+
+describe('toPlainText', () => {
+  it('puts one segment per line', () => {
+    expect(toPlainText([segment(0, 2, '第一句'), segment(2, 4, '第二句')])).toBe('第一句\n第二句\n')
+  })
+
+  it('names the speaker only on the line where the speaker changes, and skips cleared segments', () => {
+    expect(toPlainText(conversation)).toBe('王小明：大家好\n今天來聊預算\n李小華：好的\n')
+  })
+})
+
+describe('text formats with a single speaker', () => {
+  const monologue = [segment(0, 2, '大家好', '講者 1'), segment(2, 4, '開始吧', '講者 1')]
+
+  it.each([
+    ['toPlainText', toPlainText],
+    ['toTimestampedText', toTimestampedText],
+  ])('%s does not label anyone', (_name, render) => {
+    expect(render(monologue)).not.toContain('講者 1')
+  })
+})
+
+describe('toTimestampedText', () => {
+  it('starts every line with the segment start time', () => {
+    expect(toTimestampedText([segment(5, 8, '第一句'), segment(3725, 3727, '一小時後')])).toBe(
+      '[00:05] 第一句\n[1:02:05] 一小時後\n',
+    )
+  })
+
+  it('names the speaker only on the line where the speaker changes', () => {
+    expect(toTimestampedText(conversation)).toBe('[00:00] 王小明：大家好\n[00:02] 今天來聊預算\n[00:06] 李小華：好的\n')
   })
 })
