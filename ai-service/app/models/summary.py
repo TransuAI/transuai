@@ -6,8 +6,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import Text
 
 # Schema 對應 ../architecture-design.md 4.4 ai_db.summaries。
-# MVP 階段用 create_all 自動建表，跟 upload-service/transcription-service 一致，
-# 團隊/流量成長後再導入 Alembic 做版本化 migration。
+# 改了這裡（或其他 model）的欄位要一起新增 Alembic migration（app/db/migrations，見 README
+# 「資料庫 migration」），服務啟動時才會套用到資料庫。
 #
 # 文件裡 ai_db 還定義了 export_outputs，但 MVP 目前還沒做多格式輸出，先不建不用的表。
 # chapters 表見 chapter.py，embeddings/qa_history 見 embedding.py / qa_history.py。

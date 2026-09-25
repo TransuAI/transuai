@@ -9,11 +9,11 @@ from sqlalchemy import Numeric, Text
 from app.models.summary import Base
 
 # Schema 對應 ../../infra/architecture-design.md 4.4 ai_db.embeddings。
-# embedding model 用 HF Inference API 上的 Qwen/Qwen3-Embedding-0.6B（見
+# embedding model 用 HF Inference API 上的 BAAI/bge-m3（見
 # app/services/embedder.py），輸出維度用滿模型支援的上限 1024 維（原本 Gemini/multilingual-e5
-# 時代是 768 維，換 model 順便調整；SQLAlchemy create_all 不會 ALTER 既有欄位型別，換維度時
-# 舊的 embeddings 表要整張 DROP 掉讓它用新 schema 重建，反正舊資料是別的模型算出來的向量，
-# 維度就算沒變也不能跟新模型混用）。
+# 時代是 768 維，換 model 順便調整。之後再換維度要寫 migration；舊資料是別的模型算出來的向量，
+# 維度就算沒變也不能跟新模型混用，所以通常是整張表清掉、重跑 pipeline。還停在 768 維的舊表會讓
+# baseline migration 拒絕啟動，見 app/db/migrations/versions/0001_baseline.py）。
 #
 # 文件裡的 idx_embeddings_vector（ivfflat）沒有建：ivfflat 需要先有資料才能訓練聚類、還要調
 # lists 參數，MVP 資料量小、查詢一定先用 job_id 過濾縮小範圍，先不做這層索引優化。
