@@ -16,7 +16,7 @@ Accepted
 
 ## Decision
 
-採用選項 2：訊息層級 requeue，用兩條各自帶固定 `x-message-ttl` 的 retry queue（2 秒、4 秒），dead-letter-exchange 指回原本的處理 queue。重試次數上限 3 次（1 次原始 + 2 次重試），透過訊息 header 追蹤，超過上限走現有的 FAILED 路徑。
+採用選項 2：訊息層級 requeue，用兩條各自帶固定 `x-message-ttl` 的 retry queue（2 秒、4 秒），dead-letter-exchange 指回原本的處理 queue。（後續：ai-service 消費的 queue 不只一個之後，改成**每個被消費的 queue 各有自己的一組** `<queue>.retry.2s`／`.4s`，重試才會回到同一個處理函式；見 `app/services/retry.py` 的 `retry_queue_declarations()`。）重試次數上限 3 次（1 次原始 + 2 次重試），透過訊息 header 追蹤，超過上限走現有的 FAILED 路徑。
 
 Consumer 端的 `prefetch_count=1` 決定了同一時間只有一則訊息在被處理——這個決定本身沒有改變；改變的是「一則訊息處理失敗後，等待重試的時間」不再佔用 consumer thread。
 

@@ -14,7 +14,7 @@ from app.services.retry import (
     TERMINAL_FAILURE_LOST_MARKER,
     RetryableMessageError,
     is_retryable_error,
-    retry_queue_for,
+    has_retry_budget,
     retry_terminal_report,
 )
 from app.services.summarizer import summarize
@@ -72,7 +72,7 @@ def process_message(
         publish_completed(job_id)
         logger.info("job %s summarized successfully", job_id)
     except Exception as exc:
-        if is_retryable_error(exc) and retry_queue_for(retry_count) is not None:
+        if is_retryable_error(exc) and has_retry_budget(retry_count):
             raise RetryableMessageError(
                 f"job {job_id}: transient failure, retry_count={retry_count}") from exc
 

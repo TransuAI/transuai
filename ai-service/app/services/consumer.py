@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Callable
 
 import pika
 from pika.adapters.blocking_connection import BlockingChannel
@@ -7,7 +8,7 @@ from pika.adapters.blocking_connection import BlockingChannel
 from app.core.config import settings
 from app.services.event_publisher import publish_ai_completed, publish_job_failed
 from app.services.pipeline import process_message
-from app.services.retry import RETRY_COUNT_HEADER, RetryableMessageError, retry_queue_for
+from app.services.retry import RETRY_COUNT_HEADER, RetryableMessageError, retry_queue_declarations, retry_queue_for
 
 logger = logging.getLogger(__name__)
 
@@ -24,81 +25,82 @@ def _connection_params() -> pika.ConnectionParameters:
     )
 
 
-def _declare_retry_queue(channel: BlockingChannel, queue: str, ttl_ms: int) -> None:
-    channel.queue_declare(
-        queue=queue,
-        durable=True,
-        arguments={
-            "x-message-ttl": ttl_ms,
-            # default exchange 的 routing key 就是 queue 名稱，訊息 TTL 到期後自動被 dead-letter
-            # 回原本的處理 queue，不需要宣告新的 exchange（見 ADR 0001）。
-            "x-dead-letter-exchange": "",
-            "x-dead-letter-routing-key": settings.transcription_completed_queue,
-        },
+# 處理一則訊息：(body, channel, retry_count)。遇到暫時性失敗且還有重試預算時 raise
+# RetryableMessageError，由 on_message 送進「這個 queue 自己的」retry queue。
+MessageHandler = Callable[[bytes, BlockingChannel, int], None]
+
+
+def _handle_transcription_completed(body: bytes, ch: BlockingChannel, retry_count: int) -> None:
+    process_message(
+        body,
+        lambda job_id: publish_ai_completed(ch, job_id),
+        lambda job_id, stage, error_reason: publish_job_failed(ch, job_id, stage, error_reason),
+        retry_count=retry_count,
     )
+
+
+def _handlers() -> dict[str, MessageHandler]:
+    """ai-service 消費的每個 queue 跟它的處理函式。每個 queue 各有自己的 retry queue（見
+    retry.retry_queue_declarations()），重試時才會回到同一個處理函式。"""
+    return {settings.transcription_completed_queue: _handle_transcription_completed}
+
+
+def _on_message_for(queue: str, handler: MessageHandler) -> Callable[..., None]:
+    def on_message(ch, method, properties, body):
+        # 刻意不用 try/finally 包 ack：如果 requeue 用的 basic_publish 本身失敗（例如 channel
+        # 斷線），這裡要讓例外繼續往外冒、不 ack 這則訊息——ack 之後才發現 retry queue 沒收到
+        # 訊息，等於這則訊息平白消失。不 ack 的話，訊息會在連線斷掉時被 RabbitMQ 自動 requeue，
+        # 交給 consumer.py 既有的重連邏輯處理，而不是在這裡假裝重試已經送出去。
+        #
+        # 但處理函式本身也可能 raise 其他跟這個重試機制無關的例外（例如 payload 根本不是合法
+        # JSON、缺欄位），這種情況要照舊 ack 掉，不能讓它一路冒到 channel.start_consuming()：
+        # 這則訊息沒被 ack 會在重連後被 RabbitMQ 重新投遞，同一個 payload 錯誤會立刻再炸一次，
+        # 變成無窮 crash/reconnect 迴圈，而且 prefetch_count=1 會讓後面所有訊息一起卡住。
+        retry_count = (properties.headers or {}).get(RETRY_COUNT_HEADER, 0)
+        try:
+            handler(body, ch, retry_count)
+        except RetryableMessageError:
+            retry_queue = retry_queue_for(queue, retry_count)
+            assert retry_queue is not None, "處理函式只在還有重試預算時才 raise RetryableMessageError"
+            ch.basic_publish(
+                exchange="",
+                routing_key=retry_queue,
+                body=body,
+                properties=pika.BasicProperties(
+                    content_type="application/json",
+                    delivery_mode=2,
+                    headers={RETRY_COUNT_HEADER: retry_count + 1},
+                ),
+            )
+            logger.info(
+                "requeueing message from %s onto %s (retry_count %d -> %d)",
+                queue, retry_queue, retry_count, retry_count + 1)
+        except Exception:
+            logger.exception(
+                "handler for %s raised an unexpected exception outside its own handling, "
+                "acking to avoid a poison-message crash/reconnect loop", queue)
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+
+    return on_message
 
 
 def _consume_once() -> None:
     connection = pika.BlockingConnection(_connection_params())
     try:
         channel = connection.channel()
-        channel.queue_declare(
-            queue=settings.transcription_completed_queue, durable=True)
-        channel.queue_declare(
-            queue=settings.ai_completed_queue, durable=True)
-        channel.queue_declare(
-            queue=settings.job_failed_queue, durable=True)
-        _declare_retry_queue(channel, settings.retry_queue_2s, 2000)
-        _declare_retry_queue(channel, settings.retry_queue_4s, 4000)
+        channel.queue_declare(queue=settings.ai_completed_queue, durable=True)
+        channel.queue_declare(queue=settings.job_failed_queue, durable=True)
         channel.basic_qos(prefetch_count=1)
 
-        def on_message(ch, method, properties, body):
-            # 刻意不用 try/finally 包 ack：如果 requeue 用的 basic_publish 本身失敗（例如 channel
-            # 斷線），這裡要讓例外繼續往外冒、不 ack 這則訊息——ack 之後才發現 retry queue 沒收到
-            # 訊息，等於這則訊息平白消失。不 ack 的話，訊息會在連線斷掉時被 RabbitMQ 自動 requeue，
-            # 交給 consumer.py 既有的重連邏輯處理，而不是在這裡假裝重試已經送出去。
-            #
-            # 但 process_message() 本身也可能 raise 其他跟這個重試機制無關的例外（例如 payload
-            # 根本不是合法 JSON、缺欄位——這幾行在 process_message() 自己的 try/except 之外，見
-            # pipeline.py），這種情況要照舊 ack 掉，不能讓它一路冒到 channel.start_consuming()：
-            # 這則訊息沒被 ack 會在重連後被 RabbitMQ 重新投遞，同一個 payload 錯誤會立刻再炸一次，
-            # 變成無窮 crash/reconnect 迴圈，而且 prefetch_count=1 會讓後面所有訊息一起卡住。
-            retry_count = (properties.headers or {}).get(RETRY_COUNT_HEADER, 0)
-            try:
-                process_message(
-                    body,
-                    lambda job_id: publish_ai_completed(ch, job_id),
-                    lambda job_id, stage, error_reason: publish_job_failed(
-                        ch, job_id, stage, error_reason),
-                    retry_count=retry_count,
-                )
-            except RetryableMessageError:
-                queue = retry_queue_for(retry_count)
-                assert queue is not None, "process_message 只在還有重試預算時才 raise RetryableMessageError"
-                ch.basic_publish(
-                    exchange="",
-                    routing_key=queue,
-                    body=body,
-                    properties=pika.BasicProperties(
-                        content_type="application/json",
-                        delivery_mode=2,
-                        headers={RETRY_COUNT_HEADER: retry_count + 1},
-                    ),
-                )
-                logger.info(
-                    "requeueing message onto %s (retry_count %d -> %d)",
-                    queue, retry_count, retry_count + 1)
-            except Exception:
-                logger.exception(
-                    "process_message raised an unexpected exception outside its own handling, "
-                    "acking to avoid a poison-message crash/reconnect loop")
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-                return
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+        for queue, handler in _handlers().items():
+            channel.queue_declare(queue=queue, durable=True)
+            for retry_queue, arguments in retry_queue_declarations(queue):
+                channel.queue_declare(queue=retry_queue, durable=True, arguments=arguments)
+            channel.basic_consume(queue=queue, on_message_callback=_on_message_for(queue, handler))
+            logger.info("consuming from %s", queue)
 
-        channel.basic_consume(
-            queue=settings.transcription_completed_queue, on_message_callback=on_message)
-        logger.info("consuming from %s", settings.transcription_completed_queue)
         try:
             channel.start_consuming()
         except KeyboardInterrupt:

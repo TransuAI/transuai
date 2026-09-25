@@ -5,12 +5,12 @@ from typing import Callable
 import grpc
 from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError, OverloadedError
 
-from app.core.config import settings
-
 logger = logging.getLogger(__name__)
 
 RETRY_COUNT_HEADER = "x-retry-count"
-MAX_RETRIES = 2  # 最多重試 2 次（1 次原始送達 + 2 次重試 = 3 次總嘗試），見 ADR 0001
+# 每一次重試的延遲（TTL），依序對應第 1、2 次重試；見 ADR 0001。
+_RETRY_DELAYS_MS = (2000, 4000)
+MAX_RETRIES = len(_RETRY_DELAYS_MS)  # 最多重試 2 次（1 次原始送達 + 2 次重試 = 3 次總嘗試）
 
 _RETRYABLE_HF_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
 _RETRYABLE_GRPC_STATUS_CODES = {
@@ -35,19 +35,41 @@ class RetryableMessageError(Exception):
     """
 
 
-def retry_queue_for(retry_count: int) -> str | None:
-    """給定一則訊息目前已經重試過的次數，回傳下一次重試該送去哪條 queue；
-    重試預算（MAX_RETRIES 次）用盡則回傳 None。
+def _retry_queue_name(source_queue: str, delay_ms: int) -> str:
+    return f"{source_queue}.retry.{delay_ms // 1000}s"
 
-    retry_count 0 -> 第一次重試（2 秒 TTL queue）
-    retry_count 1 -> 第二次重試（4 秒 TTL queue）
-    retry_count >= MAX_RETRIES -> None（預算用盡，維持現狀走 FAILED 路徑）
+
+def has_retry_budget(retry_count: int) -> bool:
+    """這則訊息（已經重試過 retry_count 次）還能不能再重試一次。"""
+    return retry_count < MAX_RETRIES
+
+
+def retry_queue_for(source_queue: str, retry_count: int) -> str | None:
+    """給定訊息原本被消費的 queue 跟它已經重試過的次數，回傳下一次重試該送去哪條 retry queue；
+    重試預算用盡則回傳 None。
+
+    retry_count 0 -> 第一次重試（<source>.retry.2s）
+    retry_count 1 -> 第二次重試（<source>.retry.4s）
+    retry_count >= MAX_RETRIES -> None（預算用盡，由呼叫端走各自的失敗路徑）
     """
-    if retry_count == 0:
-        return settings.retry_queue_2s
-    if retry_count == 1:
-        return settings.retry_queue_4s
-    return None
+    if not has_retry_budget(retry_count):
+        return None
+    return _retry_queue_name(source_queue, _RETRY_DELAYS_MS[retry_count])
+
+
+def retry_queue_declarations(source_queue: str) -> list[tuple[str, dict[str, object]]]:
+    """某個被消費的 queue 需要宣告的 retry queue：(名稱, queue arguments)。訊息 TTL 到期後透過
+    default exchange（routing key 就是 queue 名稱）自動被 dead-letter 回 source_queue 本身，
+    不需要另外宣告 exchange（見 ADR 0001）。每個被消費的 queue 各有自己的一組，重試才會回到
+    對的處理函式。"""
+    return [
+        (_retry_queue_name(source_queue, delay_ms), {
+            "x-message-ttl": delay_ms,
+            "x-dead-letter-exchange": "",
+            "x-dead-letter-routing-key": source_queue,
+        })
+        for delay_ms in _RETRY_DELAYS_MS
+    ]
 
 
 def is_retryable_hf_error(exc: BaseException) -> bool:

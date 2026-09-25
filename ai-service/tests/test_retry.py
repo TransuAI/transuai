@@ -28,20 +28,46 @@ def _httpx_response(status_code: int) -> httpx.Response:
     return httpx.Response(status_code=status_code, request=_httpx_request())
 
 
-# --- retry_queue_for：純函式，不碰真正的 RabbitMQ/pika ---
+# --- retry queue 路由與宣告：純函式，不碰真正的 RabbitMQ/pika ---
 
 
-def test_retry_queue_for_first_retry_routes_to_2s_queue():
-    assert retry.retry_queue_for(0) == settings.retry_queue_2s
+def test_first_retry_routes_to_the_source_queues_2s_retry_queue():
+    assert retry.retry_queue_for("transcription.completed", 0) == "transcription.completed.retry.2s"
 
 
-def test_retry_queue_for_second_retry_routes_to_4s_queue():
-    assert retry.retry_queue_for(1) == settings.retry_queue_4s
+def test_second_retry_routes_to_the_source_queues_4s_retry_queue():
+    assert retry.retry_queue_for("transcription.completed", 1) == "transcription.completed.retry.4s"
 
 
 @pytest.mark.parametrize("retry_count", [2, 3, 100])
-def test_retry_queue_for_exhausted_budget_returns_none(retry_count):
-    assert retry.retry_queue_for(retry_count) is None
+def test_exhausted_retry_budget_has_no_retry_queue(retry_count):
+    assert retry.retry_queue_for("transcription.completed", retry_count) is None
+    assert not retry.has_retry_budget(retry_count)
+
+
+@pytest.mark.parametrize("retry_count", [0, 1])
+def test_retry_budget_remains_for_the_first_two_retries(retry_count):
+    assert retry.has_retry_budget(retry_count)
+
+
+def test_each_consumed_queue_gets_retry_queues_that_dead_letter_back_to_itself():
+    declarations = retry.retry_queue_declarations("transcript.edited")
+
+    assert declarations == [
+        ("transcript.edited.retry.2s", {
+            "x-message-ttl": 2000, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "transcript.edited"}),
+        ("transcript.edited.retry.4s", {
+            "x-message-ttl": 4000, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "transcript.edited"}),
+    ]
+    assert retry.retry_queue_for("transcript.edited", 1) == "transcript.edited.retry.4s"
+
+
+def test_transcription_completed_keeps_its_existing_retry_queue_names():
+    # Queues already declared on running RabbitMQ brokers keep working without manual cleanup.
+    assert [name for name, _ in retry.retry_queue_declarations(settings.transcription_completed_queue)] == [
+        "transcription.completed.retry.2s",
+        "transcription.completed.retry.4s",
+    ]
 
 
 # --- HF 例外分類 ---

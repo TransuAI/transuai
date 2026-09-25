@@ -64,7 +64,7 @@ uv run python -m app.main
 
 任一步失敗，先判斷是不是暫時性失敗（HF SDK 例外型別、gRPC status code，見
 app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3 次嘗試）：
-  - 是 → 把訊息送進對應 TTL 的 retry queue（2 秒／4 秒），原始那份直接 ack，過一段時間後訊息
+  - 是 → 把訊息送進對應 TTL 的 retry queue（`transcription.completed.retry.2s`／`.4s`），原始那份直接 ack，過一段時間後訊息
     透過 dead-letter-exchange 自動送回原 queue，被當成全新訊息重新處理一次完整的 pipeline
     （見 docs/adr/0001-message-level-retry-for-transient-external-failures.md）。整個過程
     對使用者不可見，Job 狀態維持在處理中。
@@ -157,7 +157,7 @@ app/
   controllers/
     ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters、AskQuestion、ListQaHistory）
   services/
-    consumer.py                      RabbitMQ consumer loop（pika）
+    consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
     summarizer.py                       HF Inference Providers 呼叫（摘要）
