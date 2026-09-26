@@ -20,6 +20,7 @@ from app.services.retry import (
 from app.services.speaker_context import chapter_input, spoken_segments, summary_input
 from app.services.summarizer import summarize
 from app.services.transcript_client import transcript_client
+from app.services.usage_meter import LlmFeature, UsageMeter, job_owner
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ def process_message(
     """
     payload = json.loads(body)
     job_id: str = payload["jobId"]
+    user_id = job_owner(payload)  # 用量記在他名下
 
     logger.info("processing job %s (retry_count=%d)", job_id, retry_count)
 
@@ -55,8 +57,9 @@ def process_message(
         transcript = transcript_client.get_transcript(job_id)
         # Cleared segments (empty text, 已清空片段) aren't content: leave them out of every AI input.
         segments = spoken_segments(transcript)
-        summary_text = summarize(summary_input(transcript))
-        chapters = generate_chapters(chapter_input(transcript))
+        job_uuid = uuid.UUID(job_id)
+        summary_text = summarize(summary_input(transcript), meter=UsageMeter(user_id, job_uuid, LlmFeature.SUMMARY))
+        chapters = generate_chapters(chapter_input(transcript), meter=UsageMeter(user_id, job_uuid, LlmFeature.CHAPTERS))
         vectors = embed_documents([segment.text for segment in segments])
 
         session = new_session()

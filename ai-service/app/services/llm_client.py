@@ -8,7 +8,7 @@
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Protocol
 
 import httpx2
 import openai
@@ -68,6 +68,12 @@ UNKNOWN_USAGE = TokenUsage(None, None)
 class ChatResult:
     text: str
     usage: TokenUsage
+
+
+class UsageSink(Protocol):
+    """每次呼叫結束時收到用量（成功或失敗都會收到一次），見 usage_meter.UsageMeter。"""
+
+    def record(self, model: ChatModel, usage: TokenUsage, succeeded: bool) -> None: ...
 
 
 class LlmErrorReason(StrEnum):
@@ -150,45 +156,62 @@ def _as_llm_error(model: ChatModel, exc: openai.APIError) -> LlmError:
     return LlmError(model.provider, model.model, reason, detail)
 
 
-def _create(model: ChatModel, messages: list[dict[str, str]], max_tokens: int, **stream_args: Any) -> Any:
+def _create(
+    model: ChatModel, messages: list[dict[str, str]], max_tokens: int, *, meter: UsageSink | None, **stream_args: Any
+) -> Any:
+    """送出請求；廠商拒絕時轉成 LlmError，並記一筆沒有數字的失敗用量。"""
     try:
         return _client(model).chat.completions.create(
             model=model.model, messages=messages, max_tokens=max_tokens,  # type: ignore[arg-type]
             extra_body=model.extra_body, **stream_args)
     except openai.APIError as exc:
+        if meter:
+            meter.record(model, UNKNOWN_USAGE, succeeded=False)
         raise _as_llm_error(model, exc) from exc
 
 
-def chat(model: ChatModel, messages: list[dict[str, str]], *, max_tokens: int) -> ChatResult:
-    response = _create(model, messages, max_tokens)
-    return ChatResult(text=strip_thinking(response.choices[0].message.content or ""), usage=_usage(response.usage))
+def chat(model: ChatModel, messages: list[dict[str, str]], *, max_tokens: int, meter: UsageSink | None) -> ChatResult:
+    response = _create(model, messages, max_tokens, meter=meter)
+    result = ChatResult(text=strip_thinking(response.choices[0].message.content or ""), usage=_usage(response.usage))
+    if meter:
+        meter.record(model, result.usage, succeeded=True)
+    return result
 
 
 class ChatStream:
-    """串流回答：逐段 yield 文字（已去掉混進來的 think 區塊）；迭代完之後 `usage` 才是廠商回報的用量。"""
+    """串流回答：逐段 yield 文字（已去掉混進來的 think 區塊）；迭代完之後 `usage` 才是廠商回報的用量。
+    串流結束、出錯或被中途放棄時，把用量交給 meter（只有完整讀完才算成功）。"""
 
-    def __init__(self, model: ChatModel, chunks: Iterable[Any]):
+    def __init__(self, model: ChatModel, chunks: Iterable[Any], meter: UsageSink | None):
         self._model = model
         self._chunks = chunks
+        self._meter = meter
         self.usage = UNKNOWN_USAGE
 
     def __iter__(self) -> Iterator[str]:
         yield from stream_without_thinking(self._deltas())
 
     def _deltas(self) -> Iterator[str]:
+        finished = False
         try:
             for chunk in self._chunks:
                 if chunk.usage is not None:  # 要求了 include_usage 時，最後一個 chunk 只帶用量、choices 是空的
                     self.usage = _usage(chunk.usage)
                 if chunk.choices:
                     yield chunk.choices[0].delta.content or ""
+            finished = True
         except openai.APIError as exc:
             raise _as_llm_error(self._model, exc) from exc
+        finally:
+            if self._meter:
+                self._meter.record(self._model, self.usage, succeeded=finished)
 
 
-def stream_chat(model: ChatModel, messages: list[dict[str, str]], *, max_tokens: int) -> ChatStream:
-    chunks = _create(model, messages, max_tokens, stream=True, stream_options={"include_usage": True})
-    return ChatStream(model, chunks)
+def stream_chat(
+    model: ChatModel, messages: list[dict[str, str]], *, max_tokens: int, meter: UsageSink | None
+) -> ChatStream:
+    chunks = _create(model, messages, max_tokens, meter=meter, stream=True, stream_options={"include_usage": True})
+    return ChatStream(model, chunks, meter)
 
 
 def strip_thinking(text: str) -> str:

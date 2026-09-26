@@ -53,7 +53,7 @@ def answer(fake_llm):
                 transcript_client.get_transcript.side_effect = transcript_error
             else:
                 transcript_client.get_transcript.return_value = transcript
-            events = list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "王小明對預算怎麼看？"))
+            events = list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "王小明對預算怎麼看？", user_id=None))
         assert "".join(str(payload) for kind, payload in events if kind == "delta") == "王小明認為預算要再砍一成。"
         return fake_llm.bodies()[-1]["messages"][0]["content"]
 
@@ -106,7 +106,7 @@ def test_a_follow_up_question_is_rewritten_by_the_model_before_searching(fake_ll
         patch.object(qa, "transcript_client") as transcript_client,
     ):
         transcript_client.get_transcript.return_value = INTERVIEW
-        list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "那他對預算怎麼看？"))
+        list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "那他對預算怎麼看？", user_id=None))
 
     rewrite, answer = fake_llm.bodies()
     assert "王小明是誰？" in rewrite["messages"][0]["content"] and "那他對預算怎麼看？" in rewrite["messages"][0]["content"]

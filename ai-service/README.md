@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history` 四張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage` 五張表。
 
 原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)；embedding 仍用 `hf_client.py`。
 
@@ -53,7 +53,7 @@ uv run python -m app.main
 ## Pipeline
 
 ```
-消費 transcription.completed { jobId }
+消費 transcription.completed { jobId, userId }（userId 是 Job 擁有者，用量記在他名下；升級前排入的舊訊息沒有，照常處理）
   → UpdateJobStatus(SUMMARIZING)
   → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文 + 分段
   → 已清空片段（空字串）不算內容，從下面每個 AI 輸入排除
@@ -87,13 +87,20 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 檢索到的片段對回逐字稿、換上講者目前的名字，prompt 要求用這些名字稱呼講者——改名後下一次提問就是新名字，什麼都不用重算。
 拿不到逐字稿（失敗或超過 2 秒）時照樣回答，只是不帶名字。只有一位講者或講者分離之前的舊逐字稿，輸入維持原樣、不帶名字。
 
+### 用量
+
+每一次 LLM 呼叫（摘要、章節、問答的回答與問題改寫、重新產生摘要與章節）結束時，記一筆**用量**到 `llm_usage`：使用者、Job、
+功能、廠商、模型、金鑰來源、輸入 / 輸出 token（取廠商回報的數字，沒回報就是未知，不估算）、成功或失敗。失敗的呼叫也記
+（通常沒有數字）；串流回答被中途放棄也算失敗。用量用自己的 session 立即寫入，跟摘要存檔無關；寫不進去只記 log，不讓
+Job 失敗。embedding 不記。`ListJobLlmUsage` 提供查詢，Gateway 查詢後給前端。
+
 ### 重新產生摘要與章節（`summary.regeneration.requested`）
 
 ```
 RequestRegeneration(jobId)（Gateway POST /summary/{jobId}/regenerate）
   → 鎖住該 job 的摘要列；已經 RUNNING 且在 5 分鐘內 → 什麼都不做
-  → regeneration_status = RUNNING、排入 summary.regeneration.requested { jobId }（publisher confirms、短 timeout；失敗則 rollback）
-消費 summary.regeneration.requested { jobId }
+  → regeneration_status = RUNNING、排入 summary.regeneration.requested { jobId, userId }（publisher confirms、短 timeout；失敗則 rollback）
+消費 summary.regeneration.requested { jobId, userId }
   → GetTranscript（revision R）→ 排除已清空片段、帶上講者目前的名稱（同 pipeline）→ 摘要 + 章節都成功後才覆寫兩者
   → source_revision = R、regeneration_status = IDLE
 ```
@@ -125,10 +132,11 @@ source_revision 是讀到的 R，前端照樣會顯示過時。
 
 | RPC | 說明 |
 |---|---|
-| `RequestRegeneration` | 摘要與章節過時後要求重新產生：狀態設 RUNNING、排入 `summary.regeneration.requested` 後立即回傳目前的摘要；已在跑（5 分鐘內）不重複排入；沒有摘要回 `NOT_FOUND`，排入失敗回 `UNAVAILABLE`（狀態不變） |
+| `RequestRegeneration` | 摘要與章節過時後要求重新產生（帶 `user_id`：要求的使用者，用量記在他名下）：狀態設 RUNNING、排入 `summary.regeneration.requested` 後立即回傳目前的摘要；已在跑（5 分鐘內）不重複排入；沒有摘要回 `NOT_FOUND`，排入失敗回 `UNAVAILABLE`（狀態不變） |
 | `GetSummary` | 依 `job_id` 取得摘要、`source_revision`（依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時）與 `regeneration_status`，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`）。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，只用來記錄 `qa_history`，不重新驗證 |
+| `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
 | `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService`、transcription-service 的 `TranscriptionService` 一樣只信任內部網路呼叫。
@@ -213,6 +221,7 @@ app/
     chapter_generator.py                 章節分段（呼叫 llm_client）
     embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
     qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（多位講者時帶講者目前的名稱）+ 對話歷史 → streaming 生成回答
+    usage_meter.py                       用量記錄：UsageMeter（使用者、Job、功能）交給 llm_client，每次呼叫結束時記一筆；存檔失敗只記 log，不讓流程失敗
     speaker_context.py                   讓 AI 知道講者是誰：兩位以上講者時把片段組成「名稱：文字」（摘要）、`[時間] 名稱：文字`（章節），以及問答用的「片段起訖時間 → 講者目前的名字」；只有一位講者或舊逐字稿時維持原樣
     segment_times.py                     片段起訖時間的對應鍵（embedding 對回逐字稿片段用，重算 embedding 與問答共用）
     hf_client.py                         HF InferenceClient（lazy init），只剩 embedding 在用
@@ -223,6 +232,7 @@ app/
     chapter_repository.py                  ai_db 存取（chapters）
     embedding_repository.py                ai_db 存取（embeddings，含向量相似度搜尋）
     qa_repository.py                       ai_db 存取（qa_history）
+    llm_usage_repository.py                ai_db 存取（llm_usage）：每筆用量用自己的 session 立即寫入
   db/
     session.py                              engine / session / init_db（Alembic upgrade）
     migrations/                             Alembic migration（`versions/0001_baseline.py` 是導入前 create_all 建出的 schema，只補建缺少的表）
@@ -249,4 +259,4 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - chat/embedding model 選擇都受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 embedding 模型 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `AI_HF_CHAT_MODEL`／`HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
 - 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了。還停在 768 維的舊表會讓服務拒絕啟動（baseline migration 檢查），要整張表 DROP 掉讓 migration 重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
 - `Qwen/Qwen3.5-9B` 屬於 Qwen3 系列，預設會開 thinking mode：完整思考過程另外算 completion tokens、放在 HF 回應的 `message.reasoning`（不是混進 `content` 的 `<think>` 標籤，這點實測跟原本 Groq `qwen3.6-27b` 的行為不同）。**已踩過的坑**：不設 `max_tokens` 時 provider 預設只給 2048，稍長的輸入光思考就把預算燒光，`content` 直接是空字串（`finish_reason="length"`）但整個呼叫不會報錯——摘要/章節分段因此曾經整段是空的，pipeline 卻顯示成功；而且單純拉高 `max_tokens` 治標不治本，實測 500+ 段的章節分段呼叫就算給到 32768 還是會在思考階段被 HF gateway 504 timeout 打斷。目前的做法是透過 `llm_client.DISABLE_THINKING`（chat template 的 `enable_thinking=False`）直接關掉 thinking mode，平台模型的每次呼叫都會帶上（`platform_chat_model()`），HF 的 OpenAI 相容路由會原樣轉給模型；`strip_thinking()`／`stream_without_thinking()` 保留作為防禦性 fallback（防之後換模型/provider 又變回把思考混進 `content` 的行為），正常情況下是 no-op。換其他 HF 聊天模型時要重新確認是否還會有類似的 thinking-mode 行為
-- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；摘要 / 章節 / 問答帶講者名稱（`tests/test_speaker_aware_pipeline.py`、`tests/test_qa.py`：`stream_answer()` mock 檢索與 transcript client，模型是假 AI 廠商）；gRPC controller 只有 `GetSummary` 有 in-process 測試，問答 streaming 的 gRPC 層仍只靠手動 grpcurl smoke test
+- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；摘要 / 章節 / 問答帶講者名稱（`tests/test_speaker_aware_pipeline.py`、`tests/test_qa.py`：`stream_answer()` mock 檢索與 transcript client，模型是假 AI 廠商）；gRPC controller 的 `GetSummary`、`RequestRegeneration`、`ListJobLlmUsage` 有 in-process 測試（真的 Postgres），問答 streaming 的 gRPC 層仍只靠手動 grpcurl smoke test

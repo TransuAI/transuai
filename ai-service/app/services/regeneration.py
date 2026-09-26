@@ -14,6 +14,7 @@ from app.services.retry import RetryableMessageError, has_retry_budget, is_retry
 from app.services.speaker_context import chapter_input, summary_input
 from app.services.summarizer import summarize
 from app.services.transcript_client import transcript_client
+from app.services.usage_meter import LlmFeature, UsageMeter, job_owner
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class RegenerationNotQueued(Exception):
     """The request couldn't be put on the queue; nothing was changed."""
 
 
-def _queue(job_id: str) -> None:
+def _queue(job_id: str, user_id: str | None) -> None:
     # Runs inside the user's request: short timeouts, one connection attempt, publisher confirms
     # (the same approach as transcription-service's transcript.edited).
     connection = BlockingConnection(connection_params(
@@ -49,12 +50,12 @@ def _queue(job_id: str) -> None:
     try:
         channel = connection.channel()
         channel.confirm_delivery()
-        publish_regeneration_requested(channel, job_id)
+        publish_regeneration_requested(channel, job_id, user_id)
     finally:
         connection.close()
 
 
-def request_regeneration(job_id: uuid.UUID) -> Summary:
+def request_regeneration(job_id: uuid.UUID, user_id: uuid.UUID | None) -> Summary:
     """使用者要求重新產生摘要與章節：狀態設成 RUNNING 並排入 ai-service 自己的 queue，回傳目前的摘要。
     已經在跑（且沒有卡住）時什麼都不做。排入失敗時整個 rollback、狀態不變。Job 狀態完全不碰——工作區
     只在 COMPLETED 時顯示，重新產生期間使用者必須留在工作區。"""
@@ -71,7 +72,7 @@ def request_regeneration(job_id: uuid.UUID) -> Summary:
         summary.regeneration_requested_at = now
         session.flush()
         try:
-            _queue(str(job_id))
+            _queue(str(job_id), str(user_id) if user_id else None)
         except Exception as exc:
             session.rollback()
             logger.exception("could not queue a regeneration for job %s", job_id)
@@ -83,18 +84,23 @@ def request_regeneration(job_id: uuid.UUID) -> Summary:
 
 
 def process_regeneration_requested(body: bytes, retry_count: int = 0) -> None:
-    """處理一則 summary.regeneration.requested { jobId }：依最新的逐字稿（排除已清空片段）重新產生
+    """處理一則 summary.regeneration.requested { jobId, userId }：依最新的逐字稿（排除已清空片段）重新產生
     摘要與章節、覆寫兩者，source_revision 記成讀到的 revision（重新產生期間又被編輯的話，完成後仍然
     正確地顯示過時），狀態回到 IDLE。兩個 LLM 呼叫都成功才寫入，不會只換掉一半。
 
     暫時性失敗且還有重試預算時 raise RetryableMessageError（這個 queue 自己的 retry queue）；最終失敗
     時狀態設成 FAILED、舊內容保留。Job 狀態與 ai.completed / job.failed 一律不碰。
     """
-    job_id = json.loads(body)["jobId"]
+    payload = json.loads(body)
+    job_id = payload["jobId"]
+    user_id = job_owner(payload)
     try:
         transcript = transcript_client.get_transcript(job_id)
-        summary_text = summarize(summary_input(transcript))
-        chapters = generate_chapters(chapter_input(transcript))
+        job_uuid = uuid.UUID(job_id)
+        summary_text = summarize(
+            summary_input(transcript), meter=UsageMeter(user_id, job_uuid, LlmFeature.REGENERATED_SUMMARY))
+        chapters = generate_chapters(
+            chapter_input(transcript), meter=UsageMeter(user_id, job_uuid, LlmFeature.REGENERATED_CHAPTERS))
         session = new_session()
         try:
             replace_summary_and_chapters(

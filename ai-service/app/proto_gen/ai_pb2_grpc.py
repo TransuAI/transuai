@@ -64,6 +64,11 @@ class AiServiceStub:
                 request_serializer=ai__pb2.RequestRegenerationRequest.SerializeToString,
                 response_deserializer=ai__pb2.Summary.FromString,
                 _registered_method=True)
+        self.ListJobLlmUsage = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListJobLlmUsage',
+                request_serializer=ai__pb2.ListJobLlmUsageRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListJobLlmUsageResponse.FromString,
+                _registered_method=True)
 
 
 class AiServiceServicer:
@@ -124,6 +129,14 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListJobLlmUsage(self, request, context):
+        """一個 Job 的 LLM 用量（見 ai-service/CONTEXT.md「用量」），依時間升冪。job_id 不合法回 INVALID_ARGUMENT；沒有紀錄回空列表。
+        不驗證使用者，Gateway 已經做過 ownership 檢查。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AiServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -151,6 +164,11 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.RequestRegeneration,
                     request_deserializer=ai__pb2.RequestRegenerationRequest.FromString,
                     response_serializer=ai__pb2.Summary.SerializeToString,
+            ),
+            'ListJobLlmUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListJobLlmUsage,
+                    request_deserializer=ai__pb2.ListJobLlmUsageRequest.FromString,
+                    response_serializer=ai__pb2.ListJobLlmUsageResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -292,6 +310,33 @@ class AiService:
             '/transuai.ai.v1.AiService/RequestRegeneration',
             ai__pb2.RequestRegenerationRequest.SerializeToString,
             ai__pb2.Summary.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListJobLlmUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListJobLlmUsage',
+            ai__pb2.ListJobLlmUsageRequest.SerializeToString,
+            ai__pb2.ListJobLlmUsageResponse.FromString,
             options,
             channel_credentials,
             insecure,

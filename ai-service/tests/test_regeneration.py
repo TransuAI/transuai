@@ -37,7 +37,7 @@ def job(db_session):
     return job_id
 
 
-def run(job_id, summarize=lambda text: "新摘要", retry_count=0):
+def run(job_id, summarize=lambda text, meter: "新摘要", retry_count=0):
     with (
         patch.object(regeneration, "transcript_client") as transcript_client,
         patch.object(regeneration, "summarize", side_effect=summarize) as summarize_mock,
@@ -58,12 +58,12 @@ def state(db_session, job_id):
 def test_regenerating_replaces_summary_and_chapters_from_the_current_transcript(db_session, job):
     summarize, generate_chapters = run(job)
 
-    summarize.assert_called_once_with("大家好\n今天開會討論預算")
+    assert summarize.call_args.args == ("大家好\n今天開會討論預算",)
     assert [s.text for s in generate_chapters.call_args.args[0]] == ["大家好", "今天開會討論預算"]  # no cleared segment
     assert state(db_session, job) == ("新摘要", 3, "IDLE", ["開場", "預算"])
 
 
-def _overloaded(_text):
+def _overloaded(_text, meter):
     raise LlmError("platform", "test-model", LlmErrorReason.TRANSIENT, "HTTP 503")
 
 

@@ -8,6 +8,7 @@ from google.protobuf import timestamp_pb2
 from app.db import new_session
 from app.proto_gen import ai_pb2, ai_pb2_grpc
 from app.repositories.chapter_repository import find_by_job_id as find_chapters_by_job_id
+from app.repositories.llm_usage_repository import list_job_llm_usage
 from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_job_id
 from app.repositories.qa_repository import save_qa
 from app.repositories.summary_repository import find_by_job_id as find_summary_by_job_id
@@ -103,7 +104,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
 
         session = new_session()
         try:
-            chunks = stream_answer(session, job_id, question)
+            chunks = stream_answer(session, job_id, question, user_id=user_id)
 
             # 第一個 yield 保證是 sources（見 qa.stream_answer），在這之前發生的任何錯誤都還
             # 沒有送出任何 chunk：NoEmbeddingsError 是結構性的（這個 job 現在就是沒有 embedding），
@@ -163,10 +164,42 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             job_id = uuid.UUID(request.job_id)
         except ValueError:
             _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "job_id must be a valid UUID")
+        # 升級前的 Gateway 不帶 user_id：照樣排入，用量不記使用者。
         try:
-            summary = request_regeneration(job_id)
+            user_id = uuid.UUID(request.user_id) if request.user_id else None
+        except ValueError:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "user_id must be a valid UUID")
+        try:
+            summary = request_regeneration(job_id, user_id)
         except SummaryNotFound:
             _abort(context, grpc.StatusCode.NOT_FOUND, "summary not found")
         except RegenerationNotQueued:
             _abort(context, grpc.StatusCode.UNAVAILABLE, "could not queue the regeneration, try again")
         return _summary_to_proto(summary)
+
+    def ListJobLlmUsage(self, request, context):
+        try:
+            job_id = uuid.UUID(request.job_id)
+        except ValueError:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "job_id must be a valid UUID")
+
+        session = new_session()
+        try:
+            return ai_pb2.ListJobLlmUsageResponse(
+                records=[_llm_usage_to_proto(usage) for usage in list_job_llm_usage(session, job_id)])
+        finally:
+            session.close()
+
+
+def _llm_usage_to_proto(usage) -> ai_pb2.LlmUsage:
+    created_at = timestamp_pb2.Timestamp()
+    created_at.FromDatetime(usage.created_at)
+    record = ai_pb2.LlmUsage(
+        feature=usage.feature, provider=usage.provider, model=usage.model, key_source=usage.key_source,
+        succeeded=usage.succeeded, created_at=created_at)
+    # 未知的 token 數不設定欄位（proto3 optional），跟 0 分得開。
+    if usage.input_tokens is not None:
+        record.input_tokens = usage.input_tokens
+    if usage.output_tokens is not None:
+        record.output_tokens = usage.output_tokens
+    return record

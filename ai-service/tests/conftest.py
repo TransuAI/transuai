@@ -57,7 +57,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history"))
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage"))
 
 
 @pytest.fixture(scope="session")

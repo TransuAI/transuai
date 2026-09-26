@@ -48,13 +48,14 @@ def publish_job_failed(channel: BlockingChannel, job_id: str, stage: str, error_
     logger.info("published job.failed for job %s (stage=%s)", job_id, stage)
 
 
-def publish_regeneration_requested(channel: BlockingChannel, job_id: str) -> None:
-    """summary.regeneration.requested -> {jobId}：ai-service 排給自己的背景工作（重新產生摘要與章節）。"""
+def publish_regeneration_requested(channel: BlockingChannel, job_id: str, user_id: str | None) -> None:
+    """summary.regeneration.requested -> {jobId, userId}：ai-service 排給自己的背景工作（重新產生摘要與章節）；
+    userId 是要求重新產生的使用者，用量記在他名下。"""
     channel.queue_declare(queue=settings.summary_regeneration_requested_queue, durable=True)
     channel.basic_publish(
         exchange="",
         routing_key=settings.summary_regeneration_requested_queue,
-        body=json.dumps({"jobId": job_id}).encode("utf-8"),
+        body=json.dumps({"jobId": job_id} | ({"userId": user_id} if user_id else {})).encode("utf-8"),
         properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
     )
     logger.info("queued summary.regeneration.requested for job %s", job_id)

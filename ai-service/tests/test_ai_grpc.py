@@ -42,8 +42,11 @@ def published(channel):
     return [(c.kwargs["routing_key"], json.loads(c.kwargs["body"])) for c in channel.basic_publish.call_args_list]
 
 
+REQUESTER = uuid.UUID("00000000-0000-0000-0000-00000000a11c")
+
+
 def call_request_regeneration(stub, job_id):
-    return stub.RequestRegeneration(ai_pb2.RequestRegenerationRequest(job_id=str(job_id)))
+    return stub.RequestRegeneration(ai_pb2.RequestRegenerationRequest(job_id=str(job_id), user_id=str(REQUESTER)))
 
 
 def test_requesting_a_regeneration_marks_it_running_and_queues_it(ai_stub, db_session, rabbitmq):
@@ -54,7 +57,8 @@ def test_requesting_a_regeneration_marks_it_running_and_queues_it(ai_stub, db_se
 
     assert summary.regeneration_status == ai_pb2.REGENERATION_STATUS_RUNNING
     assert summary.summary_text == "舊摘要"
-    assert published(rabbitmq.channel) == [("summary.regeneration.requested", {"jobId": str(job_id)})]
+    assert published(rabbitmq.channel) == [
+        ("summary.regeneration.requested", {"jobId": str(job_id), "userId": str(REQUESTER)})]
 
 
 def test_a_second_request_while_one_is_running_is_not_queued_again(ai_stub, db_session, rabbitmq):
@@ -110,4 +114,14 @@ def test_a_regeneration_stuck_for_more_than_5_minutes_reads_as_failed_so_it_can_
     fetched = ai_stub.GetSummary(ai_pb2.GetSummaryRequest(job_id=str(job_id)))
 
     assert fetched.regeneration_status == ai_pb2.REGENERATION_STATUS_FAILED
+
+
+def test_a_regeneration_requested_without_a_user_is_still_queued(ai_stub, db_session, rabbitmq):
+    # A Gateway from before usage was recorded doesn't send user_id; the request must keep working.
+    job_id = uuid.uuid4()
+    save_summary(db_session, job_id, "舊摘要", source_revision=0)
+
+    ai_stub.RequestRegeneration(ai_pb2.RequestRegenerationRequest(job_id=str(job_id)))
+
+    assert published(rabbitmq.channel) == [("summary.regeneration.requested", {"jobId": str(job_id)})]
 

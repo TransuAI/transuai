@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import Iterator
+from typing import Generator
 
 import grpc
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from app.services.llm_client import chat, platform_chat_model, stream_chat
 from app.services.segment_times import time_key
 from app.services.speaker_context import speaker_names_by_segment_time, with_speaker_name
 from app.services.transcript_client import transcript_client
+from app.services.usage_meter import LlmFeature, UsageMeter
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[:max_chars] + "（以下省略）"
 
 
-def _condense_question(question: str, history: list[QaHistory]) -> str:
+def _condense_question(question: str, history: list[QaHistory], meter: UsageMeter) -> str:
     """有歷史時，用一次 LLM 呼叫同時做「要不要改寫」的語意判斷跟改寫本身：問題已經
     完整就原樣照抄，依賴前文才改寫成獨立問題。只影響檢索用的 query 向量，不影響存進
     qa_history 或顯示給使用者的原始問題文字，也不影響餵給 LLM 當作對話歷史的內容
@@ -78,12 +79,14 @@ def _condense_question(question: str, history: list[QaHistory]) -> str:
     result = chat(platform_chat_model(), [{
         "role": "user",
         "content": _CONDENSE_PROMPT_TEMPLATE.format(history=history_text, question=question),
-    }], max_tokens=_CONDENSE_MAX_TOKENS)
+    }], max_tokens=_CONDENSE_MAX_TOKENS, meter=meter)
     condensed = result.text.strip()
     return condensed or question
 
 
-def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterator[tuple[str, object]]:
+def stream_answer(
+    session: Session, job_id: uuid.UUID, question: str, *, user_id: uuid.UUID | None
+) -> Generator[tuple[str, object], None, None]:
     """RAG 問答（含最近 `_MEMORY_TURNS` 輪對話記憶），streaming。
 
     yield 恰好一次 `("sources", list[float])`（在檢索完成、生成答案文字之前），
@@ -95,7 +98,7 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
     """
     history = find_by_job_id(session, job_id)[-_MEMORY_TURNS:]
 
-    condensed_question = _condense_question(question, history)
+    condensed_question = _condense_question(question, history, UsageMeter(user_id, job_id, LlmFeature.QA_REWRITE))
     query_vector = embed_query(condensed_question)
     chunks = find_similar(session, job_id, query_vector, limit=_TOP_K)
     if not chunks:
@@ -125,7 +128,8 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
         "calling %s (%s) to stream-answer question for job %s, using %d chunks, %d history turns",
         model.provider, model.model, job_id, len(chunks), len(history),
     )
-    for delta in stream_chat(model, messages, max_tokens=_ANSWER_MAX_TOKENS):
+    meter = UsageMeter(user_id, job_id, LlmFeature.QA_ANSWER)
+    for delta in stream_chat(model, messages, max_tokens=_ANSWER_MAX_TOKENS, meter=meter):
         yield ("delta", delta)
 
 

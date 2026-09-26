@@ -20,10 +20,44 @@ REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
 
 class RequestRegenerationRequest(_message.Message):
+    __slots__ = ("job_id", "user_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
+
+class ListJobLlmUsageRequest(_message.Message):
     __slots__ = ("job_id",)
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class ListJobLlmUsageResponse(_message.Message):
+    __slots__ = ("records",)
+    RECORDS_FIELD_NUMBER: _ClassVar[int]
+    records: _containers.RepeatedCompositeFieldContainer[LlmUsage]
+    def __init__(self, records: _Optional[_Iterable[_Union[LlmUsage, _Mapping]]] = ...) -> None: ...
+
+class LlmUsage(_message.Message):
+    __slots__ = ("feature", "provider", "model", "key_source", "input_tokens", "output_tokens", "succeeded", "created_at")
+    FEATURE_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    KEY_SOURCE_FIELD_NUMBER: _ClassVar[int]
+    INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    feature: str
+    provider: str
+    model: str
+    key_source: str
+    input_tokens: int
+    output_tokens: int
+    succeeded: bool
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, feature: _Optional[str] = ..., provider: _Optional[str] = ..., model: _Optional[str] = ..., key_source: _Optional[str] = ..., input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., succeeded: _Optional[bool] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class Summary(_message.Message):
     __slots__ = ("job_id", "summary_text", "source_revision", "regeneration_status")

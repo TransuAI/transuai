@@ -1,6 +1,6 @@
 import logging
 
-from app.services.llm_client import chat, platform_chat_model
+from app.services.llm_client import UsageSink, chat, platform_chat_model
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +13,10 @@ _PROMPT_TEMPLATE = (
 _MAX_TOKENS = 2048
 
 
-def summarize(transcript_text: str) -> str:
+def summarize(transcript_text: str, *, meter: UsageSink | None) -> str:
     """呼叫模型，把逐字稿濃縮成一段摘要（輸入見 speaker_context.summary_input）。"""
     model = platform_chat_model()
     logger.info("calling %s (%s) for summary, transcript length=%d", model.provider, model.model, len(transcript_text))
     result = chat(model, [{"role": "user", "content": _PROMPT_TEMPLATE.format(transcript=transcript_text)}],
-                  max_tokens=_MAX_TOKENS)
+                  max_tokens=_MAX_TOKENS, meter=meter)
     return result.text
