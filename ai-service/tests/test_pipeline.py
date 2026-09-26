@@ -32,7 +32,7 @@ def test_process_message_happy_path_calls_everything_in_order_and_persists_resul
         FakeSegment(0.0, 5.0, "A", "哈囉大家好"),
         FakeSegment(5.0, 10.0, "B", "今天來聊聊逐字稿"),
     ]
-    transcript = SimpleNamespace(full_text="哈囉大家好 今天來聊聊逐字稿", segments=segments)
+    transcript = SimpleNamespace(full_text="哈囉大家好 今天來聊聊逐字稿", segments=segments, revision=0)
 
     manager = MagicMock()
     mock_session = MagicMock(name="session")
@@ -94,7 +94,7 @@ def test_process_message_happy_path_calls_everything_in_order_and_persists_resul
     mock_generate_chapters.assert_called_once_with(segments)
     mock_embed_documents.assert_called_once_with(["哈囉大家好", "今天來聊聊逐字稿"])
 
-    mock_save_summary.assert_called_once_with(mock_session, uuid.UUID(job_id), "這是摘要")
+    mock_save_summary.assert_called_once_with(mock_session, uuid.UUID(job_id), "這是摘要", source_revision=0)
     mock_save_chapters.assert_called_once_with(mock_session, uuid.UUID(job_id), [("開場", 0.0)])
     mock_save_embeddings.assert_called_once_with(
         mock_session,
@@ -108,3 +108,36 @@ def test_process_message_happy_path_calls_everything_in_order_and_persists_resul
     publish_completed.assert_called_once_with(job_id)
     publish_failed.assert_not_called()
     mock_session.close.assert_called_once()
+
+
+def test_process_message_leaves_cleared_segments_out_and_records_the_transcript_revision():
+    """A transcript can be edited before (or while) the pipeline runs: cleared segments (empty text)
+    aren't content, and the summary remembers which revision of the transcript it was built from, so
+    a later edit can tell it's 過時."""
+    job_id = str(uuid.uuid4())
+    body = json.dumps({"jobId": job_id}).encode("utf-8")
+    kept = [FakeSegment(0.0, 5.0, "", "哈囉大家好"), FakeSegment(8.0, 10.0, "", "今天來聊聊逐字稿")]
+    transcript = SimpleNamespace(
+        full_text="哈囉大家好\n今天來聊聊逐字稿",
+        revision=3,
+        segments=[kept[0], FakeSegment(5.0, 8.0, "", ""), kept[1]],
+    )
+
+    with (
+        patch.object(pipeline, "job_status_client"),
+        patch.object(pipeline, "transcript_client") as mock_transcript_client,
+        patch.object(pipeline, "summarize", return_value="摘要"),
+        patch.object(pipeline, "generate_chapters", return_value=[]) as mock_generate_chapters,
+        patch.object(pipeline, "embed_documents", return_value=[[0.1], [0.2]]) as mock_embed_documents,
+        patch.object(pipeline, "new_session", return_value=MagicMock(name="session")),
+        patch.object(pipeline, "save_summary") as mock_save_summary,
+        patch.object(pipeline, "save_chapters"),
+        patch.object(pipeline, "save_embeddings") as mock_save_embeddings,
+    ):
+        mock_transcript_client.get_transcript.return_value = transcript
+        pipeline.process_message(body, MagicMock(), MagicMock())
+
+    mock_generate_chapters.assert_called_once_with(kept)
+    mock_embed_documents.assert_called_once_with(["哈囉大家好", "今天來聊聊逐字稿"])
+    assert [chunk[0] for chunk in mock_save_embeddings.call_args.args[2]] == ["哈囉大家好", "今天來聊聊逐字稿"]
+    assert mock_save_summary.call_args.kwargs["source_revision"] == 3

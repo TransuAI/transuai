@@ -56,3 +56,23 @@ def db_session(test_database):
     session.close()
     with test_database.begin() as conn:
         conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history"))
+
+
+@pytest.fixture(scope="session")
+def ai_stub(test_database):
+    """The real AiService, served in-process on a free port."""
+    from concurrent import futures
+
+    import grpc
+
+    from app.controllers.ai_controller import AiController
+    from app.proto_gen import ai_pb2_grpc
+
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
+    ai_pb2_grpc.add_AiServiceServicer_to_server(AiController(), server)
+    port = server.add_insecure_port("localhost:0")
+    server.start()
+    channel = grpc.insecure_channel(f"localhost:{port}")
+    yield ai_pb2_grpc.AiServiceStub(channel)
+    channel.close()
+    server.stop(grace=None)

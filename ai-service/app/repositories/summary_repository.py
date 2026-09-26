@@ -6,12 +6,12 @@ from sqlalchemy.orm import Session
 from app.models import Summary
 
 
-def save_summary(session: Session, job_id: uuid.UUID, summary_text: str) -> Summary:
+def save_summary(session: Session, job_id: uuid.UUID, summary_text: str, *, source_revision: int) -> Summary:
     """覆蓋寫入某個 job 的摘要：先刪除舊資料再寫入新的一筆，跟 chapter_repository /
     embedding_repository 用同一個模式——訊息層級的重試會讓整個 pipeline 重跑，若不先刪除舊資料，
     第二次寫入會撞上 `job_id` 的 unique 約束。"""
     session.query(Summary).filter(Summary.job_id == job_id).delete()
-    summary = Summary(job_id=job_id, summary_text=summary_text)
+    summary = Summary(job_id=job_id, summary_text=summary_text, source_revision=source_revision)
     session.add(summary)
     session.commit()
     session.refresh(summary)

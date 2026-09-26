@@ -4,7 +4,6 @@ import pytest
 from sqlalchemy import inspect, text
 
 from app.db import init_db
-from app.models import Base
 
 ALL_TABLES = {"summaries", "chapters", "embeddings", "qa_history"}
 
@@ -19,9 +18,13 @@ def test_startup_completes_a_database_created_before_migrations_existed(empty_sc
     """ai-service's create_all schema only ever grew by whole tables, so a pre-migration database
     can hold any subset of them (a dev ai_db from before chapters/Q&A only has summaries). Startup
     has to add the missing tables and keep the existing ones and their rows."""
-    Base.metadata.tables["summaries"].create(bind=empty_schema)
     job_id = uuid.uuid4()
     with empty_schema.begin() as conn:
+        # The summaries table as create_all built it back then (frozen: the model has moved on since).
+        conn.execute(text(
+            "CREATE TABLE summaries (id UUID PRIMARY KEY, job_id UUID NOT NULL, summary_text TEXT, "
+            "created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL); "
+            "CREATE UNIQUE INDEX ix_summaries_job_id ON summaries (job_id)"))
         conn.execute(
             text("INSERT INTO summaries (id, job_id, summary_text, created_at) VALUES (:id, :job, '舊摘要', now())"),
             {"id": uuid.uuid4(), "job": job_id},
@@ -32,6 +35,8 @@ def test_startup_completes_a_database_created_before_migrations_existed(empty_sc
     assert ALL_TABLES <= set(inspect(empty_schema).get_table_names())
     with empty_schema.connect() as conn:
         assert conn.execute(text("SELECT summary_text FROM summaries WHERE job_id = :job"), {"job": job_id}).scalar() == "舊摘要"
+        # Summaries from before transcripts could be edited were built from revision 0.
+        assert conn.execute(text("SELECT source_revision FROM summaries WHERE job_id = :job"), {"job": job_id}).scalar() == 0
         assert conn.execute(text("SELECT count(*) FROM alembic_version")).scalar() == 1
 
 

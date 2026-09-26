@@ -52,14 +52,15 @@ def process_message(
         job_status_client.update_status(job_id, "SUMMARIZING")
 
         transcript = transcript_client.get_transcript(job_id)
-        segments = list(transcript.segments)
+        # Cleared segments (empty text, 已清空片段) aren't content: leave them out of every AI input.
+        segments = [segment for segment in transcript.segments if segment.text != ""]
         summary_text = summarize(transcript.full_text)
         chapters = generate_chapters(segments)
         vectors = embed_documents([segment.text for segment in segments])
 
         session = new_session()
         try:
-            save_summary(session, uuid.UUID(job_id), summary_text)
+            save_summary(session, uuid.UUID(job_id), summary_text, source_revision=transcript.revision)
             save_chapters(session, uuid.UUID(job_id), chapters)
             save_embeddings(session, uuid.UUID(job_id), [
                 (segment.text, segment.start_time, segment.end_time, vector)

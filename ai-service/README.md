@@ -55,10 +55,11 @@ uv run python -m app.main
 消費 transcription.completed { jobId }
   → UpdateJobStatus(SUMMARIZING)
   → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文 + 分段
+  → 已清空片段（空字串）不算內容，從下面每個 AI 輸入排除
   → 呼叫 HF Inference Providers 產生摘要
   → 呼叫 HF Inference Providers 依分段時間戳切章節（逐字稿沒有分段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
   → 呼叫 HF Inference Providers 把逐字稿分段轉成向量
-  → 摘要存進 summaries，章節存進 chapters，向量存進 embeddings（都覆蓋該 job 舊的資料）
+  → 摘要（連同讀到的逐字稿 revision，記成 source_revision）存進 summaries，章節存進 chapters，向量存進 embeddings（都覆蓋該 job 舊的資料）
   → UpdateJobStatus(COMPLETED)
   → 發送 ai.completed { jobId, status }
 
@@ -99,7 +100,7 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 
 | RPC | 說明 |
 |---|---|
-| `GetSummary` | 依 `job_id` 取得摘要，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
+| `GetSummary` | 依 `job_id` 取得摘要與 `source_revision`（依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時），`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`）。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，只用來記錄 `qa_history`，不重新驗證 |
 | `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
@@ -146,7 +147,7 @@ uv run pytest
 
 用 pytest，mocking 只用標準庫的 `unittest.mock`（沒有額外裝 `pytest-mock`）。
 
-碰資料庫的測試——migration（`tests/test_db_migrations.py`）跟逐字稿編輯後重算 embedding（`tests/test_reembed.py`，只 mock gRPC client 跟 HF embedder）——是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
+碰資料庫的測試——migration（`tests/test_db_migrations.py`）、逐字稿編輯後重算 embedding（`tests/test_reembed.py`，只 mock gRPC client 跟 HF embedder）、in-process 的 gRPC 服務（`tests/test_ai_grpc.py`）——是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
 `tests/conftest.py` 會在同一個 Postgres 上建（或清空重建）一個獨立的 `ai_test_db`，絕對不會碰到 `ai_db`。
 
 其餘測試不需要跑起 `infra`（Postgres/RabbitMQ）或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（HF、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
@@ -213,4 +214,4 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - chat/embedding model 選擇都受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 embedding 模型 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `AI_HF_CHAT_MODEL`／`HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
 - 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了。還停在 768 維的舊表會讓服務拒絕啟動（baseline migration 檢查），要整張表 DROP 掉讓 migration 重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
 - `Qwen/Qwen3.5-9B` 屬於 Qwen3 系列，預設會開 thinking mode：完整思考過程另外算 completion tokens、放在 HF 回應的 `message.reasoning`（不是混進 `content` 的 `<think>` 標籤，這點實測跟原本 Groq `qwen3.6-27b` 的行為不同）。**已踩過的坑**：不設 `max_tokens` 時 provider 預設只給 2048，稍長的輸入光思考就把預算燒光，`content` 直接是空字串（`finish_reason="length"`）但整個呼叫不會報錯——摘要/章節分段因此曾經整段是空的，pipeline 卻顯示成功；而且單純拉高 `max_tokens` 治標不治本，實測 500+ 段的章節分段呼叫就算給到 32768 還是會在思考階段被 HF gateway 504 timeout 打斷。目前的做法是透過 `hf_client.DISABLE_THINKING`（chat template 的 `enable_thinking=False`）直接關掉 thinking mode，所有呼叫 `hf_client.get_client()` 做 chat completion 的地方都要帶上；`strip_thinking()`／`stream_without_thinking()` 保留作為防禦性 fallback（防之後換模型/provider 又變回把思考混進 `content` 的行為），正常情況下是 no-op。換其他 HF 聊天模型時要重新確認是否還會有類似的 thinking-mode 行為
-- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；gRPC controller（問答 streaming 等）目前仍只靠手動 grpcurl smoke test
+- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；gRPC controller 只有 `GetSummary` 有 in-process 測試，問答 streaming 等仍只靠手動 grpcurl smoke test

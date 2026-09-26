@@ -10,12 +10,14 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class Summary(_message.Message):
-    __slots__ = ("job_id", "summary_text")
+    __slots__ = ("job_id", "summary_text", "source_revision")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     SUMMARY_TEXT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     summary_text: str
-    def __init__(self, job_id: _Optional[str] = ..., summary_text: _Optional[str] = ...) -> None: ...
+    source_revision: int
+    def __init__(self, job_id: _Optional[str] = ..., summary_text: _Optional[str] = ..., source_revision: _Optional[int] = ...) -> None: ...
 
 class GetSummaryRequest(_message.Message):
     __slots__ = ("job_id",)

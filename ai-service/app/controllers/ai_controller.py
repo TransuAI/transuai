@@ -39,6 +39,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             return ai_pb2.Summary(
                 job_id=str(summary.job_id),
                 summary_text=summary.summary_text or "",
+                source_revision=summary.source_revision,
             )
         finally:
             session.close()
