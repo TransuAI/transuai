@@ -131,10 +131,13 @@ GET    /transcripts/{jobId}            取得逐字稿全文（含片段 timesta
 GET    /transcripts/{jobId}/segments   只取片段列表（前端目前沒有用這支：播放同步直接用上面那支的 segments）
 PATCH  /transcripts/{jobId}/segments/{segmentId}   編輯片段文字，body { "text": string }（空字串＝清空、
                                    送回 originalText＝還原），回傳 { segment, revision }
+PATCH  /transcripts/{jobId}/speakers/{label}       替講者命名，body { "name": string }（空字串＝恢復預設名稱
+                                   「講者 N」），回傳 { speaker, revision }
 ```
 
 兩個 GET 都是 Gateway 呼叫同一支 gRPC `GetTranscript` 後，視需要只回傳 `segments` 欄位；PATCH 對應
-`UpdateSegmentText`（使用者**編輯**逐字稿：只能改片段文字，起訖時間與切分永遠不變；每次實際改動
+`UpdateSegmentText`、`PATCH …/speakers/{label}` 對應 `RenameSpeaker`（改名也算一次編輯：`revision` +1、發出
+`transcript.edited`；文字沒變，ai-service 不會重算 embedding）。`UpdateSegmentText`（使用者**編輯**逐字稿：只能改片段文字，起訖時間與切分永遠不變；每次實際改動
 `revision` +1、以未清空片段重組 `fullText`，並發出 `transcript.edited` 讓 ai-service 更新問答用的 embedding，見 5.）。轉錄本身完全是 **MQ 驅動**（消費 `transcription.requested`），
 沒有另外開一支「觸發轉錄」的 API。
 
@@ -421,7 +424,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
    沒有額外抽象一層 interface，各服務直接用 pika（Python）/ Spring AMQP（Java）。三個 Python
    consumer（ai-service/transcription-service/notification-service）連線斷線時有指數退避自動
    重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
-3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），逐字稿在換人的地方顯示講者名稱；舊 Job 不回填。講者改名、手動指派講者、講者區塊與顏色、AI 使用講者資訊還沒做（見 8.5）
+3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，迷你播放器與匯出帶講者名稱；只有一位講者時全部隱藏；舊 Job 不回填。手動指派片段講者、AI 使用講者資訊還沒做（見 8.5）
 4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown、複製、下載原始檔）混為一談
 5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
@@ -454,6 +457,6 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
 - **多格式輸出**（LLM 生成會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作，API 路徑待定（不使用 `/export`，見 3.4）
-- **講者分離的其餘部分**：自動講者分離與逐字稿顯示已實作（見 7. 第 3 點）；講者改名、手動指派片段講者／新增講者、講者區塊與顏色、只有一位講者時隱藏、AI 摘要/章節/問答使用講者名稱都還沒做
+- **講者分離的其餘部分**：自動講者分離、講者區塊與改名已實作（見 7. 第 3 點）；手動指派片段講者／新增講者、AI 摘要/章節/問答使用講者名稱都還沒做
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
 - **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做
