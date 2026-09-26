@@ -16,6 +16,18 @@ from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_
 from app.repositories.qa_repository import save_qa
 from app.repositories.quiz_repository import best_correct_counts, find_quiz, list_questions, list_quizzes
 from app.repositories.summary_repository import find_by_job_id as find_summary_by_job_id
+from app.services.connections import (
+    AuthorizationFailed,
+    InvalidBrowserBinding,
+    ServiceNotConfigured,
+    ServiceUnreachable,
+    UnknownAuthorization,
+    UnknownService,
+    complete_connection,
+    disconnect,
+    list_connections,
+    start_connection,
+)
 from app.services.default_models import (
     ModelNotAvailable,
     NoProviderKey,
@@ -39,7 +51,7 @@ from app.services.quizzes import (
     request_quiz,
     submit_attempt,
 )
-from app.models import Quiz, QuizQuestion, QuizStatus, RegenerationStatus
+from app.models import ConnectionStatus, Quiz, QuizQuestion, QuizStatus, RegenerationStatus
 from app.services.regeneration import (
     RegenerationNotQueued,
     SummaryNotFound,
@@ -353,6 +365,58 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             results=[ai_pb2.QuizQuestionResult(chosen_option=r.chosen_option, correct_option=r.correct_option,
                                                correct=r.correct, explanation=r.explanation)
                      for r in result.results])
+
+
+    def ListConnections(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        connections = []
+        for state in list_connections(user_id):
+            connection = ai_pb2.Connection(service=state.service, status=_CONNECTION_STATUS[state.status])
+            if state.connected_at is not None:
+                connection.connected_at.FromDatetime(state.connected_at)
+            connections.append(connection)
+        return ai_pb2.ListConnectionsResponse(connections=connections)
+
+    def StartConnection(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            url = start_connection(user_id, request.service, request.redirect_uri, request.browser_binding)
+        except UnknownService:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, f"不支援的服務：{request.service}")
+        except InvalidBrowserBinding:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "browser_binding is required")
+        except ServiceNotConfigured as exc:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, str(exc))
+        except ServiceUnreachable as exc:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, str(exc))
+        return ai_pb2.StartConnectionResponse(authorize_url=url)
+
+    def CompleteConnection(self, request, context):
+        try:
+            user_id = complete_connection(request.service, request.state, request.code, request.error,
+                                          request.browser_binding)
+        except (UnknownService, UnknownAuthorization):
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "這次授權不存在或已經過期，請再連結一次")
+        except AuthorizationFailed as exc:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, str(exc))
+        except ServiceUnreachable as exc:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, str(exc))
+        return ai_pb2.CompleteConnectionResponse(user_id=str(user_id))
+
+    def DeleteConnection(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            revoked = disconnect(user_id, request.service)
+        except UnknownService:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, f"不支援的服務：{request.service}")
+        return ai_pb2.DeleteConnectionResponse(revoked=revoked)
+
+
+_CONNECTION_STATUS = {
+    None: ai_pb2.CONNECTION_STATUS_NOT_CONNECTED,
+    ConnectionStatus.CONNECTED: ai_pb2.CONNECTION_STATUS_CONNECTED,
+    ConnectionStatus.INVALID: ai_pb2.CONNECTION_STATUS_INVALID,
+}
 
 
 def _parse_uuid(value: str, field: str, context: grpc.ServicerContext) -> uuid.UUID:

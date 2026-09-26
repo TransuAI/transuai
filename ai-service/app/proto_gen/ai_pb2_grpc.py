@@ -94,6 +94,26 @@ class AiServiceStub:
                 request_serializer=ai__pb2.SubmitQuizAttemptRequest.SerializeToString,
                 response_deserializer=ai__pb2.QuizAttemptResult.FromString,
                 _registered_method=True)
+        self.ListConnections = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListConnections',
+                request_serializer=ai__pb2.ListConnectionsRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListConnectionsResponse.FromString,
+                _registered_method=True)
+        self.StartConnection = channel.unary_unary(
+                '/transuai.ai.v1.AiService/StartConnection',
+                request_serializer=ai__pb2.StartConnectionRequest.SerializeToString,
+                response_deserializer=ai__pb2.StartConnectionResponse.FromString,
+                _registered_method=True)
+        self.CompleteConnection = channel.unary_unary(
+                '/transuai.ai.v1.AiService/CompleteConnection',
+                request_serializer=ai__pb2.CompleteConnectionRequest.SerializeToString,
+                response_deserializer=ai__pb2.CompleteConnectionResponse.FromString,
+                _registered_method=True)
+        self.DeleteConnection = channel.unary_unary(
+                '/transuai.ai.v1.AiService/DeleteConnection',
+                request_serializer=ai__pb2.DeleteConnectionRequest.SerializeToString,
+                response_deserializer=ai__pb2.DeleteConnectionResponse.FromString,
+                _registered_method=True)
         self.SaveProviderKey = channel.unary_unary(
                 '/transuai.ai.v1.AiService/SaveProviderKey',
                 request_serializer=ai__pb2.SaveProviderKeyRequest.SerializeToString,
@@ -236,6 +256,40 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListConnections(self, request, context):
+        """已連結的帳號（見 ai-service/CONTEXT.md）：Google、Notion 各一個，狀態是已連結、已失效或未連結。存取權杖過期時會先
+        用 refresh token 換新；對方拒絕（授權被撤銷、refresh token 失效）就標成已失效，暫時連不上則維持原狀。
+        權杖加密存在 ai-service，永遠不會出現在任何回應裡。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StartConnection(self, request, context):
+        """開始連結：記下這次授權（state；Notion 另外用 PKCE，第一次會先向 Notion 動態註冊 client），回傳要把使用者轉過去的
+        授權網址。redirect_uri 是 Gateway 的回呼網址，完成時用同一個。service 不認得回 INVALID_ARGUMENT；伺服器沒設定
+        Google OAuth client 或加密主金鑰回 FAILED_PRECONDITION；連不上 Notion 註冊 client 回 UNAVAILABLE。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CompleteConnection(self, request, context):
+        """完成連結（Gateway 的回呼）：用 state 找回開始連結的使用者，拿 code 換權杖並加密保存。state 不認得、過期、用過，
+        或 browser_binding 對不上回 INVALID_ARGUMENT；使用者在對方那邊拒絕（error 有值）或換權杖失敗回 FAILED_PRECONDITION。state 一律只能用一次。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteConnection(self, request, context):
+        """中斷連結：向對方撤銷授權並刪除權杖。撤銷失敗（例如連不上）時權杖仍然刪除，revoked 是 false；對方說權杖本來就已經
+        無效（授權早就不在了）算撤銷成功。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SaveProviderKey(self, request, context):
         """自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
         取得的使用者，不另外驗證。
@@ -345,6 +399,26 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.SubmitQuizAttempt,
                     request_deserializer=ai__pb2.SubmitQuizAttemptRequest.FromString,
                     response_serializer=ai__pb2.QuizAttemptResult.SerializeToString,
+            ),
+            'ListConnections': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListConnections,
+                    request_deserializer=ai__pb2.ListConnectionsRequest.FromString,
+                    response_serializer=ai__pb2.ListConnectionsResponse.SerializeToString,
+            ),
+            'StartConnection': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartConnection,
+                    request_deserializer=ai__pb2.StartConnectionRequest.FromString,
+                    response_serializer=ai__pb2.StartConnectionResponse.SerializeToString,
+            ),
+            'CompleteConnection': grpc.unary_unary_rpc_method_handler(
+                    servicer.CompleteConnection,
+                    request_deserializer=ai__pb2.CompleteConnectionRequest.FromString,
+                    response_serializer=ai__pb2.CompleteConnectionResponse.SerializeToString,
+            ),
+            'DeleteConnection': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteConnection,
+                    request_deserializer=ai__pb2.DeleteConnectionRequest.FromString,
+                    response_serializer=ai__pb2.DeleteConnectionResponse.SerializeToString,
             ),
             'SaveProviderKey': grpc.unary_unary_rpc_method_handler(
                     servicer.SaveProviderKey,
@@ -678,6 +752,114 @@ class AiService:
             '/transuai.ai.v1.AiService/SubmitQuizAttempt',
             ai__pb2.SubmitQuizAttemptRequest.SerializeToString,
             ai__pb2.QuizAttemptResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListConnections(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListConnections',
+            ai__pb2.ListConnectionsRequest.SerializeToString,
+            ai__pb2.ListConnectionsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StartConnection(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/StartConnection',
+            ai__pb2.StartConnectionRequest.SerializeToString,
+            ai__pb2.StartConnectionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CompleteConnection(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/CompleteConnection',
+            ai__pb2.CompleteConnectionRequest.SerializeToString,
+            ai__pb2.CompleteConnectionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteConnection(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/DeleteConnection',
+            ai__pb2.DeleteConnectionRequest.SerializeToString,
+            ai__pb2.DeleteConnectionResponse.FromString,
             options,
             channel_credentials,
             insecure,

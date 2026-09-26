@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # 加密自有金鑰用的主金鑰（AES-256-GCM，base64 編碼的 32 bytes）。沒設定時不能存入自有金鑰，其他功能照常。
     key_encryption_key: str = ""
 
+    # 平台自己的 Google Cloud OAuth client（連結 Google 帳號用，見 app/services/connections.py）。沒設定時不能連結 Google。
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+
     grpc_port: int = 8084
 
     @property

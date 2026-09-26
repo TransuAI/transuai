@@ -22,6 +22,13 @@ class QuizStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     QUIZ_STATUS_GENERATING: _ClassVar[QuizStatus]
     QUIZ_STATUS_COMPLETED: _ClassVar[QuizStatus]
     QUIZ_STATUS_FAILED: _ClassVar[QuizStatus]
+
+class ConnectionStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    CONNECTION_STATUS_UNSPECIFIED: _ClassVar[ConnectionStatus]
+    CONNECTION_STATUS_NOT_CONNECTED: _ClassVar[ConnectionStatus]
+    CONNECTION_STATUS_CONNECTED: _ClassVar[ConnectionStatus]
+    CONNECTION_STATUS_INVALID: _ClassVar[ConnectionStatus]
 REGENERATION_STATUS_IDLE: RegenerationStatus
 REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
@@ -29,6 +36,10 @@ QUIZ_STATUS_UNSPECIFIED: QuizStatus
 QUIZ_STATUS_GENERATING: QuizStatus
 QUIZ_STATUS_COMPLETED: QuizStatus
 QUIZ_STATUS_FAILED: QuizStatus
+CONNECTION_STATUS_UNSPECIFIED: ConnectionStatus
+CONNECTION_STATUS_NOT_CONNECTED: ConnectionStatus
+CONNECTION_STATUS_CONNECTED: ConnectionStatus
+CONNECTION_STATUS_INVALID: ConnectionStatus
 
 class RequestQuizRequest(_message.Message):
     __slots__ = ("job_id", "user_id", "question_count")
@@ -87,6 +98,80 @@ class Quiz(_message.Message):
     questions: _containers.RepeatedCompositeFieldContainer[QuizQuestion]
     best_correct_count: int
     def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., question_count: _Optional[int] = ..., status: _Optional[_Union[QuizStatus, str]] = ..., failure_reason: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., questions: _Optional[_Iterable[_Union[QuizQuestion, _Mapping]]] = ..., best_correct_count: _Optional[int] = ...) -> None: ...
+
+class ListConnectionsRequest(_message.Message):
+    __slots__ = ("user_id",)
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    def __init__(self, user_id: _Optional[str] = ...) -> None: ...
+
+class ListConnectionsResponse(_message.Message):
+    __slots__ = ("connections",)
+    CONNECTIONS_FIELD_NUMBER: _ClassVar[int]
+    connections: _containers.RepeatedCompositeFieldContainer[Connection]
+    def __init__(self, connections: _Optional[_Iterable[_Union[Connection, _Mapping]]] = ...) -> None: ...
+
+class Connection(_message.Message):
+    __slots__ = ("service", "status", "connected_at")
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    CONNECTED_AT_FIELD_NUMBER: _ClassVar[int]
+    service: str
+    status: ConnectionStatus
+    connected_at: _timestamp_pb2.Timestamp
+    def __init__(self, service: _Optional[str] = ..., status: _Optional[_Union[ConnectionStatus, str]] = ..., connected_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class StartConnectionRequest(_message.Message):
+    __slots__ = ("user_id", "service", "redirect_uri", "browser_binding")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
+    REDIRECT_URI_FIELD_NUMBER: _ClassVar[int]
+    BROWSER_BINDING_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    service: str
+    redirect_uri: str
+    browser_binding: str
+    def __init__(self, user_id: _Optional[str] = ..., service: _Optional[str] = ..., redirect_uri: _Optional[str] = ..., browser_binding: _Optional[str] = ...) -> None: ...
+
+class StartConnectionResponse(_message.Message):
+    __slots__ = ("authorize_url",)
+    AUTHORIZE_URL_FIELD_NUMBER: _ClassVar[int]
+    authorize_url: str
+    def __init__(self, authorize_url: _Optional[str] = ...) -> None: ...
+
+class CompleteConnectionRequest(_message.Message):
+    __slots__ = ("service", "state", "code", "error", "browser_binding")
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    BROWSER_BINDING_FIELD_NUMBER: _ClassVar[int]
+    service: str
+    state: str
+    code: str
+    error: str
+    browser_binding: str
+    def __init__(self, service: _Optional[str] = ..., state: _Optional[str] = ..., code: _Optional[str] = ..., error: _Optional[str] = ..., browser_binding: _Optional[str] = ...) -> None: ...
+
+class CompleteConnectionResponse(_message.Message):
+    __slots__ = ("user_id",)
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    def __init__(self, user_id: _Optional[str] = ...) -> None: ...
+
+class DeleteConnectionRequest(_message.Message):
+    __slots__ = ("user_id", "service")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    service: str
+    def __init__(self, user_id: _Optional[str] = ..., service: _Optional[str] = ...) -> None: ...
+
+class DeleteConnectionResponse(_message.Message):
+    __slots__ = ("revoked",)
+    REVOKED_FIELD_NUMBER: _ClassVar[int]
+    revoked: bool
+    def __init__(self, revoked: _Optional[bool] = ...) -> None: ...
 
 class SubmitQuizAttemptRequest(_message.Message):
     __slots__ = ("job_id", "quiz_id", "user_id", "answers")

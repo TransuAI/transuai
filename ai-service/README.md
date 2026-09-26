@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts` 十張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts`、`oauth_connections`、`oauth_pending_authorizations`、`oauth_clients` 十三張表。
 
 原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)；embedding 仍用 `hf_client.py`。
 
@@ -32,6 +32,8 @@
 - Transcription Service 要跑在 `localhost:8083`（見 [`../transcription-service`](../transcription-service)），因為要呼叫它的 `TranscriptionService.GetTranscript`
 - 一組 HF Inference API Key（[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)，建立 fine-grained token 時勾選「Make calls to Inference Providers」），填進 `.env` 的 `HF_API_KEY`——embedding 跟摘要/章節分段/RAG 問答共用同一把
 - 沒填的話服務照樣能啟動（health check 正常），但實際消費到訊息、呼叫 HF 時會失敗，Job 會被標成 `FAILED`
+- 要連結 Google 帳號才需要：`.env` 的 `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`（Google Cloud Console 的「網頁應用程式」
+  OAuth client，重新導向 URI 是 `http://localhost:5173/api/oauth/google/callback`，見 [`../infra/README.md`](../infra/README.md)）
 
 ```bash
 cp .env.example .env   # 第一次使用才需要，填入 HF_API_KEY
@@ -93,6 +95,23 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 需要金鑰的查詢 API 驗證（OpenRouter 的模型清單是公開的，所以改查「目前這把金鑰」）；只有 2xx 算通過，401／403 與其他 4xx 就拒絕並
 說明原因（附上廠商自己的說明，例如 Gemini 對無效金鑰回 400），廠商暫時連不上也不存。密文綁定「使用者:廠商」，搬到別列就解不開。通過後用 AES-256-GCM 加密存進 `provider_keys`，主金鑰是環境變數 `KEY_ENCRYPTION_KEY`（`openssl rand -base64 32` 產生，
 沒設定時不能存入自有金鑰，其他功能照常），之後只回傳末四碼。取捨見 [ADR 0005](docs/adr/0005-own-api-keys-encrypted-in-ai-service.md)。
+
+### 已連結的帳號
+
+使用者可以連結 Google（Calendar 查行程與建立活動、Gmail 建立草稿、Tasks）與 Notion（官方遠端 MCP），給之後的會後處理用。
+每個服務是 `app/services/connections.py` 裡的一份設定（授權、換權杖、撤銷的網址、權限、是否 PKCE、是否動態註冊 client）。
+
+- **開始連結**（`StartConnection`）：產生一次性的 `state`（10 分鐘內有效）記在 `oauth_pending_authorizations`，連同 Gateway
+  放進瀏覽器 cookie 的值的雜湊（`browser_binding`：回呼時要帶回同一個值，state 才算數，別人的授權網址連不到使用者的帳號上），
+  回傳授權網址；過期沒完成的授權在下一次開始連結時清掉。
+  Google 用平台自己的 OAuth client（環境變數 `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`，沒設定時不能連結 Google），
+  `access_type=offline` 拿 refresh token；Notion 用 PKCE（S256），第一次先向 `mcp.notion.com/register` 動態註冊公開 client，
+  依回呼網址存在 `oauth_clients` 重複使用。
+- **完成連結**（`CompleteConnection`，Gateway 的回呼）：用 `state` 找回使用者（只能用一次），拿 code 換權杖，跟自有金鑰同一套
+  AES-256-GCM 加密存進 `oauth_connections`（綁定「使用者:服務:權杖種類」）。權杖不會出現在任何回應裡。
+- **續期**：要用存取權杖時快過期就先用 refresh token 換新（Notion 會連 refresh token 一起換）；對方拒絕就把連結標成已失效，
+  暫時連不上則維持原狀。`ListConnections` 會順便確認，所以設定頁看得到失效。
+- **中斷連結**（`DeleteConnection`）：向對方撤銷授權（Google 的 `/revoke`、Notion 的 `/token`），不論成敗都刪除權杖。
 
 ### 預設模型
 
@@ -176,6 +195,10 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 | `RequestQuiz` | 要求產生一份測驗（帶 `user_id`：要求的使用者，用他的預設模型、用量記在他名下）：新增 GENERATING 的測驗、排入 `quiz.requested` 後立即回傳（不含題目）；每次都是新的一份。題數不是 5、10、20 或 ID 不合法回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
 | `ListQuizzes` | 一個 Job 的所有測驗（新的在前）：題數、狀態（GENERATING 超過 5 分鐘回報成 FAILED）、失敗原因、依據的逐字稿 revision、產生的模型、要求與完成時間、最佳成績（`best_correct_count`：所有作答裡答對最多的題數，沒作答過不設定）；不含題目 |
 | `GetQuiz` | 一份測驗含題目（題型、題目、選項、正確選項、解說、依據的片段開始時間）與最佳成績；不存在或不屬於這個 `job_id` 回 `NOT_FOUND` |
+| `ListConnections` | 使用者的已連結帳號，Google、Notion 各一筆：狀態（已連結、已失效、未連結）與連結時間；已連結的會先確認存取權杖還能用（過期就換新，換不到就是已失效） |
+| `StartConnection` | 開始連結：記下 `state` 與 `browser_binding` 的雜湊（Notion 另外 PKCE，必要時先動態註冊 client），回傳授權網址；`redirect_uri` 是 Gateway 的回呼網址，`browser_binding` 不能是空的。不認得的服務回 `INVALID_ARGUMENT`，沒設定 Google OAuth client 或加密主金鑰回 `FAILED_PRECONDITION`，連不上 Notion 回 `UNAVAILABLE` |
+| `CompleteConnection` | 完成連結：用 `state` 找回使用者、拿 `code` 換權杖並加密保存，回傳 `user_id`。`state` 不認得、過期、用過、屬於別的服務，或 `browser_binding` 對不上（不是開始連結的那個瀏覽器）回 `INVALID_ARGUMENT`；使用者拒絕（`error` 有值）或對方不肯換權杖回 `FAILED_PRECONDITION` |
+| `DeleteConnection` | 中斷連結：向對方撤銷授權並刪除權杖；撤銷失敗時照樣刪除，`revoked` 是 false（對方說權杖本來就無效——授權早就不在了——算撤銷成功）。沒連結也算成功 |
 | `SubmitQuizAttempt` | 送出一次作答（依題目順序、每題一個選項位置）：計分、存進 `quiz_attempts`，回傳答對題數與每題的選擇、正確選項、對錯、解說；同一份測驗可以重做，每次都保存。題數不對或選項超出範圍回 `INVALID_ARGUMENT`，還沒產生完成回 `FAILED_PRECONDITION`，不屬於這個 `job_id` 回 `NOT_FOUND` |
 | `SumUserLlmUsage` | 一位使用者在 `[start, end)` 之間的 LLM 用量，依廠商、模型、金鑰來源加總：輸入 / 輸出 token（已知數字的加總）、呼叫次數（失敗也算）、廠商沒回報 token 的次數；Gateway 把「某個月」換成時間範圍。`user_id` 不合法或沒給 `start` / `end` 回 `INVALID_ARGUMENT`，沒有用量回空列表 |
 | `SaveProviderKey` / `DeleteProviderKey` / `ListProviderKeys` | 自有金鑰（見上方「自有金鑰」）：存入或替換（先向廠商驗證，通過才加密存下，回傳末四碼；廠商不在清單、金鑰是空的或無效回 `INVALID_ARGUMENT` 附原因，廠商暫時連不上回 `UNAVAILABLE`，沒設定主金鑰回 `FAILED_PRECONDITION`）、刪除（沒有這把回 `deleted=false`；預設模型正在用它時一起改回平台模型，`default_model_reset=true`）、列出（只有末四碼） |
@@ -268,7 +291,8 @@ app/
     embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
     qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（多位講者時帶講者目前的名稱）+ 對話歷史 → streaming 生成回答
     providers.py                         自有金鑰支援的廠商（固定清單）：OpenAI 相容網址、驗證金鑰用的查詢 API
-    key_encryption.py                    自有金鑰的 AES-256-GCM 加密；主金鑰來自 KEY_ENCRYPTION_KEY
+    key_encryption.py                    自有金鑰與已連結帳號權杖的 AES-256-GCM 加密；主金鑰來自 KEY_ENCRYPTION_KEY
+    connections.py                       已連結的帳號：每個服務的 OAuth 設定、開始 / 完成連結、續期、中斷連結（撤銷）
     provider_keys.py                     存入自有金鑰：驗證 → 加密 → 存下
     model_catalog.py                     可以選的模型：OpenAI / Anthropic / Gemini 整理好的清單（標示能不能呼叫工具）、OpenRouter 模型 ID 的確認
     default_models.py                    預設模型：可選的模型、設定與讀取、刪金鑰時改回平台模型、resolve_chat_model()（背景工作與問答要用的模型，需要時解開自有金鑰）
@@ -295,6 +319,11 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```
 
 ## 已知限制 / 待辦
+
+- 已連結的帳號：Google 的 `gmail.compose`（建立草稿）屬於 Google 的受限權限，應用程式通過 Google 的審查之前，只有 OAuth
+  同意畫面登記的測試使用者能連結；會後處理要用的 Google Calendar / Gmail 官方遠端 MCP 目前是 Developer Preview，要先加入
+  Google Workspace 的預覽計畫。兩者都還沒實際申請過，Google 的連結流程只用假的 OAuth 端點測過；Notion 的端點照它公開的
+  `/.well-known/oauth-authorization-server` 設定，也還沒用真的帳號走過一次。
 
 - 訊息處理遇到暫時性失敗（HF 429/503、內部 gRPC 服務短暫不可用）會自動重試（訊息層級 requeue，
   最多 2 次、共 3 次嘗試，見上面 Pipeline 一節跟 `docs/adr/0001-...md`）；重試預算用盡、或失敗屬於永久性

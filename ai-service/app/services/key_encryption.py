@@ -1,5 +1,5 @@
-"""自有金鑰的加密（AES-256-GCM）。主金鑰來自設定（`KEY_ENCRYPTION_KEY`，base64 的 32 bytes），不在資料庫裡：資料庫
-外洩時，拿到的只有密文。"""
+"""自有金鑰與已連結帳號權杖的加密（AES-256-GCM）。主金鑰來自設定（`KEY_ENCRYPTION_KEY`，base64 的 32 bytes），不在
+資料庫裡：資料庫外洩時，拿到的只有密文。"""
 
 import base64
 import binascii
@@ -39,6 +39,11 @@ def decrypt(ciphertext: bytes, *, bound_to: str) -> str:
         ciphertext[:_NONCE_BYTES], ciphertext[_NONCE_BYTES:], bound_to.encode("utf-8")).decode("utf-8")
 
 
-def key_binding(user_id: uuid.UUID, provider: str) -> str:
-    """自有金鑰綁定的對象：哪位使用者的哪個廠商。"""
-    return f"{user_id}:{provider}"
+def key_binding(user_id: uuid.UUID, owner: str) -> str:
+    """密文綁定的對象：哪位使用者的什麼（自有金鑰是廠商，例如「openai」；已連結帳號的權杖是「connection:google:access」）。"""
+    return f"{user_id}:{owner}"
+
+
+def ensure_available() -> None:
+    """主金鑰沒設定或無效時 raise EncryptionUnavailable——在開始一件之後才要加密的事之前先確認。"""
+    _cipher()
