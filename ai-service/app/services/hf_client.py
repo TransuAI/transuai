@@ -78,3 +78,6 @@ def stream_without_thinking(chunks: Iterable[str]) -> Iterator[str]:
         buffer = ""
         if remainder:
             yield remainder
+    # 整個回答比 `<think>` 還短時，串流結束前一直都還在判斷開頭，剩下的就是答案本身。
+    if in_think is None and buffer:
+        yield buffer
