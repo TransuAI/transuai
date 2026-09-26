@@ -10,14 +10,18 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.gateway.grpc.JobOwnershipGuard;
+import com.transuai.gateway.web.dto.RenameSpeakerRequestDto;
 import com.transuai.gateway.web.dto.SegmentDto;
 import com.transuai.gateway.web.dto.SegmentUpdateDto;
 import com.transuai.gateway.web.dto.SpeakerDto;
+import com.transuai.gateway.web.dto.SpeakerUpdateDto;
 import com.transuai.gateway.web.dto.TranscriptDto;
 import com.transuai.gateway.web.dto.UpdateSegmentTextRequestDto;
 
 import lombok.RequiredArgsConstructor;
 import transuai.transcription.v1.Transcription.GetTranscriptRequest;
+import transuai.transcription.v1.Transcription.RenameSpeakerRequest;
+import transuai.transcription.v1.Transcription.RenameSpeakerResponse;
 import transuai.transcription.v1.Transcription.Speaker;
 import transuai.transcription.v1.Transcription.Transcript;
 import transuai.transcription.v1.Transcription.TranscriptSegment;
@@ -63,6 +67,24 @@ public class TranscriptionController {
                         .setText(request.text())
                         .build());
         return new SegmentUpdateDto(toDto(response.getSegment()), response.getRevision());
+    }
+
+    // 替講者命名（name 空字串＝恢復預設名稱），見 transcription.proto 的 RenameSpeaker。
+    @PatchMapping("/transcripts/{jobId}/speakers/{label}")
+    public SpeakerUpdateDto renameSpeaker(@CurrentUserId UUID userId, @PathVariable String jobId,
+            @PathVariable String label, @RequestBody RenameSpeakerRequestDto request) {
+        if (request == null || request.name() == null) {
+            // Without this a body like {} would silently reset the name.
+            throw new IllegalArgumentException("name is required"); // → 400 via GrpcExceptionAdvice
+        }
+        jobOwnershipGuard.check(userId, jobId);
+        RenameSpeakerResponse response = transcriptionServiceStub.renameSpeaker(
+                RenameSpeakerRequest.newBuilder()
+                        .setJobId(jobId)
+                        .setLabel(label)
+                        .setName(request.name())
+                        .build());
+        return new SpeakerUpdateDto(toDto(response.getSpeaker()), response.getRevision());
     }
 
     private Transcript fetchTranscript(String jobId) {
