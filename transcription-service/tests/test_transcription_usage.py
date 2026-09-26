@@ -3,7 +3,7 @@
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import grpc
@@ -121,4 +121,56 @@ def test_listing_transcription_usage_with_a_malformed_job_id_is_invalid(transcri
     with pytest.raises(grpc.RpcError) as error:
         transcription_stub.ListJobTranscriptionUsage(transcription_pb2.ListJobTranscriptionUsageRequest(job_id="nope"))
 
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+# --- 一位使用者一段時間的彙總（真的 Postgres）---
+
+SEPTEMBER = (datetime(2026, 8, 31, 16, tzinfo=timezone.utc), datetime(2026, 9, 30, 16, tzinfo=timezone.utc))
+
+
+def transcribed(at, model, seconds, *, user_id=OWNER, succeeded=True):
+    return TranscriptionUsageRecord(
+        user_id=user_id, job_id=uuid.uuid4(), provider="deepgram", model=model, audio_seconds=seconds,
+        succeeded=succeeded, created_at=at)
+
+
+def sum_usage(stub, user_id: uuid.UUID | str = OWNER, start=SEPTEMBER[0], end=SEPTEMBER[1]):
+    request = transcription_pb2.SumUserTranscriptionUsageRequest(user_id=str(user_id))
+    request.start.FromDatetime(start)
+    request.end.FromDatetime(end)
+    return stub.SumUserTranscriptionUsage(request).sums
+
+
+def test_a_users_transcription_over_a_period_is_summed_per_model(transcription_stub, db_session):
+    start, _ = SEPTEMBER
+    save_transcription_usage(transcribed(start, "nova-3", 90.5))
+    save_transcription_usage(transcribed(start + timedelta(days=2), "nova-3", 29.5))
+    save_transcription_usage(transcribed(start + timedelta(days=3), "nova-3", None, succeeded=False))
+    save_transcription_usage(transcribed(start + timedelta(days=4), "nova-2", 60.0))
+
+    sums = sum_usage(transcription_stub)
+
+    assert [(s.provider, s.model, s.audio_seconds, s.calls, s.calls_with_unknown_usage) for s in sums] == [
+        ("deepgram", "nova-2", 60.0, 1, 0), ("deepgram", "nova-3", 120.0, 3, 1)]
+
+
+def test_the_sum_leaves_out_other_users_and_transcriptions_outside_the_period(transcription_stub, db_session):
+    start, end = SEPTEMBER
+    save_transcription_usage(transcribed(start - timedelta(seconds=1), "nova-3", 1.0))
+    save_transcription_usage(transcribed(end, "nova-3", 2.0))
+    save_transcription_usage(transcribed(start, "nova-3", 4.0, user_id=uuid.uuid4()))
+    save_transcription_usage(transcribed(end - timedelta(seconds=1), "nova-3", 8.0))
+
+    assert [(s.audio_seconds, s.calls) for s in sum_usage(transcription_stub)] == [(8.0, 1)]
+
+
+def test_summing_transcription_usage_needs_a_valid_user_and_a_period(transcription_stub):
+    with pytest.raises(grpc.RpcError) as error:
+        sum_usage(transcription_stub, user_id="nope")
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+    with pytest.raises(grpc.RpcError) as error:
+        transcription_stub.SumUserTranscriptionUsage(
+            transcription_pb2.SumUserTranscriptionUsageRequest(user_id=str(OWNER)))
     assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT

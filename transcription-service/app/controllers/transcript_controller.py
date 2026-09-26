@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import timezone
 from typing import NoReturn
 
 import grpc
@@ -17,7 +18,7 @@ from app.repositories.transcript_repository import (
     rename_speaker,
     update_segment_text,
 )
-from app.repositories.transcription_usage_repository import list_job_transcription_usage
+from app.repositories.transcription_usage_repository import list_job_transcription_usage, sum_user_transcription_usage
 from app.services.edit_events import publish_transcript_edited
 
 logger = logging.getLogger(__name__)
@@ -172,3 +173,18 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
                 records=[_usage_to_proto(usage) for usage in list_job_transcription_usage(session, job_id)])
         finally:
             session.close()
+
+    def SumUserTranscriptionUsage(self, request, context):
+        user_id = _parse_uuid(request.user_id, "user_id", context)
+        if not (request.HasField("start") and request.HasField("end")):
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "start and end are required")
+        session = new_session()
+        try:
+            sums = sum_user_transcription_usage(session, user_id, request.start.ToDatetime(timezone.utc),
+                                                request.end.ToDatetime(timezone.utc))
+        finally:
+            session.close()
+        return transcription_pb2.SumUserTranscriptionUsageResponse(sums=[
+            transcription_pb2.TranscriptionUsageSum(provider=s.provider, model=s.model, audio_seconds=s.audio_seconds,
+                                                    calls=s.calls, calls_with_unknown_usage=s.calls_with_unknown_usage)
+            for s in sums])

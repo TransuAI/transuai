@@ -63,6 +63,11 @@ class TranscriptionServiceStub:
                 request_serializer=transcription__pb2.ListJobTranscriptionUsageRequest.SerializeToString,
                 response_deserializer=transcription__pb2.ListJobTranscriptionUsageResponse.FromString,
                 _registered_method=True)
+        self.SumUserTranscriptionUsage = channel.unary_unary(
+                '/transuai.transcription.v1.TranscriptionService/SumUserTranscriptionUsage',
+                request_serializer=transcription__pb2.SumUserTranscriptionUsageRequest.SerializeToString,
+                response_deserializer=transcription__pb2.SumUserTranscriptionUsageResponse.FromString,
+                _registered_method=True)
 
 
 class TranscriptionServiceServicer:
@@ -118,6 +123,14 @@ class TranscriptionServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SumUserTranscriptionUsage(self, request, context):
+        """一位使用者在 [start, end) 之間的轉錄用量，依廠商、模型彙總（Gateway 把「某個月」換成這段時間）。
+        user_id 不合法、或沒給 start / end 回 INVALID_ARGUMENT；沒有用量回空列表。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TranscriptionServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -145,6 +158,11 @@ def add_TranscriptionServiceServicer_to_server(servicer, server):
                     servicer.ListJobTranscriptionUsage,
                     request_deserializer=transcription__pb2.ListJobTranscriptionUsageRequest.FromString,
                     response_serializer=transcription__pb2.ListJobTranscriptionUsageResponse.SerializeToString,
+            ),
+            'SumUserTranscriptionUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.SumUserTranscriptionUsage,
+                    request_deserializer=transcription__pb2.SumUserTranscriptionUsageRequest.FromString,
+                    response_serializer=transcription__pb2.SumUserTranscriptionUsageResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -285,6 +303,33 @@ class TranscriptionService:
             '/transuai.transcription.v1.TranscriptionService/ListJobTranscriptionUsage',
             transcription__pb2.ListJobTranscriptionUsageRequest.SerializeToString,
             transcription__pb2.ListJobTranscriptionUsageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SumUserTranscriptionUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.transcription.v1.TranscriptionService/SumUserTranscriptionUsage',
+            transcription__pb2.SumUserTranscriptionUsageRequest.SerializeToString,
+            transcription__pb2.SumUserTranscriptionUsageResponse.FromString,
             options,
             channel_credentials,
             insecure,
