@@ -43,6 +43,18 @@ service AiService {
   // 一個 Job 的 LLM 用量（見 ai-service/CONTEXT.md「用量」），依時間升冪。job_id 不合法回 INVALID_ARGUMENT；沒有紀錄回空列表。
   // 不驗證使用者，Gateway 已經做過 ownership 檢查。
   rpc ListJobLlmUsage(ListJobLlmUsageRequest) returns (ListJobLlmUsageResponse);
+
+  // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
+  // 取得的使用者，不另外驗證。
+  //
+  // 存入或替換一把自有金鑰：先向廠商驗證（呼叫不收費的查詢 API），通過才加密存下，回傳末四碼。provider 不在清單、金鑰
+  // 是空的、或廠商說金鑰無效回 INVALID_ARGUMENT（訊息說明原因）；廠商暫時連不上回 UNAVAILABLE；伺服器沒有設定加密主金鑰
+  // 回 FAILED_PRECONDITION。驗證沒通過時什麼都不存。
+  rpc SaveProviderKey(SaveProviderKeyRequest) returns (ProviderKey);
+  // 刪除一把自有金鑰；沒有這把金鑰時 deleted 是 false，不算錯誤。
+  rpc DeleteProviderKey(DeleteProviderKeyRequest) returns (DeleteProviderKeyResponse);
+  // 這位使用者存了哪些自有金鑰（只有末四碼，永遠不回傳金鑰本身）。
+  rpc ListProviderKeys(ListProviderKeysRequest) returns (ListProviderKeysResponse);
 }
 
 enum RegenerationStatus {
@@ -150,4 +162,34 @@ message QaTurn {
 message ListQaHistoryResponse {
   // 依 created_at 升冪排序。
   repeated QaTurn turns = 1;
+}
+
+message SaveProviderKeyRequest {
+  string user_id = 1;
+  string provider = 2;
+  string key = 3;
+}
+
+message ProviderKey {
+  string provider = 1;
+  // 金鑰的末四碼，給使用者辨認是哪一把。
+  string last4 = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message DeleteProviderKeyRequest {
+  string user_id = 1;
+  string provider = 2;
+}
+
+message DeleteProviderKeyResponse {
+  bool deleted = 1;
+}
+
+message ListProviderKeysRequest {
+  string user_id = 1;
+}
+
+message ListProviderKeysResponse {
+  repeated ProviderKey keys = 1;
 }
