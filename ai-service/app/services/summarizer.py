@@ -1,7 +1,6 @@
 import logging
 
-from app.core.config import settings
-from app.services.hf_client import DISABLE_THINKING, get_client, strip_thinking
+from app.services.llm_client import chat, platform_chat_model
 
 logger = logging.getLogger(__name__)
 
@@ -15,13 +14,9 @@ _MAX_TOKENS = 2048
 
 
 def summarize(transcript_text: str) -> str:
-    """呼叫 HF Inference Providers，把逐字稿濃縮成一段摘要（輸入見 speaker_context.summary_input）。"""
-    logger.info("calling HF Inference (%s) for summary, transcript length=%d",
-                settings.ai_hf_chat_model, len(transcript_text))
-    response = get_client().chat.completions.create(
-        model=settings.ai_hf_chat_model,
-        messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(transcript=transcript_text)}],
-        max_tokens=_MAX_TOKENS,
-        extra_body=DISABLE_THINKING,
-    )
-    return strip_thinking(response.choices[0].message.content or "")
+    """呼叫模型，把逐字稿濃縮成一段摘要（輸入見 speaker_context.summary_input）。"""
+    model = platform_chat_model()
+    logger.info("calling %s (%s) for summary, transcript length=%d", model.provider, model.model, len(transcript_text))
+    result = chat(model, [{"role": "user", "content": _PROMPT_TEMPLATE.format(transcript=transcript_text)}],
+                  max_tokens=_MAX_TOKENS)
+    return result.text

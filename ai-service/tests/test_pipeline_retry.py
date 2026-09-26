@@ -5,11 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import grpc
-import httpx
 import pytest
-from huggingface_hub.errors import HfHubHTTPError, OverloadedError
+from huggingface_hub.errors import OverloadedError
 
 from app.services import pipeline
+from app.services.llm_client import LlmError, LlmErrorReason
 from app.services.retry import RetryableMessageError, TERMINAL_FAILURE_LOST_MARKER
 
 
@@ -31,8 +31,9 @@ class _FakeSegment:
         self.speaker_label = ""
 
 
-def _response(status_code: int) -> httpx.Response:
-    return httpx.Response(status_code=status_code, request=httpx.Request("POST", "https://example.invalid"))
+def _llm_error(reason: LlmErrorReason, detail: str) -> LlmError:
+    """What summarize() / generate_chapters() raise when the model call fails (see llm_client)."""
+    return LlmError("platform", "test-model", reason, detail)
 
 
 def _job_body() -> tuple[str, bytes]:
@@ -79,9 +80,9 @@ def mocks():
 # 現在全部改走 HF，spec 名稱維持不變只是歷史記錄）---
 
 
-def test_transient_hf_error_in_summarize_within_budget_raises_retryable(mocks):
+def test_transient_model_error_in_summarize_within_budget_raises_retryable(mocks):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = HfHubHTTPError("rate limited", response=_response(429))
+    mocks.summarize.side_effect = _llm_error(LlmErrorReason.TRANSIENT, "rate limited")
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     with pytest.raises(RetryableMessageError):
@@ -92,32 +93,32 @@ def test_transient_hf_error_in_summarize_within_budget_raises_retryable(mocks):
     publish_completed.assert_not_called()
 
 
-def test_transient_hf_error_in_summarize_budget_exhausted_falls_back_to_failed(mocks):
+def test_transient_model_error_in_summarize_budget_exhausted_falls_back_to_failed(mocks):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = HfHubHTTPError("rate limited", response=_response(429))
+    mocks.summarize.side_effect = _llm_error(LlmErrorReason.TRANSIENT, "rate limited")
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     pipeline.process_message(body, publish_completed, publish_failed, retry_count=2)
 
-    mocks.job_status_client.update_status.assert_any_call(job_id, "FAILED", error_reason="rate limited")
-    publish_failed.assert_called_once_with(job_id, "SUMMARIZING", "rate limited")
+    mocks.job_status_client.update_status.assert_any_call(job_id, "FAILED", error_reason="平台模型（test-model）暫時無法使用：rate limited")
+    publish_failed.assert_called_once_with(job_id, "SUMMARIZING", "平台模型（test-model）暫時無法使用：rate limited")
     publish_completed.assert_not_called()
 
 
-def test_permanent_hf_error_in_summarize_falls_back_to_failed_regardless_of_budget(mocks):
+def test_permanent_model_error_in_summarize_falls_back_to_failed_regardless_of_budget(mocks):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = HfHubHTTPError("malformed request", response=_response(400))
+    mocks.summarize.side_effect = _llm_error(LlmErrorReason.OTHER, "malformed request")
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     pipeline.process_message(body, publish_completed, publish_failed, retry_count=0)
 
-    publish_failed.assert_called_once_with(job_id, "SUMMARIZING", "malformed request")
+    publish_failed.assert_called_once_with(job_id, "SUMMARIZING", "平台模型（test-model）拒絕了這個請求：malformed request")
     publish_completed.assert_not_called()
 
 
-def test_transient_hf_error_in_generate_chapters_raises_retryable(mocks):
+def test_transient_model_error_in_generate_chapters_raises_retryable(mocks):
     _, body = _job_body()
-    mocks.generate_chapters.side_effect = HfHubHTTPError("rate limited", response=_response(429))
+    mocks.generate_chapters.side_effect = _llm_error(LlmErrorReason.TRANSIENT, "rate limited")
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     with pytest.raises(RetryableMessageError):
@@ -193,7 +194,7 @@ def test_transient_grpc_error_marking_completed_raises_retryable(mocks):
 
 def test_terminal_report_retries_transient_failures_then_succeeds(mocks):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = HfHubHTTPError("malformed", response=_response(400))
+    mocks.summarize.side_effect = _llm_error(LlmErrorReason.OTHER, "malformed")
 
     failed_attempts = {"n": 0}
 
@@ -210,12 +211,12 @@ def test_terminal_report_retries_transient_failures_then_succeeds(mocks):
         pipeline.process_message(body, publish_completed, publish_failed, retry_count=0)
 
     assert failed_attempts["n"] == 3
-    publish_failed.assert_called_once_with(job_id, "SUMMARIZING", "malformed")
+    publish_failed.assert_called_once_with(job_id, "SUMMARIZING", "平台模型（test-model）拒絕了這個請求：malformed")
 
 
 def test_terminal_report_exhausted_logs_marker_and_does_not_publish_failed(mocks, caplog):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = HfHubHTTPError("malformed", response=_response(400))
+    mocks.summarize.side_effect = _llm_error(LlmErrorReason.OTHER, "malformed")
 
     def fake_update_status(job_id_arg, status, error_reason=""):
         if status == "FAILED":
@@ -234,7 +235,7 @@ def test_terminal_report_exhausted_logs_marker_and_does_not_publish_failed(mocks
 
 def test_terminal_report_gives_up_immediately_on_permanent_failure_of_report_itself(mocks, caplog):
     job_id, body = _job_body()
-    mocks.summarize.side_effect = HfHubHTTPError("malformed", response=_response(400))
+    mocks.summarize.side_effect = _llm_error(LlmErrorReason.OTHER, "malformed")
 
     report_attempts = {"n": 0}
 

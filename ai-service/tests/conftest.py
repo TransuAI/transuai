@@ -1,5 +1,7 @@
+import json
 import os
 
+import httpx2
 import pytest
 from sqlalchemy import create_engine, text
 
@@ -76,3 +78,71 @@ def ai_stub(test_database):
     yield ai_pb2_grpc.AiServiceStub(channel)
     channel.close()
     server.stop(grace=None)
+
+
+class FakeLlmProvider:
+    """An OpenAI-compatible AI provider at the HTTP layer: records every request and answers each one
+    with the next queued reply (a plain "ok" when nothing is queued). Everything above HTTP — the real
+    client, streaming, usage parsing, error handling — runs for real."""
+
+    def __init__(self):
+        self.requests: list[httpx2.Request] = []
+        self._replies: list[httpx2.Response] = []
+
+    def reply(self, text: str, *, usage: tuple[int, int] | None = (12, 5)) -> None:
+        body = {
+            "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+        }
+        if usage is not None:
+            body["usage"] = {"prompt_tokens": usage[0], "completion_tokens": usage[1], "total_tokens": sum(usage)}
+        self._replies.append(httpx2.Response(200, json=body))
+
+    def stream(self, deltas: list[str], *, usage: tuple[int, int] | None = (12, 5)) -> None:
+        def chunk(delta: dict, choices: bool = True, extra: dict | None = None) -> str:
+            body = {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 0, "model": "test",
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}] if choices else []}
+            return "data: " + json.dumps({**body, **(extra or {})}, ensure_ascii=False) + "\n\n"
+
+        events = [chunk({"role": "assistant", "content": ""})] + [chunk({"content": d}) for d in deltas]
+        if usage is not None:
+            events.append(chunk({}, choices=False, extra={"usage": {
+                "prompt_tokens": usage[0], "completion_tokens": usage[1], "total_tokens": sum(usage)}}))
+        events.append("data: [DONE]\n\n")
+        self._replies.append(httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, content="".join(events).encode()))
+
+    def stream_then_fail(self, deltas: list[str], message: str) -> None:
+        """A stream that sends some text, then an error event instead of finishing."""
+        events = [
+            "data: " + json.dumps({"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 0, "model": "test",
+                                   "choices": [{"index": 0, "delta": {"content": d}, "finish_reason": None}]},
+                                  ensure_ascii=False) + "\n\n"
+            for d in deltas
+        ] + ["data: " + json.dumps({"error": {"message": message}}) + "\n\n"]
+        self._replies.append(httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, content="".join(events).encode()))
+
+    def fail(self, status: int, error: dict | None = None) -> None:
+        self._replies.append(httpx2.Response(status, json={"error": error or {"message": f"status {status}"}}))
+
+    def bodies(self) -> list[dict]:
+        return [json.loads(request.content) for request in self.requests]
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        request.read()
+        self.requests.append(request)
+        if not self._replies:
+            self.reply("ok")
+        return self._replies.pop(0)
+
+
+@pytest.fixture
+def fake_llm(monkeypatch):
+    """Points every generation call (summaries, chapters, Q&A) at a FakeLlmProvider."""
+    from app.services import llm_client
+
+    provider = FakeLlmProvider()
+    monkeypatch.setattr(llm_client, "_http_client", httpx2.Client(transport=httpx2.MockTransport(provider.handle)))
+    monkeypatch.setattr(llm_client.settings, "hf_api_key", "hf-test-key")
+    return provider

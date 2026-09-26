@@ -1,4 +1,4 @@
-"""stream_answer() 這個 seam：檢索（repository）、transcript client、HF client 都 mock 掉，驗證交給 LLM 的上下文。
+"""stream_answer() 這個 seam：檢索（repository）、transcript client 都 mock 掉，模型是假的 AI 廠商（HTTP 層），驗證交給 LLM 的上下文。
 講者的名字在回答當下才向 transcription-service 拿**目前的**顯示名稱，embedding 本身只有片段文字。"""
 
 import uuid
@@ -36,50 +36,33 @@ def chunk(start: str, end: str, text: str):
     return SimpleNamespace(start_time=Decimal(start), end_time=Decimal(end), chunk_text=text)
 
 
-class FakeLlm:
-    """Records the messages of each call and streams back a fixed answer."""
-
-    def __init__(self):
-        self.calls = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs["messages"])
-        delta = SimpleNamespace(content="王小明認為預算要再砍一成。")
-        return iter([SimpleNamespace(choices=[SimpleNamespace(delta=delta)])])
-
-    def system_prompt(self):
-        return self.calls[-1][0]["content"]
-
-
 @pytest.fixture
-def answer():
-    """Runs stream_answer() over the given retrieved chunks and transcript; returns the fake LLM."""
+def answer(fake_llm):
+    """Runs stream_answer() over the given retrieved chunks and transcript; returns the system prompt the
+    (fake) provider received."""
 
     def _answer(chunks, transcript=None, transcript_error=None):
-        llm = FakeLlm()
-        client = SimpleNamespace(chat=SimpleNamespace(completions=llm))
+        fake_llm.stream(["王小明認為", "預算要再砍一成。"])
         with (
             patch.object(qa, "find_by_job_id", return_value=[]),
             patch.object(qa, "embed_query", return_value=[0.1]),
             patch.object(qa, "find_similar", return_value=chunks),
             patch.object(qa, "transcript_client") as transcript_client,
-            patch.object(qa, "get_client", return_value=client),
         ):
             if transcript_error:
                 transcript_client.get_transcript.side_effect = transcript_error
             else:
                 transcript_client.get_transcript.return_value = transcript
             events = list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "王小明對預算怎麼看？"))
-        assert events[-1] == ("delta", "王小明認為預算要再砍一成。")
-        return llm
+        assert "".join(str(payload) for kind, payload in events if kind == "delta") == "王小明認為預算要再砍一成。"
+        return fake_llm.bodies()[-1]["messages"][0]["content"]
 
     return _answer
 
 
 def test_with_several_speakers_the_context_names_each_speaker_by_their_current_name(answer):
-    llm = answer([chunk("2.00", "4.50", "我覺得預算要再砍一成"), chunk("4.50", "6.00", "主持人不同意")], INTERVIEW)
+    prompt = answer([chunk("2.00", "4.50", "我覺得預算要再砍一成"), chunk("4.50", "6.00", "主持人不同意")], INTERVIEW)
 
-    prompt = llm.system_prompt()
     assert "[2.0s] 王小明：我覺得預算要再砍一成" in prompt
     assert "[4.5s] 主持人：主持人不同意" in prompt
     assert "用這些名字稱呼講者" in prompt
@@ -91,7 +74,7 @@ def test_with_a_single_speaker_the_context_carries_no_names(answer):
         speakers=[transcription_pb2.Speaker(label="S1", display_name="講者 1", display_order=1)],
     )
 
-    prompt = answer([chunk("0.00", "2.00", "歡迎收聽")], solo).system_prompt()
+    prompt = answer([chunk("0.00", "2.00", "歡迎收聽")], solo)
 
     assert "[0.0s] 歡迎收聽" in prompt
     assert "講者 1" not in prompt
@@ -99,13 +82,34 @@ def test_with_a_single_speaker_the_context_carries_no_names(answer):
 
 
 def test_a_chunk_that_matches_no_segment_is_given_without_a_name(answer):
-    prompt = answer([chunk("9.00", "10.00", "對不上的片段")], INTERVIEW).system_prompt()
+    prompt = answer([chunk("9.00", "10.00", "對不上的片段")], INTERVIEW)
 
     assert "[9.0s] 對不上的片段" in prompt
 
 
 def test_when_the_transcript_cannot_be_fetched_it_still_answers_without_names(answer):
     error = grpc.RpcError()
-    prompt = answer([chunk("2.00", "4.50", "我覺得預算要再砍一成")], transcript_error=error).system_prompt()
+    prompt = answer([chunk("2.00", "4.50", "我覺得預算要再砍一成")], transcript_error=error)
 
     assert "[2.0s] 我覺得預算要再砍一成" in prompt
+
+
+def test_a_follow_up_question_is_rewritten_by_the_model_before_searching(fake_llm):
+    history = [SimpleNamespace(question="王小明是誰？", answer="他是這集的來賓。")]
+    fake_llm.reply("王小明對預算怎麼看？")
+    fake_llm.stream(["他認為要砍一成。"])
+
+    with (
+        patch.object(qa, "find_by_job_id", return_value=history),
+        patch.object(qa, "embed_query", return_value=[0.1]) as embed_query,
+        patch.object(qa, "find_similar", return_value=[chunk("2.00", "4.50", "我覺得預算要再砍一成")]),
+        patch.object(qa, "transcript_client") as transcript_client,
+    ):
+        transcript_client.get_transcript.return_value = INTERVIEW
+        list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "那他對預算怎麼看？"))
+
+    rewrite, answer = fake_llm.bodies()
+    assert "王小明是誰？" in rewrite["messages"][0]["content"] and "那他對預算怎麼看？" in rewrite["messages"][0]["content"]
+    embed_query.assert_called_once_with("王小明對預算怎麼看？")
+    assert answer["stream"] is True
+    assert answer["messages"][-1] == {"role": "user", "content": "那他對預算怎麼看？"}

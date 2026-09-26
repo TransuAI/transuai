@@ -2,8 +2,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from app.core.config import settings
-from app.services.hf_client import DISABLE_THINKING, get_client, strip_thinking
+from app.services.llm_client import chat, platform_chat_model
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ def _parse_response(text: str) -> list[dict]:
 
 
 def generate_chapters(lines: list[TimedLine]) -> list[tuple[str, float]]:
-    """呼叫 HF Inference Providers，依逐字稿分段的時間戳切出章節，回傳依 start_time 排序的
+    """呼叫模型，依逐字稿片段的時間戳切出章節，回傳依 start_time 排序的
     (title, start_time) 清單。
 
     逐字稿沒有分段（例如太短）時直接回空清單，不呼叫模型；模型判斷只有單一主題、
@@ -51,15 +50,11 @@ def generate_chapters(lines: list[TimedLine]) -> list[tuple[str, float]]:
     if not lines:
         return []
 
-    logger.info("calling HF Inference (%s) for chapters, segment count=%d",
-                settings.ai_hf_chat_model, len(lines))
-    response = get_client().chat.completions.create(
-        model=settings.ai_hf_chat_model,
-        messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(segments=_format_lines(lines))}],
-        max_tokens=_MAX_TOKENS,
-        extra_body=DISABLE_THINKING,
-    )
-    raw_chapters = _parse_response(strip_thinking(response.choices[0].message.content or "") or "[]")
+    model = platform_chat_model()
+    logger.info("calling %s (%s) for chapters, segment count=%d", model.provider, model.model, len(lines))
+    result = chat(model, [{"role": "user", "content": _PROMPT_TEMPLATE.format(segments=_format_lines(lines))}],
+                  max_tokens=_MAX_TOKENS)
+    raw_chapters = _parse_response(result.text or "[]")
     chapters = [(str(item["title"]), float(item["start_time"])) for item in raw_chapters]
     chapters.sort(key=lambda chapter: chapter[1])
     return chapters

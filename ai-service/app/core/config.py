@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # 摘要/章節分段/RAG 問答共用同一個 HF Inference Providers 聊天模型，見
     # docs/adr/0003-hf-inference-providers-for-generation.md。
     ai_hf_chat_model: str = "Qwen/Qwen3.5-9B"
+    # 生成類呼叫走 HF 的 OpenAI 相容路由（見 app/services/llm_client.py）。
+    hf_router_base_url: str = "https://router.huggingface.co/v1"
 
     grpc_port: int = 8084
 

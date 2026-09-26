@@ -143,3 +143,33 @@ def test_process_message_leaves_cleared_segments_out_and_records_the_transcript_
     mock_embed_documents.assert_called_once_with(["哈囉大家好", "今天來聊聊逐字稿"])
     assert [chunk[0] for chunk in mock_save_embeddings.call_args.args[2]] == ["哈囉大家好", "今天來聊聊逐字稿"]
     assert mock_save_summary.call_args.kwargs["source_revision"] == 3
+
+
+def test_the_pipeline_asks_the_platform_model_for_the_summary_and_the_chapters(fake_llm):
+    """End to end through the real summarize() / generate_chapters(): only the model provider (at the HTTP
+    layer), the gRPC clients, the embedder and the database are faked."""
+    job_id = str(uuid.uuid4())
+    transcript = SimpleNamespace(
+        full_text="大家好\n今天談預算", revision=0, speakers=[],
+        segments=[FakeSegment(0.0, 5.0, "", "大家好"), FakeSegment(5.0, 9.0, "", "今天談預算")],
+    )
+    fake_llm.reply("這場會議討論預算")
+    fake_llm.reply('[{"title": "預算", "start_time": 5.0}]')
+
+    with (
+        patch.object(pipeline, "job_status_client"),
+        patch.object(pipeline, "transcript_client") as mock_transcript_client,
+        patch.object(pipeline, "embed_documents", return_value=[[0.1], [0.2]]),
+        patch.object(pipeline, "new_session", return_value=MagicMock(name="session")),
+        patch.object(pipeline, "save_summary") as mock_save_summary,
+        patch.object(pipeline, "save_chapters") as mock_save_chapters,
+        patch.object(pipeline, "save_embeddings"),
+    ):
+        mock_transcript_client.get_transcript.return_value = transcript
+        pipeline.process_message(json.dumps({"jobId": job_id}).encode(), MagicMock(), MagicMock())
+
+    assert [body["model"] for body in fake_llm.bodies()] == ["Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B"]
+    assert "大家好\n今天談預算" in fake_llm.bodies()[0]["messages"][0]["content"]
+    assert "[5.0] 今天談預算" in fake_llm.bodies()[1]["messages"][0]["content"]
+    assert mock_save_summary.call_args.args[2] == "這場會議討論預算"
+    assert mock_save_chapters.call_args.args[2] == [("預算", 5.0)]

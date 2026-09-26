@@ -3,15 +3,14 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import httpx
 import pytest
-from huggingface_hub.errors import HfHubHTTPError
 from sqlalchemy import select
 
 from app.models import Chapter, Summary
 from app.repositories.chapter_repository import save_chapters
 from app.repositories.summary_repository import save_summary
 from app.services import regeneration
+from app.services.llm_client import LlmError, LlmErrorReason
 from app.services.job_status_client import job_status_client
 from app.services.retry import RetryableMessageError
 
@@ -65,8 +64,7 @@ def test_regenerating_replaces_summary_and_chapters_from_the_current_transcript(
 
 
 def _overloaded(_text):
-    response = httpx.Response(503, request=httpx.Request("POST", "https://example.invalid"))
-    raise HfHubHTTPError("hf", response=response)
+    raise LlmError("platform", "test-model", LlmErrorReason.TRANSIENT, "HTTP 503")
 
 
 def test_a_transient_failure_asks_for_a_retry_and_leaves_everything_as_it_was(db_session, job):

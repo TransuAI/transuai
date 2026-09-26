@@ -5,12 +5,11 @@ from typing import Iterator
 import grpc
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.models import QaHistory
 from app.repositories.embedding_repository import find_similar
 from app.repositories.qa_repository import find_by_job_id
 from app.services.embedder import embed_query
-from app.services.hf_client import DISABLE_THINKING, get_client, strip_thinking, stream_without_thinking
+from app.services.llm_client import chat, platform_chat_model, stream_chat
 from app.services.segment_times import time_key
 from app.services.speaker_context import speaker_names_by_segment_time, with_speaker_name
 from app.services.transcript_client import transcript_client
@@ -44,7 +43,7 @@ _MEMORY_TURNS = 5
 # 撐得很大，所以每輪歷史塞進 prompt 前都先截斷，跟 _MEMORY_TURNS（要塞幾輪）是兩個獨立的
 # 控制，不能只靠調輪數解決。
 _MAX_HISTORY_ANSWER_CHARS = 300
-# 這兩個呼叫都帶 DISABLE_THINKING（見 hf_client.py），thinking mode 關掉之後模型不會把
+# 平台模型關掉了 thinking mode（見 llm_client.DISABLE_THINKING），模型不會把
 # 大量 token 燒在思考過程上，這裡的值只需要夠放「使用者真正會看到的答案」，不用像開著
 # thinking mode 時那樣另外預留一大段給 chain-of-thought。
 _ANSWER_MAX_TOKENS = 1024
@@ -76,16 +75,11 @@ def _condense_question(question: str, history: list[QaHistory]) -> str:
     history_text = "\n".join(
         f"問：{turn.question}\n答：{_truncate(turn.answer, _MAX_HISTORY_ANSWER_CHARS)}" for turn in history
     )
-    response = get_client().chat.completions.create(
-        model=settings.ai_hf_chat_model,
-        messages=[{
-            "role": "user",
-            "content": _CONDENSE_PROMPT_TEMPLATE.format(history=history_text, question=question),
-        }],
-        max_tokens=_CONDENSE_MAX_TOKENS,
-        extra_body=DISABLE_THINKING,
-    )
-    condensed = strip_thinking(response.choices[0].message.content or "").strip()
+    result = chat(platform_chat_model(), [{
+        "role": "user",
+        "content": _CONDENSE_PROMPT_TEMPLATE.format(history=history_text, question=question),
+    }], max_tokens=_CONDENSE_MAX_TOKENS)
+    condensed = result.text.strip()
     return condensed or question
 
 
@@ -126,22 +120,12 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
         messages.append({"role": "assistant", "content": _truncate(turn.answer, _MAX_HISTORY_ANSWER_CHARS)})
     messages.append({"role": "user", "content": question})
 
+    model = platform_chat_model()
     logger.info(
-        "calling HF Inference (%s) to stream-answer question for job %s, using %d chunks, %d history turns",
-        settings.ai_hf_chat_model, job_id, len(chunks), len(history),
+        "calling %s (%s) to stream-answer question for job %s, using %d chunks, %d history turns",
+        model.provider, model.model, job_id, len(chunks), len(history),
     )
-    stream = get_client().chat.completions.create(
-        model=settings.ai_hf_chat_model,
-        messages=messages,
-        max_tokens=_ANSWER_MAX_TOKENS,
-        extra_body=DISABLE_THINKING,
-        stream=True,
-    )
-    # 有些 chunk（實測至少是收尾、只帶 usage 統計的那個）choices 是空陣列，不是每個 chunk
-    # 都有 delta 可以拿——直接 chunk.choices[0] 會在 stream 快結束時炸 IndexError，這時候
-    # 前面的 delta 通常已經送給使用者了，讓這輪問答整個被判定失敗、卻沒真的存進 qa_history。
-    raw_deltas = (chunk.choices[0].delta.content for chunk in stream if chunk.choices)
-    for delta in stream_without_thinking(raw_deltas):
+    for delta in stream_chat(model, messages, max_tokens=_ANSWER_MAX_TOKENS):
         yield ("delta", delta)
 
 

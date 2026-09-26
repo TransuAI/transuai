@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted；呼叫方式已被 [ADR 0004](./0004-generation-calls-through-openai-compatible-interface.md) 部分取代：平台模型仍是這裡選的 HF 模型，但生成類呼叫改走 HF 的 OpenAI 相容路由（`llm_client.py`），不再透過 `hf_client.py` 的 `InferenceClient`；下面提到的 `hf_client.py`、`is_retryable_hf_error` 現在只適用於 embedding。
 
 ## Context
 

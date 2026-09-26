@@ -5,6 +5,8 @@ from typing import Callable
 import grpc
 from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError, OverloadedError
 
+from app.services.llm_client import LlmError
+
 logger = logging.getLogger(__name__)
 
 RETRY_COUNT_HEADER = "x-retry-count"
@@ -94,10 +96,15 @@ def is_retryable_grpc_error(exc: BaseException) -> bool:
     return exc.code() in _RETRYABLE_GRPC_STATUS_CODES
 
 
+def is_retryable_llm_error(exc: BaseException) -> bool:
+    """生成類呼叫（摘要、章節、問答）的例外，由 llm_client 分類好：429、5xx、逾時、連不上是暫時性。"""
+    return isinstance(exc, LlmError) and exc.transient
+
+
 def is_retryable_error(exc: BaseException) -> bool:
-    """process_message() 的統一分類入口。HF（摘要/章節分段/RAG 問答/embedding 都走同一個
-    provider）、內部 gRPC 兩種例外來源的型別互不重疊，依序檢查即可。"""
-    return is_retryable_hf_error(exc) or is_retryable_grpc_error(exc)
+    """process_message() 的統一分類入口。生成類呼叫（llm_client）、embedding（HF）、內部 gRPC 三種例外來源
+    的型別互不重疊，依序檢查即可。"""
+    return is_retryable_llm_error(exc) or is_retryable_hf_error(exc) or is_retryable_grpc_error(exc)
 
 
 def retry_terminal_report(report: Callable[[], None]) -> bool:
