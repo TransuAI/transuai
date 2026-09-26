@@ -55,6 +55,18 @@ service AiService {
   rpc DeleteProviderKey(DeleteProviderKeyRequest) returns (DeleteProviderKeyResponse);
   // 這位使用者存了哪些自有金鑰（只有末四碼，永遠不回傳金鑰本身）。
   rpc ListProviderKeys(ListProviderKeysRequest) returns (ListProviderKeysResponse);
+
+  // 預設模型（見 ai-service/CONTEXT.md）：背景工作（上傳後的摘要與章節、重新產生）與問答都用它。
+  //
+  // 這位使用者可以選的模型：平台模型，加上他有自有金鑰的每個廠商整理好的模型清單；有 OpenRouter 金鑰時
+  // openrouter_custom 為 true，代表可以自己輸入 OpenRouter 模型 ID。
+  rpc ListAvailableModels(ListAvailableModelsRequest) returns (ListAvailableModelsResponse);
+  // 目前的預設模型；沒有設定過就是平台模型。
+  rpc GetDefaultModel(GetDefaultModelRequest) returns (ModelChoice);
+  // 設定預設模型：provider 是 "platform" 或有自有金鑰的廠商。整理好的清單裡沒有的模型回 INVALID_ARGUMENT；
+  // OpenRouter 的模型 ID 用 OpenRouter 的模型清單確認存在（不存在回 INVALID_ARGUMENT，OpenRouter 連不上回 UNAVAILABLE）；
+  // 沒有那個廠商的自有金鑰回 FAILED_PRECONDITION。不會重新產生任何既有的內容。
+  rpc SetDefaultModel(SetDefaultModelRequest) returns (ModelChoice);
 }
 
 enum RegenerationStatus {
@@ -102,6 +114,9 @@ message Summary {
   int32 source_revision = 3;
   // RUNNING 超過 5 分鐘視為卡住，回報成 FAILED（可以再要求一次）。
   RegenerationStatus regeneration_status = 4;
+  // 產生這份摘要（與同一次產生的章節）的模型；記錄模型之前產生的摘要是空字串。provider 是 "platform" 或廠商名稱。
+  string model_provider = 5;
+  string model = 6;
 }
 
 message GetSummaryRequest {
@@ -184,6 +199,35 @@ message DeleteProviderKeyRequest {
 
 message DeleteProviderKeyResponse {
   bool deleted = 1;
+  // 刪掉的金鑰正被預設模型使用時，預設模型改回平台模型，這裡是 true。
+  bool default_model_reset = 2;
+}
+
+message ListAvailableModelsRequest {
+  string user_id = 1;
+}
+
+message ListAvailableModelsResponse {
+  repeated ModelChoice models = 1;
+  bool openrouter_custom = 2;
+}
+
+// 一個可以選的模型。provider 是 "platform"（平台模型）或廠商名稱。
+message ModelChoice {
+  string provider = 1;
+  string model = 2;
+  // 能不能呼叫工具（會後處理需要）。
+  bool supports_tools = 3;
+}
+
+message GetDefaultModelRequest {
+  string user_id = 1;
+}
+
+message SetDefaultModelRequest {
+  string user_id = 1;
+  string provider = 2;
+  string model = 3;
 }
 
 message ListProviderKeysRequest {
