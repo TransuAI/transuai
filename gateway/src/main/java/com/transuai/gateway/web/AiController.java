@@ -68,7 +68,10 @@ public class AiController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public SummaryDto regenerateSummary(@CurrentUserId UUID userId, @PathVariable String jobId) {
         jobOwnershipGuard.check(userId, jobId);
-        return toDto(aiServiceStub.requestRegeneration(RequestRegenerationRequest.newBuilder().setJobId(jobId).build()));
+        return toDto(aiServiceStub.requestRegeneration(RequestRegenerationRequest.newBuilder()
+                .setJobId(jobId)
+                .setUserId(userId.toString())
+                .build()));
     }
 
     private static SummaryDto toDto(Summary summary) {
