@@ -21,14 +21,14 @@ from app.core.config import settings  # noqa: E402
 from app.db import engine, init_db, new_session  # noqa: E402
 from app.proto_gen import transcription_pb2_grpc  # noqa: E402
 
-from app.services import pipeline
+from app.services import pipeline, transcription_usage
 from app.services.speech_recognition import Recognition
 from app.services.transcript_result import TranscriptResult
 
 
 @pytest.fixture
 def mocks():
-    """驅動 `process_message()` 這個 seam 的共用 mocking boundary：pipeline 會碰到的外部 I/O（語音辨識、下載、
+    """驅動 `process_message()` 這個 seam 的共用 mocking boundary：pipeline 會碰到的外部 I/O（語音辨識、下載、用量存檔、
     抽音軌、gRPC 狀態回報、DB session / 存檔）全部 patch 在 pipeline 模組「使用端」import 進來的名稱
     （跟 ai-service/tests/test_pipeline_retry.py 同一種做法），並預先設好 happy-path 的回傳值。"""
     with (
@@ -38,6 +38,7 @@ def mocks():
         patch.object(pipeline, "recognize") as recognize,
         patch.object(pipeline, "new_session", return_value=MagicMock(name="session")),
         patch.object(pipeline, "save_transcript") as save_transcript,
+        patch.object(transcription_usage, "save_transcription_usage"),
         patch("pathlib.Path.unlink"),
     ):
         recognize.return_value = Recognition(language="en", words=[])
@@ -128,7 +129,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE transcripts, transcript_segments, speakers CASCADE"))
+        conn.execute(text("TRUNCATE transcripts, transcript_segments, speakers, transcription_usage CASCADE"))
 
 
 @pytest.fixture(scope="session")

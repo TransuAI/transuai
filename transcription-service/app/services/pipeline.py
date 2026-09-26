@@ -13,8 +13,18 @@ from app.services.segmentation import build_transcript
 from app.services.speech_recognition import is_transient_recognition_error, recognize
 from app.services.storage import download_object
 from app.services.traditional_chinese import to_traditional_if_chinese
+from app.services.transcription_usage import record_transcription_usage
 
 logger = logging.getLogger(__name__)
+
+
+def _job_owner(payload: dict) -> uuid.UUID | None:
+    """訊息裡的 Job 擁有者（`userId`）；舊訊息沒有、或格式不對時當成不知道，不值得讓整則訊息失敗。"""
+    try:
+        return uuid.UUID(payload["userId"]) if payload.get("userId") else None
+    except ValueError:
+        logger.warning("ignoring malformed userId %r in message for job %s", payload.get("userId"), payload.get("jobId"))
+        return None
 
 
 def process_message(
@@ -39,8 +49,8 @@ def process_message(
     job_id: str = payload["jobId"]
     storage_path: str = payload["storagePath"]
     file_type: str = payload["fileType"]
-    # Job 擁有者，原樣往下傳給 ai-service（用量記在他名下）；升級當下還在佇列裡的舊訊息沒有。
-    user_id: str | None = payload.get("userId")
+    # Job 擁有者：轉錄用量記在他名下，也往下傳給 ai-service；升級當下還在佇列裡的舊訊息沒有。
+    owner = _job_owner(payload)
 
     logger.info("processing job %s (%s) storage_path=%s",
                 job_id, file_type, storage_path)
@@ -54,7 +64,13 @@ def process_message(
         audio_path = extract_audio_track(
             downloaded) if file_type == "VIDEO" else downloaded
 
-        result = to_traditional_if_chinese(build_transcript(recognize(audio_path)))
+        try:
+            recognition = recognize(audio_path)
+        except Exception:
+            record_transcription_usage(owner, uuid.UUID(job_id), None, succeeded=False)
+            raise
+        record_transcription_usage(owner, uuid.UUID(job_id), recognition.audio_seconds, succeeded=True)
+        result = to_traditional_if_chinese(build_transcript(recognition))
 
         session = new_session()
         try:
@@ -63,7 +79,7 @@ def process_message(
             session.close()
 
         job_status_client.update_status(job_id, "TRANSCRIBED")
-        publish_completed(job_id, user_id)
+        publish_completed(job_id, str(owner) if owner else None)
         logger.info("job %s transcribed successfully", job_id)
     except Exception as exc:
         if is_transient_recognition_error(exc) and retry_queue_for(retry_count) is not None:

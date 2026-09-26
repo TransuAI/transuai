@@ -1,3 +1,3 @@
-from app.models.transcript import Base, Speaker, Transcript, TranscriptSegment
+from app.models.transcript import Base, Speaker, Transcript, TranscriptionUsage, TranscriptSegment
 
-__all__ = ["Base", "Speaker", "Transcript", "TranscriptSegment"]
+__all__ = ["Base", "Speaker", "Transcript", "TranscriptionUsage", "TranscriptSegment"]

@@ -3,9 +3,10 @@ import uuid
 from typing import NoReturn
 
 import grpc
+from google.protobuf import timestamp_pb2
 
 from app.db import new_session
-from app.models import Speaker, TranscriptSegment
+from app.models import Speaker, TranscriptionUsage, TranscriptSegment
 from app.proto_gen import transcription_pb2, transcription_pb2_grpc
 from app.repositories.transcript_repository import (
     NewSpeaker,
@@ -16,6 +17,7 @@ from app.repositories.transcript_repository import (
     rename_speaker,
     update_segment_text,
 )
+from app.repositories.transcription_usage_repository import list_job_transcription_usage
 from app.services.edit_events import publish_transcript_edited
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,16 @@ def _normalized_speaker_name(name: str, context: grpc.ServicerContext) -> str | 
         _abort(context, grpc.StatusCode.INVALID_ARGUMENT,
                f"name must be at most {MAX_SPEAKER_NAME_LENGTH} characters")
     return name or None
+
+
+def _usage_to_proto(usage: TranscriptionUsage) -> transcription_pb2.TranscriptionUsage:
+    created_at = timestamp_pb2.Timestamp()
+    created_at.FromDatetime(usage.created_at)
+    record = transcription_pb2.TranscriptionUsage(
+        provider=usage.provider, model=usage.model, succeeded=usage.succeeded, created_at=created_at)
+    if usage.audio_seconds is not None:  # 未知就不設定（proto3 optional），跟 0 分得開
+        record.audio_seconds = usage.audio_seconds
+    return record
 
 
 class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
@@ -149,5 +161,14 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
                 speakers=[_speaker_to_proto(speaker) for speaker in assignment.speakers],
                 revision=assignment.revision,
             )
+        finally:
+            session.close()
+
+    def ListJobTranscriptionUsage(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        session = new_session()
+        try:
+            return transcription_pb2.ListJobTranscriptionUsageResponse(
+                records=[_usage_to_proto(usage) for usage in list_job_transcription_usage(session, job_id)])
         finally:
             session.close()

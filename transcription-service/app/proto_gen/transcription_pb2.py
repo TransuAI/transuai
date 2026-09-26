@@ -22,37 +22,44 @@ _runtime_version.ValidateProtobufRuntimeVersion(
 _sym_db = _symbol_database.Default()
 
 
+from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13transcription.proto\x12\x19transuai.transcription.v1\"\x81\x01\n\x11TranscriptSegment\x12\x12\n\nstart_time\x18\x01 \x01(\x01\x12\x10\n\x08\x65nd_time\x18\x02 \x01(\x01\x12\x15\n\rspeaker_label\x18\x03 \x01(\t\x12\x0c\n\x04text\x18\x04 \x01(\t\x12\n\n\x02id\x18\x05 \x01(\t\x12\x15\n\roriginal_text\x18\x06 \x01(\t\"\xc9\x01\n\nTranscript\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\x11\n\tfull_text\x18\x03 \x01(\t\x12>\n\x08segments\x18\x04 \x03(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x10\n\x08revision\x18\x05 \x01(\x05\x12\x34\n\x08speakers\x18\x06 \x03(\x0b\x32\".transuai.transcription.v1.Speaker\"E\n\x07Speaker\x12\r\n\x05label\x18\x01 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x02 \x01(\t\x12\x15\n\rdisplay_order\x18\x03 \x01(\x05\"&\n\x14GetTranscriptRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"L\n\x18UpdateSegmentTextRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x12\n\nsegment_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"l\n\x19UpdateSegmentTextResponse\x12=\n\x07segment\x18\x01 \x01(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x10\n\x08revision\x18\x02 \x01(\x05\"C\n\x14RenameSpeakerRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\r\n\x05label\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\"^\n\x15RenameSpeakerResponse\x12\x33\n\x07speaker\x18\x01 \x01(\x0b\x32\".transuai.transcription.v1.Speaker\x12\x10\n\x08revision\x18\x02 \x01(\x05\"\xa2\x01\n\x1b\x41ssignSegmentSpeakerRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x12\n\nsegment_id\x18\x02 \x01(\t\x12\x17\n\rspeaker_label\x18\x03 \x01(\tH\x00\x12<\n\x0bnew_speaker\x18\x04 \x01(\x0b\x32%.transuai.transcription.v1.NewSpeakerH\x00\x42\x08\n\x06target\"\x1a\n\nNewSpeaker\x12\x0c\n\x04name\x18\x01 \x01(\t\"\xa5\x01\n\x1c\x41ssignSegmentSpeakerResponse\x12=\n\x07segment\x18\x01 \x01(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x34\n\x08speakers\x18\x02 \x03(\x0b\x32\".transuai.transcription.v1.Speaker\x12\x10\n\x08revision\x18\x03 \x01(\x05\x32\xfd\x03\n\x14TranscriptionService\x12g\n\rGetTranscript\x12/.transuai.transcription.v1.GetTranscriptRequest\x1a%.transuai.transcription.v1.Transcript\x12~\n\x11UpdateSegmentText\x12\x33.transuai.transcription.v1.UpdateSegmentTextRequest\x1a\x34.transuai.transcription.v1.UpdateSegmentTextResponse\x12r\n\rRenameSpeaker\x12/.transuai.transcription.v1.RenameSpeakerRequest\x1a\x30.transuai.transcription.v1.RenameSpeakerResponse\x12\x87\x01\n\x14\x41ssignSegmentSpeaker\x12\x36.transuai.transcription.v1.AssignSegmentSpeakerRequest\x1a\x37.transuai.transcription.v1.AssignSegmentSpeakerResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13transcription.proto\x12\x19transuai.transcription.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x81\x01\n\x11TranscriptSegment\x12\x12\n\nstart_time\x18\x01 \x01(\x01\x12\x10\n\x08\x65nd_time\x18\x02 \x01(\x01\x12\x15\n\rspeaker_label\x18\x03 \x01(\t\x12\x0c\n\x04text\x18\x04 \x01(\t\x12\n\n\x02id\x18\x05 \x01(\t\x12\x15\n\roriginal_text\x18\x06 \x01(\t\"\xc9\x01\n\nTranscript\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\x11\n\tfull_text\x18\x03 \x01(\t\x12>\n\x08segments\x18\x04 \x03(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x10\n\x08revision\x18\x05 \x01(\x05\x12\x34\n\x08speakers\x18\x06 \x03(\x0b\x32\".transuai.transcription.v1.Speaker\"E\n\x07Speaker\x12\r\n\x05label\x18\x01 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x02 \x01(\t\x12\x15\n\rdisplay_order\x18\x03 \x01(\x05\"&\n\x14GetTranscriptRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"L\n\x18UpdateSegmentTextRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x12\n\nsegment_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"l\n\x19UpdateSegmentTextResponse\x12=\n\x07segment\x18\x01 \x01(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x10\n\x08revision\x18\x02 \x01(\x05\"C\n\x14RenameSpeakerRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\r\n\x05label\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\"^\n\x15RenameSpeakerResponse\x12\x33\n\x07speaker\x18\x01 \x01(\x0b\x32\".transuai.transcription.v1.Speaker\x12\x10\n\x08revision\x18\x02 \x01(\x05\"\xa2\x01\n\x1b\x41ssignSegmentSpeakerRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x12\n\nsegment_id\x18\x02 \x01(\t\x12\x17\n\rspeaker_label\x18\x03 \x01(\tH\x00\x12<\n\x0bnew_speaker\x18\x04 \x01(\x0b\x32%.transuai.transcription.v1.NewSpeakerH\x00\x42\x08\n\x06target\"\x1a\n\nNewSpeaker\x12\x0c\n\x04name\x18\x01 \x01(\t\"\xa5\x01\n\x1c\x41ssignSegmentSpeakerResponse\x12=\n\x07segment\x18\x01 \x01(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x34\n\x08speakers\x18\x02 \x03(\x0b\x32\".transuai.transcription.v1.Speaker\x12\x10\n\x08revision\x18\x03 \x01(\x05\"2\n ListJobTranscriptionUsageRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"c\n!ListJobTranscriptionUsageResponse\x12>\n\x07records\x18\x01 \x03(\x0b\x32-.transuai.transcription.v1.TranscriptionUsage\"\xa6\x01\n\x12TranscriptionUsage\x12\x10\n\x08provider\x18\x01 \x01(\t\x12\r\n\x05model\x18\x02 \x01(\t\x12\x1a\n\raudio_seconds\x18\x03 \x01(\x01H\x00\x88\x01\x01\x12\x11\n\tsucceeded\x18\x04 \x01(\x08\x12.\n\ncreated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x10\n\x0e_audio_seconds2\x96\x05\n\x14TranscriptionService\x12g\n\rGetTranscript\x12/.transuai.transcription.v1.GetTranscriptRequest\x1a%.transuai.transcription.v1.Transcript\x12~\n\x11UpdateSegmentText\x12\x33.transuai.transcription.v1.UpdateSegmentTextRequest\x1a\x34.transuai.transcription.v1.UpdateSegmentTextResponse\x12r\n\rRenameSpeaker\x12/.transuai.transcription.v1.RenameSpeakerRequest\x1a\x30.transuai.transcription.v1.RenameSpeakerResponse\x12\x87\x01\n\x14\x41ssignSegmentSpeaker\x12\x36.transuai.transcription.v1.AssignSegmentSpeakerRequest\x1a\x37.transuai.transcription.v1.AssignSegmentSpeakerResponse\x12\x96\x01\n\x19ListJobTranscriptionUsage\x12;.transuai.transcription.v1.ListJobTranscriptionUsageRequest\x1a<.transuai.transcription.v1.ListJobTranscriptionUsageResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'transcription_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_TRANSCRIPTSEGMENT']._serialized_start=51
-  _globals['_TRANSCRIPTSEGMENT']._serialized_end=180
-  _globals['_TRANSCRIPT']._serialized_start=183
-  _globals['_TRANSCRIPT']._serialized_end=384
-  _globals['_SPEAKER']._serialized_start=386
-  _globals['_SPEAKER']._serialized_end=455
-  _globals['_GETTRANSCRIPTREQUEST']._serialized_start=457
-  _globals['_GETTRANSCRIPTREQUEST']._serialized_end=495
-  _globals['_UPDATESEGMENTTEXTREQUEST']._serialized_start=497
-  _globals['_UPDATESEGMENTTEXTREQUEST']._serialized_end=573
-  _globals['_UPDATESEGMENTTEXTRESPONSE']._serialized_start=575
-  _globals['_UPDATESEGMENTTEXTRESPONSE']._serialized_end=683
-  _globals['_RENAMESPEAKERREQUEST']._serialized_start=685
-  _globals['_RENAMESPEAKERREQUEST']._serialized_end=752
-  _globals['_RENAMESPEAKERRESPONSE']._serialized_start=754
-  _globals['_RENAMESPEAKERRESPONSE']._serialized_end=848
-  _globals['_ASSIGNSEGMENTSPEAKERREQUEST']._serialized_start=851
-  _globals['_ASSIGNSEGMENTSPEAKERREQUEST']._serialized_end=1013
-  _globals['_NEWSPEAKER']._serialized_start=1015
-  _globals['_NEWSPEAKER']._serialized_end=1041
-  _globals['_ASSIGNSEGMENTSPEAKERRESPONSE']._serialized_start=1044
-  _globals['_ASSIGNSEGMENTSPEAKERRESPONSE']._serialized_end=1209
-  _globals['_TRANSCRIPTIONSERVICE']._serialized_start=1212
-  _globals['_TRANSCRIPTIONSERVICE']._serialized_end=1721
+  _globals['_TRANSCRIPTSEGMENT']._serialized_start=84
+  _globals['_TRANSCRIPTSEGMENT']._serialized_end=213
+  _globals['_TRANSCRIPT']._serialized_start=216
+  _globals['_TRANSCRIPT']._serialized_end=417
+  _globals['_SPEAKER']._serialized_start=419
+  _globals['_SPEAKER']._serialized_end=488
+  _globals['_GETTRANSCRIPTREQUEST']._serialized_start=490
+  _globals['_GETTRANSCRIPTREQUEST']._serialized_end=528
+  _globals['_UPDATESEGMENTTEXTREQUEST']._serialized_start=530
+  _globals['_UPDATESEGMENTTEXTREQUEST']._serialized_end=606
+  _globals['_UPDATESEGMENTTEXTRESPONSE']._serialized_start=608
+  _globals['_UPDATESEGMENTTEXTRESPONSE']._serialized_end=716
+  _globals['_RENAMESPEAKERREQUEST']._serialized_start=718
+  _globals['_RENAMESPEAKERREQUEST']._serialized_end=785
+  _globals['_RENAMESPEAKERRESPONSE']._serialized_start=787
+  _globals['_RENAMESPEAKERRESPONSE']._serialized_end=881
+  _globals['_ASSIGNSEGMENTSPEAKERREQUEST']._serialized_start=884
+  _globals['_ASSIGNSEGMENTSPEAKERREQUEST']._serialized_end=1046
+  _globals['_NEWSPEAKER']._serialized_start=1048
+  _globals['_NEWSPEAKER']._serialized_end=1074
+  _globals['_ASSIGNSEGMENTSPEAKERRESPONSE']._serialized_start=1077
+  _globals['_ASSIGNSEGMENTSPEAKERRESPONSE']._serialized_end=1242
+  _globals['_LISTJOBTRANSCRIPTIONUSAGEREQUEST']._serialized_start=1244
+  _globals['_LISTJOBTRANSCRIPTIONUSAGEREQUEST']._serialized_end=1294
+  _globals['_LISTJOBTRANSCRIPTIONUSAGERESPONSE']._serialized_start=1296
+  _globals['_LISTJOBTRANSCRIPTIONUSAGERESPONSE']._serialized_end=1395
+  _globals['_TRANSCRIPTIONUSAGE']._serialized_start=1398
+  _globals['_TRANSCRIPTIONUSAGE']._serialized_end=1564
+  _globals['_TRANSCRIPTIONSERVICE']._serialized_start=1567
+  _globals['_TRANSCRIPTIONSERVICE']._serialized_end=2229
 # @@protoc_insertion_point(module_scope)

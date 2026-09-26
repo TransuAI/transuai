@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -91,3 +91,21 @@ class Speaker(Base):
     def set_name(self, name: str | None) -> None:
         """取名；None 或等於預設名稱「講者 N」＝沒有自訂名稱。"""
         self.name = None if name == self.default_name else name
+
+
+class TranscriptionUsage(Base):
+    """轉錄用量（見 CONTEXT.md「轉錄用量」）：每次呼叫語音辨識服務一筆，記在 Job 擁有者名下。"""
+
+    __tablename__ = "transcription_usage"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # 升級當下還在佇列裡、沒帶 userId 的舊訊息，使用者是空的。
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    # 服務沒回報（例如呼叫失敗）時是 NULL（未知），不是 0。
+    audio_seconds: Mapped[float | None] = mapped_column(Float)
+    succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))

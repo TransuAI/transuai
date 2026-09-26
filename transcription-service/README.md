@@ -1,6 +1,6 @@
 # transcription-service
 
-音訊/影片逐字稿 + AI 分析平台的 Transcription Service。消費 Upload Service 發出的 `transcription.requested` 事件，抽音軌、呼叫 Deepgram 一次完成轉錄與**講者分離**、切成片段後把逐字稿存進自己的 `transcription_db`，並回寫 Job 狀態、發送 `transcription.completed` 事件給下游的 AI Service；也保存使用者對逐字稿的**編輯**（見 [`CONTEXT.md`](CONTEXT.md)）。是純內部服務（轉錄由 MQ 驅動），只暴露 gRPC 給其他內部服務查詢與編輯——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service) 一致）。
+音訊/影片逐字稿 + AI 分析平台的 Transcription Service。消費 Upload Service 發出的 `transcription.requested` 事件，抽音軌、呼叫 Deepgram 一次完成轉錄與**講者分離**、切成片段後把逐字稿存進自己的 `transcription_db`（每次轉錄也記一筆轉錄用量），並回寫 Job 狀態、發送 `transcription.completed` 事件給下游的 AI Service；也保存使用者對逐字稿的**編輯**（見 [`CONTEXT.md`](CONTEXT.md)）。是純內部服務（轉錄由 MQ 驅動），只暴露 gRPC 給其他內部服務查詢與編輯——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service) 一致）。
 
 ## 技術棧
 
@@ -47,6 +47,7 @@ uv run python -m app.main
   → 從物件儲存下載檔案
   → file_type == VIDEO 才用 moviepy 抽音軌，AUDIO 直接用原始檔案
   → 呼叫 Deepgram（音檔內容直接上傳，不傳 URL），拿回每個字的起訖時間、文字與講者
+  → 記一筆轉錄用量（音檔秒數取 Deepgram 回報的長度；呼叫失敗也記一筆沒有秒數的失敗紀錄，存不進去只記 log）
   → 切成片段：換講者、句末標點、字間停頓 ≥ 0.5 秒時切，片段即將超過 15 秒時在字的邊界強制切
     （每個片段只屬於一位講者；中文字之間不加空白、英文字之間加一個）
   → 講者依第一次開口的順序換成這個 Job 的標籤 S1、S2…（預設名稱「講者 N」）
@@ -75,6 +76,7 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 | `UpdateSegmentText` | 編輯一個片段的文字：去前後空白，空字串＝清空；跟目前相同則不動作；否則更新文字、`revision` +1、以未清空片段依換行重組全文，並發送 `transcript.edited { jobId }`（逐字稿那列 `SELECT … FOR UPDATE`，同時編輯以最後寫入為準但 revision 各加一次）。id 格式錯誤 / 超過 2,000 字回 `INVALID_ARGUMENT`，逐字稿或片段不存在、片段不屬於該 job 回 `NOT_FOUND` |
 | `RenameSpeaker` | 替講者命名：去前後空白，空字串或等於預設名稱「講者 N」＝恢復預設名稱；顯示名稱沒變則不動作；否則更新、`revision` +1，並發送 `transcript.edited { jobId }`（同一把逐字稿列鎖）。`job_id` 格式錯誤 / 名稱超過 100 字回 `INVALID_ARGUMENT`，逐字稿或這個標籤的講者不存在回 `NOT_FOUND` |
 | `AssignSegmentSpeaker` | 改片段的講者：目標是現有講者的標籤，或「新增講者」（可附名稱，排在顯示順序最後）。逐字稿還沒有任何講者（講者分離之前的舊 Job）時，新增講者前先把沒有講者的片段一起歸給新的講者 1，這樣指定出來就是兩位。片段本來就是目標講者則不動作；否則更新、`revision` +1，並發送 `transcript.edited { jobId }`，回傳片段、所有講者、`revision`。id 格式錯誤、沒有指定目標、名稱超過 100 字回 `INVALID_ARGUMENT`，逐字稿 / 片段 / 標籤不存在或片段不屬於該 job 回 `NOT_FOUND` |
+| `ListJobTranscriptionUsage` | 列出一個 Job 的轉錄用量（依時間升冪）：廠商、模型、音檔秒數（沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
 
@@ -161,7 +163,8 @@ app/
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     storage.py                         從 MinIO/R2 下載檔案
     audio.py                            moviepy 抽音軌
-    speech_recognition.py                語音辨識 adapter（Deepgram）：回傳不綁定廠商的逐字資料，並判斷錯誤是否暫時性
+    speech_recognition.py                語音辨識 adapter（Deepgram）：回傳不綁定廠商的逐字資料與計費的音檔秒數，並判斷錯誤是否暫時性
+    transcription_usage.py               記錄轉錄用量（Job 擁有者、音檔秒數、成功或失敗），存檔失敗只記 log
     segmentation.py                       把逐字資料切成片段、講者依第一次開口的順序編號（跟廠商無關）
     transcript_result.py                  切好片段、準備存檔的逐字稿（dataclass）
     traditional_chinese.py                中文逐字稿轉繁體（OpenCC s2tw），pipeline 在切片段與存檔之間呼叫
@@ -170,9 +173,10 @@ app/
     edit_events.py                         編輯後發送 transcript.edited { jobId }：gRPC handler 自己開短連線，失敗做 3 次小型重試，仍失敗記 TRANSCRIPTION_SERVICE_TRANSCRIPT_EDITED_EVENT_LOST 但編輯照樣成功
   repositories/
     transcript_repository.py               transcription_db 存取（transcripts / transcript_segments / speakers）
+    transcription_usage_repository.py       transcription_db 存取（transcription_usage），每筆用自己的 session 立即寫入
   db/
     session.py                               engine / session / init_db（Alembic upgrade，含接手舊 create_all 資料庫）
-    migrations/                              Alembic migration（`0001_baseline` 是導入前 create_all 建出的 schema；`0002_segment_editing` 加 `original_text`、`revision`；`0003_speakers` 加 `speakers` 表）
+    migrations/                              Alembic migration（`0001_baseline` 是導入前 create_all 建出的 schema；`0002_segment_editing` 加 `original_text`、`revision`；`0003_speakers` 加 `speakers` 表；`0004_transcription_usage` 加轉錄用量表）
   proto_gen/                                  gRPC stub 產物（由 scripts/generate_grpc.sh 產生）
 scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```

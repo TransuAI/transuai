@@ -30,9 +30,17 @@ class RecognizedWord:
 class Recognition:
     language: str
     words: list[RecognizedWord]
+    # 服務計費的音檔長度（轉錄用量）；服務沒回報時是 None。
+    audio_seconds: float | None = None
 
 
 _DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"
+PROVIDER = "deepgram"
+
+
+def model_name() -> str:
+    """目前用的語音辨識模型（記轉錄用量用）。"""
+    return settings.deepgram_model
 
 # 音檔直接以檔案內容上傳（不傳 URL：本機的 MinIO 從網際網路上連不到）。幾十分鐘的音檔上傳加處理要一點時間，
 # 讀取逾時放寬；連不上則很快放棄，交給訊息層級重試。
@@ -75,7 +83,12 @@ def _parse(body: dict[str, Any]) -> Recognition:
         for word in channel["alternatives"][0]["words"]
     ]
     # 指定語言時 Deepgram 不回 detected_language，這時就是指定的語言。
-    return Recognition(language=channel.get("detected_language") or settings.deepgram_language, words=words)
+    duration = body.get("metadata", {}).get("duration")
+    return Recognition(
+        language=channel.get("detected_language") or settings.deepgram_language,
+        words=words,
+        audio_seconds=float(duration) if duration is not None else None,
+    )
 
 
 def is_transient_recognition_error(exc: BaseException) -> bool:

@@ -62,6 +62,16 @@ def test_parses_every_word_with_its_times_and_speaker(deepgram, audio):
     assert recognition.words[-1] == RecognizedWord(start=31.920937, end=33.440937, text="過", speaker="0")
 
 
+def test_reports_how_many_seconds_of_audio_were_recognised(deepgram, audio):
+    assert recognize(audio).audio_seconds == 32.076
+
+
+def test_a_response_without_a_duration_has_unknown_audio_seconds(deepgram, audio):
+    deepgram.response = httpx.Response(200, json={"results": {"channels": [{"alternatives": [{"words": []}]}]}})
+
+    assert recognize(audio).audio_seconds is None
+
+
 def test_keeps_the_vendor_speaker_turns(deepgram, audio):
     words = recognize(audio).words
 
