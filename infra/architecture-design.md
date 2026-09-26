@@ -37,7 +37,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`）。只剩多格式輸出還沒做。見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 
 ---
@@ -66,7 +66,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` 五張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` 六張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -179,11 +179,15 @@ GET    /chapters/{jobId}                取得章節列表
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string }，
                                          回傳 text/event-stream（SSE，逐字串流），不是一次性 JSON
+GET    /me/provider-keys                自有金鑰列表（只有廠商、末四碼、存入時間）
+PUT    /me/provider-keys/{provider}     存入或替換自有金鑰，body { "key": string }；先向廠商驗證，無效回 400（附原因）、
+                                         廠商暫時連不上回 503、伺服器沒設定加密主金鑰回 409，都不會存
+DELETE /me/provider-keys/{provider}     刪除自有金鑰，回 { deleted }
 GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫與轉錄，依時間排序，附總計）；Gateway 向
                                          ai-service（LLM）與 transcription-service（轉錄）分別查詢再合併
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`ListJobLlmUsage`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`），
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`ListJobLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -308,7 +312,7 @@ CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
 
 ### 4.4 ai_db
 
-**現況（已建立，五張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，六張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -372,6 +376,18 @@ CREATE TABLE llm_usage (
 );
 CREATE INDEX ix_llm_usage_job_id ON llm_usage(job_id);
 CREATE INDEX ix_llm_usage_user_id ON llm_usage(user_id);
+
+-- 自有金鑰：每位使用者每個廠商一把，AES-256-GCM 加密（主金鑰在環境變數 KEY_ENCRYPTION_KEY，不在資料庫），
+-- 見 ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md
+CREATE TABLE provider_keys (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    provider VARCHAR(32) NOT NULL,          -- openai / anthropic / gemini / openrouter
+    encrypted_key BYTEA NOT NULL,           -- nonce + 密文
+    last4 VARCHAR(4) NOT NULL,              -- 給使用者辨認是哪一把；金鑰本身永遠不回傳
+    created_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (user_id, provider)
+);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：

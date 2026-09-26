@@ -116,16 +116,18 @@ docker compose exec rabbitmq rabbitmqctl list_queues
    ```
 4. 套用 manifests：`kubectl apply -f k8s`
 5. 等待所有 StatefulSet/Deployment 就緒（Postgres/RabbitMQ/MinIO 第一次起會比較慢，`minio-init` job 要等它們先起來才會 complete）。
-6. 把 `DEEPGRAM_API_KEY` / `HF_API_KEY` 從各自服務的 `.env` 補進 k8s secret 並重啟對應服務（secret 套用時預設留白，避免 API key 進版控）：
+6. 把 `DEEPGRAM_API_KEY` / `HF_API_KEY` 從各自服務的 `.env` 補進 k8s secret、產生一把 `KEY_ENCRYPTION_KEY`，並重啟對應服務（secret 套用時預設留白，避免 API key 進版控）：
    ```bash
    kubectl -n transuai patch secret app-secrets --type merge -p \
      "{\"stringData\":{\"DEEPGRAM_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^DEEPGRAM_API_KEY= ../transcription-service/.env)")\"}}"
    kubectl -n transuai patch secret app-secrets --type merge -p \
      "{\"stringData\":{\"HF_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^HF_API_KEY= ../ai-service/.env)")\"}}"
+   kubectl -n transuai patch secret app-secrets --type merge -p \
+     "{\"stringData\":{\"KEY_ENCRYPTION_KEY\":\"$(openssl rand -base64 32)\"}}"
    kubectl -n transuai rollout restart deployment transcription-service ai-service
    ```
    `DEEPGRAM_API_KEY` 只有 transcription-service（語音辨識 + 講者分離）會用到；`HF_API_KEY` 是 ai-service 的
-   摘要/章節/RAG 問答跟 embedding 用的（見 [`../ai-service/README.md`](../ai-service/README.md)）。
+   摘要/章節/RAG 問答跟 embedding 用的（見 [`../ai-service/README.md`](../ai-service/README.md)）；`KEY_ENCRYPTION_KEY` 是 ai-service 加密使用者自有金鑰的主金鑰，產生後不要再換，換了之後已存的自有金鑰都解不開。
 
 ### 從本機用 localhost 存取
 
