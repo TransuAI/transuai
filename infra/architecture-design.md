@@ -65,7 +65,7 @@ Notification Service 消費訊息
 
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
-- `transcription_db`：逐字稿內容、片段 timestamp
+- `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
 - `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` 五張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
@@ -179,11 +179,11 @@ GET    /chapters/{jobId}                取得章節列表
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string }，
                                          回傳 text/event-stream（SSE，逐字串流），不是一次性 JSON
-GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫，依時間排序，附總計）；轉錄用量還沒記錄，
-                                         之後由 Gateway 向 transcription-service 另外查詢再合併
+GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫與轉錄，依時間排序，附總計）；Gateway 向
+                                         ai-service（LLM）與 transcription-service（轉錄）分別查詢再合併
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`ListJobLlmUsage`，
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`ListJobLlmUsage`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -290,6 +290,20 @@ CREATE TABLE speakers (
     name VARCHAR(100),                      -- 使用者取的名稱；NULL＝顯示預設名稱
     UNIQUE (transcript_id, label)
 );
+
+-- 轉錄用量：每次呼叫語音辨識服務一筆（LLM 用量在 ai_db）
+CREATE TABLE transcription_usage (
+    id UUID PRIMARY KEY,
+    user_id UUID,                           -- Job 擁有者；升級前排入的舊訊息沒有
+    job_id UUID NOT NULL,
+    provider VARCHAR(32) NOT NULL,          -- deepgram
+    model VARCHAR(100) NOT NULL,
+    audio_seconds DOUBLE PRECISION,         -- 服務計費的音檔長度；NULL＝沒回報（例如呼叫失敗）
+    succeeded BOOLEAN NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_transcription_usage_job_id ON transcription_usage(job_id);
+CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
 ```
 
 ### 4.4 ai_db
@@ -342,7 +356,7 @@ CREATE TABLE qa_history (
 );
 CREATE INDEX ix_qa_history_job_id ON qa_history(job_id);
 
--- 用量：每一次 LLM 呼叫一筆（轉錄用量還沒記錄）
+-- 用量：每一次 LLM 呼叫一筆（轉錄用量在 transcription_db）
 CREATE TABLE llm_usage (
     id UUID PRIMARY KEY,
     user_id UUID,                           -- Job 擁有者 / 提問者；升級前排入的舊訊息沒有
