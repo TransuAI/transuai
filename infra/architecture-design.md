@@ -37,7 +37,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`）。只剩多格式輸出還沒做。見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 
 ---
@@ -66,7 +66,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` 六張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` 七張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -172,22 +172,27 @@ embedding——改名、改講者不動文字，所以不用重算；摘要與�
 
 ```
 GET    /summary/{jobId}                 取得摘要（含 sourceRevision：依據的逐字稿 revision，前端比對判斷過時；
-                                         regenerationStatus：IDLE / RUNNING / FAILED）
+                                         regenerationStatus：IDLE / RUNNING / FAILED；modelProvider / model：產生它的模型）
 POST   /summary/{jobId}/regenerate      摘要與章節過時後，在背景依最新逐字稿重新產生兩者，回 202（Job 狀態不變，
                                          前端每 3 秒輪詢 GET /summary 直到不是 RUNNING）
 GET    /chapters/{jobId}                取得章節列表
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string }，
                                          回傳 text/event-stream（SSE，逐字串流），不是一次性 JSON
+GET    /ai/models                       可以選的模型：平台模型，加上有自有金鑰的廠商整理好的清單（標示能不能呼叫工具）；
+                                         有 OpenRouter 金鑰時可以自己輸入模型 ID（openrouterCustom）
+GET    /me/default-model                目前的預設模型（沒選過就是平台模型）
+PUT    /me/default-model                設定預設模型，body { "provider", "model" }；清單外的模型或 OpenRouter 上不存在回 400、
+                                         沒有那個廠商的自有金鑰回 409、OpenRouter 查不到回 503；不會重做既有內容
 GET    /me/provider-keys                自有金鑰列表（只有廠商、末四碼、存入時間）
 PUT    /me/provider-keys/{provider}     存入或替換自有金鑰，body { "key": string }；先向廠商驗證，無效回 400（附原因）、
                                          廠商暫時連不上回 503、伺服器沒設定加密主金鑰回 409，都不會存
-DELETE /me/provider-keys/{provider}     刪除自有金鑰，回 { deleted }
+DELETE /me/provider-keys/{provider}     刪除自有金鑰，回 { deleted, defaultModelReset }（預設模型正在用它時改回平台模型）
 GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫與轉錄，依時間排序，附總計）；Gateway 向
                                          ai-service（LLM）與 transcription-service（轉錄）分別查詢再合併
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`ListJobLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`），
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`ListJobLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -312,7 +317,7 @@ CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
 
 ### 4.4 ai_db
 
-**現況（已建立，六張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，七張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -324,6 +329,8 @@ CREATE TABLE summaries (
     source_revision INT NOT NULL DEFAULT 0,  -- 依據的逐字稿 revision；小於逐字稿目前的 revision＝過時（章節共用）
     regeneration_status VARCHAR(10) NOT NULL DEFAULT 'IDLE',  -- 使用者要求的重新產生：IDLE / RUNNING / FAILED
     regeneration_requested_at TIMESTAMPTZ,   -- RUNNING 超過 5 分鐘視為卡住，允許再要求一次
+    model_provider VARCHAR(32),              -- 產生它（與同一次的章節）的模型：platform 或廠商；記錄模型之前是 NULL
+    model VARCHAR(200),
     created_at TIMESTAMP NOT NULL
 );
 CREATE UNIQUE INDEX ix_summaries_job_id ON summaries(job_id);
@@ -388,6 +395,15 @@ CREATE TABLE provider_keys (
     created_at TIMESTAMPTZ NOT NULL,
     UNIQUE (user_id, provider)
 );
+
+-- 預設模型：每位使用者一筆（沒有這一筆＝平台模型）；背景工作用它，問答之後可以臨時換
+CREATE TABLE default_models (
+    user_id UUID PRIMARY KEY,
+    provider VARCHAR(32) NOT NULL,          -- 有自有金鑰的廠商
+    model VARCHAR(200) NOT NULL,
+    supports_tools BOOLEAN NOT NULL,        -- 選的時候確認過能不能呼叫工具（會後處理需要）
+    updated_at TIMESTAMPTZ NOT NULL
+);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
@@ -439,7 +455,7 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
 | ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體 |
-| LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），平台模型是 HF Inference Providers 的 OpenAI 相容路由（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
+| LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型是 HF Inference Providers 的 OpenAI 相容路由（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
