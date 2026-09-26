@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     job_failed_queue: str = "job.failed"
     transcript_edited_queue: str = "transcript.edited"
     summary_regeneration_requested_queue: str = "summary.regeneration.requested"
+    quiz_requested_queue: str = "quiz.requested"
 
     upload_service_grpc_target: str = "localhost:9090"
     transcription_service_grpc_target: str = "localhost:8083"

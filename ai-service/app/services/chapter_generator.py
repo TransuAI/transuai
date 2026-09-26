@@ -1,6 +1,7 @@
 import json
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from app.services.llm_client import ChatModel, UsageSink, chat
 
@@ -26,11 +27,13 @@ _PROMPT_TEMPLATE = (
 _MAX_TOKENS = 2048
 
 
-def _format_lines(lines: list[TimedLine]) -> str:
+def format_timed_lines(lines: list[TimedLine]) -> str:
+    """交給模型的逐字稿：每行「[開始時間] 文字」，時間取到小數一位。"""
     return "\n".join(f"[{line.start_time:.1f}] {line.text}" for line in lines)
 
 
-def _parse_response(text: str) -> list[dict]:
+def parse_json_reply(text: str) -> Any:
+    """模型回的 JSON；容許包在 Markdown code fence 裡。"""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
@@ -51,9 +54,9 @@ def generate_chapters(lines: list[TimedLine], *, model: ChatModel, meter: UsageS
         return []
 
     logger.info("calling %s (%s) for chapters, segment count=%d", model.provider, model.model, len(lines))
-    result = chat(model, [{"role": "user", "content": _PROMPT_TEMPLATE.format(segments=_format_lines(lines))}],
+    result = chat(model, [{"role": "user", "content": _PROMPT_TEMPLATE.format(segments=format_timed_lines(lines))}],
                   max_tokens=_MAX_TOKENS, meter=meter)
-    raw_chapters = _parse_response(result.text or "[]")
+    raw_chapters = parse_json_reply(result.text or "[]")
     chapters = [(str(item["title"]), float(item["start_time"])) for item in raw_chapters]
     chapters.sort(key=lambda chapter: chapter[1])
     return chapters

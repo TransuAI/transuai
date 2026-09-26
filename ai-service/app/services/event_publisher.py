@@ -59,3 +59,16 @@ def publish_regeneration_requested(channel: BlockingChannel, job_id: str, user_i
         properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
     )
     logger.info("queued summary.regeneration.requested for job %s", job_id)
+
+
+def publish_quiz_requested(channel: BlockingChannel, quiz_id: str, job_id: str, user_id: str) -> None:
+    """quiz.requested -> {quizId, jobId, userId}：ai-service 排給自己的背景工作（產生測驗）；userId 是要求產生的
+    使用者，用他的預設模型、用量記在他名下。"""
+    channel.queue_declare(queue=settings.quiz_requested_queue, durable=True)
+    channel.basic_publish(
+        exchange="",
+        routing_key=settings.quiz_requested_queue,
+        body=json.dumps({"quizId": quiz_id, "jobId": job_id, "userId": user_id}).encode("utf-8"),
+        properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+    )
+    logger.info("queued quiz.requested for quiz %s of job %s", quiz_id, job_id)

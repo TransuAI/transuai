@@ -15,9 +15,92 @@ class RegenerationStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     REGENERATION_STATUS_IDLE: _ClassVar[RegenerationStatus]
     REGENERATION_STATUS_RUNNING: _ClassVar[RegenerationStatus]
     REGENERATION_STATUS_FAILED: _ClassVar[RegenerationStatus]
+
+class QuizStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    QUIZ_STATUS_UNSPECIFIED: _ClassVar[QuizStatus]
+    QUIZ_STATUS_GENERATING: _ClassVar[QuizStatus]
+    QUIZ_STATUS_COMPLETED: _ClassVar[QuizStatus]
+    QUIZ_STATUS_FAILED: _ClassVar[QuizStatus]
 REGENERATION_STATUS_IDLE: RegenerationStatus
 REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
+QUIZ_STATUS_UNSPECIFIED: QuizStatus
+QUIZ_STATUS_GENERATING: QuizStatus
+QUIZ_STATUS_COMPLETED: QuizStatus
+QUIZ_STATUS_FAILED: QuizStatus
+
+class RequestQuizRequest(_message.Message):
+    __slots__ = ("job_id", "user_id", "question_count")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_COUNT_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    question_count: int
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., question_count: _Optional[int] = ...) -> None: ...
+
+class ListQuizzesRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class ListQuizzesResponse(_message.Message):
+    __slots__ = ("quizzes",)
+    QUIZZES_FIELD_NUMBER: _ClassVar[int]
+    quizzes: _containers.RepeatedCompositeFieldContainer[Quiz]
+    def __init__(self, quizzes: _Optional[_Iterable[_Union[Quiz, _Mapping]]] = ...) -> None: ...
+
+class GetQuizRequest(_message.Message):
+    __slots__ = ("job_id", "quiz_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    QUIZ_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    quiz_id: str
+    def __init__(self, job_id: _Optional[str] = ..., quiz_id: _Optional[str] = ...) -> None: ...
+
+class Quiz(_message.Message):
+    __slots__ = ("id", "job_id", "question_count", "status", "failure_reason", "source_revision", "model_provider", "model", "requested_at", "completed_at", "questions")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_COUNT_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    QUESTIONS_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    job_id: str
+    question_count: int
+    status: QuizStatus
+    failure_reason: str
+    source_revision: int
+    model_provider: str
+    model: str
+    requested_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    questions: _containers.RepeatedCompositeFieldContainer[QuizQuestion]
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., question_count: _Optional[int] = ..., status: _Optional[_Union[QuizStatus, str]] = ..., failure_reason: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., questions: _Optional[_Iterable[_Union[QuizQuestion, _Mapping]]] = ...) -> None: ...
+
+class QuizQuestion(_message.Message):
+    __slots__ = ("kind", "prompt", "options", "correct_option", "explanation", "source_timestamps")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
+    CORRECT_OPTION_FIELD_NUMBER: _ClassVar[int]
+    EXPLANATION_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_TIMESTAMPS_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    prompt: str
+    options: _containers.RepeatedScalarFieldContainer[str]
+    correct_option: int
+    explanation: str
+    source_timestamps: _containers.RepeatedScalarFieldContainer[float]
+    def __init__(self, kind: _Optional[str] = ..., prompt: _Optional[str] = ..., options: _Optional[_Iterable[str]] = ..., correct_option: _Optional[int] = ..., explanation: _Optional[str] = ..., source_timestamps: _Optional[_Iterable[float]] = ...) -> None: ...
 
 class RequestRegenerationRequest(_message.Message):
     __slots__ = ("job_id", "user_id")

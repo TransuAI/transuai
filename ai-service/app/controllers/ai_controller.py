@@ -1,5 +1,6 @@
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import timezone
 from typing import NoReturn
 
@@ -13,6 +14,7 @@ from app.repositories.llm_usage_repository import list_job_llm_usage, sum_user_l
 from app.repositories.provider_key_repository import list_provider_keys
 from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_job_id
 from app.repositories.qa_repository import save_qa
+from app.repositories.quiz_repository import find_quiz, list_questions, list_quizzes
 from app.repositories.summary_repository import find_by_job_id as find_summary_by_job_id
 from app.services.default_models import (
     ModelNotAvailable,
@@ -27,7 +29,8 @@ from app.services.llm_client import LlmError
 from app.services.model_catalog import CatalogUnreachable, ModelChoice, UnknownModel
 from app.services.provider_keys import InvalidKey, ProviderUnreachable, UnknownProvider, save_provider_key
 from app.services.qa import NoEmbeddingsError, stream_answer
-from app.models import RegenerationStatus
+from app.services.quizzes import InvalidQuestionCount, QuizNotQueued, effective_status, request_quiz
+from app.models import Quiz, QuizQuestion, QuizStatus, RegenerationStatus
 from app.services.regeneration import (
     RegenerationNotQueued,
     SummaryNotFound,
@@ -290,16 +293,73 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         finally:
             session.close()
 
+    def RequestQuiz(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            quiz = request_quiz(job_id, user_id, request.question_count)
+        except InvalidQuestionCount:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "題數只能是 5、10 或 20")
+        except QuizNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法產生測驗，請稍後再試")
+        return _quiz_to_proto(quiz)
+
+    def ListQuizzes(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        session = new_session()
+        try:
+            return ai_pb2.ListQuizzesResponse(quizzes=[_quiz_to_proto(quiz) for quiz in list_quizzes(session, job_id)])
+        finally:
+            session.close()
+
+    def GetQuiz(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        quiz_id = _parse_uuid(request.quiz_id, "quiz_id", context)
+        session = new_session()
+        try:
+            quiz = find_quiz(session, job_id, quiz_id)
+            if quiz is None:
+                _abort(context, grpc.StatusCode.NOT_FOUND, "quiz not found")
+            return _quiz_to_proto(quiz, list_questions(session, quiz_id))
+        finally:
+            session.close()
+
+
+def _parse_uuid(value: str, field: str, context: grpc.ServicerContext) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        _abort(context, grpc.StatusCode.INVALID_ARGUMENT, f"{field} must be a valid UUID")
+
+
+_QUIZ_STATUS = {
+    QuizStatus.GENERATING: ai_pb2.QUIZ_STATUS_GENERATING,
+    QuizStatus.COMPLETED: ai_pb2.QUIZ_STATUS_COMPLETED,
+    QuizStatus.FAILED: ai_pb2.QUIZ_STATUS_FAILED,
+}
+
+
+def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = ()) -> ai_pb2.Quiz:
+    status, failure_reason = effective_status(quiz)
+    message = ai_pb2.Quiz(
+        id=str(quiz.id), job_id=str(quiz.job_id), question_count=quiz.question_count,
+        status=_QUIZ_STATUS[status], failure_reason=failure_reason or "",
+        source_revision=quiz.source_revision or 0, model_provider=quiz.model_provider or "", model=quiz.model or "",
+        questions=[ai_pb2.QuizQuestion(
+            kind=q.kind, prompt=q.prompt, options=q.options, correct_option=q.correct_option,
+            explanation=q.explanation, source_timestamps=q.source_timestamps) for q in questions])
+    message.requested_at.FromDatetime(quiz.requested_at)
+    if quiz.completed_at is not None:
+        message.completed_at.FromDatetime(quiz.completed_at)
+    return message
+
 
 def _model_choice_to_proto(choice: ModelChoice) -> ai_pb2.ModelChoice:
     return ai_pb2.ModelChoice(provider=choice.provider, model=choice.model, supports_tools=choice.supports_tools)
 
 
 def _parse_user_id(value: str, context: grpc.ServicerContext) -> uuid.UUID:
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "user_id must be a valid UUID")
+    return _parse_uuid(value, "user_id", context)
 
 
 def _provider_key_to_proto(key) -> ai_pb2.ProviderKey:

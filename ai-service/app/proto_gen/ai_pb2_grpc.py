@@ -74,6 +74,21 @@ class AiServiceStub:
                 request_serializer=ai__pb2.SumUserLlmUsageRequest.SerializeToString,
                 response_deserializer=ai__pb2.SumUserLlmUsageResponse.FromString,
                 _registered_method=True)
+        self.RequestQuiz = channel.unary_unary(
+                '/transuai.ai.v1.AiService/RequestQuiz',
+                request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
+                response_deserializer=ai__pb2.Quiz.FromString,
+                _registered_method=True)
+        self.ListQuizzes = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListQuizzes',
+                request_serializer=ai__pb2.ListQuizzesRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListQuizzesResponse.FromString,
+                _registered_method=True)
+        self.GetQuiz = channel.unary_unary(
+                '/transuai.ai.v1.AiService/GetQuiz',
+                request_serializer=ai__pb2.GetQuizRequest.SerializeToString,
+                response_deserializer=ai__pb2.Quiz.FromString,
+                _registered_method=True)
         self.SaveProviderKey = channel.unary_unary(
                 '/transuai.ai.v1.AiService/SaveProviderKey',
                 request_serializer=ai__pb2.SaveProviderKeyRequest.SerializeToString,
@@ -182,6 +197,31 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RequestQuiz(self, request, context):
+        """測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
+        quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
+        job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
+        user_id 是 Gateway 驗證過 ownership 的使用者，用他的預設模型產生、用量記在他名下。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListQuizzes(self, request, context):
+        """一個 Job 的所有測驗（新的在前），不含題目。「產生中」超過 5 分鐘回報成 FAILED。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetQuiz(self, request, context):
+        """一份測驗，含題目與正確答案（測驗屬於使用者自己，「作答時看不到答案」由前端處理）。
+        不存在或不屬於這個 job 回 NOT_FOUND。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SaveProviderKey(self, request, context):
         """自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
         取得的使用者，不另外驗證。
@@ -271,6 +311,21 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.SumUserLlmUsage,
                     request_deserializer=ai__pb2.SumUserLlmUsageRequest.FromString,
                     response_serializer=ai__pb2.SumUserLlmUsageResponse.SerializeToString,
+            ),
+            'RequestQuiz': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestQuiz,
+                    request_deserializer=ai__pb2.RequestQuizRequest.FromString,
+                    response_serializer=ai__pb2.Quiz.SerializeToString,
+            ),
+            'ListQuizzes': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListQuizzes,
+                    request_deserializer=ai__pb2.ListQuizzesRequest.FromString,
+                    response_serializer=ai__pb2.ListQuizzesResponse.SerializeToString,
+            ),
+            'GetQuiz': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetQuiz,
+                    request_deserializer=ai__pb2.GetQuizRequest.FromString,
+                    response_serializer=ai__pb2.Quiz.SerializeToString,
             ),
             'SaveProviderKey': grpc.unary_unary_rpc_method_handler(
                     servicer.SaveProviderKey,
@@ -496,6 +551,87 @@ class AiService:
             '/transuai.ai.v1.AiService/SumUserLlmUsage',
             ai__pb2.SumUserLlmUsageRequest.SerializeToString,
             ai__pb2.SumUserLlmUsageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RequestQuiz(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/RequestQuiz',
+            ai__pb2.RequestQuizRequest.SerializeToString,
+            ai__pb2.Quiz.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListQuizzes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListQuizzes',
+            ai__pb2.ListQuizzesRequest.SerializeToString,
+            ai__pb2.ListQuizzesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetQuiz(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/GetQuiz',
+            ai__pb2.GetQuizRequest.SerializeToString,
+            ai__pb2.Quiz.FromString,
             options,
             channel_credentials,
             insecure,

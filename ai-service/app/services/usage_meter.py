@@ -35,6 +35,7 @@ class LlmFeature(StrEnum):
     QA_REWRITE = "qa_rewrite"  # 問答前的問題改寫
     REGENERATED_SUMMARY = "regenerated_summary"
     REGENERATED_CHAPTERS = "regenerated_chapters"
+    QUIZ = "quiz"
 
 
 @dataclass(frozen=True)
