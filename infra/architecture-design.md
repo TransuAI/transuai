@@ -390,7 +390,7 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
 | ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體 |
-| LLM（摘要/章節分段/RAG 問答） | HF Inference Providers（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
+| LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），平台模型是 HF Inference Providers 的 OpenAI 相容路由（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
