@@ -6,24 +6,16 @@ import pika
 from pika.adapters.blocking_connection import BlockingChannel
 
 from app.core.config import settings
-from app.services.event_publisher import publish_ai_completed, publish_job_failed
+from app.services.event_publisher import connection_params, publish_ai_completed, publish_job_failed
 from app.services.pipeline import process_message
 from app.services.reembed import process_transcript_edited
+from app.services.regeneration import process_regeneration_requested
 from app.services.retry import RETRY_COUNT_HEADER, RetryableMessageError, retry_queue_declarations, retry_queue_for
 
 logger = logging.getLogger(__name__)
 
 _INITIAL_RETRY_DELAY_SECONDS = 1
 _MAX_RETRY_DELAY_SECONDS = 30
-
-
-def _connection_params() -> pika.ConnectionParameters:
-    return pika.ConnectionParameters(
-        host=settings.rabbitmq_host,
-        port=settings.rabbitmq_port,
-        credentials=pika.PlainCredentials(
-            settings.rabbitmq_user, settings.rabbitmq_password),
-    )
 
 
 # 處理一則訊息：(body, channel, retry_count)。遇到暫時性失敗且還有重試預算時 raise
@@ -44,12 +36,17 @@ def _handle_transcript_edited(body: bytes, _ch: BlockingChannel, retry_count: in
     process_transcript_edited(body, retry_count=retry_count)
 
 
+def _handle_regeneration_requested(body: bytes, _ch: BlockingChannel, retry_count: int) -> None:
+    process_regeneration_requested(body, retry_count=retry_count)
+
+
 def _handlers() -> dict[str, MessageHandler]:
     """ai-service 消費的每個 queue 跟它的處理函式。每個 queue 各有自己的 retry queue（見
     retry.retry_queue_declarations()），重試時才會回到同一個處理函式。"""
     return {
         settings.transcription_completed_queue: _handle_transcription_completed,
         settings.transcript_edited_queue: _handle_transcript_edited,
+        settings.summary_regeneration_requested_queue: _handle_regeneration_requested,
     }
 
 
@@ -95,7 +92,7 @@ def _on_message_for(queue: str, handler: MessageHandler) -> Callable[..., None]:
 
 
 def _consume_once() -> None:
-    connection = pika.BlockingConnection(_connection_params())
+    connection = pika.BlockingConnection(connection_params())
     try:
         channel = connection.channel()
         channel.queue_declare(queue=settings.ai_completed_queue, durable=True)

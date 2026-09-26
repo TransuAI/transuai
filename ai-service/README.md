@@ -46,7 +46,7 @@ uv run python -m app.main
 啟動時會：
 
 1. 把 `ai_db` 的 schema 升級到最新的 Alembic migration（多個副本同時啟動時用 Postgres advisory lock 排隊）。導入 Alembic 前用 `create_all` 建的資料庫可能只有部分表（例如只有 `summaries`），baseline（`0001`）只補建缺少的表、不動既有的表跟資料，不需要刪庫重建；唯一例外是還停在 768 維的舊 `embeddings` 表，會拒絕啟動並提示整張表 DROP 掉、重跑 pipeline
-2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）跟 `transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding）
+2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding）跟 `summary.regeneration.requested`（使用者要求重新產生摘要與章節）
 3. 起 gRPC server，監聽 `8084`
 
 ## Pipeline
@@ -78,6 +78,22 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 章節分段還沒有獨立的 Job status，暫時併在 SUMMARIZING 階段，失敗一樣算整個 job 失敗。
 ```
 
+### 重新產生摘要與章節（`summary.regeneration.requested`）
+
+```
+RequestRegeneration(jobId)（Gateway POST /summary/{jobId}/regenerate）
+  → 鎖住該 job 的摘要列；已經 RUNNING 且在 5 分鐘內 → 什麼都不做
+  → regeneration_status = RUNNING、排入 summary.regeneration.requested { jobId }（publisher confirms、短 timeout；失敗則 rollback）
+消費 summary.regeneration.requested { jobId }
+  → GetTranscript（revision R）→ 排除已清空片段 → 摘要 + 章節都成功後才覆寫兩者
+  → source_revision = R、regeneration_status = IDLE
+```
+
+暫時性失敗走訊息層級重試（`summary.regeneration.requested.retry.2s`／`.4s`）；最終失敗 → `regeneration_status = FAILED`，
+舊內容保留（摘要在原本那一列上更新、跟章節同一個 transaction 寫入，不會只換掉一半）。RUNNING 超過 5 分鐘視為卡住（例如服務中途重啟），
+`GetSummary` 對外回報成 FAILED，使用者看得到重試按鈕。全程不動 Job 狀態、不發 `ai.completed`／`job.failed`（工作區只在 COMPLETED 時顯示）。重新產生期間又被編輯的話，
+source_revision 是讀到的 R，前端照樣會顯示過時。
+
 ### 逐字稿被編輯之後（`transcript.edited`）
 
 ```
@@ -100,7 +116,8 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 
 | RPC | 說明 |
 |---|---|
-| `GetSummary` | 依 `job_id` 取得摘要與 `source_revision`（依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時），`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
+| `RequestRegeneration` | 摘要與章節過時後要求重新產生：狀態設 RUNNING、排入 `summary.regeneration.requested` 後立即回傳目前的摘要；已在跑（5 分鐘內）不重複排入；沒有摘要回 `NOT_FOUND`，排入失敗回 `UNAVAILABLE`（狀態不變） |
+| `GetSummary` | 依 `job_id` 取得摘要、`source_revision`（依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時）與 `regeneration_status`，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`）。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，只用來記錄 `qa_history`，不重新驗證 |
 | `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
@@ -170,9 +187,10 @@ app/
     embedding.py                  Embedding（SQLAlchemy ORM，pgvector Vector(1024) 欄位）
     qa_history.py                 QaHistory（SQLAlchemy ORM）
   controllers/
-    ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters、AskQuestion、ListQaHistory）
+    ai_controller.py               AiServiceServicer 實作（GetSummary、ListChapters、AskQuestion、ListQaHistory、RequestRegeneration）
   services/
     reembed.py                       消費 transcript.edited：只重算文字有變的片段的 embedding
+    regeneration.py                  RequestRegeneration（排入自己的 queue）與消費 summary.regeneration.requested：重新產生摘要與章節
     consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
@@ -182,7 +200,7 @@ app/
     qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context + 對話歷史 → streaming 生成回答
     hf_client.py                         共用的 HF InferenceClient（lazy init，embedding + chat completion 共用同一個 client）+ DISABLE_THINKING（關閉 Qwen3 系列的 thinking mode，所有 chat completion 呼叫都要帶）+ strip_thinking()／stream_without_thinking()（防禦性濾掉 <think> 區塊，正常情況下是 no-op，後者是 streaming 版）
     job_status_client.py                 gRPC client，呼叫 upload-service 的 UpdateJobStatus
-    event_publisher.py                    發送 ai.completed / job.failed
+    event_publisher.py                    發送 ai.completed / job.failed / summary.regeneration.requested；connection_params() 供 consumer 與 gRPC 請求內發訊息共用
   repositories/
     summary_repository.py                  ai_db 存取（summaries）
     chapter_repository.py                  ai_db 存取（chapters）

@@ -12,6 +12,13 @@ from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_
 from app.repositories.qa_repository import save_qa
 from app.repositories.summary_repository import find_by_job_id as find_summary_by_job_id
 from app.services.qa import NoEmbeddingsError, stream_answer
+from app.models import RegenerationStatus
+from app.services.regeneration import (
+    RegenerationNotQueued,
+    SummaryNotFound,
+    effective_regeneration_status,
+    request_regeneration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +28,22 @@ _STREAM_ERROR_MESSAGE = "回答時發生錯誤，請稍後再試"
 def _abort(context: grpc.ServicerContext, code: grpc.StatusCode, message: str) -> NoReturn:
     context.abort(code, message)
     raise AssertionError("unreachable")  # context.abort() 保證會 raise 中斷 RPC
+
+
+_REGENERATION_STATUSES = {
+    RegenerationStatus.IDLE: ai_pb2.REGENERATION_STATUS_IDLE,
+    RegenerationStatus.RUNNING: ai_pb2.REGENERATION_STATUS_RUNNING,
+    RegenerationStatus.FAILED: ai_pb2.REGENERATION_STATUS_FAILED,
+}
+
+
+def _summary_to_proto(summary) -> ai_pb2.Summary:
+    return ai_pb2.Summary(
+        job_id=str(summary.job_id),
+        summary_text=summary.summary_text or "",
+        source_revision=summary.source_revision,
+        regeneration_status=_REGENERATION_STATUSES[effective_regeneration_status(summary)],
+    )
 
 
 class AiController(ai_pb2_grpc.AiServiceServicer):
@@ -36,11 +59,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             if summary is None:
                 _abort(context, grpc.StatusCode.NOT_FOUND, "summary not found")
 
-            return ai_pb2.Summary(
-                job_id=str(summary.job_id),
-                summary_text=summary.summary_text or "",
-                source_revision=summary.source_revision,
-            )
+            return _summary_to_proto(summary)
         finally:
             session.close()
 
@@ -138,3 +157,16 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             return ai_pb2.ListQaHistoryResponse(turns=turns)
         finally:
             session.close()
+
+    def RequestRegeneration(self, request, context):
+        try:
+            job_id = uuid.UUID(request.job_id)
+        except ValueError:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "job_id must be a valid UUID")
+        try:
+            summary = request_regeneration(job_id)
+        except SummaryNotFound:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "summary not found")
+        except RegenerationNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "could not queue the regeneration, try again")
+        return _summary_to_proto(summary)

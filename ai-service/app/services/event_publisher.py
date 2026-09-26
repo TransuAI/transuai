@@ -9,6 +9,16 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def connection_params(**overrides) -> pika.ConnectionParameters:
+    """RabbitMQ 連線參數；overrides 給需要不同 timeout 的呼叫端（例如從 gRPC 請求裡發訊息）。"""
+    return pika.ConnectionParameters(
+        host=settings.rabbitmq_host,
+        port=settings.rabbitmq_port,
+        credentials=pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_password),
+        **overrides,
+    )
+
+
 def publish_ai_completed(channel: BlockingChannel, job_id: str) -> None:
     """對應 ../architecture-design.md 5. MQ Topics/Queues：ai.completed -> {jobId, status}。"""
     channel.queue_declare(queue=settings.ai_completed_queue, durable=True)
@@ -36,3 +46,15 @@ def publish_job_failed(channel: BlockingChannel, job_id: str, stage: str, error_
             content_type="application/json", delivery_mode=2),
     )
     logger.info("published job.failed for job %s (stage=%s)", job_id, stage)
+
+
+def publish_regeneration_requested(channel: BlockingChannel, job_id: str) -> None:
+    """summary.regeneration.requested -> {jobId}：ai-service 排給自己的背景工作（重新產生摘要與章節）。"""
+    channel.queue_declare(queue=settings.summary_regeneration_requested_queue, durable=True)
+    channel.basic_publish(
+        exchange="",
+        routing_key=settings.summary_regeneration_requested_queue,
+        body=json.dumps({"jobId": job_id}).encode("utf-8"),
+        properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+    )
+    logger.info("queued summary.regeneration.requested for job %s", job_id)

@@ -2,6 +2,7 @@ import datetime
 
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
@@ -9,15 +10,32 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class RegenerationStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    REGENERATION_STATUS_IDLE: _ClassVar[RegenerationStatus]
+    REGENERATION_STATUS_RUNNING: _ClassVar[RegenerationStatus]
+    REGENERATION_STATUS_FAILED: _ClassVar[RegenerationStatus]
+REGENERATION_STATUS_IDLE: RegenerationStatus
+REGENERATION_STATUS_RUNNING: RegenerationStatus
+REGENERATION_STATUS_FAILED: RegenerationStatus
+
+class RequestRegenerationRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
 class Summary(_message.Message):
-    __slots__ = ("job_id", "summary_text", "source_revision")
+    __slots__ = ("job_id", "summary_text", "source_revision", "regeneration_status")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     SUMMARY_TEXT_FIELD_NUMBER: _ClassVar[int]
     SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    REGENERATION_STATUS_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     summary_text: str
     source_revision: int
-    def __init__(self, job_id: _Optional[str] = ..., summary_text: _Optional[str] = ..., source_revision: _Optional[int] = ...) -> None: ...
+    regeneration_status: RegenerationStatus
+    def __init__(self, job_id: _Optional[str] = ..., summary_text: _Optional[str] = ..., source_revision: _Optional[int] = ..., regeneration_status: _Optional[_Union[RegenerationStatus, str]] = ...) -> None: ...
 
 class GetSummaryRequest(_message.Message):
     __slots__ = ("job_id",)

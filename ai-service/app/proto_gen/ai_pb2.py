@@ -25,35 +25,39 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08\x61i.proto\x12\x0etransuai.ai.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"H\n\x07Summary\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x14\n\x0csummary_text\x18\x02 \x01(\t\x12\x17\n\x0fsource_revision\x18\x03 \x01(\x05\"#\n\x11GetSummaryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"]\n\x07\x43hapter\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0e\n\x06job_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x12\n\nstart_time\x18\x04 \x01(\x01\x12\x13\n\x0bsequence_no\x18\x05 \x01(\x05\"%\n\x13ListChaptersRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"A\n\x14ListChaptersResponse\x12)\n\x08\x63hapters\x18\x01 \x03(\x0b\x32\x17.transuai.ai.v1.Chapter\"G\n\x12\x41skQuestionRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x10\n\x08question\x18\x03 \x01(\t\"t\n\x10\x41skQuestionChunk\x12\x33\n\x07sources\x18\x01 \x01(\x0b\x32 .transuai.ai.v1.SourceTimestampsH\x00\x12\x0f\n\x05\x64\x65lta\x18\x02 \x01(\tH\x00\x12\x0f\n\x05\x65rror\x18\x03 \x01(\tH\x00\x42\t\n\x07payload\"-\n\x10SourceTimestamps\x12\x19\n\x11source_timestamps\x18\x01 \x03(\x01\"&\n\x14ListQaHistoryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"u\n\x06QaTurn\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0e\n\x06\x61nswer\x18\x02 \x01(\t\x12\x19\n\x11source_timestamps\x18\x03 \x03(\x01\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\">\n\x15ListQaHistoryResponse\x12%\n\x05turns\x18\x01 \x03(\x0b\x32\x16.transuai.ai.v1.QaTurn2\xe5\x02\n\tAiService\x12H\n\nGetSummary\x12!.transuai.ai.v1.GetSummaryRequest\x1a\x17.transuai.ai.v1.Summary\x12Y\n\x0cListChapters\x12#.transuai.ai.v1.ListChaptersRequest\x1a$.transuai.ai.v1.ListChaptersResponse\x12U\n\x0b\x41skQuestion\x12\".transuai.ai.v1.AskQuestionRequest\x1a .transuai.ai.v1.AskQuestionChunk0\x01\x12\\\n\rListQaHistory\x12$.transuai.ai.v1.ListQaHistoryRequest\x1a%.transuai.ai.v1.ListQaHistoryResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08\x61i.proto\x12\x0etransuai.ai.v1\x1a\x1fgoogle/protobuf/timestamp.proto\",\n\x1aRequestRegenerationRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"\x89\x01\n\x07Summary\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x14\n\x0csummary_text\x18\x02 \x01(\t\x12\x17\n\x0fsource_revision\x18\x03 \x01(\x05\x12?\n\x13regeneration_status\x18\x04 \x01(\x0e\x32\".transuai.ai.v1.RegenerationStatus\"#\n\x11GetSummaryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"]\n\x07\x43hapter\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0e\n\x06job_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x12\n\nstart_time\x18\x04 \x01(\x01\x12\x13\n\x0bsequence_no\x18\x05 \x01(\x05\"%\n\x13ListChaptersRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"A\n\x14ListChaptersResponse\x12)\n\x08\x63hapters\x18\x01 \x03(\x0b\x32\x17.transuai.ai.v1.Chapter\"G\n\x12\x41skQuestionRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x10\n\x08question\x18\x03 \x01(\t\"t\n\x10\x41skQuestionChunk\x12\x33\n\x07sources\x18\x01 \x01(\x0b\x32 .transuai.ai.v1.SourceTimestampsH\x00\x12\x0f\n\x05\x64\x65lta\x18\x02 \x01(\tH\x00\x12\x0f\n\x05\x65rror\x18\x03 \x01(\tH\x00\x42\t\n\x07payload\"-\n\x10SourceTimestamps\x12\x19\n\x11source_timestamps\x18\x01 \x03(\x01\"&\n\x14ListQaHistoryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"u\n\x06QaTurn\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0e\n\x06\x61nswer\x18\x02 \x01(\t\x12\x19\n\x11source_timestamps\x18\x03 \x03(\x01\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\">\n\x15ListQaHistoryResponse\x12%\n\x05turns\x18\x01 \x03(\x0b\x32\x16.transuai.ai.v1.QaTurn*s\n\x12RegenerationStatus\x12\x1c\n\x18REGENERATION_STATUS_IDLE\x10\x00\x12\x1f\n\x1bREGENERATION_STATUS_RUNNING\x10\x01\x12\x1e\n\x1aREGENERATION_STATUS_FAILED\x10\x02\x32\xc1\x03\n\tAiService\x12H\n\nGetSummary\x12!.transuai.ai.v1.GetSummaryRequest\x1a\x17.transuai.ai.v1.Summary\x12Y\n\x0cListChapters\x12#.transuai.ai.v1.ListChaptersRequest\x1a$.transuai.ai.v1.ListChaptersResponse\x12U\n\x0b\x41skQuestion\x12\".transuai.ai.v1.AskQuestionRequest\x1a .transuai.ai.v1.AskQuestionChunk0\x01\x12\\\n\rListQaHistory\x12$.transuai.ai.v1.ListQaHistoryRequest\x1a%.transuai.ai.v1.ListQaHistoryResponse\x12Z\n\x13RequestRegeneration\x12*.transuai.ai.v1.RequestRegenerationRequest\x1a\x17.transuai.ai.v1.Summaryb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'ai_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_SUMMARY']._serialized_start=61
-  _globals['_SUMMARY']._serialized_end=133
-  _globals['_GETSUMMARYREQUEST']._serialized_start=135
-  _globals['_GETSUMMARYREQUEST']._serialized_end=170
-  _globals['_CHAPTER']._serialized_start=172
-  _globals['_CHAPTER']._serialized_end=265
-  _globals['_LISTCHAPTERSREQUEST']._serialized_start=267
-  _globals['_LISTCHAPTERSREQUEST']._serialized_end=304
-  _globals['_LISTCHAPTERSRESPONSE']._serialized_start=306
-  _globals['_LISTCHAPTERSRESPONSE']._serialized_end=371
-  _globals['_ASKQUESTIONREQUEST']._serialized_start=373
-  _globals['_ASKQUESTIONREQUEST']._serialized_end=444
-  _globals['_ASKQUESTIONCHUNK']._serialized_start=446
-  _globals['_ASKQUESTIONCHUNK']._serialized_end=562
-  _globals['_SOURCETIMESTAMPS']._serialized_start=564
-  _globals['_SOURCETIMESTAMPS']._serialized_end=609
-  _globals['_LISTQAHISTORYREQUEST']._serialized_start=611
-  _globals['_LISTQAHISTORYREQUEST']._serialized_end=649
-  _globals['_QATURN']._serialized_start=651
-  _globals['_QATURN']._serialized_end=768
-  _globals['_LISTQAHISTORYRESPONSE']._serialized_start=770
-  _globals['_LISTQAHISTORYRESPONSE']._serialized_end=832
-  _globals['_AISERVICE']._serialized_start=835
-  _globals['_AISERVICE']._serialized_end=1192
+  _globals['_REGENERATIONSTATUS']._serialized_start=946
+  _globals['_REGENERATIONSTATUS']._serialized_end=1061
+  _globals['_REQUESTREGENERATIONREQUEST']._serialized_start=61
+  _globals['_REQUESTREGENERATIONREQUEST']._serialized_end=105
+  _globals['_SUMMARY']._serialized_start=108
+  _globals['_SUMMARY']._serialized_end=245
+  _globals['_GETSUMMARYREQUEST']._serialized_start=247
+  _globals['_GETSUMMARYREQUEST']._serialized_end=282
+  _globals['_CHAPTER']._serialized_start=284
+  _globals['_CHAPTER']._serialized_end=377
+  _globals['_LISTCHAPTERSREQUEST']._serialized_start=379
+  _globals['_LISTCHAPTERSREQUEST']._serialized_end=416
+  _globals['_LISTCHAPTERSRESPONSE']._serialized_start=418
+  _globals['_LISTCHAPTERSRESPONSE']._serialized_end=483
+  _globals['_ASKQUESTIONREQUEST']._serialized_start=485
+  _globals['_ASKQUESTIONREQUEST']._serialized_end=556
+  _globals['_ASKQUESTIONCHUNK']._serialized_start=558
+  _globals['_ASKQUESTIONCHUNK']._serialized_end=674
+  _globals['_SOURCETIMESTAMPS']._serialized_start=676
+  _globals['_SOURCETIMESTAMPS']._serialized_end=721
+  _globals['_LISTQAHISTORYREQUEST']._serialized_start=723
+  _globals['_LISTQAHISTORYREQUEST']._serialized_end=761
+  _globals['_QATURN']._serialized_start=763
+  _globals['_QATURN']._serialized_end=880
+  _globals['_LISTQAHISTORYRESPONSE']._serialized_start=882
+  _globals['_LISTQAHISTORYRESPONSE']._serialized_end=944
+  _globals['_AISERVICE']._serialized_start=1064
+  _globals['_AISERVICE']._serialized_end=1513
 # @@protoc_insertion_point(module_scope)

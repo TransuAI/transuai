@@ -59,6 +59,11 @@ class AiServiceStub:
                 request_serializer=ai__pb2.ListQaHistoryRequest.SerializeToString,
                 response_deserializer=ai__pb2.ListQaHistoryResponse.FromString,
                 _registered_method=True)
+        self.RequestRegeneration = channel.unary_unary(
+                '/transuai.ai.v1.AiService/RequestRegeneration',
+                request_serializer=ai__pb2.RequestRegenerationRequest.SerializeToString,
+                response_deserializer=ai__pb2.Summary.FromString,
+                _registered_method=True)
 
 
 class AiServiceServicer:
@@ -108,6 +113,17 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RequestRegeneration(self, request, context):
+        """逐字稿被編輯、摘要與章節過時之後，在背景依最新的逐字稿重新產生兩者（見 transcript-editing spec）。
+        把狀態設成 RUNNING 並排入 ai-service 自己的 queue 後立即回傳目前的摘要；完成後狀態回到 IDLE、
+        source_revision 更新，失敗則是 FAILED 且舊內容保留。Job 狀態完全不變。已經 RUNNING 且請求在 5 分鐘
+        內時不重複排入（直接回傳目前狀態）；超過 5 分鐘視為上一次卡住，允許再排一次。這個 job 還沒有摘要
+        回 NOT_FOUND，job_id 不合法回 INVALID_ARGUMENT，排入 queue 失敗回 UNAVAILABLE（狀態不變）。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AiServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -130,6 +146,11 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.ListQaHistory,
                     request_deserializer=ai__pb2.ListQaHistoryRequest.FromString,
                     response_serializer=ai__pb2.ListQaHistoryResponse.SerializeToString,
+            ),
+            'RequestRegeneration': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestRegeneration,
+                    request_deserializer=ai__pb2.RequestRegenerationRequest.FromString,
+                    response_serializer=ai__pb2.Summary.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -244,6 +265,33 @@ class AiService:
             '/transuai.ai.v1.AiService/ListQaHistory',
             ai__pb2.ListQaHistoryRequest.SerializeToString,
             ai__pb2.ListQaHistoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RequestRegeneration(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/RequestRegeneration',
+            ai__pb2.RequestRegenerationRequest.SerializeToString,
+            ai__pb2.Summary.FromString,
             options,
             channel_credentials,
             insecure,
