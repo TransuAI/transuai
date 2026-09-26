@@ -168,3 +168,11 @@ export interface JobUsage {
   /** Sums of the known numbers. */
   totals: { inputTokens: number; outputTokens: number; audioSeconds: number }
 }
+
+/** One of the user's own API keys (自有金鑰): only its last four characters ever come back. */
+export interface ProviderKey {
+  /** openai / anthropic / gemini / openrouter */
+  provider: string
+  last4: string
+  createdAt: string
+}

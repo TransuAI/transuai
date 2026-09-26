@@ -86,6 +86,9 @@ src/
     login-page.tsx / register-page.tsx
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete
     jobs-page.tsx           Job 列表、分頁、刪除
+    settings-page.tsx       設定頁(側邊欄「設定」):目前只有自有金鑰
+    settings/
+      provider-keys-section.tsx 自有金鑰:OpenAI / Anthropic / Google Gemini / OpenRouter 各一列,存入(後端先向廠商驗證,失敗顯示原因並保留輸入)、替換、刪除(先確認);存入後只顯示末四碼
     job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked;自動跟隨的狀態也在這層;版面切換重新掛載 media element 時用 use-playback-continuity 接著播)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
     job-detail/
       export-menu.tsx          工作區頂列的「匯出」下拉選單(桌面 / 手機都有):下載各格式(報告可勾選是否包含問答紀錄)、複製逐字稿 / 摘要(以上全部在瀏覽器產生),以及下載原始檔(向 Gateway 要 `media-url?download=true` 的附件 URL)
@@ -111,4 +114,4 @@ src/
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
-- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、用量區塊與重新載入、講者區塊與顏色、講者改名、改片段講者 / 新增講者(單一講者也能指定出第二位)、只有一位講者時隱藏、換人時顯示講者名稱、迷你播放器與匯出帶講者名稱)跟 sidebar / 深色模式;匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
+- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、用量區塊與重新載入、講者區塊與顏色、講者改名、改片段講者 / 新增講者(單一講者也能指定出第二位)、只有一位講者時隱藏、換人時顯示講者名稱、迷你播放器與匯出帶講者名稱)跟 sidebar / 深色模式;設定頁的自有金鑰另有頁面測試(`settings-page.test.tsx`);匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。

@@ -7,6 +7,7 @@ import type {
   JobUsage,
   MediaUrlResponse,
   PresignResponse,
+  ProviderKey,
   QaTurn,
   SegmentSpeakerUpdate,
   SegmentUpdate,
@@ -134,4 +135,12 @@ export const qaApi = {
 export const usageApi = {
   // 這個 Job 的用量：LLM 呼叫與轉錄，依時間排序，附總計。
   getJobUsage: (jobId: string) => apiFetch<JobUsage>(`/jobs/${jobId}/usage`),
+}
+
+// 自有金鑰：存入前後端會先向廠商驗證；之後只看得到末四碼。
+export const providerKeysApi = {
+  list: () => apiFetch<ProviderKey[]>('/me/provider-keys'),
+  save: (provider: string, key: string) =>
+    apiFetch<ProviderKey>(`/me/provider-keys/${provider}`, { method: 'PUT', body: { key } }),
+  remove: (provider: string) => apiFetch<{ deleted: boolean }>(`/me/provider-keys/${provider}`, { method: 'DELETE' }),
 }
