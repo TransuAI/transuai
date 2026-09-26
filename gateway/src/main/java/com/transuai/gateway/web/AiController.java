@@ -3,6 +3,7 @@ package com.transuai.gateway.web;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -31,6 +32,7 @@ import transuai.ai.v1.Ai.Chapter;
 import transuai.ai.v1.Ai.GetSummaryRequest;
 import transuai.ai.v1.Ai.ListChaptersRequest;
 import transuai.ai.v1.Ai.ListQaHistoryRequest;
+import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.RequestRegenerationRequest;
 import transuai.ai.v1.Ai.Summary;
 import transuai.ai.v1.AiServiceGrpc;
@@ -77,8 +79,7 @@ public class AiController {
     private static SummaryDto toDto(Summary summary) {
         return new SummaryDto(summary.getJobId(), summary.getSummaryText(), summary.getSourceRevision(),
                 summary.getRegenerationStatus().name().replace("REGENERATION_STATUS_", ""),
-                summary.getModelProvider().isEmpty() ? null : summary.getModelProvider(),
-                summary.getModel().isEmpty() ? null : summary.getModel());
+                emptyToNull(summary.getModelProvider()), emptyToNull(summary.getModel()));
     }
 
     @GetMapping("/chapters/{jobId}")
@@ -101,7 +102,8 @@ public class AiController {
                 .listQaHistory(ListQaHistoryRequest.newBuilder().setJobId(jobId).build())
                 .getTurnsList().stream()
                 .map(t -> new QaTurnDto(t.getQuestion(), t.getAnswer(), t.getSourceTimestampsList(),
-                        GrpcTimestamps.toInstant(t.getCreatedAt())))
+                        GrpcTimestamps.toInstant(t.getCreatedAt()), emptyToNull(t.getModelProvider()),
+                        emptyToNull(t.getModel())))
                 .toList();
     }
 
@@ -114,11 +116,20 @@ public class AiController {
             @RequestBody QuestionRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
 
-        Iterator<AskQuestionChunk> chunks = aiServiceStub.askQuestion(AskQuestionRequest.newBuilder()
+        AskQuestionRequest.Builder askRequest = AskQuestionRequest.newBuilder()
                 .setJobId(jobId)
                 .setUserId(userId.toString())
-                .setQuestion(request.question())
-                .build());
+                .setQuestion(request.question());
+        if (request.model() != null) {
+            if (isBlank(request.model().provider()) || isBlank(request.model().model())) {
+                throw new IllegalArgumentException("model needs both provider and model"); // → 400 via GrpcExceptionAdvice
+            }
+            // 這次提問臨時用的模型；用不到時 ai-service 在送出任何 chunk 之前回 INVALID_ARGUMENT → 400。
+            askRequest.setModel(ModelChoice.newBuilder()
+                    .setProvider(request.model().provider())
+                    .setModel(request.model().model()));
+        }
+        Iterator<AskQuestionChunk> chunks = aiServiceStub.askQuestion(askRequest.build());
 
         // 同步先拉第一個 chunk（ai-service 保證是 sources，見 ai.proto 的註解）：這是唯一會讓
         // StatusRuntimeException 冒出來的時機點（例如這個 job 還沒有 embedding 對應的
@@ -158,7 +169,19 @@ public class AiController {
                     .data(objectMapper.writeValueAsString(chunk.getDelta())));
             case ERROR -> emitter.send(SseEmitter.event().name("error")
                     .data(objectMapper.writeValueAsString(chunk.getError())));
+            case ANSWERED_BY -> emitter.send(SseEmitter.event().name("model")
+                    .data(objectMapper.writeValueAsString(Map.of("provider", chunk.getAnsweredBy().getProvider(),
+                            "model", chunk.getAnsweredBy().getModel()))));
             case PAYLOAD_NOT_SET -> log.warn("AskQuestionChunk with no payload set, skipping");
         }
+    }
+
+    // proto3 的字串沒有「沒設定」：空字串代表不知道（例如記錄模型之前的資料），API 回 null。
+    private static String emptyToNull(String value) {
+        return value.isEmpty() ? null : value;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }
