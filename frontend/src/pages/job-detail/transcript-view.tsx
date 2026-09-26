@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import { LocateFixed } from 'lucide-react'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useTranscriptSearch } from '@/hooks/use-transcript-search'
-import { speakerNamesAtTurns } from '@/lib/speakers'
+import { speakersAtTurns } from '@/lib/speakers'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SegmentRow } from '@/pages/job-detail/segment-row'
@@ -54,7 +54,7 @@ export function TranscriptView({
   const search = useTranscriptSearch(segments, pause)
   const { activeMatch, matchesBySegment } = search
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null)
-  const speakerNames = useMemo(() => speakerNamesAtTurns(segments, speakers), [segments, speakers])
+  const turnSpeakers = useMemo(() => speakersAtTurns(segments, speakers), [segments, speakers])
 
   // Clicking the transcript text should give the viewport keyboard focus, so that a
   // following PageDown/Space — which the browser uses to scroll the viewport — also reaches
@@ -124,7 +124,7 @@ export function TranscriptView({
             <SegmentRow
               key={segment.id}
               segment={segment}
-              speakerName={speakerNames[i]}
+              turnSpeaker={turnSpeakers[i]}
               index={i}
               isCurrent={i === currentSegmentIndex}
               matches={matchesBySegment.get(i) ?? []}

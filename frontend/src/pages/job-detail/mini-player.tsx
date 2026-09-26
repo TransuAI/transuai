@@ -3,7 +3,7 @@ import { Pause, Play } from 'lucide-react'
 import { useMediaPlayback } from '@/hooks/use-media-playback'
 import { formatDuration } from '@/lib/media'
 import { Button } from '@/components/ui/button'
-import type { FileType } from '@/types/api'
+import type { FileType, Speaker } from '@/types/api'
 
 interface MiniPlayerProps {
   fileType: FileType
@@ -12,12 +12,21 @@ interface MiniPlayerProps {
   fallbackDuration: number
   setMediaRef: (el: HTMLMediaElement | null) => void
   currentSegmentText: string | null
+  /** The current segment's speaker, when speakers are shown at all (two or more of them). */
+  currentSpeaker: Speaker | null
 }
 
 // Narrow viewports only: a bar pinned under the Chat pane that owns the workspace's single
 // media element, so playback survives closing the Source Sheet. Its own controls replace
 // the native ones so they fit the bar.
-export function MiniPlayer({ fileType, mediaUrl, fallbackDuration, setMediaRef, currentSegmentText }: MiniPlayerProps) {
+export function MiniPlayer({
+  fileType,
+  mediaUrl,
+  fallbackDuration,
+  setMediaRef,
+  currentSegmentText,
+  currentSpeaker,
+}: MiniPlayerProps) {
   const [media, setMedia] = useState<HTMLMediaElement | null>(null)
   const mediaRef = useCallback(
     (el: HTMLMediaElement | null) => {
@@ -46,7 +55,10 @@ export function MiniPlayer({ fileType, mediaUrl, fallbackDuration, setMediaRef, 
         {paused ? <Play /> : <Pause />}
       </Button>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="min-h-5 truncate text-sm">{currentSegmentText}</p>
+        <p className="min-h-5 truncate text-sm">
+          {currentSpeaker && currentSegmentText && <span className="font-medium">{currentSpeaker.displayName}：</span>}
+          {currentSegmentText}
+        </p>
         <div className="flex items-center gap-2">
           <input
             type="range"

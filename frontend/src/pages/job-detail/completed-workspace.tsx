@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { SourcePane } from '@/pages/job-detail/source-pane'
 import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
 import { ExportMenu } from '@/pages/job-detail/export-menu'
+import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
 import type { Chapter, Job, Summary, Transcript } from '@/types/api'
@@ -170,6 +171,9 @@ export function CompletedWorkspace({
               fallbackDuration={job.durationSeconds}
               setMediaRef={setMediaRef}
               currentSegmentText={currentSegment?.text ?? null}
+              currentSpeaker={
+                transcript && currentSegment ? shownSpeakerOf(currentSegment, transcript.segments, transcript.speakers) : null
+              }
             />
           )}
         </div>

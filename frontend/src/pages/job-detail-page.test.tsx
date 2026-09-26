@@ -86,6 +86,10 @@ async function renderCompletedJob(
 
   const view = renderJobDetail()
   await screen.findByText('問答')
+  // The workspace can show up before the transcript's own fetch has settled; let it land so tests
+  // can look at the transcript straight away.
+  await waitFor(() => expect(transcriptApi.get).toHaveBeenCalled())
+  await act(async () => {})
   return view
 }
 
@@ -784,7 +788,16 @@ const diarizedTranscript: Transcript = {
   speakers: [
     { label: 'S1', displayName: '主持人', displayOrder: 1 },
     { label: 'S2', displayName: '講者 2', displayOrder: 2 },
+    // Every segment of 講者 3 has been moved to someone else.
+    { label: 'S3', displayName: '講者 3', displayOrder: 3 },
   ],
+}
+
+// A single-speaker recording (a solo podcast): speaker labels would only be noise.
+const soloTranscript: Transcript = {
+  ...diarizedTranscript,
+  segments: diarizedTranscript.segments.map((segment) => ({ ...segment, speakerLabel: 'S1' })),
+  speakers: [{ label: 'S1', displayName: '講者 1', displayOrder: 1 }],
 }
 
 describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
@@ -814,6 +827,46 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
     expect(segmentRow('先聊聊近況')).not.toHaveTextContent('主持人')
   })
 
+  it('lists the speakers who have segments above the transcript, each with its own colour', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(diarizedTranscript)
+
+    const panel = screen.getByRole('list', { name: '講者' })
+    const items = within(panel).getAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual(['主持人', '講者 2'])
+    const colours = items.map((item) => (item.querySelector('[data-speaker-colour]') as HTMLElement).style.backgroundColor)
+    expect(new Set(colours).size).toBe(2)
+  })
+
+  it("marks a speaker's turn in the transcript with the speaker's colour", async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(diarizedTranscript)
+
+    const panelColour = (within(screen.getByRole('list', { name: '講者' })).getByText('講者 2').closest('li')
+      ?.querySelector('[data-speaker-colour]') as HTMLElement).style.backgroundColor
+    const turnColour = (segmentRow('大家好').querySelector('[data-speaker-colour]') as HTMLElement).style.backgroundColor
+    expect(turnColour).toBe(panelColour)
+  })
+
+  it('hides everything about speakers when only one speaker was found', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(soloTranscript)
+
+    expect(screen.queryByRole('list', { name: '講者' })).not.toBeInTheDocument()
+    expect(segmentRow('歡迎收聽')).not.toHaveTextContent('講者 1')
+  })
+
+  it("counts only segments that aren't cleared when deciding whether there is more than one speaker", async () => {
+    stubDesktopLayout()
+    await renderCompletedJob({
+      ...diarizedTranscript,
+      segments: diarizedTranscript.segments.map((segment) => (segment.speakerLabel === 'S2' ? { ...segment, text: '' } : segment)),
+    })
+
+    expect(screen.queryByRole('list', { name: '講者' })).not.toBeInTheDocument()
+    expect(segmentRow('歡迎收聽')).not.toHaveTextContent('主持人')
+  })
+
   it('exports subtitles with the speakers\' names', async () => {
     const user = userEvent.setup()
     let exported: Blob | undefined
@@ -829,6 +882,26 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
     await user.click(await screen.findByRole('menuitem', { name: '下載字幕（SRT）' }))
 
     expect(await exported?.text()).toContain('00:00:04,000 --> 00:00:06,000\n講者 2：大家好\n')
+  })
+})
+
+describe('JobDetailPage mini player speakers (COMPLETED, narrow viewport)', () => {
+  it("puts the current speaker's name before the current segment's text", async () => {
+    await renderCompletedJob(diarizedTranscript)
+
+    playTo(renderedMediaElement(), 5)
+
+    const line = await within(screen.getByRole('region', { name: '播放器' })).findByText('大家好')
+    expect(line).toHaveTextContent('講者 2：大家好')
+  })
+
+  it('shows only the text when there is a single speaker', async () => {
+    await renderCompletedJob(soloTranscript)
+
+    playTo(renderedMediaElement(), 5)
+
+    const line = await within(screen.getByRole('region', { name: '播放器' })).findByText('大家好')
+    expect(line).toHaveTextContent(/^大家好$/)
   })
 })
 

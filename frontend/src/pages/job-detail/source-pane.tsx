@@ -4,6 +4,7 @@ import { formatBytes, formatDuration } from '@/lib/media'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { JobStatusBadge } from '@/components/job-status-badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { SpeakerPanel } from '@/pages/job-detail/speaker-panel'
 import { TranscriptView } from '@/pages/job-detail/transcript-view'
 import type { Job, Transcript } from '@/types/api'
 
@@ -41,6 +42,7 @@ export function SourcePane({
           {new Date(job.createdAt).toLocaleString()}
         </p>
         {player}
+        {transcript && <SpeakerPanel transcript={transcript} />}
       </CardHeader>
       <CardContent className="min-h-0 flex-1 pt-4">
         {transcript ? (

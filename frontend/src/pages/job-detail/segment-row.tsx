@@ -4,7 +4,8 @@ import { toast } from 'sonner'
 import { formatDuration } from '@/lib/media'
 import type { TranscriptMatch } from '@/lib/transcript-search'
 import { cn } from '@/lib/utils'
-import type { TranscriptSegment } from '@/types/api'
+import { SpeakerDot } from '@/pages/job-detail/speaker-dot'
+import type { Speaker, TranscriptSegment } from '@/types/api'
 
 function HighlightedText({ text, matches, activeStart }: { text: string; matches: TranscriptMatch[]; activeStart: number | null }) {
   const parts = []
@@ -31,7 +32,7 @@ function HighlightedText({ text, matches, activeStart }: { text: string; matches
 interface SegmentRowProps {
   segment: TranscriptSegment
   /** Shown before the text on the first segment of a speaker's turn; null elsewhere. */
-  speakerName: string | null
+  turnSpeaker: Speaker | null
   index: number
   isCurrent: boolean
   matches: TranscriptMatch[]
@@ -50,7 +51,7 @@ interface SegmentRowProps {
 // is a faint 「已清空 · 還原」 row that keeps its time range (it can still be the current segment).
 export function SegmentRow({
   segment,
-  speakerName,
+  turnSpeaker,
   index,
   isCurrent,
   matches,
@@ -141,7 +142,12 @@ export function SegmentRow({
       ) : (
         <>
           <p className="min-w-0 flex-1 leading-relaxed">
-            {speakerName && <span className="font-medium">{speakerName}：</span>}
+            {turnSpeaker && (
+              <span className="font-medium">
+                <SpeakerDot speaker={turnSpeaker} className="mr-1.5 align-middle" />
+                {turnSpeaker.displayName}：
+              </span>
+            )}
             <HighlightedText text={segment.text} matches={matches} activeStart={activeMatchStart} />
             {isEdited && (
               <span className="ml-1.5 rounded bg-muted px-1 align-middle text-xs text-muted-foreground">
