@@ -46,6 +46,10 @@ service AiService {
   // 不驗證使用者，Gateway 已經做過 ownership 檢查。
   rpc ListJobLlmUsage(ListJobLlmUsageRequest) returns (ListJobLlmUsageResponse);
 
+  // 一位使用者在 [start, end) 之間的 LLM 用量，依廠商、模型、金鑰來源彙總（Gateway 把「某個月」換成這段時間）。
+  // user_id 不合法、或沒給 start / end 回 INVALID_ARGUMENT；沒有用量回空列表。
+  rpc SumUserLlmUsage(SumUserLlmUsageRequest) returns (SumUserLlmUsageResponse);
+
   // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
   // 取得的使用者，不另外驗證。
   //
@@ -91,6 +95,30 @@ message ListJobLlmUsageRequest {
 
 message ListJobLlmUsageResponse {
   repeated LlmUsage records = 1;
+}
+
+message SumUserLlmUsageRequest {
+  string user_id = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
+}
+
+message SumUserLlmUsageResponse {
+  repeated LlmUsageSum sums = 1;
+}
+
+// 同一個廠商、模型、金鑰來源的 LLM 用量加總。
+message LlmUsageSum {
+  string provider = 1;
+  string model = 2;
+  string key_source = 3;
+  // 已知數字的加總；廠商沒回報的不算進去（有幾次見 calls_with_unknown_usage）。
+  int64 input_tokens = 4;
+  int64 output_tokens = 5;
+  // 呼叫次數，失敗的也算。
+  int32 calls = 6;
+  // 廠商沒有回報 token 數的呼叫次數。
+  int32 calls_with_unknown_usage = 7;
 }
 
 // 一次 LLM 呼叫的用量。

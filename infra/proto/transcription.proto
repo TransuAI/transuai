@@ -34,6 +34,10 @@ service TranscriptionService {
   // 一個 Job 的轉錄用量（見 transcription-service/CONTEXT.md「轉錄用量」），依時間升冪；每次呼叫語音辨識服務一筆，
   // 失敗的也算。job_id 不合法回 INVALID_ARGUMENT；沒有紀錄回空列表。
   rpc ListJobTranscriptionUsage(ListJobTranscriptionUsageRequest) returns (ListJobTranscriptionUsageResponse);
+
+  // 一位使用者在 [start, end) 之間的轉錄用量，依廠商、模型彙總（Gateway 把「某個月」換成這段時間）。
+  // user_id 不合法、或沒給 start / end 回 INVALID_ARGUMENT；沒有用量回空列表。
+  rpc SumUserTranscriptionUsage(SumUserTranscriptionUsageRequest) returns (SumUserTranscriptionUsageResponse);
 }
 
 message TranscriptSegment {
@@ -125,6 +129,28 @@ message ListJobTranscriptionUsageRequest {
 
 message ListJobTranscriptionUsageResponse {
   repeated TranscriptionUsage records = 1;
+}
+
+message SumUserTranscriptionUsageRequest {
+  string user_id = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
+}
+
+message SumUserTranscriptionUsageResponse {
+  repeated TranscriptionUsageSum sums = 1;
+}
+
+// 同一個廠商、模型的轉錄用量加總。
+message TranscriptionUsageSum {
+  string provider = 1;
+  string model = 2;
+  // 已知秒數的加總；服務沒回報的不算進去（有幾次見 calls_with_unknown_usage）。
+  double audio_seconds = 3;
+  // 呼叫次數，失敗的也算。
+  int32 calls = 4;
+  // 服務沒有回報秒數的呼叫次數。
+  int32 calls_with_unknown_usage = 5;
 }
 
 // 一次呼叫語音辨識服務的用量。
