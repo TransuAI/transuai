@@ -18,6 +18,10 @@ class NoProviderKey(Exception):
     """要用某個廠商的模型，但使用者沒有這個廠商的自有金鑰。"""
 
 
+class ModelNotAvailable(Exception):
+    """問答臨時指定的模型這位使用者用不到。"""
+
+
 def platform_choice() -> ModelChoice:
     return ModelChoice(PLATFORM, settings.ai_hf_chat_model, supports_tools=False)
 
@@ -95,11 +99,36 @@ def resolve_chat_model(user_id: uuid.UUID | None) -> ChatModel:
     if key is None:
         # 刪金鑰時會一起改回平台模型，照理不會發生；真的發生也不改用平台模型（使用者選了自己的廠商）。
         raise LlmError(row.provider, row.model, LlmErrorReason.AUTH, "找不到這個廠商的自有金鑰，請到設定頁重新存入或改選模型")
+    return _own_key_model(user_id, row.provider, row.model, key.encrypted_key)
+
+
+def resolve_requested_chat_model(user_id: uuid.UUID, provider: str, model: str) -> ChatModel:
+    """問答臨時指定的模型（只用在那一次提問）：平台模型、有自有金鑰的廠商整理好的清單，或這位使用者目前的預設模型
+    （OpenRouter 的模型只有選成預設時確認過存在）。用不到時 raise ModelNotAvailable。"""
+    if provider == PLATFORM:
+        return platform_chat_model()
+    session = new_session()
     try:
-        api_key = decrypt(key.encrypted_key, bound_to=key_binding(user_id, row.provider))
+        key = find_provider_key(session, user_id, provider)
+        default = find_default_model(session, user_id)
+    finally:
+        session.close()
+    is_default = default is not None and (default.provider, default.model) == (provider, model)
+    if key is None or not (is_default or _is_curated(provider, model)):
+        raise ModelNotAvailable(f"不能用 {provider} 的「{model}」")
+    return _own_key_model(user_id, provider, model, key.encrypted_key)
+
+
+def _is_curated(provider: str, model: str) -> bool:
+    return any(choice.model == model for choice in CURATED_MODELS.get(provider, []))
+
+
+def _own_key_model(user_id: uuid.UUID, provider: str, model: str, encrypted_key: bytes) -> ChatModel:
+    try:
+        api_key = decrypt(encrypted_key, bound_to=key_binding(user_id, provider))
     except EncryptionUnavailable as exc:
-        raise LlmError(row.provider, row.model, LlmErrorReason.OTHER, "伺服器沒有設定加密金鑰，暫時無法使用自有金鑰") from exc
+        raise LlmError(provider, model, LlmErrorReason.OTHER, "伺服器沒有設定加密金鑰，暫時無法使用自有金鑰") from exc
     except InvalidTag as exc:
         # 主金鑰換過、或密文被動過：這把金鑰解不開了。
-        raise LlmError(row.provider, row.model, LlmErrorReason.AUTH, "無法解開儲存的金鑰，請到設定頁重新存入") from exc
-    return ChatModel(provider=row.provider, model=row.model, base_url=PROVIDERS[row.provider].base_url, api_key=api_key)
+        raise LlmError(provider, model, LlmErrorReason.AUTH, "無法解開儲存的金鑰，請到設定頁重新存入") from exc
+    return ChatModel(provider=provider, model=model, base_url=PROVIDERS[provider].base_url, api_key=api_key)

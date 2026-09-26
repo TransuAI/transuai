@@ -27,12 +27,16 @@ def save_qa(
     question: str,
     answer: str,
     source_timestamps: list[float],
+    *,
+    model: tuple[str, str],
 ) -> QaHistory:
     qa = QaHistory(
         job_id=job_id,
         user_id=user_id,
         question=question,
         answer=answer,
+        model_provider=model[0],
+        model=model[1],
         source_timestamps=source_timestamps,
     )
     session.add(qa)

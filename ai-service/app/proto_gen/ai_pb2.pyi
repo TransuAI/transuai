@@ -108,24 +108,28 @@ class ListChaptersResponse(_message.Message):
     def __init__(self, chapters: _Optional[_Iterable[_Union[Chapter, _Mapping]]] = ...) -> None: ...
 
 class AskQuestionRequest(_message.Message):
-    __slots__ = ("job_id", "user_id", "question")
+    __slots__ = ("job_id", "user_id", "question", "model")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     QUESTION_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     user_id: str
     question: str
-    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., question: _Optional[str] = ...) -> None: ...
+    model: ModelChoice
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., question: _Optional[str] = ..., model: _Optional[_Union[ModelChoice, _Mapping]] = ...) -> None: ...
 
 class AskQuestionChunk(_message.Message):
-    __slots__ = ("sources", "delta", "error")
+    __slots__ = ("sources", "delta", "error", "answered_by")
     SOURCES_FIELD_NUMBER: _ClassVar[int]
     DELTA_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
+    ANSWERED_BY_FIELD_NUMBER: _ClassVar[int]
     sources: SourceTimestamps
     delta: str
     error: str
-    def __init__(self, sources: _Optional[_Union[SourceTimestamps, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+    answered_by: ModelChoice
+    def __init__(self, sources: _Optional[_Union[SourceTimestamps, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ..., answered_by: _Optional[_Union[ModelChoice, _Mapping]] = ...) -> None: ...
 
 class SourceTimestamps(_message.Message):
     __slots__ = ("source_timestamps",)
@@ -140,16 +144,20 @@ class ListQaHistoryRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ...) -> None: ...
 
 class QaTurn(_message.Message):
-    __slots__ = ("question", "answer", "source_timestamps", "created_at")
+    __slots__ = ("question", "answer", "source_timestamps", "created_at", "model_provider", "model")
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     ANSWER_FIELD_NUMBER: _ClassVar[int]
     SOURCE_TIMESTAMPS_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
     question: str
     answer: str
     source_timestamps: _containers.RepeatedScalarFieldContainer[float]
     created_at: _timestamp_pb2.Timestamp
-    def __init__(self, question: _Optional[str] = ..., answer: _Optional[str] = ..., source_timestamps: _Optional[_Iterable[float]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    model_provider: str
+    model: str
+    def __init__(self, question: _Optional[str] = ..., answer: _Optional[str] = ..., source_timestamps: _Optional[_Iterable[float]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ...) -> None: ...
 
 class ListQaHistoryResponse(_message.Message):
     __slots__ = ("turns",)

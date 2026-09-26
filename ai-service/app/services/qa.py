@@ -9,7 +9,7 @@ from app.models import QaHistory
 from app.repositories.embedding_repository import find_similar
 from app.repositories.qa_repository import find_by_job_id
 from app.services.embedder import embed_query
-from app.services.default_models import resolve_chat_model
+from app.services.default_models import resolve_chat_model, resolve_requested_chat_model
 from app.services.llm_client import ChatModel, chat, stream_chat
 from app.services.segment_times import time_key
 from app.services.speaker_context import speaker_names_by_segment_time, with_speaker_name
@@ -86,20 +86,30 @@ def _condense_question(question: str, history: list[QaHistory], model: ChatModel
 
 
 def stream_answer(
-    session: Session, job_id: uuid.UUID, question: str, *, user_id: uuid.UUID | None
+    session: Session,
+    job_id: uuid.UUID,
+    question: str,
+    *,
+    user_id: uuid.UUID | None,
+    requested_model: tuple[str, str] | None = None,
 ) -> Generator[tuple[str, object], None, None]:
     """RAG 問答（含最近 `_MEMORY_TURNS` 輪對話記憶），streaming。
 
-    yield 恰好一次 `("sources", list[float])`（在檢索完成、生成答案文字之前），
-    接著任意數量的 `("delta", str)`。這個 function 本身不寫 DB——存不存 qa_history
+    yield 恰好一次 `("sources", list[float])`（在檢索完成、生成答案文字之前），接著恰好一次
+    `("answered_by", (廠商, 模型))`，再接著任意數量的 `("delta", str)`。這個 function 本身不寫 DB——存不存 qa_history
     由呼叫端在成功收集完整答案之後才決定，半途失敗（例如 streaming 中斷）
     才不會留下不完整的紀錄。
 
-    這個 job 沒有 embedding 時 raise NoEmbeddingsError，一定發生在任何 yield 之前。
+    這個 job 沒有 embedding 時 raise NoEmbeddingsError、臨時指定的模型用不到時 raise ModelNotAvailable，都一定發生在
+    任何 yield 之前。
     """
+    # 這次用哪個模型：提問當下臨時指定的（用不到就在送出任何東西之前 raise ModelNotAvailable），否則是提問者的預設模型。
+    if requested_model and user_id:
+        model = resolve_requested_chat_model(user_id, *requested_model)
+    else:
+        model = resolve_chat_model(user_id)
     history = find_by_job_id(session, job_id)[-_MEMORY_TURNS:]
 
-    model = resolve_chat_model(user_id)  # 提問者的預設模型
     condensed_question = _condense_question(question, history, model, UsageMeter(user_id, job_id, LlmFeature.QA_REWRITE))
     query_vector = embed_query(condensed_question)
     chunks = find_similar(session, job_id, query_vector, limit=_TOP_K)
@@ -114,6 +124,7 @@ def stream_answer(
     )
     source_timestamps = [float(chunk.start_time) for chunk in chunks]
     yield ("sources", source_timestamps)
+    yield ("answered_by", (model.provider, model.model))
 
     speaker_instruction = _SPEAKER_INSTRUCTION if speaker_by_time else ""
     messages = [{

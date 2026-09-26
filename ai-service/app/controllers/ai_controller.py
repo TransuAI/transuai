@@ -14,6 +14,7 @@ from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_
 from app.repositories.qa_repository import save_qa
 from app.repositories.summary_repository import find_by_job_id as find_summary_by_job_id
 from app.services.default_models import (
+    ModelNotAvailable,
     NoProviderKey,
     available_models,
     get_default_model,
@@ -121,9 +122,11 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         if not question:
             _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "question must not be empty")
 
+        requested_model = (request.model.provider, request.model.model) if request.HasField("model") else None
+
         session = new_session()
         try:
-            chunks = stream_answer(session, job_id, question, user_id=user_id)
+            chunks = stream_answer(session, job_id, question, user_id=user_id, requested_model=requested_model)
 
             # 第一個 yield 保證是 sources（見 qa.stream_answer），在這之前發生的任何錯誤都還
             # 沒有送出任何 chunk：NoEmbeddingsError 是結構性的（這個 job 現在就是沒有 embedding），
@@ -134,6 +137,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             except NoEmbeddingsError:
                 _abort(context, grpc.StatusCode.NOT_FOUND,
                        "no transcript content available for this job yet")
+            except ModelNotAvailable as exc:
+                _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
             except Exception as exc:
                 logger.exception("failed to prepare answer for job %s", job_id)
                 yield ai_pb2.AskQuestionChunk(error=_stream_error_message(exc))
@@ -143,16 +148,22 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                 sources=ai_pb2.SourceTimestamps(source_timestamps=source_timestamps))
 
             answer_parts: list[str] = []
+            answered_by: tuple[str, str] = ("", "")
             try:
-                for _, delta in chunks:
-                    answer_parts.append(delta)
-                    yield ai_pb2.AskQuestionChunk(delta=delta)
+                for kind, payload in chunks:
+                    if kind == "answered_by":
+                        answered_by = payload  # type: ignore[assignment]
+                        yield ai_pb2.AskQuestionChunk(
+                            answered_by=ai_pb2.ModelChoice(provider=answered_by[0], model=answered_by[1]))
+                        continue
+                    answer_parts.append(payload)  # type: ignore[arg-type]
+                    yield ai_pb2.AskQuestionChunk(delta=payload)  # type: ignore[arg-type]
             except Exception as exc:
                 logger.exception("answer streaming failed mid-flight for job %s", job_id)
                 yield ai_pb2.AskQuestionChunk(error=_stream_error_message(exc))
                 return
 
-            save_qa(session, job_id, user_id, question, "".join(answer_parts), source_timestamps)
+            save_qa(session, job_id, user_id, question, "".join(answer_parts), source_timestamps, model=answered_by)
         finally:
             session.close()
 
@@ -173,6 +184,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                     answer=turn.answer,
                     source_timestamps=[float(t) for t in turn.source_timestamps],
                     created_at=created_at,
+                    model_provider=turn.model_provider or "",
+                    model=turn.model or "",
                 ))
             return ai_pb2.ListQaHistoryResponse(turns=turns)
         finally:

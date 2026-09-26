@@ -98,7 +98,7 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 
 使用者在設定頁選一個預設模型：平台模型，或某把自有金鑰底下的模型（OpenAI、Anthropic、Gemini 是 `model_catalog.py` 整理好的
 清單；OpenRouter 可以輸入任意模型 ID，用 OpenRouter 公開的模型清單確認存在）。上傳後的摘要與章節（用 Job 擁有者的）、重新產生
-（用要求的人的）、問答（用提問者的）都用它；摘要記錄產生它的模型。自有金鑰被廠商拒絕（認證、額度、模型不存在）時直接失敗、
+（用要求的人的）、問答（用提問者的；問答也可以在提問當下臨時換模型）都用它；摘要記錄產生它的模型。自有金鑰被廠商拒絕（認證、額度、模型不存在）時直接失敗、
 錯誤原因寫明廠商與原因，**不會**改用平台模型；429、5xx 照樣走訊息層級重試。換預設模型不會重做任何既有的內容；刪掉預設模型
 正在用的金鑰時，預設模型改回平台模型。
 
@@ -150,11 +150,11 @@ source_revision 是讀到的 R，前端照樣會顯示過時。
 | `RequestRegeneration` | 摘要與章節過時後要求重新產生（帶 `user_id`：要求的使用者，用量記在他名下）：狀態設 RUNNING、排入 `summary.regeneration.requested` 後立即回傳目前的摘要；已在跑（5 分鐘內）不重複排入；沒有摘要回 `NOT_FOUND`，排入失敗回 `UNAVAILABLE`（狀態不變） |
 | `GetSummary` | 依 `job_id` 取得摘要、`source_revision`（依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時）與 `regeneration_status`，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
-| `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`）。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，只用來記錄 `qa_history`，不重新驗證 |
+| `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、`answered_by` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`，模型呼叫失敗時訊息點出廠商與原因）。可以帶 `model` 臨時換模型（只用在這一次，必須是提問者用得到的：平台模型、有金鑰的廠商整理好的清單，或他目前的預設模型；否則在送出任何 chunk 前回 `INVALID_ARGUMENT`），不帶就用預設模型；問題改寫與回答用同一個模型，`qa_history` 記錄回答的模型。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，用來記錄 `qa_history`、決定用誰的預設模型與自有金鑰，不重新驗證 |
 | `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
 | `SaveProviderKey` / `DeleteProviderKey` / `ListProviderKeys` | 自有金鑰（見上方「自有金鑰」）：存入或替換（先向廠商驗證，通過才加密存下，回傳末四碼；廠商不在清單、金鑰是空的或無效回 `INVALID_ARGUMENT` 附原因，廠商暫時連不上回 `UNAVAILABLE`，沒設定主金鑰回 `FAILED_PRECONDITION`）、刪除（沒有這把回 `deleted=false`；預設模型正在用它時一起改回平台模型，`default_model_reset=true`）、列出（只有末四碼） |
 | `ListAvailableModels` / `GetDefaultModel` / `SetDefaultModel` | 預設模型（見上方「預設模型」）：可以選的模型、目前的預設模型、設定預設模型（沒有那個廠商的自有金鑰回 `FAILED_PRECONDITION`，清單外的模型或 OpenRouter 上不存在回 `INVALID_ARGUMENT`，OpenRouter 查不到回 `UNAVAILABLE`） |
-| `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
+| `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪；每則帶回答的 `model_provider` / `model`，記錄模型之前的是空字串），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService`、transcription-service 的 `TranscriptionService` 一樣只信任內部網路呼叫。
 

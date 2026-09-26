@@ -192,6 +192,7 @@ def test_an_answer_abandoned_part_way_is_recorded_as_failed(fake_llm, saved_usag
 
     with answering(uuid.uuid4()) as events:
         next(events)  # sources
+        next(events)  # answered_by
         next(events)  # first text
         events.close()
 

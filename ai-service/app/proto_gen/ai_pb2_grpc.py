@@ -126,12 +126,13 @@ class AiServiceServicer:
     def AskQuestion(self, request, context):
         """針對某個 job 的逐字稿內容做 RAG 問答，server-streaming。job_id/user_id 格式不合法回
         INVALID_ARGUMENT，這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回
-        NOT_FOUND。user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，只用來記錄 qa_history，
-        不重新驗證。對話記憶的範圍是「這個 job 底下所有問答」，沒有獨立的 conversation/thread 概念
+        NOT_FOUND。user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，用來記錄 qa_history、決定用誰的預設模型，
+        不重新驗證。model 不給就用這位使用者的預設模型；給了就只用在這一次提問，必須是他用得到的模型（平台模型、他有
+        自有金鑰的廠商整理好的清單，或他目前的預設模型），否則在送出任何 chunk 之前回 INVALID_ARGUMENT。對話記憶的範圍是「這個 job 底下所有問答」，沒有獨立的 conversation/thread 概念
         （見 ai-service/docs/adr/ 對話範圍的 ADR）；一個 job 的問答串只要 job_id 就能定位。
 
-        stream 保證的順序：最多一個 sources chunk（在檢索完成、生成答案文字之前送出），接著任意數量
-        的 delta chunk（依生成順序），最後如果中途失敗會有恰好一個 error chunk 並結束 stream（这轮
+        stream 保證的順序：最多一個 sources chunk（在檢索完成、生成答案文字之前送出），接著恰好一個 answered_by
+        chunk（這次用哪個模型回答），再接著任意數量的 delta chunk（依生成順序），最後如果中途失敗會有恰好一個 error chunk 並結束 stream（这轮
         不會有對應的 qa_history 紀錄）；成功的話 stream 在最後一個 delta 後直接結束，不送額外的
         「done」訊號——gRPC stream 本身結束就是 done，這輪已經在結束前存進 qa_history。
         """

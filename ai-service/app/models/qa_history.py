@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Numeric, Text
+from sqlalchemy import Numeric, String, Text
 
 from app.models.summary import Base
 
@@ -24,5 +24,8 @@ class QaHistory(Base):
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     source_timestamps: Mapped[list[float]] = mapped_column(ARRAY(Numeric(10, 2)))
+    # 回答這一則的模型；記錄模型之前的問答是空的。
+    model_provider: Mapped[str | None] = mapped_column(String(32))
+    model: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(timezone.utc))
