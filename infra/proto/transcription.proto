@@ -20,6 +20,14 @@ service TranscriptionService {
   // revision +1，並發送 transcript.edited。job_id 格式不對、名稱超過 100 字回 INVALID_ARGUMENT；job 沒有
   // 逐字稿或這個標籤的講者不存在回 NOT_FOUND。
   rpc RenameSpeaker(RenameSpeakerRequest) returns (RenameSpeakerResponse);
+
+  // 把一個片段改成另一位講者，或新增一位講者給它（講者分離判斷錯時的修正），也是一次編輯。新講者排在顯示
+  // 順序最後，可以附名稱（空字串＝預設名稱「講者 N」）。逐字稿還有沒講者的片段（講者分離之前的舊 Job）時，
+  // 那些片段先一起歸給一位新的講者 1，這樣「只有一位講者」的逐字稿指定出第二位後就是兩位。片段已經是目標
+  // 講者時什麼都不做（revision 不變）；否則更新、revision +1，並發送 transcript.edited。job_id / segment_id
+  // 格式不對、沒有指定目標、名稱超過 100 字回 INVALID_ARGUMENT；job 沒有逐字稿、片段不存在或不屬於這個
+  // job、這個標籤的講者不存在回 NOT_FOUND。
+  rpc AssignSegmentSpeaker(AssignSegmentSpeakerRequest) returns (AssignSegmentSpeakerResponse);
 }
 
 message TranscriptSegment {
@@ -80,4 +88,27 @@ message RenameSpeakerRequest {
 message RenameSpeakerResponse {
   Speaker speaker = 1;
   int32 revision = 2;
+}
+
+message AssignSegmentSpeakerRequest {
+  string job_id = 1;
+  string segment_id = 2;
+  oneof target {
+    // 改成這位現有的講者。
+    string speaker_label = 3;
+    // 新增一位講者給這個片段。
+    NewSpeaker new_speaker = 4;
+  }
+}
+
+message NewSpeaker {
+  // 空字串＝預設名稱「講者 N」。
+  string name = 1;
+}
+
+message AssignSegmentSpeakerResponse {
+  TranscriptSegment segment = 1;
+  // 這個 Job 所有的講者（可能多了新增的那位），依 display_order 排序。
+  repeated Speaker speakers = 2;
+  int32 revision = 3;
 }
