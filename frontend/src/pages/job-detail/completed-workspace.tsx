@@ -12,7 +12,7 @@ import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
-import type { Chapter, Job, JobUsage, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobUsage, ModelChoice, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
   job: Job
@@ -37,6 +37,9 @@ interface CompletedWorkspaceProps {
   isRegeneratingSummary: boolean
   isRequestingRegeneration: boolean
   usage: JobUsage | null
+  modelChoices: ModelChoice[]
+  selectedModel: ModelChoice | null
+  onSelectModel: (model: ModelChoice) => void
   setMediaRef: (el: HTMLMediaElement | null) => void
 }
 
@@ -86,6 +89,9 @@ export function CompletedWorkspace({
   isRegeneratingSummary,
   isRequestingRegeneration,
   usage,
+  modelChoices,
+  selectedModel,
+  onSelectModel,
   setMediaRef,
 }: CompletedWorkspaceProps) {
   const isDesktop = useMediaQuery('(min-width: 1024px)')
@@ -144,6 +150,9 @@ export function CompletedWorkspace({
       onAsk={onAsk}
       onSeek={onSeek}
       mediaAvailable={mediaAvailable}
+      modelChoices={modelChoices}
+      selectedModel={selectedModel}
+      onSelectModel={onSelectModel}
     />
   )
 

@@ -98,7 +98,7 @@ src/
       source-pane.tsx          來源欄:檔案資訊、播放器(只有桌面 grid 那份有,由 completed-workspace 以 player slot 傳入)、講者區塊、逐字稿
       speaker-panel.tsx        講者區塊:還有片段的講者,每位一個顏色點 + 名稱;點名稱就地改名(Enter 存 / Esc 取消,名稱清空＝恢復「講者 N」,存檔失敗保留輸入);只有一位講者時不顯示
       speaker-dot.tsx          講者的顏色點(講者區塊、逐字稿換人處共用)
-      chat-pane.tsx            問答欄
+      chat-pane.tsx            問答欄:輸入框旁可以臨時換回答的模型(預設是預設模型,只影響這一次提問;選的是預設模型時不帶 model,由伺服器用當下的預設模型);每則回答標示「由 某模型 回答」;模型出錯時顯示廠商與原因
       usage-section.tsx        Studio 欄的「用量」區塊:這個 Job 每一次 LLM 呼叫與轉錄(時間、功能、模型、token 或分鐘數;未知顯示「—」,失敗標示),附總計;Job 完成時載入,每次問答結束、重新產生完成後重新載入
       studio-pane.tsx          Studio 欄:AI 摘要(附「由 某模型 產生」)、章節、用量;逐字稿被編輯後顯示「逐字稿已修改,摘要與章節可能過時」與「重新產生摘要與章節」按鈕(產生中顯示「重新產生中…」)
       transcript-search-bar.tsx 逐字稿搜尋列(搜尋框、n / N、上一個 / 下一個;Enter / Shift+Enter / Esc)

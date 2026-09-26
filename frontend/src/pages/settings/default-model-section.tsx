@@ -2,19 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Cpu } from 'lucide-react'
 import { toast } from 'sonner'
 import { modelsApi } from '@/lib/api'
-import { providerName } from '@/lib/providers'
+import { modelLabel, sameModel } from '@/lib/providers'
 import { ApiError } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { AvailableModels, ModelChoice } from '@/types/api'
-
-function label(choice: ModelChoice) {
-  return choice.provider === 'platform'
-    ? `平台模型（${choice.model}）`
-    : `${providerName(choice.provider)} · ${choice.model}`
-}
-
-const sameChoice = (a: ModelChoice | null, b: ModelChoice) => a?.provider === b.provider && a.model === b.model
 
 // 預設模型 (see ai-service CONTEXT.md): what the summary and chapters after an upload, regenerating them and
 // Q&A run on. Changing it doesn't redo anything already made. `keysVersion` changes whenever
@@ -58,7 +50,7 @@ export function DefaultModelSection({ keysVersion }: { keysVersion: number }) {
 
   // The current default may be an OpenRouter model that isn't in any list: show it as a choice anyway.
   const choices = available?.models ?? []
-  const listed = current && !choices.some((choice) => sameChoice(current, choice)) ? [...choices, current] : choices
+  const listed = current && !choices.some((choice) => sameModel(current, choice)) ? [...choices, current] : choices
 
   return (
     <section aria-labelledby="default-model-heading" className="flex flex-col gap-3">
@@ -78,10 +70,10 @@ export function DefaultModelSection({ keysVersion }: { keysVersion: number }) {
             <input
               type="radio"
               name="default-model"
-              checked={sameChoice(current, choice)}
+              checked={sameModel(current, choice)}
               onChange={() => void choose(choice.provider, choice.model)}
             />
-            {label(choice)}
+            {modelLabel(choice)}
           </label>
         ))}
       </fieldset>

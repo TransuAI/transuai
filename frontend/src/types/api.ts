@@ -133,6 +133,9 @@ export interface QaTurn {
   answer: string
   sourceTimestamps: number[]
   createdAt: string
+  /** The model that answered ("platform" is 平台模型); null for answers from before models were recorded. */
+  modelProvider: string | null
+  model: string | null
 }
 
 export interface ApiErrorBody {

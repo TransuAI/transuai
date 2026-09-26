@@ -1,4 +1,5 @@
 import { apiFetch, apiFetchVoid, requestSse } from '@/lib/api-client'
+import type { ModelRef } from '@/lib/providers'
 import type {
   AuthResponse,
   AvailableModels,
@@ -104,7 +105,11 @@ export interface QaStreamHandlers {
   onSources: (sourceTimestamps: number[]) => void
   onDelta: (text: string) => void
   onError: (message: string) => void
+  /** Which model is answering; arrives once, after the sources. */
+  onModel?: (model: ModelChoice) => void
   signal?: AbortSignal
+  /** A model for this question only; the default model when omitted. */
+  model?: ModelRef
 }
 
 export const qaApi = {
@@ -116,7 +121,7 @@ export const qaApi = {
   ask: (jobId: string, question: string, handlers: QaStreamHandlers) =>
     requestSse(
       `/qa/${jobId}`,
-      { method: 'POST', body: { question } },
+      { method: 'POST', body: { question, ...(handlers.model && { model: handlers.model }) } },
       (event, data) => {
         switch (event) {
           case 'sources':
@@ -127,6 +132,9 @@ export const qaApi = {
             break
           case 'error':
             handlers.onError(JSON.parse(data) as string)
+            break
+          case 'model':
+            handlers.onModel?.(JSON.parse(data) as ModelChoice)
             break
         }
       },

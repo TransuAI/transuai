@@ -1,11 +1,15 @@
 import { AlertCircle, Loader2Icon, MessageCircle } from 'lucide-react'
 import { formatDuration } from '@/lib/media'
+import { modelLabel } from '@/lib/providers'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import type { ModelChoice } from '@/types/api'
 
 export type QaEntryStatus = 'streaming' | 'done' | 'error'
+
+const choiceKey = (choice: ModelChoice) => `${choice.provider}/${choice.model}`
 
 export interface QaEntry {
   id: string
@@ -13,6 +17,8 @@ export interface QaEntry {
   answer: string
   sourceTimestamps: number[]
   status: QaEntryStatus
+  /** The model that answered, once known. */
+  model?: string | null
 }
 
 interface ChatPaneProps {
@@ -24,6 +30,10 @@ interface ChatPaneProps {
   onAsk: () => void
   onSeek: (seconds: number) => void
   mediaAvailable: boolean
+  /** Models the user can answer with (see 預設模型), and the one picked for the next question. */
+  modelChoices: ModelChoice[]
+  selectedModel: ModelChoice | null
+  onSelectModel: (model: ModelChoice) => void
 }
 
 export function ChatPane({
@@ -35,6 +45,9 @@ export function ChatPane({
   onAsk,
   onSeek,
   mediaAvailable,
+  modelChoices,
+  selectedModel,
+  onSelectModel,
 }: ChatPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -59,6 +72,9 @@ export function ChatPane({
                     <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
                       {entry.answer}
                     </p>
+                  )}
+                  {entry.model && entry.status !== 'error' && (
+                    <p className="text-xs text-muted-foreground/80">由 {entry.model} 回答</p>
                   )}
                   {entry.status === 'streaming' && (
                     <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
@@ -102,6 +118,24 @@ export function ChatPane({
             onAsk()
           }}
         >
+          {modelChoices.length > 1 && (
+            <select
+              aria-label="回答的模型"
+              value={selectedModel ? choiceKey(selectedModel) : ''}
+              disabled={isAsking}
+              onChange={(e) => {
+                const picked = modelChoices.find((choice) => choiceKey(choice) === e.target.value)
+                if (picked) onSelectModel(picked)
+              }}
+              className="max-w-40 shrink-0 truncate rounded-md border bg-background px-2 text-xs"
+            >
+              {modelChoices.map((choice) => (
+                <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                  {modelLabel(choice)}
+                </option>
+              ))}
+            </select>
+          )}
           <Input
             value={questionInput}
             onChange={(e) => onQuestionInputChange(e.target.value)}

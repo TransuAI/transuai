@@ -11,3 +11,16 @@ export type Provider = (typeof PROVIDERS)[number]
 export function providerName(id: string): string {
   return PROVIDERS.find((provider) => provider.id === id)?.name ?? id
 }
+
+/** A model as the API names it: which provider, which model. */
+export interface ModelRef {
+  provider: string
+  model: string
+}
+
+export const sameModel = (a: ModelRef | null | undefined, b: ModelRef) => a?.provider === b.provider && a.model === b.model
+
+/** How a model is named to the user: 「平台模型（…）」 or 「OpenAI · gpt-5」. */
+export function modelLabel(choice: ModelRef): string {
+  return choice.provider === 'platform' ? `平台模型（${choice.model}）` : `${providerName(choice.provider)} · ${choice.model}`
+}

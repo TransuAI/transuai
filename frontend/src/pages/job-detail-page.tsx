@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft } from 'lucide-react'
-import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
+import { chapterApi, jobsApi, modelsApi, qaApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { findCurrentSegmentIndex } from '@/lib/current-segment'
 import { formatBytes, formatDuration } from '@/lib/media'
+import { sameModel } from '@/lib/providers'
 import { useAutoFollow } from '@/hooks/use-auto-follow'
 import { useJobSocket } from '@/hooks/use-job-socket'
 import { usePlaybackContinuity } from '@/hooks/use-playback-continuity'
@@ -17,7 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { CompletedWorkspace } from '@/pages/job-detail/completed-workspace'
 import type { QaEntry } from '@/pages/job-detail/chat-pane'
-import type { Chapter, Job, JobStatusEvent, JobUsage, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobStatusEvent, JobUsage, ModelChoice, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -27,6 +28,10 @@ export function JobDetailPage() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [usage, setUsage] = useState<JobUsage | null>(null)
+  // Models the user can answer with, the default model, and the one picked for the next question (the default at first).
+  const [modelChoices, setModelChoices] = useState<ModelChoice[]>([])
+  const [defaultModel, setDefaultModel] = useState<ModelChoice | null>(null)
+  const [selectedModel, setSelectedModel] = useState<ModelChoice | null>(null)
   const [qaHistory, setQaHistory] = useState<QaEntry[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [questionInput, setQuestionInput] = useState('')
@@ -123,6 +128,14 @@ export function JobDetailPage() {
       summaryApi.get(jobId).then(setSummary).catch(() => setSummary(null))
       chapterApi.list(jobId).then(setChapters).catch(() => setChapters([]))
       usageApi.getJobUsage(jobId).then(setUsage).catch(() => setUsage(null))
+      Promise.all([modelsApi.available(), modelsApi.getDefault()])
+        .then(([available, current]) => {
+          const listed = available.models.some((m) => sameModel(m, current))
+          setModelChoices(listed ? available.models : [...available.models, current])
+          setDefaultModel(current)
+          setSelectedModel(current)
+        })
+        .catch(() => {}) // without the list, questions just go to the default model
       setIsLoadingHistory(true)
       qaApi
         .history(jobId)
@@ -134,6 +147,7 @@ export function JobDetailPage() {
               answer: turn.answer,
               sourceTimestamps: turn.sourceTimestamps,
               status: 'done',
+              model: turn.model,
             })),
           ),
         )
@@ -239,11 +253,17 @@ export function JobDetailPage() {
           setQaHistory((prev) =>
             prev.map((entry) => (entry.id === id ? { ...entry, answer: entry.answer + text } : entry)),
           ),
-        onError: () => {
+        onError: (message) => {
           failed = true
           patchEntry({ status: 'error' })
-          toast.error('問答失敗')
+          // e.g. 「openai（gpt-5）額度不足：…」 when the user's own key ran out
+          toast.error(message || '問答失敗')
         },
+        onModel: (answeredBy) => patchEntry({ model: answeredBy.model }),
+        // Only a model picked for this question is sent; for the default the server uses whatever it is by now.
+        ...(selectedModel && !sameModel(defaultModel, selectedModel) && {
+          model: { provider: selectedModel.provider, model: selectedModel.model },
+        }),
       })
       .then(() => {
         if (!failed) patchEntry({ status: 'done' })
@@ -350,6 +370,9 @@ export function JobDetailPage() {
       isRegeneratingSummary={regeneration.isRegenerating}
       isRequestingRegeneration={regeneration.isRequesting}
       usage={usage}
+      modelChoices={modelChoices}
+      selectedModel={selectedModel}
+      onSelectModel={setSelectedModel}
       setMediaRef={setMediaElement}
     />
   )

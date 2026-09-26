@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
+import { chapterApi, jobsApi, modelsApi, qaApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
 import type { Chapter, Job, JobUsage, QaTurn, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
@@ -18,6 +18,7 @@ vi.mock('@/lib/api', () => ({
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
   usageApi: { getJobUsage: vi.fn() },
+  modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -32,8 +33,13 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+const platformModel = { provider: 'platform', model: 'Qwen/Qwen3.5-9B', supportsTools: false }
+const gpt5 = { provider: 'openai', model: 'gpt-5', supportsTools: true }
+
 beforeEach(() => {
   vi.mocked(usageApi.getJobUsage).mockResolvedValue(noUsage)
+  vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false })
+  vi.mocked(modelsApi.getDefault).mockResolvedValue(platformModel)
 })
 
 beforeAll(async () => {
@@ -412,7 +418,7 @@ describe('JobDetailPage current segment (COMPLETED, narrow viewport)', () => {
 describe('JobDetailPage auto-follow (COMPLETED, desktop layout)', () => {
   async function renderPlayingAt(seconds: number) {
     const media = await renderGappedTranscriptOnDesktop([
-      { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z' },
+      { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z', modelProvider: null, model: null },
     ])
     playTo(media, seconds)
     return media
@@ -692,7 +698,7 @@ describe('JobDetailPage transcript search (COMPLETED, narrow viewport)', () => {
 
 describe('JobDetailPage mini player (COMPLETED, narrow viewport)', () => {
   const citedHistory: QaTurn[] = [
-    { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z' },
+    { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z', modelProvider: null, model: null },
   ]
 
   it('lets a Q&A citation seek playback without opening the Source Sheet', async () => {
@@ -1156,6 +1162,55 @@ describe('JobDetailPage mini player speakers (COMPLETED, narrow viewport)', () =
   })
 })
 
+describe('JobDetailPage answering model (COMPLETED, desktop layout)', () => {
+  it('leaves the model to the server while the default model is picked', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(qaApi.ask).mockResolvedValue(undefined)
+    await renderCompletedJob()
+    expect(await screen.findByRole('combobox', { name: '回答的模型' })).toHaveValue('platform/Qwen/Qwen3.5-9B')
+
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), '預算怎麼分？{Enter}')
+
+    // Omitted, so the server uses whatever the default model is by now.
+    expect(vi.mocked(qaApi.ask).mock.calls[0][2]).not.toHaveProperty('model')
+  })
+
+  it('asks with another model when one is picked for this question', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(qaApi.ask).mockImplementation(async (_jobId, _question, handlers) => {
+      handlers.onSources([1])
+      handlers.onModel?.({ provider: 'openai', model: 'gpt-5', supportsTools: true })
+      handlers.onDelta('答案')
+    })
+    await renderCompletedJob()
+    const picker = await screen.findByRole('combobox', { name: '回答的模型' })
+    expect(picker).toHaveValue('platform/Qwen/Qwen3.5-9B')
+
+    await user.selectOptions(picker, 'openai/gpt-5')
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), '預算怎麼分？{Enter}')
+
+    expect(qaApi.ask).toHaveBeenCalledWith(
+      'job-1',
+      '預算怎麼分？',
+      expect.objectContaining({ model: { provider: 'openai', model: 'gpt-5' } }),
+    )
+    expect(await screen.findByText('由 gpt-5 回答')).toBeInTheDocument()
+  })
+
+  it('says which model gave each earlier answer', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(mockTranscript, [
+      { question: '第一題', answer: '第一答', sourceTimestamps: [], createdAt: '2026-01-01T00:00:00Z', modelProvider: 'platform', model: 'Qwen/Qwen3.5-9B' },
+      { question: '第二題', answer: '第二答', sourceTimestamps: [], createdAt: '2026-01-01T00:01:00Z', modelProvider: null, model: null },
+    ])
+
+    expect(await screen.findByText('由 Qwen/Qwen3.5-9B 回答')).toBeInTheDocument()
+    expect(screen.getAllByText(/^由 .+ 回答$/)).toHaveLength(1)
+  })
+})
+
 describe('JobDetailPage summary model (COMPLETED, desktop layout)', () => {
   it('says which model made the summary', async () => {
     stubDesktopLayout()
@@ -1375,7 +1430,7 @@ describe('JobDetailPage export menu', () => {
     const user = userEvent.setup()
     const downloads = captureDownloads()
     await renderGappedTranscriptOnDesktop([
-      { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z' },
+      { question: '第三句在說什麼?', answer: '在說第三句', sourceTimestamps: [13], createdAt: '2026-01-01T00:00:00Z', modelProvider: null, model: null },
     ])
 
     await user.click(screen.getByRole('button', { name: '匯出' }))
