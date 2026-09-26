@@ -92,7 +92,7 @@ docker compose up -d
 | `POST` | `/summary/{jobId}/regenerate` | 在背景依最新逐字稿重新產生摘要與章節，回 `202` 與目前的摘要；轉給 `RequestRegeneration`，帶上當下使用者（用量記在他名下；Job 狀態不變） |
 | `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
 | `GET` | `/qa/{jobId}` | 取得這個 job 的完整問答紀錄（依時間升冪），回傳 `[{ question, answer, sourceTimestamps, createdAt }]`；一個 job 只有一段連續對話，沒有獨立的 conversation/thread（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)） |
-| `GET` | `/jobs/{jobId}/usage` | 這個 Job 的用量：`{ records, totals }`，`records` 依時間排序（目前只有 LLM 用量），每筆有 `kind`（目前一律 `llm`）、`feature`、`provider`、`model`、`keySource`、`inputTokens`、`outputTokens`、`audioSeconds`（未知是 `null`）、`succeeded`、`createdAt`；`totals` 是已知數字的加總。LLM 用量來自 ai-service 的 `ListJobLlmUsage` |
+| `GET` | `/jobs/{jobId}/usage` | 這個 Job 的用量：`{ records, totals }`，`records` 依時間排序，每筆有 `kind`（`llm` / `transcription`）、`feature`、`provider`、`model`、`keySource`、`inputTokens`、`outputTokens`、`audioSeconds`（未知是 `null`）、`succeeded`、`createdAt`；`totals` 是已知數字的加總。LLM 用量來自 ai-service 的 `ListJobLlmUsage`，轉錄用量來自 transcription-service 的 `ListJobTranscriptionUsage`（`feature` 是 `transcription`、`keySource` 是 `platform`），在這裡合併 |
 | `POST` | `/qa/{jobId}` | RAG 問答（含最近 5 輪對話記憶），body `{ "question": string }`，回傳 `text/event-stream`（SSE，見下方「問答 streaming」一節）；還沒有 embedding（pipeline 沒跑完）在串流開始前就回 404，不會是 SSE error event |
 
 #### 問答 streaming

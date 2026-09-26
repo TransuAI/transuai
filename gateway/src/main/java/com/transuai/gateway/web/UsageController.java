@@ -4,6 +4,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,23 +20,32 @@ import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.ListJobLlmUsageRequest;
 import transuai.ai.v1.Ai.LlmUsage;
 import transuai.ai.v1.AiServiceGrpc;
+import transuai.transcription.v1.Transcription.ListJobTranscriptionUsageRequest;
+import transuai.transcription.v1.Transcription.TranscriptionUsage;
+import transuai.transcription.v1.TranscriptionServiceGrpc;
 
-// 用量（見 ai-service/CONTEXT.md「用量」）：各服務存在自己的資料庫，由這裡查詢後合併（見 CONTEXT-MAP.md）。
-// 目前只有 ai-service 的 LLM 用量；轉錄用量還沒記錄。
+// 用量（見 ai-service/CONTEXT.md「用量」）：LLM 用量在 ai-service、轉錄用量在 transcription-service，
+// 各自存在自己的資料庫，這裡分別查詢再合併（見 CONTEXT-MAP.md）。
 @RestController
 @RequiredArgsConstructor
 public class UsageController {
 
     private final AiServiceGrpc.AiServiceBlockingStub aiServiceStub;
+    private final TranscriptionServiceGrpc.TranscriptionServiceBlockingStub transcriptionServiceStub;
     private final JobOwnershipGuard jobOwnershipGuard;
 
     @GetMapping("/jobs/{jobId}/usage")
     public JobUsageDto getJobUsage(@CurrentUserId UUID userId, @PathVariable String jobId) {
         jobOwnershipGuard.check(userId, jobId);
-        List<UsageRecordDto> records = aiServiceStub
+        Stream<UsageRecordDto> transcription = transcriptionServiceStub
+                .listJobTranscriptionUsage(ListJobTranscriptionUsageRequest.newBuilder().setJobId(jobId).build())
+                .getRecordsList().stream()
+                .map(UsageController::toDto);
+        Stream<UsageRecordDto> llm = aiServiceStub
                 .listJobLlmUsage(ListJobLlmUsageRequest.newBuilder().setJobId(jobId).build())
                 .getRecordsList().stream()
-                .map(UsageController::toDto)
+                .map(UsageController::toDto);
+        List<UsageRecordDto> records = Stream.concat(transcription, llm)
                 .sorted(Comparator.comparing(UsageRecordDto::createdAt))
                 .toList();
         return new JobUsageDto(records, totals(records));
@@ -47,6 +57,12 @@ public class UsageController {
                 usage.hasInputTokens() ? usage.getInputTokens() : null,
                 usage.hasOutputTokens() ? usage.getOutputTokens() : null,
                 null, usage.getSucceeded(), GrpcTimestamps.toInstant(usage.getCreatedAt()));
+    }
+
+    private static UsageRecordDto toDto(TranscriptionUsage usage) {
+        return new UsageRecordDto("transcription", "transcription", usage.getProvider(), usage.getModel(),
+                "platform", null, null, usage.hasAudioSeconds() ? usage.getAudioSeconds() : null,
+                usage.getSucceeded(), GrpcTimestamps.toInstant(usage.getCreatedAt()));
     }
 
     private static UsageTotalsDto totals(List<UsageRecordDto> records) {
