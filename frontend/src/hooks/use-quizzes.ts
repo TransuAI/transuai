@@ -59,6 +59,16 @@ export function useQuizzes(jobId: string | undefined, isCompleted: boolean, onSe
     return () => clearInterval(timer)
   }, [jobId, generatingIds, onSettled, list])
 
+  // After an attempt: the best scores in the list may have changed.
+  const reload = useCallback(() => {
+    if (!jobId) return
+    list(jobId)
+      .then((latest) => {
+        if (latest) setQuizzes(latest)
+      })
+      .catch(() => {})
+  }, [jobId, list])
+
   const requestQuiz = useCallback(
     (questionCount: number) => {
       if (!jobId || isRequesting) return
@@ -75,5 +85,5 @@ export function useQuizzes(jobId: string | undefined, isCompleted: boolean, onSe
     [jobId, isRequesting],
   )
 
-  return { quizzes, requestQuiz, isRequesting }
+  return { quizzes, requestQuiz, isRequesting, reload }
 }

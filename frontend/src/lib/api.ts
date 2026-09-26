@@ -13,6 +13,7 @@ import type {
   PresignResponse,
   ProviderKey,
   Quiz,
+  QuizAttemptResult,
   QaTurn,
   SegmentSpeakerUpdate,
   SegmentUpdate,
@@ -151,6 +152,9 @@ export const quizApi = {
   request: (jobId: string, questionCount: number) =>
     apiFetch<Quiz>(`/jobs/${jobId}/quizzes`, { method: 'POST', body: { questionCount } }),
   get: (jobId: string, quizId: string) => apiFetch<Quiz>(`/jobs/${jobId}/quizzes/${quizId}`),
+  // 後端計分並保存；answers 依題目順序，每題選的選項位置（從 0 開始）
+  submitAttempt: (jobId: string, quizId: string, answers: number[]) =>
+    apiFetch<QuizAttemptResult>(`/jobs/${jobId}/quizzes/${quizId}/attempts`, { method: 'POST', body: { answers } }),
 }
 
 export const usageApi = {

@@ -8,6 +8,7 @@ import { UsageSection } from '@/pages/job-detail/usage-section'
 import type { Chapter, JobUsage, Quiz, Summary } from '@/types/api'
 
 interface StudioPaneProps {
+  jobId: string
   summary: Summary | null
   chapters: Chapter[]
   onSeek: (seconds: number) => void
@@ -23,9 +24,11 @@ interface StudioPaneProps {
   quizzes: Quiz[]
   onRequestQuiz: (questionCount: number) => void
   isRequestingQuiz: boolean
+  onQuizAttempted: () => void
 }
 
 export function StudioPane({
+  jobId,
   summary,
   chapters,
   onSeek,
@@ -38,6 +41,7 @@ export function StudioPane({
   quizzes,
   onRequestQuiz,
   isRequestingQuiz,
+  onQuizAttempted,
 }: StudioPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -121,7 +125,15 @@ export function StudioPane({
               )}
             </section>
 
-            <QuizSection quizzes={quizzes} onRequestQuiz={onRequestQuiz} isRequesting={isRequestingQuiz} />
+            <QuizSection
+              jobId={jobId}
+              quizzes={quizzes}
+              onRequestQuiz={onRequestQuiz}
+              isRequesting={isRequestingQuiz}
+              onSeek={onSeek}
+              mediaAvailable={mediaAvailable}
+              onAttempted={onQuizAttempted}
+            />
 
             <UsageSection usage={usage} />
           </div>

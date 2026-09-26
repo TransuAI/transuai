@@ -40,6 +40,7 @@ interface CompletedWorkspaceProps {
   quizzes: Quiz[]
   onRequestQuiz: (questionCount: number) => void
   isRequestingQuiz: boolean
+  onQuizAttempted: () => void
   modelChoices: ModelChoice[]
   selectedModel: ModelChoice | null
   onSelectModel: (model: ModelChoice) => void
@@ -95,6 +96,7 @@ export function CompletedWorkspace({
   quizzes,
   onRequestQuiz,
   isRequestingQuiz,
+  onQuizAttempted,
   modelChoices,
   selectedModel,
   onSelectModel,
@@ -145,6 +147,8 @@ export function CompletedWorkspace({
       quizzes={quizzes}
       onRequestQuiz={onRequestQuiz}
       isRequestingQuiz={isRequestingQuiz}
+      onQuizAttempted={onQuizAttempted}
+      jobId={job.jobId}
     />
   )
   const currentSegment = currentSegmentIndex !== null ? transcript?.segments[currentSegmentIndex] : undefined

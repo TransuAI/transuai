@@ -1,6 +1,6 @@
 import { AlertCircle, Loader2Icon, MessageCircle } from 'lucide-react'
-import { formatDuration } from '@/lib/media'
 import { modelLabel } from '@/lib/providers'
+import { TimestampButton } from '@/pages/job-detail/timestamp-button'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -88,15 +88,7 @@ export function ChatPane({
                   {entry.sourceTimestamps.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {entry.sourceTimestamps.map((ts, j) => (
-                        <button
-                          key={j}
-                          type="button"
-                          disabled={!mediaAvailable}
-                          onClick={() => onSeek(ts)}
-                          className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground enabled:hover:bg-accent enabled:hover:text-accent-foreground disabled:opacity-60"
-                        >
-                          {formatDuration(ts)}
-                        </button>
+                        <TimestampButton key={j} seconds={ts} onSeek={onSeek} mediaAvailable={mediaAvailable} />
                       ))}
                     </div>
                   )}

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { GraduationCap, Loader2Icon, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { QuizDialog } from '@/pages/job-detail/quiz-dialog'
 import type { Quiz } from '@/types/api'
 
 const QUESTION_COUNTS = [5, 10, 20] as const
@@ -13,15 +14,29 @@ function shortTime(isoTimestamp: string) {
 }
 
 interface QuizSectionProps {
+  jobId: string
   quizzes: Quiz[]
   onRequestQuiz: (questionCount: number) => void
   /** A request is on its way; one click is one request. */
   isRequesting: boolean
+  onSeek: (seconds: number) => void
+  mediaAvailable: boolean
+  /** An attempt was saved: the list's best scores may have changed. */
+  onAttempted: () => void
 }
 
 // 測驗 (see ai-service CONTEXT.md): the Studio card to generate quizzes from the whole job and list them.
-export function QuizSection({ quizzes, onRequestQuiz, isRequesting }: QuizSectionProps) {
+export function QuizSection({
+  jobId,
+  quizzes,
+  onRequestQuiz,
+  isRequesting,
+  onSeek,
+  mediaAvailable,
+  onAttempted,
+}: QuizSectionProps) {
   const [questionCount, setQuestionCount] = useState<number>(DEFAULT_QUESTION_COUNT)
+  const [takingQuizId, setTakingQuizId] = useState<string | null>(null)
 
   return (
     <section aria-labelledby="quiz-heading" className="flex flex-col gap-2">
@@ -61,8 +76,18 @@ export function QuizSection({ quizzes, onRequestQuiz, isRequesting }: QuizSectio
                   產生中…
                 </p>
               )}
-              {quiz.status === 'COMPLETED' && quiz.model && (
-                <p className="text-xs text-muted-foreground/80">由 {quiz.model} 產生</p>
+              {quiz.status === 'COMPLETED' && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {quiz.model && <p className="text-xs text-muted-foreground/80">由 {quiz.model} 產生</p>}
+                  {quiz.bestCorrectCount !== null && (
+                    <p className="text-xs text-muted-foreground">
+                      最佳 {quiz.bestCorrectCount} / {quiz.questionCount}
+                    </p>
+                  )}
+                  <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setTakingQuizId(quiz.id)}>
+                    作答
+                  </Button>
+                </div>
               )}
               {quiz.status === 'FAILED' && (
                 <div className="flex flex-col gap-1.5">
@@ -84,6 +109,17 @@ export function QuizSection({ quizzes, onRequestQuiz, isRequesting }: QuizSectio
         </ul>
       ) : (
         <p className="text-sm text-muted-foreground">還沒有測驗</p>
+      )}
+      {takingQuizId && (
+        <QuizDialog
+          key={takingQuizId}
+          jobId={jobId}
+          quizId={takingQuizId}
+          onClose={() => setTakingQuizId(null)}
+          onSeek={onSeek}
+          mediaAvailable={mediaAvailable}
+          onAttempted={onAttempted}
+        />
       )}
     </section>
   )

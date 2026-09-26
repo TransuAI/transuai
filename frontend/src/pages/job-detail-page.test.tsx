@@ -5,7 +5,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chapterApi, jobsApi, modelsApi, qaApi, quizApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
-import type { Chapter, Job, JobUsage, QaTurn, Quiz, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobUsage, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -20,7 +20,7 @@ vi.mock('@/lib/api', () => ({
   qaApi: { ask: vi.fn(), history: vi.fn() },
   usageApi: { getJobUsage: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
-  quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn() },
+  quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), submitAttempt: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -1924,21 +1924,23 @@ describe('JobDetailPage regenerating the summary and chapters (COMPLETED, deskto
   })
 })
 
+const doneQuiz: Quiz = {
+  id: 'quiz-1',
+  jobId: 'job-1',
+  questionCount: 10,
+  status: 'COMPLETED',
+  failureReason: null,
+  sourceRevision: 0,
+  modelProvider: 'platform',
+  model: 'Qwen/Qwen3.5-9B',
+  requestedAt: '2026-09-26T06:00:00Z',
+  completedAt: '2026-09-26T06:00:40Z',
+  questions: null,
+  bestCorrectCount: null,
+}
+
 describe('JobDetailPage quizzes (測驗)', () => {
-  const quiz = (overrides: Partial<Quiz> = {}): Quiz => ({
-    id: 'quiz-1',
-    jobId: 'job-1',
-    questionCount: 10,
-    status: 'COMPLETED',
-    failureReason: null,
-    sourceRevision: 0,
-    modelProvider: 'platform',
-    model: 'Qwen/Qwen3.5-9B',
-    requestedAt: '2026-09-26T06:00:00Z',
-    completedAt: '2026-09-26T06:00:40Z',
-    questions: null,
-    ...overrides,
-  })
+  const quiz = (overrides: Partial<Quiz> = {}): Quiz => ({ ...doneQuiz, ...overrides })
   const generating = quiz({ status: 'GENERATING', modelProvider: null, model: null, completedAt: null })
   const quizCard = () => screen.getByRole('region', { name: '測驗' })
 
@@ -2073,5 +2075,144 @@ describe('JobDetailPage quizzes (測驗)', () => {
 
     const card = await screen.findByRole('region', { name: '測驗' })
     expect(await within(card).findByRole('listitem')).toHaveTextContent('由 Qwen/Qwen3.5-9B 產生')
+  })
+})
+
+describe('JobDetailPage taking a quiz (作答)', () => {
+  const questions: QuizQuestion[] = [
+    {
+      kind: 'multiple_choice',
+      prompt: '這集主要在講什麼？',
+      options: ['天氣', '預算', '旅遊', '音樂'],
+      correctOption: 1,
+      explanation: '開場就說今天談預算。',
+      sourceTimestamps: [12],
+    },
+    {
+      kind: 'true_false',
+      prompt: '講者主張砍一成。',
+      options: ['是', '否'],
+      correctOption: 0,
+      explanation: '他說要砍一成。',
+      sourceTimestamps: [],
+    },
+  ]
+  const completedQuiz: Quiz = { ...doneQuiz, questionCount: 2 }
+  const attemptResult: QuizAttemptResult = {
+    correctCount: 1,
+    questionCount: 2,
+    results: [
+      { chosenOption: 1, correctOption: 1, correct: true, explanation: '開場就說今天談預算。' },
+      { chosenOption: 1, correctOption: 0, correct: false, explanation: '他說要砍一成。' },
+    ],
+  }
+
+  beforeEach(() => {
+    vi.mocked(quizApi.list).mockResolvedValue([completedQuiz])
+    vi.mocked(quizApi.get).mockResolvedValue({ ...completedQuiz, questions })
+    vi.mocked(quizApi.submitAttempt).mockResolvedValue(attemptResult)
+  })
+
+  async function openQuiz() {
+    stubDesktopLayout()
+    await renderCompletedJob()
+    const user = userEvent.setup()
+    const card = await screen.findByRole('region', { name: '測驗' })
+    await user.click(await within(card).findByRole('button', { name: '作答' }))
+    return { user, dialog: await screen.findByRole('dialog') }
+  }
+
+  async function answerAll(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
+    await user.click(await within(dialog).findByRole('radio', { name: '預算' }))
+    await user.click(within(dialog).getByRole('button', { name: '下一題' }))
+    await user.click(within(dialog).getByRole('radio', { name: '否' }))
+    await user.click(within(dialog).getByRole('button', { name: '送出' }))
+  }
+
+  it('asks one question at a time without showing any answer', async () => {
+    const { user, dialog } = await openQuiz()
+
+    expect(quizApi.get).toHaveBeenCalledWith('job-1', 'quiz-1')
+    expect(await within(dialog).findByText('第 1 / 2 題')).toBeInTheDocument()
+    expect(within(dialog).getByText('這集主要在講什麼？')).toBeInTheDocument()
+    expect(within(dialog).queryByText('講者主張砍一成。')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('開場就說今天談預算。')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/正確答案/)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '上一題' })).toBeDisabled()
+
+    await user.click(within(dialog).getByRole('radio', { name: '預算' }))
+    await user.click(within(dialog).getByRole('button', { name: '下一題' }))
+    expect(within(dialog).getByText('講者主張砍一成。')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '上一題' }))
+    expect(within(dialog).getByRole('radio', { name: '預算' })).toBeChecked() // the answer is kept
+  })
+
+  it('can only be sent once every question has an answer', async () => {
+    const { user, dialog } = await openQuiz()
+    await user.click(await within(dialog).findByRole('button', { name: '下一題' }))
+
+    expect(within(dialog).getByRole('button', { name: '送出' })).toBeDisabled()
+    expect(within(dialog).getByText('還有 2 題沒有作答')).toBeInTheDocument()
+  })
+
+  it('sends the answers and shows the score with each question’s answers and explanation', async () => {
+    const { user, dialog } = await openQuiz()
+
+    await answerAll(user, dialog)
+
+    expect(quizApi.submitAttempt).toHaveBeenCalledWith('job-1', 'quiz-1', [1, 1])
+    expect(await within(dialog).findByText('答對 1 / 2 題')).toBeInTheDocument()
+    const [first, second] = within(dialog).getAllByRole('listitem')
+    expect(first).toHaveTextContent('答對')
+    expect(first).toHaveTextContent('你的答案：預算')
+    expect(first).toHaveTextContent('正確答案：預算')
+    expect(first).toHaveTextContent('開場就說今天談預算。')
+    expect(second).toHaveTextContent('答錯')
+    expect(second).toHaveTextContent('你的答案：否')
+    expect(second).toHaveTextContent('正確答案：是')
+    expect(second).toHaveTextContent('他說要砍一成。')
+  })
+
+  it('jumps to the part of the recording a result points at', async () => {
+    const { user, dialog } = await openQuiz()
+    await answerAll(user, dialog)
+
+    await user.click(await within(dialog).findByRole('button', { name: '0:12' }))
+
+    expect(document.querySelector('audio')?.currentTime).toBe(12)
+  })
+
+  it('can be taken again from the start, and the list then shows the best score', async () => {
+    const { user, dialog } = await openQuiz()
+    vi.mocked(quizApi.list).mockResolvedValue([{ ...completedQuiz, bestCorrectCount: 1 }])
+    await answerAll(user, dialog)
+
+    await user.click(await within(dialog).findByRole('button', { name: '重做' }))
+
+    expect(within(dialog).getByText('第 1 / 2 題')).toBeInTheDocument()
+    expect(within(dialog).getByRole('radio', { name: '預算' })).not.toBeChecked()
+    await user.keyboard('{Escape}')
+    const card = screen.getByRole('region', { name: '測驗' })
+    expect(await within(card).findByText('最佳 1 / 2')).toBeInTheDocument()
+  })
+
+  it('says so inside the dialog when the quiz cannot be loaded, and can try again', async () => {
+    vi.mocked(quizApi.get).mockRejectedValueOnce(new Error('network'))
+    const { user, dialog } = await openQuiz()
+
+    await user.click(await within(dialog).findByRole('button', { name: '重試' }))
+
+    expect(await within(dialog).findByText('第 1 / 2 題')).toBeInTheDocument()
+  })
+
+  it('can be taken on a phone, from the Studio sheet', async () => {
+    await renderCompletedJob()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Studio' }))
+    const card = await screen.findByRole('region', { name: '測驗' })
+
+    await user.click(await within(card).findByRole('button', { name: '作答' }))
+
+    expect(await screen.findByText('第 1 / 2 題')).toBeInTheDocument()
   })
 })

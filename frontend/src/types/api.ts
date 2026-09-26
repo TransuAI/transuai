@@ -234,6 +234,15 @@ export interface Quiz {
   completedAt: string | null
   /** Only when a single quiz is fetched; null in the list. */
   questions: QuizQuestion[] | null
+  /** Most questions answered right in any attempt; null before the first attempt. */
+  bestCorrectCount: number | null
+}
+
+/** The scored result of one attempt at a quiz; results follow the question order. */
+export interface QuizAttemptResult {
+  correctCount: number
+  questionCount: number
+  results: { chosenOption: number; correctOption: number; correct: boolean; explanation: string }[]
 }
 
 /** One of the user's own API keys (自有金鑰): only its last four characters ever come back. */

@@ -374,6 +374,7 @@ export function JobDetailPage() {
       quizzes={quizzes.quizzes}
       onRequestQuiz={quizzes.requestQuiz}
       isRequestingQuiz={quizzes.isRequesting}
+      onQuizAttempted={quizzes.reload}
       usage={usage}
       modelChoices={modelChoices}
       selectedModel={selectedModel}
