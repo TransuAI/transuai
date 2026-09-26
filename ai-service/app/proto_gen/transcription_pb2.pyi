@@ -133,6 +133,36 @@ class ListJobTranscriptionUsageResponse(_message.Message):
     records: _containers.RepeatedCompositeFieldContainer[TranscriptionUsage]
     def __init__(self, records: _Optional[_Iterable[_Union[TranscriptionUsage, _Mapping]]] = ...) -> None: ...
 
+class SumUserTranscriptionUsageRequest(_message.Message):
+    __slots__ = ("user_id", "start", "end")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    START_FIELD_NUMBER: _ClassVar[int]
+    END_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    start: _timestamp_pb2.Timestamp
+    end: _timestamp_pb2.Timestamp
+    def __init__(self, user_id: _Optional[str] = ..., start: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., end: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class SumUserTranscriptionUsageResponse(_message.Message):
+    __slots__ = ("sums",)
+    SUMS_FIELD_NUMBER: _ClassVar[int]
+    sums: _containers.RepeatedCompositeFieldContainer[TranscriptionUsageSum]
+    def __init__(self, sums: _Optional[_Iterable[_Union[TranscriptionUsageSum, _Mapping]]] = ...) -> None: ...
+
+class TranscriptionUsageSum(_message.Message):
+    __slots__ = ("provider", "model", "audio_seconds", "calls", "calls_with_unknown_usage")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    AUDIO_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    CALLS_FIELD_NUMBER: _ClassVar[int]
+    CALLS_WITH_UNKNOWN_USAGE_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    model: str
+    audio_seconds: float
+    calls: int
+    calls_with_unknown_usage: int
+    def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., audio_seconds: _Optional[float] = ..., calls: _Optional[int] = ..., calls_with_unknown_usage: _Optional[int] = ...) -> None: ...
+
 class TranscriptionUsage(_message.Message):
     __slots__ = ("provider", "model", "audio_seconds", "succeeded", "created_at")
     PROVIDER_FIELD_NUMBER: _ClassVar[int]

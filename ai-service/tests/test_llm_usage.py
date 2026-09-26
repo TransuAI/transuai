@@ -4,7 +4,7 @@
 import json
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -252,4 +252,63 @@ def test_listing_usage_with_a_malformed_job_id_is_invalid(ai_stub):
     with pytest.raises(grpc.RpcError) as error:
         ai_stub.ListJobLlmUsage(ai_pb2.ListJobLlmUsageRequest(job_id="not-a-uuid"))
 
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+# --- 一位使用者一段時間的彙總（真的 Postgres）---
+
+SEPTEMBER = (datetime(2026, 8, 31, 16, tzinfo=timezone.utc), datetime(2026, 9, 30, 16, tzinfo=timezone.utc))
+
+
+def used(at, provider, model, input_tokens, output_tokens, *, user_id=OWNER, key_source="own_key", succeeded=True):
+    return LlmUsageRecord(
+        user_id=user_id, job_id=uuid.uuid4(), feature="summary", provider=provider, model=model,
+        key_source=key_source, input_tokens=input_tokens, output_tokens=output_tokens, succeeded=succeeded,
+        created_at=at)
+
+
+def sum_usage(stub, user_id: uuid.UUID | str = OWNER, start=SEPTEMBER[0], end=SEPTEMBER[1]):
+    request = ai_pb2.SumUserLlmUsageRequest(user_id=str(user_id))
+    request.start.FromDatetime(start)
+    request.end.FromDatetime(end)
+    return stub.SumUserLlmUsage(request).sums
+
+
+def test_a_users_usage_over_a_period_is_summed_per_model_and_key_source(ai_stub, db_session):
+    start, end = SEPTEMBER
+    save_llm_usage(used(start, "openai", "gpt-5", 100, 10))
+    save_llm_usage(used(start + timedelta(days=3), "openai", "gpt-5", 200, 20))
+    save_llm_usage(used(start + timedelta(days=4), "openai", "gpt-5", None, None, succeeded=False))
+    save_llm_usage(used(start + timedelta(days=5), "platform", "Qwen/Qwen3.5-9B", 50, 5, key_source="platform"))
+
+    sums = sorted(sum_usage(ai_stub), key=lambda s: s.provider)
+
+    assert [(s.provider, s.model, s.key_source, s.input_tokens, s.output_tokens, s.calls, s.calls_with_unknown_usage)
+            for s in sums] == [
+        ("openai", "gpt-5", "own_key", 300, 30, 3, 1),
+        ("platform", "Qwen/Qwen3.5-9B", "platform", 50, 5, 1, 0),
+    ]
+
+
+def test_the_sum_leaves_out_other_users_and_usage_outside_the_period(ai_stub, db_session):
+    start, end = SEPTEMBER
+    save_llm_usage(used(start - timedelta(seconds=1), "openai", "gpt-5", 1, 1))
+    save_llm_usage(used(end, "openai", "gpt-5", 2, 2))
+    save_llm_usage(used(start, "openai", "gpt-5", 4, 4, user_id=uuid.uuid4()))
+    save_llm_usage(used(end - timedelta(seconds=1), "openai", "gpt-5", 8, 8))
+
+    assert [(s.input_tokens, s.calls) for s in sum_usage(ai_stub)] == [(8, 1)]
+
+
+def test_a_period_without_usage_sums_to_nothing(ai_stub, db_session):
+    assert list(sum_usage(ai_stub)) == []
+
+
+def test_summing_usage_needs_a_valid_user_and_a_period(ai_stub):
+    with pytest.raises(grpc.RpcError) as error:
+        sum_usage(ai_stub, user_id="nope")
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+    with pytest.raises(grpc.RpcError) as error:
+        ai_stub.SumUserLlmUsage(ai_pb2.SumUserLlmUsageRequest(user_id=str(OWNER)))
     assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT

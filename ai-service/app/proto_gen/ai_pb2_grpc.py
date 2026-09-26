@@ -69,6 +69,11 @@ class AiServiceStub:
                 request_serializer=ai__pb2.ListJobLlmUsageRequest.SerializeToString,
                 response_deserializer=ai__pb2.ListJobLlmUsageResponse.FromString,
                 _registered_method=True)
+        self.SumUserLlmUsage = channel.unary_unary(
+                '/transuai.ai.v1.AiService/SumUserLlmUsage',
+                request_serializer=ai__pb2.SumUserLlmUsageRequest.SerializeToString,
+                response_deserializer=ai__pb2.SumUserLlmUsageResponse.FromString,
+                _registered_method=True)
         self.SaveProviderKey = channel.unary_unary(
                 '/transuai.ai.v1.AiService/SaveProviderKey',
                 request_serializer=ai__pb2.SaveProviderKeyRequest.SerializeToString,
@@ -128,12 +133,13 @@ class AiServiceServicer:
         INVALID_ARGUMENT，這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回
         NOT_FOUND。user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，用來記錄 qa_history、決定用誰的預設模型，
         不重新驗證。model 不給就用這位使用者的預設模型；給了就只用在這一次提問，必須是他用得到的模型（平台模型、他有
-        自有金鑰的廠商整理好的清單，或他目前的預設模型），否則在送出任何 chunk 之前回 INVALID_ARGUMENT。對話記憶的範圍是「這個 job 底下所有問答」，沒有獨立的 conversation/thread 概念
+        自有金鑰的廠商整理好的清單，或他目前的預設模型），否則在送出任何 chunk 之前回 INVALID_ARGUMENT。
+        對話記憶的範圍是「這個 job 底下所有問答」，沒有獨立的 conversation/thread 概念
         （見 ai-service/docs/adr/ 對話範圍的 ADR）；一個 job 的問答串只要 job_id 就能定位。
 
         stream 保證的順序：最多一個 sources chunk（在檢索完成、生成答案文字之前送出），接著恰好一個 answered_by
-        chunk（這次用哪個模型回答），再接著任意數量的 delta chunk（依生成順序），最後如果中途失敗會有恰好一個 error chunk 並結束 stream（这轮
-        不會有對應的 qa_history 紀錄）；成功的話 stream 在最後一個 delta 後直接結束，不送額外的
+        chunk（這次用哪個模型回答，只有 provider 與 model），再接著任意數量的 delta chunk（依生成順序），
+        最後如果中途失敗會有恰好一個 error chunk 並結束 stream（這輪不會有對應的 qa_history 紀錄）；成功的話 stream 在最後一個 delta 後直接結束，不送額外的
         「done」訊號——gRPC stream 本身結束就是 done，這輪已經在結束前存進 qa_history。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -163,6 +169,14 @@ class AiServiceServicer:
     def ListJobLlmUsage(self, request, context):
         """一個 Job 的 LLM 用量（見 ai-service/CONTEXT.md「用量」），依時間升冪。job_id 不合法回 INVALID_ARGUMENT；沒有紀錄回空列表。
         不驗證使用者，Gateway 已經做過 ownership 檢查。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SumUserLlmUsage(self, request, context):
+        """一位使用者在 [start, end) 之間的 LLM 用量，依廠商、模型、金鑰來源彙總（Gateway 把「某個月」換成這段時間）。
+        user_id 不合法、或沒給 start / end 回 INVALID_ARGUMENT；沒有用量回空列表。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -252,6 +266,11 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.ListJobLlmUsage,
                     request_deserializer=ai__pb2.ListJobLlmUsageRequest.FromString,
                     response_serializer=ai__pb2.ListJobLlmUsageResponse.SerializeToString,
+            ),
+            'SumUserLlmUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.SumUserLlmUsage,
+                    request_deserializer=ai__pb2.SumUserLlmUsageRequest.FromString,
+                    response_serializer=ai__pb2.SumUserLlmUsageResponse.SerializeToString,
             ),
             'SaveProviderKey': grpc.unary_unary_rpc_method_handler(
                     servicer.SaveProviderKey,
@@ -450,6 +469,33 @@ class AiService:
             '/transuai.ai.v1.AiService/ListJobLlmUsage',
             ai__pb2.ListJobLlmUsageRequest.SerializeToString,
             ai__pb2.ListJobLlmUsageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SumUserLlmUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/SumUserLlmUsage',
+            ai__pb2.SumUserLlmUsageRequest.SerializeToString,
+            ai__pb2.SumUserLlmUsageResponse.FromString,
             options,
             channel_credentials,
             insecure,

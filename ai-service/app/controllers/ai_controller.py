@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import timezone
 from typing import NoReturn
 
 import grpc
@@ -8,7 +9,7 @@ from google.protobuf import timestamp_pb2
 from app.db import new_session
 from app.proto_gen import ai_pb2, ai_pb2_grpc
 from app.repositories.chapter_repository import find_by_job_id as find_chapters_by_job_id
-from app.repositories.llm_usage_repository import list_job_llm_usage
+from app.repositories.llm_usage_repository import list_job_llm_usage, sum_user_llm_usage
 from app.repositories.provider_key_repository import list_provider_keys
 from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_job_id
 from app.repositories.qa_repository import save_qa
@@ -222,6 +223,22 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         finally:
             session.close()
 
+    def SumUserLlmUsage(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        if not (request.HasField("start") and request.HasField("end")):
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "start and end are required")
+
+        session = new_session()
+        try:
+            sums = sum_user_llm_usage(session, user_id, request.start.ToDatetime(timezone.utc),
+                                      request.end.ToDatetime(timezone.utc))
+        finally:
+            session.close()
+        return ai_pb2.SumUserLlmUsageResponse(sums=[
+            ai_pb2.LlmUsageSum(provider=s.provider, model=s.model, key_source=s.key_source, input_tokens=s.input_tokens,
+                               output_tokens=s.output_tokens, calls=s.calls,
+                               calls_with_unknown_usage=s.calls_with_unknown_usage)
+            for s in sums])
 
     def SaveProviderKey(self, request, context):
         user_id = _parse_user_id(request.user_id, context)

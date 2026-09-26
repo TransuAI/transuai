@@ -39,6 +39,40 @@ class ListJobLlmUsageResponse(_message.Message):
     records: _containers.RepeatedCompositeFieldContainer[LlmUsage]
     def __init__(self, records: _Optional[_Iterable[_Union[LlmUsage, _Mapping]]] = ...) -> None: ...
 
+class SumUserLlmUsageRequest(_message.Message):
+    __slots__ = ("user_id", "start", "end")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    START_FIELD_NUMBER: _ClassVar[int]
+    END_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    start: _timestamp_pb2.Timestamp
+    end: _timestamp_pb2.Timestamp
+    def __init__(self, user_id: _Optional[str] = ..., start: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., end: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class SumUserLlmUsageResponse(_message.Message):
+    __slots__ = ("sums",)
+    SUMS_FIELD_NUMBER: _ClassVar[int]
+    sums: _containers.RepeatedCompositeFieldContainer[LlmUsageSum]
+    def __init__(self, sums: _Optional[_Iterable[_Union[LlmUsageSum, _Mapping]]] = ...) -> None: ...
+
+class LlmUsageSum(_message.Message):
+    __slots__ = ("provider", "model", "key_source", "input_tokens", "output_tokens", "calls", "calls_with_unknown_usage")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    KEY_SOURCE_FIELD_NUMBER: _ClassVar[int]
+    INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    CALLS_FIELD_NUMBER: _ClassVar[int]
+    CALLS_WITH_UNKNOWN_USAGE_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    model: str
+    key_source: str
+    input_tokens: int
+    output_tokens: int
+    calls: int
+    calls_with_unknown_usage: int
+    def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., key_source: _Optional[str] = ..., input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., calls: _Optional[int] = ..., calls_with_unknown_usage: _Optional[int] = ...) -> None: ...
+
 class LlmUsage(_message.Message):
     __slots__ = ("feature", "provider", "model", "key_source", "input_tokens", "output_tokens", "succeeded", "created_at")
     FEATURE_FIELD_NUMBER: _ClassVar[int]
