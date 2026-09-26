@@ -2,6 +2,7 @@ import logging
 import uuid
 from typing import Iterator
 
+import grpc
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -10,13 +11,18 @@ from app.repositories.embedding_repository import find_similar
 from app.repositories.qa_repository import find_by_job_id
 from app.services.embedder import embed_query
 from app.services.hf_client import DISABLE_THINKING, get_client, strip_thinking, stream_without_thinking
+from app.services.segment_times import time_key
+from app.services.speaker_context import named, speaker_names, spoken_segments
+from app.services.transcript_client import transcript_client
 
 logger = logging.getLogger(__name__)
 
 _ANSWER_SYSTEM_PROMPT_TEMPLATE = (
     "你是一個逐字稿問答助手。請只根據以下逐字稿片段回答問題，用繁體中文回答；"
-    "如果片段中找不到答案，就照實說沒有足夠資訊，不要編造：\n\n{context}"
+    "如果片段中找不到答案，就照實說沒有足夠資訊，不要編造。{speaker_instruction}\n\n{context}"
 )
+# 只有多位講者、片段帶了名字時才加：名字是講者目前的顯示名稱（可能剛被使用者改過）。
+_SPEAKER_INSTRUCTION = "片段前面標了講者名稱（「名稱：內容」），回答時請用這些名字稱呼講者。"
 
 # 對話記憶的範圍是整個 job（見 ai-service/docs/adr/ 對話範圍的 ADR），沒有獨立的
 # conversation/thread 概念，所以這裡不需要 conversation_id，只需要 job_id 就能定位。
@@ -99,11 +105,20 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
     if not chunks:
         raise NoEmbeddingsError(f"no embeddings found for job {job_id}")
 
-    context = "\n\n".join(f"[{float(chunk.start_time):.1f}s] {chunk.chunk_text}" for chunk in chunks)
+    speaker_by_time = _current_speaker_names_by_time(job_id)
+    context = "\n\n".join(
+        f"[{float(chunk.start_time):.1f}s] "
+        + named(chunk.chunk_text, speaker_by_time.get(time_key(chunk.start_time, chunk.end_time)))
+        for chunk in chunks
+    )
     source_timestamps = [float(chunk.start_time) for chunk in chunks]
     yield ("sources", source_timestamps)
 
-    messages = [{"role": "system", "content": _ANSWER_SYSTEM_PROMPT_TEMPLATE.format(context=context)}]
+    speaker_instruction = _SPEAKER_INSTRUCTION if speaker_by_time else ""
+    messages = [{
+        "role": "system",
+        "content": _ANSWER_SYSTEM_PROMPT_TEMPLATE.format(speaker_instruction=speaker_instruction, context=context),
+    }]
     for turn in history:
         messages.append({"role": "user", "content": turn.question})
         messages.append({"role": "assistant", "content": _truncate(turn.answer, _MAX_HISTORY_ANSWER_CHARS)})
@@ -126,3 +141,24 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
     raw_deltas = (chunk.choices[0].delta.content for chunk in stream if chunk.choices)
     for delta in stream_without_thinking(raw_deltas):
         yield ("delta", delta)
+
+
+def _current_speaker_names_by_time(job_id: uuid.UUID) -> dict[tuple[float, float], str]:
+    """片段起訖時間 -> 講者目前的顯示名稱，只在有兩位以上講者時才有內容（見 speaker_context）。
+
+    embedding 只存片段文字，名字在回答當下才向 transcription-service 拿，改名後下一次提問就是新名字。拿不到
+    逐字稿時照樣回答，只是不帶名字——名字是加分，不值得讓整輪問答失敗。
+    """
+    try:
+        transcript = transcript_client.get_transcript(str(job_id))
+    except grpc.RpcError:
+        logger.warning("job %s: could not fetch the transcript for speaker names, answering without them", job_id)
+        return {}
+    names = speaker_names(transcript)
+    if names is None:
+        return {}
+    return {
+        time_key(segment.start_time, segment.end_time): names[segment.speaker_label]
+        for segment in spoken_segments(transcript)
+        if segment.speaker_label in names
+    }

@@ -23,6 +23,7 @@ EDITED_TRANSCRIPT = SimpleNamespace(
         SimpleNamespace(start_time=1.5, end_time=3.0, text=""),
         SimpleNamespace(start_time=3.0, end_time=6.0, text="今天開會討論預算"),
     ],
+    speakers=[],
 )
 
 

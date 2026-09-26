@@ -15,10 +15,10 @@
 | 框架 | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework |
 | API | gRPC（`AiService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費 | RabbitMQ（`pika`），消費 `transcription.completed`，發送 `ai.completed` / `job.failed` |
-| 摘要 | HF Inference Providers（預設 `Qwen/Qwen3.5-9B`，可用 `AI_HF_CHAT_MODEL` 換模型），把逐字稿全文丟給模型產生摘要 |
-| 章節分段 | 同一個 HF 聊天模型，把逐字稿分段（含時間戳）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
+| 摘要 | HF Inference Providers（預設 `Qwen/Qwen3.5-9B`，可用 `AI_HF_CHAT_MODEL` 換模型），把逐字稿全文丟給模型產生摘要；兩位以上講者時改成每行「名稱：文字」（見下方「講者」） |
+| 章節分段 | 同一個 HF 聊天模型，把逐字稿分段（含時間戳，兩位以上講者時每行 `[開始時間] 名稱：文字`）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
 | Embedding | HF Inference Providers 的 `BAAI/bge-m3`（1024 維，query/document 對稱，不用加任何 instruction 前綴）：pipeline 內把逐字稿分段轉成向量存進 `embeddings` |
-| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個 HF 聊天模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段，組成 context 連同最近 5 輪對話歷史一起餵給模型，用 `stream=True` 逐字串流生成回答 |
+| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個 HF 聊天模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段，組成 context 連同最近 5 輪對話歷史一起餵給模型，用 `stream=True` 逐字串流生成回答；兩位以上講者時 context 每行帶講者**目前的**名稱（回答當下呼叫 `GetTranscript` 取得） |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
 | 向量儲存 | PostgreSQL + `pgvector` extension（`Vector(1024)` 欄位，cosine distance 查詢，沒有建 ivfflat 索引——見已知限制） |
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級 |
@@ -56,8 +56,8 @@ uv run python -m app.main
   → UpdateJobStatus(SUMMARIZING)
   → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文 + 分段
   → 已清空片段（空字串）不算內容，從下面每個 AI 輸入排除
-  → 呼叫 HF Inference Providers 產生摘要
-  → 呼叫 HF Inference Providers 依分段時間戳切章節（逐字稿沒有分段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
+  → 呼叫 HF Inference Providers 產生摘要（兩位以上講者時輸入是每行「名稱：文字」，否則是逐字稿全文）
+  → 呼叫 HF Inference Providers 依分段時間戳切章節（兩位以上講者時每行 `[開始時間] 名稱：文字`）（逐字稿沒有分段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
   → 呼叫 HF Inference Providers 把逐字稿分段轉成向量
   → 摘要（連同讀到的逐字稿 revision，記成 source_revision）存進 summaries，章節存進 chapters，向量存進 embeddings（都覆蓋該 job 舊的資料）
   → UpdateJobStatus(COMPLETED)
@@ -78,6 +78,14 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 章節分段還沒有獨立的 Job status，暫時併在 SUMMARIZING 階段，失敗一樣算整個 job 失敗。
 ```
 
+### 講者
+
+逐字稿有兩位以上講者（有內容的片段裡出現的講者，見 transcription-service `CONTEXT.md`「講者」）時，AI 的輸入帶上講者的
+**顯示名稱**：摘要每行「名稱：文字」、章節每行 `[開始時間] 名稱：文字`，prompt 要求點出誰說了什麼。問答的 embedding
+**只依片段文字**（名字會改，改名不能讓 embedding 過期）；回答當下才呼叫 `GetTranscript` 拿最新的片段與講者，用起訖時間把
+檢索到的片段對回逐字稿、換上講者目前的名字，prompt 要求用這些名字稱呼講者——改名後下一次提問就是新名字，什麼都不用重算。
+拿不到逐字稿時照樣回答，只是不帶名字。只有一位講者或講者分離之前的舊逐字稿，輸入維持原樣、不帶名字。
+
 ### 重新產生摘要與章節（`summary.regeneration.requested`）
 
 ```
@@ -85,7 +93,7 @@ RequestRegeneration(jobId)（Gateway POST /summary/{jobId}/regenerate）
   → 鎖住該 job 的摘要列；已經 RUNNING 且在 5 分鐘內 → 什麼都不做
   → regeneration_status = RUNNING、排入 summary.regeneration.requested { jobId }（publisher confirms、短 timeout；失敗則 rollback）
 消費 summary.regeneration.requested { jobId }
-  → GetTranscript（revision R）→ 排除已清空片段 → 摘要 + 章節都成功後才覆寫兩者
+  → GetTranscript（revision R）→ 排除已清空片段、帶上講者目前的名稱（同 pipeline）→ 摘要 + 章節都成功後才覆寫兩者
   → source_revision = R、regeneration_status = IDLE
 ```
 
@@ -197,7 +205,9 @@ app/
     summarizer.py                       HF Inference Providers 呼叫（摘要）
     chapter_generator.py                 HF Inference Providers 呼叫（章節分段）
     embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
-    qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context + 對話歷史 → streaming 生成回答
+    qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（多位講者時帶講者目前的名稱）+ 對話歷史 → streaming 生成回答
+    speaker_context.py                   讓 AI 知道講者是誰：兩位以上講者時把片段組成「名稱：文字」（摘要）、`[時間] 名稱：文字`（章節）；只有一位講者或舊逐字稿時維持原樣
+    segment_times.py                     片段起訖時間的對應鍵（embedding 對回逐字稿片段用，重算 embedding 與問答共用）
     hf_client.py                         共用的 HF InferenceClient（lazy init，embedding + chat completion 共用同一個 client）+ DISABLE_THINKING（關閉 Qwen3 系列的 thinking mode，所有 chat completion 呼叫都要帶）+ strip_thinking()／stream_without_thinking()（防禦性濾掉 <think> 區塊，正常情況下是 no-op，後者是 streaming 版）
     job_status_client.py                 gRPC client，呼叫 upload-service 的 UpdateJobStatus
     event_publisher.py                    發送 ai.completed / job.failed / summary.regeneration.requested；connection_params() 供 consumer 與 gRPC 請求內發訊息共用
@@ -232,4 +242,4 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - chat/embedding model 選擇都受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 embedding 模型 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `AI_HF_CHAT_MODEL`／`HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
 - 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了。還停在 768 維的舊表會讓服務拒絕啟動（baseline migration 檢查），要整張表 DROP 掉讓 migration 重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
 - `Qwen/Qwen3.5-9B` 屬於 Qwen3 系列，預設會開 thinking mode：完整思考過程另外算 completion tokens、放在 HF 回應的 `message.reasoning`（不是混進 `content` 的 `<think>` 標籤，這點實測跟原本 Groq `qwen3.6-27b` 的行為不同）。**已踩過的坑**：不設 `max_tokens` 時 provider 預設只給 2048，稍長的輸入光思考就把預算燒光，`content` 直接是空字串（`finish_reason="length"`）但整個呼叫不會報錯——摘要/章節分段因此曾經整段是空的，pipeline 卻顯示成功；而且單純拉高 `max_tokens` 治標不治本，實測 500+ 段的章節分段呼叫就算給到 32768 還是會在思考階段被 HF gateway 504 timeout 打斷。目前的做法是透過 `hf_client.DISABLE_THINKING`（chat template 的 `enable_thinking=False`）直接關掉 thinking mode，所有呼叫 `hf_client.get_client()` 做 chat completion 的地方都要帶上；`strip_thinking()`／`stream_without_thinking()` 保留作為防禦性 fallback（防之後換模型/provider 又變回把思考混進 `content` 的行為），正常情況下是 no-op。換其他 HF 聊天模型時要重新確認是否還會有類似的 thinking-mode 行為
-- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；gRPC controller 只有 `GetSummary` 有 in-process 測試，問答 streaming 等仍只靠手動 grpcurl smoke test
+- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；摘要 / 章節 / 問答帶講者名稱（`tests/test_speaker_aware_pipeline.py`、`tests/test_qa.py`：`stream_answer()` mock 檢索、transcript client、HF client）；gRPC controller 只有 `GetSummary` 有 in-process 測試，問答 streaming 的 gRPC 層仍只靠手動 grpcurl smoke test

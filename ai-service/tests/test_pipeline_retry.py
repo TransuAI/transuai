@@ -40,7 +40,7 @@ def _job_body() -> tuple[str, bytes]:
 
 
 def _transcript() -> SimpleNamespace:
-    return SimpleNamespace(full_text="哈囉大家好", segments=[_FakeSegment(0.0, 5.0, "哈囉大家好")], revision=0)
+    return SimpleNamespace(full_text="哈囉大家好", segments=[_FakeSegment(0.0, 5.0, "哈囉大家好")], revision=0, speakers=[])
 
 
 @pytest.fixture

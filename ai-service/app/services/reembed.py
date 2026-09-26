@@ -7,13 +7,9 @@ from app.repositories.embedding_repository import apply_embedding_changes, find_
 from app.services.embedder import embed_documents
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
 from app.services.transcript_client import transcript_client
+from app.services.segment_times import time_key
 
 logger = logging.getLogger(__name__)
-
-
-def _time_key(start, end) -> tuple[float, float]:
-    # Segment times are NUMERIC(10,2) on both sides; compare them at that precision.
-    return round(float(start), 2), round(float(end), 2)
 
 
 def process_transcript_edited(body: bytes, retry_count: int = 0) -> None:
@@ -30,10 +26,10 @@ def process_transcript_edited(body: bytes, retry_count: int = 0) -> None:
         transcript = transcript_client.get_transcript(job_id)
         session = new_session()
         try:
-            existing = {_time_key(row.start_time, row.end_time): row for row in find_by_job_id(session, uuid.UUID(job_id))}
+            existing = {time_key(row.start_time, row.end_time): row for row in find_by_job_id(session, uuid.UUID(job_id))}
             to_embed, deletions = [], []
             for segment in transcript.segments:
-                key = _time_key(segment.start_time, segment.end_time)
+                key = time_key(segment.start_time, segment.end_time)
                 row = existing.get(key)
                 if segment.text == "":
                     if row is not None:

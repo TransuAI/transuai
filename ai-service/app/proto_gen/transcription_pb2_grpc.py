@@ -48,6 +48,16 @@ class TranscriptionServiceStub:
                 request_serializer=transcription__pb2.UpdateSegmentTextRequest.SerializeToString,
                 response_deserializer=transcription__pb2.UpdateSegmentTextResponse.FromString,
                 _registered_method=True)
+        self.RenameSpeaker = channel.unary_unary(
+                '/transuai.transcription.v1.TranscriptionService/RenameSpeaker',
+                request_serializer=transcription__pb2.RenameSpeakerRequest.SerializeToString,
+                response_deserializer=transcription__pb2.RenameSpeakerResponse.FromString,
+                _registered_method=True)
+        self.AssignSegmentSpeaker = channel.unary_unary(
+                '/transuai.transcription.v1.TranscriptionService/AssignSegmentSpeaker',
+                request_serializer=transcription__pb2.AssignSegmentSpeakerRequest.SerializeToString,
+                response_deserializer=transcription__pb2.AssignSegmentSpeakerResponse.FromString,
+                _registered_method=True)
 
 
 class TranscriptionServiceServicer:
@@ -73,6 +83,28 @@ class TranscriptionServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RenameSpeaker(self, request, context):
+        """替講者命名（見 transcription-service/CONTEXT.md「講者」），也是一次編輯。名稱會先去掉前後空白；空字串
+        或等於預設名稱「講者 N」＝恢復預設名稱。顯示名稱跟目前相同時什麼都不做（revision 不變）；否則更新、
+        revision +1，並發送 transcript.edited。job_id 格式不對、名稱超過 100 字回 INVALID_ARGUMENT；job 沒有
+        逐字稿或這個標籤的講者不存在回 NOT_FOUND。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AssignSegmentSpeaker(self, request, context):
+        """把一個片段改成另一位講者，或新增一位講者給它（講者分離判斷錯時的修正），也是一次編輯。新講者排在顯示
+        順序最後，可以附名稱（空字串＝預設名稱「講者 N」）。逐字稿還有沒講者的片段（講者分離之前的舊 Job）時，
+        那些片段先一起歸給一位新的講者 1，這樣「只有一位講者」的逐字稿指定出第二位後就是兩位。片段已經是目標
+        講者時什麼都不做（revision 不變）；否則更新、revision +1，並發送 transcript.edited。job_id / segment_id
+        格式不對、沒有指定目標、名稱超過 100 字回 INVALID_ARGUMENT；job 沒有逐字稿、片段不存在或不屬於這個
+        job、這個標籤的講者不存在回 NOT_FOUND。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TranscriptionServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -85,6 +117,16 @@ def add_TranscriptionServiceServicer_to_server(servicer, server):
                     servicer.UpdateSegmentText,
                     request_deserializer=transcription__pb2.UpdateSegmentTextRequest.FromString,
                     response_serializer=transcription__pb2.UpdateSegmentTextResponse.SerializeToString,
+            ),
+            'RenameSpeaker': grpc.unary_unary_rpc_method_handler(
+                    servicer.RenameSpeaker,
+                    request_deserializer=transcription__pb2.RenameSpeakerRequest.FromString,
+                    response_serializer=transcription__pb2.RenameSpeakerResponse.SerializeToString,
+            ),
+            'AssignSegmentSpeaker': grpc.unary_unary_rpc_method_handler(
+                    servicer.AssignSegmentSpeaker,
+                    request_deserializer=transcription__pb2.AssignSegmentSpeakerRequest.FromString,
+                    response_serializer=transcription__pb2.AssignSegmentSpeakerResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -144,6 +186,60 @@ class TranscriptionService:
             '/transuai.transcription.v1.TranscriptionService/UpdateSegmentText',
             transcription__pb2.UpdateSegmentTextRequest.SerializeToString,
             transcription__pb2.UpdateSegmentTextResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RenameSpeaker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.transcription.v1.TranscriptionService/RenameSpeaker',
+            transcription__pb2.RenameSpeakerRequest.SerializeToString,
+            transcription__pb2.RenameSpeakerResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AssignSegmentSpeaker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.transcription.v1.TranscriptionService/AssignSegmentSpeaker',
+            transcription__pb2.AssignSegmentSpeakerRequest.SerializeToString,
+            transcription__pb2.AssignSegmentSpeakerResponse.FromString,
             options,
             channel_credentials,
             insecure,

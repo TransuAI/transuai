@@ -17,6 +17,7 @@ from app.services.retry import (
     has_retry_budget,
     retry_terminal_report,
 )
+from app.services.speaker_context import chapter_input, spoken_segments, summary_input
 from app.services.summarizer import summarize
 from app.services.transcript_client import transcript_client
 
@@ -53,9 +54,9 @@ def process_message(
 
         transcript = transcript_client.get_transcript(job_id)
         # Cleared segments (empty text, 已清空片段) aren't content: leave them out of every AI input.
-        segments = [segment for segment in transcript.segments if segment.text != ""]
-        summary_text = summarize(transcript.full_text)
-        chapters = generate_chapters(segments)
+        segments = spoken_segments(transcript)
+        summary_text = summarize(summary_input(transcript))
+        chapters = generate_chapters(chapter_input(transcript))
         vectors = embed_documents([segment.text for segment in segments])
 
         session = new_session()

@@ -11,6 +11,7 @@ from app.repositories.summary_repository import lock_summary, mark_regeneration_
 from app.services.chapter_generator import generate_chapters
 from app.services.event_publisher import connection_params, publish_regeneration_requested
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
+from app.services.speaker_context import chapter_input, summary_input
 from app.services.summarizer import summarize
 from app.services.transcript_client import transcript_client
 
@@ -92,9 +93,8 @@ def process_regeneration_requested(body: bytes, retry_count: int = 0) -> None:
     job_id = json.loads(body)["jobId"]
     try:
         transcript = transcript_client.get_transcript(job_id)
-        segments = [segment for segment in transcript.segments if segment.text != ""]
-        summary_text = summarize(transcript.full_text)
-        chapters = generate_chapters(segments)
+        summary_text = summarize(summary_input(transcript))
+        chapters = generate_chapters(chapter_input(transcript))
         session = new_session()
         try:
             replace_summary_and_chapters(

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.services import pipeline
+from app.services.speaker_context import TimedLine
 
 
 class FakeSegment:
@@ -32,7 +33,7 @@ def test_process_message_happy_path_calls_everything_in_order_and_persists_resul
         FakeSegment(0.0, 5.0, "A", "哈囉大家好"),
         FakeSegment(5.0, 10.0, "B", "今天來聊聊逐字稿"),
     ]
-    transcript = SimpleNamespace(full_text="哈囉大家好 今天來聊聊逐字稿", segments=segments, revision=0)
+    transcript = SimpleNamespace(full_text="哈囉大家好 今天來聊聊逐字稿", segments=segments, revision=0, speakers=[])
 
     manager = MagicMock()
     mock_session = MagicMock(name="session")
@@ -91,7 +92,7 @@ def test_process_message_happy_path_calls_everything_in_order_and_persists_resul
     ]
     mock_transcript_client.get_transcript.assert_called_once_with(job_id)
     mock_summarize.assert_called_once_with(transcript.full_text)
-    mock_generate_chapters.assert_called_once_with(segments)
+    mock_generate_chapters.assert_called_once_with([TimedLine(0.0, "哈囉大家好"), TimedLine(5.0, "今天來聊聊逐字稿")])
     mock_embed_documents.assert_called_once_with(["哈囉大家好", "今天來聊聊逐字稿"])
 
     mock_save_summary.assert_called_once_with(mock_session, uuid.UUID(job_id), "這是摘要", source_revision=0)
@@ -121,6 +122,7 @@ def test_process_message_leaves_cleared_segments_out_and_records_the_transcript_
         full_text="哈囉大家好\n今天來聊聊逐字稿",
         revision=3,
         segments=[kept[0], FakeSegment(5.0, 8.0, "", ""), kept[1]],
+        speakers=[],
     )
 
     with (
@@ -137,7 +139,7 @@ def test_process_message_leaves_cleared_segments_out_and_records_the_transcript_
         mock_transcript_client.get_transcript.return_value = transcript
         pipeline.process_message(body, MagicMock(), MagicMock())
 
-    mock_generate_chapters.assert_called_once_with(kept)
+    mock_generate_chapters.assert_called_once_with([TimedLine(0.0, "哈囉大家好"), TimedLine(8.0, "今天來聊聊逐字稿")])
     mock_embed_documents.assert_called_once_with(["哈囉大家好", "今天來聊聊逐字稿"])
     assert [chunk[0] for chunk in mock_save_embeddings.call_args.args[2]] == ["哈囉大家好", "今天來聊聊逐字稿"]
     assert mock_save_summary.call_args.kwargs["source_revision"] == 3
