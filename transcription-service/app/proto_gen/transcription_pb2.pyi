@@ -71,3 +71,21 @@ class UpdateSegmentTextResponse(_message.Message):
     segment: TranscriptSegment
     revision: int
     def __init__(self, segment: _Optional[_Union[TranscriptSegment, _Mapping]] = ..., revision: _Optional[int] = ...) -> None: ...
+
+class RenameSpeakerRequest(_message.Message):
+    __slots__ = ("job_id", "label", "name")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    LABEL_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    label: str
+    name: str
+    def __init__(self, job_id: _Optional[str] = ..., label: _Optional[str] = ..., name: _Optional[str] = ...) -> None: ...
+
+class RenameSpeakerResponse(_message.Message):
+    __slots__ = ("speaker", "revision")
+    SPEAKER_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    speaker: Speaker
+    revision: int
+    def __init__(self, speaker: _Optional[_Union[Speaker, _Mapping]] = ..., revision: _Optional[int] = ...) -> None: ...

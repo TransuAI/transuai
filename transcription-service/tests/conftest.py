@@ -65,6 +65,28 @@ def run_pipeline(mocks):
     return _run
 
 
+@pytest.fixture
+def rabbitmq():
+    """The RabbitMQ boundary: every connection the service opens to publish events is a fake whose
+    channel records what was published."""
+    with patch("app.services.edit_events.BlockingConnection") as connection_class:
+        channel = MagicMock(name="channel")
+        connection_class.return_value.channel.return_value = channel
+        yield FakeRabbitMQ(connection_class, channel)
+
+
+class FakeRabbitMQ:
+    def __init__(self, connection_class, channel):
+        self.connection_class = connection_class
+        self.channel = channel
+
+    def published(self):
+        return [
+            (call.kwargs["routing_key"], json.loads(call.kwargs["body"]))
+            for call in self.channel.basic_publish.call_args_list
+        ]
+
+
 def _reset_schema():
     # Guard: this drops everything, so make sure it can only ever hit the test database.
     assert settings.db_name == TEST_DB_NAME, f"refusing to reset {settings.db_name!r}"

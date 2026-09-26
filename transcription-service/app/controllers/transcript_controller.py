@@ -7,7 +7,13 @@ import grpc
 from app.db import new_session
 from app.models import Speaker, TranscriptSegment
 from app.proto_gen import transcription_pb2, transcription_pb2_grpc
-from app.repositories.transcript_repository import SegmentNotFound, find_by_job_id, update_segment_text
+from app.repositories.transcript_repository import (
+    SegmentNotFound,
+    SpeakerNotFound,
+    find_by_job_id,
+    rename_speaker,
+    update_segment_text,
+)
 from app.services.edit_events import publish_transcript_edited
 
 logger = logging.getLogger(__name__)
@@ -15,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 # 一個片段通常只有一句話；這個上限只是擋掉明顯異常的輸入，不是給使用者碰的限制。
 MAX_SEGMENT_TEXT_LENGTH = 2000
+# 跟 speakers.name 欄位長度一致。
+MAX_SPEAKER_NAME_LENGTH = 100
 
 
 def _parse_uuid(value: str, field: str, context: grpc.ServicerContext) -> uuid.UUID:
@@ -84,5 +92,25 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
                 publish_transcript_edited(str(job_id))
             return transcription_pb2.UpdateSegmentTextResponse(
                 segment=_segment_to_proto(edit.segment), revision=edit.revision)
+        finally:
+            session.close()
+
+    def RenameSpeaker(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        name = request.name.strip()
+        if len(name) > MAX_SPEAKER_NAME_LENGTH:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT,
+                   f"name must be at most {MAX_SPEAKER_NAME_LENGTH} characters")
+
+        session = new_session()
+        try:
+            try:
+                edit = rename_speaker(session, job_id, request.label, name or None)
+            except SpeakerNotFound:
+                _abort(context, grpc.StatusCode.NOT_FOUND, "speaker not found in this job's transcript")
+            if edit.changed:
+                publish_transcript_edited(str(job_id))
+            return transcription_pb2.RenameSpeakerResponse(
+                speaker=_speaker_to_proto(edit.speaker), revision=edit.revision)
         finally:
             session.close()

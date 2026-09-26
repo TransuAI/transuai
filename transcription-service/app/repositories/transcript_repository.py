@@ -48,12 +48,8 @@ class SegmentEdit:
 
 def update_segment_text(session: Session, job_id: uuid.UUID, segment_id: uuid.UUID, text: str) -> SegmentEdit:
     """編輯一個片段的文字（text 已由呼叫端正規化，空字串＝清空）。文字沒變時什麼都不做；否則
-    revision +1、以未清空片段依換行重組 full_text。
-
-    逐字稿那一列用 SELECT ... FOR UPDATE 鎖住：同時兩個編輯仍是「最後寫入為準」，但 revision
-    會正確地各加一次。"""
-    transcript = session.scalar(
-        select(Transcript).where(Transcript.job_id == job_id).with_for_update())
+    revision +1、以未清空片段依換行重組 full_text。同時兩個編輯是「最後寫入為準」。"""
+    transcript = _lock_transcript(session, job_id)
     segment = next((s for s in transcript.segments if s.id == segment_id), None) if transcript else None
     if transcript is None or segment is None:
         session.rollback()
@@ -68,3 +64,40 @@ def update_segment_text(session: Session, job_id: uuid.UUID, segment_id: uuid.UU
     transcript.full_text = "\n".join(s.text for s in transcript.segments if s.text != "")
     session.commit()
     return SegmentEdit(segment, transcript.revision, changed=True)
+
+
+def _lock_transcript(session: Session, job_id: uuid.UUID) -> Transcript | None:
+    # 逐字稿那一列用 SELECT ... FOR UPDATE 鎖住：同一份逐字稿的編輯一個一個來，revision 才會各加一次。
+    return session.scalar(select(Transcript).where(Transcript.job_id == job_id).with_for_update())
+
+
+class SpeakerNotFound(Exception):
+    """這個 job 沒有逐字稿，或它的逐字稿沒有這個標籤的講者。"""
+
+
+@dataclass
+class SpeakerEdit:
+    speaker: Speaker
+    revision: int  # 逐字稿目前的 revision
+    changed: bool  # False＝顯示名稱跟原本一樣，什麼都沒做
+
+
+def rename_speaker(session: Session, job_id: uuid.UUID, label: str, name: str | None) -> SpeakerEdit:
+    """替講者命名（name 已由呼叫端正規化，None＝恢復預設名稱）。等於預設名稱「講者 N」也當成恢復預設；
+    顯示名稱沒變時什麼都不做，否則 revision +1。"""
+    transcript = _lock_transcript(session, job_id)
+    speaker = next((s for s in transcript.speakers if s.label == label), None) if transcript else None
+    if transcript is None or speaker is None:
+        session.rollback()
+        raise SpeakerNotFound()
+
+    if name == speaker.default_name:
+        name = None
+    if speaker.name == name:
+        session.rollback()
+        return SpeakerEdit(speaker, transcript.revision, changed=False)
+
+    speaker.name = name
+    transcript.revision += 1
+    session.commit()
+    return SpeakerEdit(speaker, transcript.revision, changed=True)

@@ -81,5 +81,9 @@ class Speaker(Base):
     transcript: Mapped["Transcript"] = relationship(back_populates="speakers")
 
     @property
+    def default_name(self) -> str:
+        return f"講者 {self.display_order}"
+
+    @property
     def display_name(self) -> str:
-        return self.name or f"講者 {self.display_order}"
+        return self.name or self.default_name

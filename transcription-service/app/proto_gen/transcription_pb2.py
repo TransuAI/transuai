@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13transcription.proto\x12\x19transuai.transcription.v1\"\x81\x01\n\x11TranscriptSegment\x12\x12\n\nstart_time\x18\x01 \x01(\x01\x12\x10\n\x08\x65nd_time\x18\x02 \x01(\x01\x12\x15\n\rspeaker_label\x18\x03 \x01(\t\x12\x0c\n\x04text\x18\x04 \x01(\t\x12\n\n\x02id\x18\x05 \x01(\t\x12\x15\n\roriginal_text\x18\x06 \x01(\t\"\xc9\x01\n\nTranscript\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\x11\n\tfull_text\x18\x03 \x01(\t\x12>\n\x08segments\x18\x04 \x03(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x10\n\x08revision\x18\x05 \x01(\x05\x12\x34\n\x08speakers\x18\x06 \x03(\x0b\x32\".transuai.transcription.v1.Speaker\"E\n\x07Speaker\x12\r\n\x05label\x18\x01 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x02 \x01(\t\x12\x15\n\rdisplay_order\x18\x03 \x01(\x05\"&\n\x14GetTranscriptRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"L\n\x18UpdateSegmentTextRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x12\n\nsegment_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"l\n\x19UpdateSegmentTextResponse\x12=\n\x07segment\x18\x01 \x01(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x10\n\x08revision\x18\x02 \x01(\x05\x32\xff\x01\n\x14TranscriptionService\x12g\n\rGetTranscript\x12/.transuai.transcription.v1.GetTranscriptRequest\x1a%.transuai.transcription.v1.Transcript\x12~\n\x11UpdateSegmentText\x12\x33.transuai.transcription.v1.UpdateSegmentTextRequest\x1a\x34.transuai.transcription.v1.UpdateSegmentTextResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13transcription.proto\x12\x19transuai.transcription.v1\"\x81\x01\n\x11TranscriptSegment\x12\x12\n\nstart_time\x18\x01 \x01(\x01\x12\x10\n\x08\x65nd_time\x18\x02 \x01(\x01\x12\x15\n\rspeaker_label\x18\x03 \x01(\t\x12\x0c\n\x04text\x18\x04 \x01(\t\x12\n\n\x02id\x18\x05 \x01(\t\x12\x15\n\roriginal_text\x18\x06 \x01(\t\"\xc9\x01\n\nTranscript\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\x11\n\tfull_text\x18\x03 \x01(\t\x12>\n\x08segments\x18\x04 \x03(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x10\n\x08revision\x18\x05 \x01(\x05\x12\x34\n\x08speakers\x18\x06 \x03(\x0b\x32\".transuai.transcription.v1.Speaker\"E\n\x07Speaker\x12\r\n\x05label\x18\x01 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x02 \x01(\t\x12\x15\n\rdisplay_order\x18\x03 \x01(\x05\"&\n\x14GetTranscriptRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"L\n\x18UpdateSegmentTextRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x12\n\nsegment_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"l\n\x19UpdateSegmentTextResponse\x12=\n\x07segment\x18\x01 \x01(\x0b\x32,.transuai.transcription.v1.TranscriptSegment\x12\x10\n\x08revision\x18\x02 \x01(\x05\"C\n\x14RenameSpeakerRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\r\n\x05label\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\"^\n\x15RenameSpeakerResponse\x12\x33\n\x07speaker\x18\x01 \x01(\x0b\x32\".transuai.transcription.v1.Speaker\x12\x10\n\x08revision\x18\x02 \x01(\x05\x32\xf3\x02\n\x14TranscriptionService\x12g\n\rGetTranscript\x12/.transuai.transcription.v1.GetTranscriptRequest\x1a%.transuai.transcription.v1.Transcript\x12~\n\x11UpdateSegmentText\x12\x33.transuai.transcription.v1.UpdateSegmentTextRequest\x1a\x34.transuai.transcription.v1.UpdateSegmentTextResponse\x12r\n\rRenameSpeaker\x12/.transuai.transcription.v1.RenameSpeakerRequest\x1a\x30.transuai.transcription.v1.RenameSpeakerResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -43,6 +43,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_UPDATESEGMENTTEXTREQUEST']._serialized_end=573
   _globals['_UPDATESEGMENTTEXTRESPONSE']._serialized_start=575
   _globals['_UPDATESEGMENTTEXTRESPONSE']._serialized_end=683
-  _globals['_TRANSCRIPTIONSERVICE']._serialized_start=686
-  _globals['_TRANSCRIPTIONSERVICE']._serialized_end=941
+  _globals['_RENAMESPEAKERREQUEST']._serialized_start=685
+  _globals['_RENAMESPEAKERREQUEST']._serialized_end=752
+  _globals['_RENAMESPEAKERRESPONSE']._serialized_start=754
+  _globals['_RENAMESPEAKERRESPONSE']._serialized_end=848
+  _globals['_TRANSCRIPTIONSERVICE']._serialized_start=851
+  _globals['_TRANSCRIPTIONSERVICE']._serialized_end=1222
 # @@protoc_insertion_point(module_scope)

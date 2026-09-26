@@ -1,7 +1,6 @@
-import json
 import logging
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import grpc
 import pytest
@@ -12,26 +11,7 @@ from app.repositories.transcript_repository import save_transcript
 from app.services.transcript_result import TranscriptResult, TranscriptSegment
 
 
-@pytest.fixture(autouse=True)
-def rabbitmq():
-    """The RabbitMQ boundary: every connection the service opens to publish events is a fake whose
-    channel records what was published."""
-    with patch("app.services.edit_events.BlockingConnection") as connection_class:
-        channel = MagicMock(name="channel")
-        connection_class.return_value.channel.return_value = channel
-        yield FakeRabbitMQ(connection_class, channel)
-
-
-class FakeRabbitMQ:
-    def __init__(self, connection_class, channel):
-        self.connection_class = connection_class
-        self.channel = channel
-
-    def published(self):
-        return [
-            (call.kwargs["routing_key"], json.loads(call.kwargs["body"]))
-            for call in self.channel.basic_publish.call_args_list
-        ]
+pytestmark = pytest.mark.usefixtures("rabbitmq")
 
 
 @pytest.fixture
