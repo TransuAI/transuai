@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package transuai.transcription.v1;
 
+import "google/protobuf/timestamp.proto";
+
 // TranscriptionService 是純內部服務，供 Gateway / AI Service 查詢逐字稿，以及（經 Gateway）保存使用者對
 // 逐字稿的編輯。跟 upload-service 的 InternalJobService 一樣不需要額外驗證身分，只信任內部網路呼叫——
 // 「只能改自己的 job」由 Gateway 的 ownership 檢查把關。轉錄本身是 MQ 驅動（消費 transcription.requested）。
@@ -28,6 +30,10 @@ service TranscriptionService {
   // 格式不對、沒有指定目標、名稱超過 100 字回 INVALID_ARGUMENT；job 沒有逐字稿、片段不存在或不屬於這個
   // job、這個標籤的講者不存在回 NOT_FOUND。
   rpc AssignSegmentSpeaker(AssignSegmentSpeakerRequest) returns (AssignSegmentSpeakerResponse);
+
+  // 一個 Job 的轉錄用量（見 transcription-service/CONTEXT.md「轉錄用量」），依時間升冪；每次呼叫語音辨識服務一筆，
+  // 失敗的也算。job_id 不合法回 INVALID_ARGUMENT；沒有紀錄回空列表。
+  rpc ListJobTranscriptionUsage(ListJobTranscriptionUsageRequest) returns (ListJobTranscriptionUsageResponse);
 }
 
 message TranscriptSegment {
@@ -111,4 +117,22 @@ message AssignSegmentSpeakerResponse {
   // 這個 Job 所有的講者（可能多了新增的那位），依 display_order 排序。
   repeated Speaker speakers = 2;
   int32 revision = 3;
+}
+
+message ListJobTranscriptionUsageRequest {
+  string job_id = 1;
+}
+
+message ListJobTranscriptionUsageResponse {
+  repeated TranscriptionUsage records = 1;
+}
+
+// 一次呼叫語音辨識服務的用量。
+message TranscriptionUsage {
+  string provider = 1;
+  string model = 2;
+  // 送進語音辨識服務的音檔秒數；服務沒有回報（例如呼叫失敗）時不設定（未知），不是 0。
+  optional double audio_seconds = 3;
+  bool succeeded = 4;
+  google.protobuf.Timestamp created_at = 5;
 }
