@@ -56,7 +56,7 @@ public class AiController {
     public SummaryDto getSummary(@CurrentUserId UUID userId, @PathVariable String jobId) {
         jobOwnershipGuard.check(userId, jobId);
         Summary summary = aiServiceStub.getSummary(GetSummaryRequest.newBuilder().setJobId(jobId).build());
-        return new SummaryDto(summary.getJobId(), summary.getSummaryText());
+        return new SummaryDto(summary.getJobId(), summary.getSummaryText(), summary.getSourceRevision());
     }
 
     @GetMapping("/chapters/{jobId}")
