@@ -89,3 +89,31 @@ class RenameSpeakerResponse(_message.Message):
     speaker: Speaker
     revision: int
     def __init__(self, speaker: _Optional[_Union[Speaker, _Mapping]] = ..., revision: _Optional[int] = ...) -> None: ...
+
+class AssignSegmentSpeakerRequest(_message.Message):
+    __slots__ = ("job_id", "segment_id", "speaker_label", "new_speaker")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    SPEAKER_LABEL_FIELD_NUMBER: _ClassVar[int]
+    NEW_SPEAKER_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    segment_id: str
+    speaker_label: str
+    new_speaker: NewSpeaker
+    def __init__(self, job_id: _Optional[str] = ..., segment_id: _Optional[str] = ..., speaker_label: _Optional[str] = ..., new_speaker: _Optional[_Union[NewSpeaker, _Mapping]] = ...) -> None: ...
+
+class NewSpeaker(_message.Message):
+    __slots__ = ("name",)
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...
+
+class AssignSegmentSpeakerResponse(_message.Message):
+    __slots__ = ("segment", "speakers", "revision")
+    SEGMENT_FIELD_NUMBER: _ClassVar[int]
+    SPEAKERS_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    segment: TranscriptSegment
+    speakers: _containers.RepeatedCompositeFieldContainer[Speaker]
+    revision: int
+    def __init__(self, segment: _Optional[_Union[TranscriptSegment, _Mapping]] = ..., speakers: _Optional[_Iterable[_Union[Speaker, _Mapping]]] = ..., revision: _Optional[int] = ...) -> None: ...

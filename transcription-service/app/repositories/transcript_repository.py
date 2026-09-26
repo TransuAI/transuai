@@ -101,3 +101,68 @@ def rename_speaker(session: Session, job_id: uuid.UUID, label: str, name: str | 
     transcript.revision += 1
     session.commit()
     return SpeakerEdit(speaker, transcript.revision, changed=True)
+
+
+@dataclass(frozen=True)
+class NewSpeaker:
+    name: str | None  # None＝預設名稱「講者 N」
+
+
+@dataclass
+class SpeakerAssignment:
+    segment: TranscriptSegment
+    speakers: list[Speaker]  # 這份逐字稿所有的講者，依顯示順序
+    revision: int  # 逐字稿目前的 revision
+    changed: bool  # False＝片段本來就是這位講者，什麼都沒做
+
+
+def assign_segment_speaker(
+    session: Session, job_id: uuid.UUID, segment_id: uuid.UUID, target: str | NewSpeaker
+) -> SpeakerAssignment:
+    """把片段改成另一位講者（target 是現有講者的標籤），或新增一位講者給它（排在顯示順序最後）。片段本來就是
+    這位講者時什麼都不做，否則 revision +1。"""
+    transcript = _lock_transcript(session, job_id)
+    segment = next((s for s in transcript.segments if s.id == segment_id), None) if transcript else None
+    if transcript is None or segment is None:
+        session.rollback()
+        raise SegmentNotFound()
+
+    if isinstance(target, NewSpeaker):
+        _give_unlabelled_segments_to_speaker_1(transcript)
+        label = _add_speaker(transcript, target.name).label
+    else:
+        if all(speaker.label != target for speaker in transcript.speakers):
+            session.rollback()
+            raise SpeakerNotFound()
+        if segment.speaker_label == target:
+            session.rollback()
+            return SpeakerAssignment(segment, list(transcript.speakers), transcript.revision, changed=False)
+        label = target
+
+    segment.speaker_label = label
+    transcript.revision += 1
+    session.commit()
+    return SpeakerAssignment(segment, list(transcript.speakers), transcript.revision, changed=True)
+
+
+def _give_unlabelled_segments_to_speaker_1(transcript: Transcript) -> None:
+    # 講者分離之前的舊 Job 沒有講者，當成只有一位講者：真的指定出新講者時，其他片段先一起歸給講者 1，
+    # 逐字稿才會變成兩位講者。
+    if transcript.speakers:
+        return
+    speaker_1 = _add_speaker(transcript, None)
+    for segment in transcript.segments:
+        if segment.speaker_label is None:
+            segment.speaker_label = speaker_1.label
+
+
+def _add_speaker(transcript: Transcript, name: str | None) -> Speaker:
+    labels = {speaker.label for speaker in transcript.speakers}
+    number = len(labels) + 1
+    while f"S{number}" in labels:
+        number += 1
+    speaker = Speaker(
+        label=f"S{number}", display_order=max((s.display_order for s in transcript.speakers), default=0) + 1)
+    speaker.name = None if name == speaker.default_name else name
+    transcript.speakers.append(speaker)
+    return speaker

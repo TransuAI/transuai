@@ -74,6 +74,7 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 | `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 片段（id、timestamp、講者標籤、目前文字、原始文字）+ `revision` + 講者列表（標籤、顯示名稱、顯示順序；顯示名稱在這裡決定：自訂名稱，否則「講者 N」），`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `UpdateSegmentText` | 編輯一個片段的文字：去前後空白，空字串＝清空；跟目前相同則不動作；否則更新文字、`revision` +1、以未清空片段依換行重組全文，並發送 `transcript.edited { jobId }`（逐字稿那列 `SELECT … FOR UPDATE`，同時編輯以最後寫入為準但 revision 各加一次）。id 格式錯誤 / 超過 2,000 字回 `INVALID_ARGUMENT`，逐字稿或片段不存在、片段不屬於該 job 回 `NOT_FOUND` |
 | `RenameSpeaker` | 替講者命名：去前後空白，空字串或等於預設名稱「講者 N」＝恢復預設名稱；顯示名稱沒變則不動作；否則更新、`revision` +1，並發送 `transcript.edited { jobId }`（同一把逐字稿列鎖）。`job_id` 格式錯誤 / 名稱超過 100 字回 `INVALID_ARGUMENT`，逐字稿或這個標籤的講者不存在回 `NOT_FOUND` |
+| `AssignSegmentSpeaker` | 改片段的講者：目標是現有講者的標籤，或「新增講者」（可附名稱，排在顯示順序最後）。逐字稿還沒有任何講者（講者分離之前的舊 Job）時，新增講者前先把沒有講者的片段一起歸給新的講者 1，這樣指定出來就是兩位。片段本來就是目標講者則不動作；否則更新、`revision` +1，並發送 `transcript.edited { jobId }`，回傳片段、所有講者、`revision`。id 格式錯誤、沒有指定目標、名稱超過 100 字回 `INVALID_ARGUMENT`，逐字稿 / 片段 / 標籤不存在或片段不屬於該 job 回 `NOT_FOUND` |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
 
@@ -113,7 +114,7 @@ uv run pytest
 
 用 pytest，mocking 只用標準庫的 `unittest.mock`。
 
-gRPC 服務本身（`tests/test_transcript_grpc.py`：查詢與啟動 migration；`tests/test_segment_editing.py`：編輯片段；`tests/test_speaker_editing.py`：替講者命名）是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
+gRPC 服務本身（`tests/test_transcript_grpc.py`：查詢與啟動 migration；`tests/test_segment_editing.py`：編輯片段；`tests/test_speaker_editing.py`：替講者命名、改片段的講者）是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
 fixture 會在同一個 Postgres 上建（或清空重建）一個獨立的 `transcription_test_db`，用服務啟動時同一套
 `init_db()` 跑 migration，再在 process 裡起一個真的 gRPC server 給測試呼叫（參考 upload-service 的 IT 做法）；
 絕對不會碰到 `transcription_db`。
@@ -154,7 +155,7 @@ app/
   models/
     transcript.py                 Transcript / TranscriptSegment / Speaker（SQLAlchemy ORM）
   controllers/
-    transcript_controller.py       TranscriptionServiceServicer 實作（GetTranscript、UpdateSegmentText、RenameSpeaker）
+    transcript_controller.py       TranscriptionServiceServicer 實作（GetTranscript、UpdateSegmentText、RenameSpeaker、AssignSegmentSpeaker）
   services/
     consumer.py                      RabbitMQ consumer loop（pika）
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
