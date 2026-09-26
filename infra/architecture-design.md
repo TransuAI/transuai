@@ -176,9 +176,10 @@ GET    /summary/{jobId}                 取得摘要（含 sourceRevision：依�
 POST   /summary/{jobId}/regenerate      摘要與章節過時後，在背景依最新逐字稿重新產生兩者，回 202（Job 狀態不變，
                                          前端每 3 秒輪詢 GET /summary 直到不是 RUNNING）
 GET    /chapters/{jobId}                取得章節列表
-GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料）
-POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string }，
-                                         回傳 text/event-stream（SSE，逐字串流），不是一次性 JSON
+GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料；每則附回答的 modelProvider / model）
+POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string, "model"?: { provider, model } }
+                                         （model 只用在這一次提問，省略就用預設模型），回傳 text/event-stream（SSE，
+                                         逐字串流，含一個說明由哪個模型回答的 model event），不是一次性 JSON
 GET    /ai/models                       可以選的模型：平台模型，加上有自有金鑰的廠商整理好的清單（標示能不能呼叫工具）；
                                          有 OpenRouter 金鑰時可以自己輸入模型 ID（openrouterCustom）
 GET    /me/default-model                目前的預設模型（沒選過就是平台模型）
@@ -363,6 +364,8 @@ CREATE TABLE qa_history (
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
     source_timestamps NUMERIC(10,2)[] NOT NULL,
+    model_provider VARCHAR(32),             -- 回答的模型：platform 或廠商；記錄模型之前是 NULL
+    model VARCHAR(200),
     created_at TIMESTAMP NOT NULL
 );
 CREATE INDEX ix_qa_history_job_id ON qa_history(job_id);
@@ -396,7 +399,7 @@ CREATE TABLE provider_keys (
     UNIQUE (user_id, provider)
 );
 
--- 預設模型：每位使用者一筆（沒有這一筆＝平台模型）；背景工作用它，問答之後可以臨時換
+-- 預設模型：每位使用者一筆（沒有這一筆＝平台模型）；背景工作用它，問答可以在提問當下臨時換
 CREATE TABLE default_models (
     user_id UUID PRIMARY KEY,
     provider VARCHAR(32) NOT NULL,          -- 有自有金鑰的廠商
@@ -455,7 +458,7 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
 | ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體 |
-| LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型是 HF Inference Providers 的 OpenAI 相容路由（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
+| LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型（問答可以臨時換成別的模型）：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型是 HF Inference Providers 的 OpenAI 相容路由（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
