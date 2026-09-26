@@ -12,4 +12,8 @@ public final class GrpcTimestamps {
     public static Instant toInstant(Timestamp timestamp) {
         return Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());
     }
+
+    public static Timestamp fromInstant(Instant instant) {
+        return Timestamp.newBuilder().setSeconds(instant.getEpochSecond()).setNanos(instant.getNano()).build();
+    }
 }
