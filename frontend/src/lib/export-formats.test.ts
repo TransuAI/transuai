@@ -5,6 +5,7 @@ import {
   buildExportContent,
   markdownReportFormat,
   toMarkdownReport,
+  toQuizMarkdown,
   toPlainText,
   toSrt,
   toTimestampedText,
@@ -254,5 +255,82 @@ describe('buildExportContent', () => {
     })
 
     expect(content.qaHistory.map((turn) => turn.question)).toEqual(['完成的'])
+  })
+})
+
+describe('toQuizMarkdown', () => {
+  const quiz = {
+    fileName: '光合作用.mp3',
+    // Built from local date parts so the expected local time below holds in any time zone.
+    madeAt: new Date(2026, 8, 26, 14, 7).toISOString(),
+    isStale: false,
+    questions: [
+      {
+        kind: 'multiple_choice' as const,
+        prompt: '光能被什麼吸收？',
+        options: ['粒線體', '葉綠體', '細胞核', '液泡'],
+        correctOption: 1,
+        explanation: '講者說葉綠體吸收光能。',
+        sourceTimestamps: [20.5, 65],
+      },
+      {
+        kind: 'true_false' as const,
+        prompt: '今天講的是光合作用。',
+        options: ['是', '否'],
+        correctOption: 0,
+        explanation: '開場就說了。',
+        sourceTimestamps: [],
+      },
+    ],
+  }
+
+  it('puts the questions and their options first and the answers with explanations in a last section', () => {
+    expect(toQuizMarkdown(quiz)).toBe(
+      [
+        '# 光合作用.mp3：測驗',
+        '',
+        '- 題數：2',
+        '- 產生時間：2026-09-26 14:07',
+        '',
+        '## 題目',
+        '',
+        '### 1. 光能被什麼吸收？',
+        '',
+        '- A. 粒線體',
+        '- B. 葉綠體',
+        '- C. 細胞核',
+        '- D. 液泡',
+        '',
+        '### 2. 今天講的是光合作用。',
+        '',
+        '- A. 是',
+        '- B. 否',
+        '',
+        '## 解答',
+        '',
+        '### 1. B. 葉綠體',
+        '',
+        '講者說葉綠體吸收光能。',
+        '',
+        '依據：[00:20]、[01:05]',
+        '',
+        '### 2. A. 是',
+        '',
+        '開場就說了。',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('flags a quiz made before the transcript was last edited', () => {
+    expect(toQuizMarkdown({ ...quiz, isStale: true })).toContain(
+      '- 產生時間：2026-09-26 14:07\n\n> 逐字稿在測驗產生後有修改，這份測驗可能過時\n\n## 題目',
+    )
+  })
+
+  it('keeps a multi-line question on its heading line', () => {
+    const multiLine = { ...quiz, questions: [{ ...quiz.questions[1], prompt: '第一行\n第二行' }] }
+
+    expect(toQuizMarkdown(multiLine)).toContain('### 1. 第一行 第二行\n')
   })
 })

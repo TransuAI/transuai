@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { ArrowLeft, FileText, Sparkles } from 'lucide-react'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { isSummaryStale } from '@/lib/summary-staleness'
+import { isSummaryStale } from '@/lib/staleness'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { SourcePane } from '@/pages/job-detail/source-pane'
@@ -145,6 +145,7 @@ export function CompletedWorkspace({
       isRequestingRegeneration={isRequestingRegeneration}
       usage={usage}
       quizzes={quizzes}
+      transcript={transcript}
       onRequestQuiz={onRequestQuiz}
       isRequestingQuiz={isRequestingQuiz}
       onQuizAttempted={onQuizAttempted}
@@ -180,7 +181,7 @@ export function CompletedWorkspace({
         </Button>
 
         <div className="flex items-center gap-2">
-          <ExportMenu source={{ job, transcript, summary, chapters, qaHistory }} />
+          <ExportMenu source={{ job, transcript, summary, chapters, qaHistory }} quizzes={quizzes} />
           <div className="flex items-center gap-2 lg:hidden">
             <Button variant="outline" size="sm" onClick={() => setSourceOpen(true)}>
               <FileText className="size-4" />

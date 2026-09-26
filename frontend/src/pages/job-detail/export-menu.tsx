@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
-import { jobsApi } from '@/lib/api'
+import { jobsApi, quizApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { downloadTextFile, openDownloadUrl } from '@/lib/download'
 import {
@@ -9,12 +9,16 @@ import {
   exportFileName,
   markdownReportFormat,
   PLAIN_TEXT_FORMAT,
+  QUIZ_MARKDOWN,
   SRT_FORMAT,
   TIMESTAMPED_TEXT_FORMAT,
+  toQuizMarkdown,
   VTT_FORMAT,
   type ExportFormat,
   type ExportSource,
 } from '@/lib/export-formats'
+import { formatShortDateTime } from '@/lib/media'
+import { isQuizStale } from '@/lib/staleness'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -24,12 +28,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import type { Quiz } from '@/types/api'
 
 const TRANSCRIPT_FORMATS: ExportFormat[] = [PLAIN_TEXT_FORMAT, TIMESTAMPED_TEXT_FORMAT, SRT_FORMAT, VTT_FORMAT]
 
 // 匯出（見 frontend CONTEXT.md）：把工作區已經載入的內容轉成檔案，全部在瀏覽器裡完成。
 // The export content is only assembled when a format is picked, not on every workspace render.
-export function ExportMenu({ source }: { source: ExportSource }) {
+export function ExportMenu({ source, quizzes }: { source: ExportSource; quizzes: Quiz[] }) {
   const hasTranscript = source.transcript !== null
   const [reportIncludesQa, setReportIncludesQa] = useState(false)
   const reportFormat = markdownReportFormat({ includeQa: reportIncludesQa })
@@ -41,6 +46,28 @@ export function ExportMenu({ source }: { source: ExportSource }) {
       mimeType: format.mimeType,
     })
   }
+  // 測驗：列表裡沒有題目，選了才載入整份測驗。
+  const doneQuizzes = quizzes.filter((quiz) => quiz.status === 'COMPLETED')
+  const downloadQuiz = (quiz: Quiz) =>
+    quizApi.get(source.job.jobId, quiz.id).then(
+      (full) => {
+        if (!full.questions?.length) {
+          toast.error('無法下載測驗')
+          return
+        }
+        downloadTextFile({
+          fileName: exportFileName(source.job.fileName, QUIZ_MARKDOWN.fileSuffix),
+          content: toQuizMarkdown({
+            fileName: source.job.fileName,
+            madeAt: full.completedAt ?? full.requestedAt,
+            isStale: isQuizStale(full, source.transcript),
+            questions: full.questions,
+          }),
+          mimeType: QUIZ_MARKDOWN.mimeType,
+        })
+      },
+      (err) => toast.error(err instanceof ApiError ? err.message : '無法下載測驗'),
+    )
   const downloadOriginal = () =>
     jobsApi.getMediaUrl(source.job.jobId, { download: true }).then(
       (response) => openDownloadUrl(response.downloadUrl),
@@ -76,6 +103,16 @@ export function ExportMenu({ source }: { source: ExportSource }) {
         >
           報告包含問答紀錄
         </DropdownMenuCheckboxItem>
+        {doneQuizzes.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            {doneQuizzes.map((quiz) => (
+              <DropdownMenuItem key={quiz.id} onSelect={() => void downloadQuiz(quiz)}>
+                下載測驗（{quiz.questionCount} 題，{formatShortDateTime(quiz.completedAt ?? quiz.requestedAt)}，Markdown）
+              </DropdownMenuItem>
+            ))}
+          </>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={!hasTranscript}

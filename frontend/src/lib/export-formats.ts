@@ -1,6 +1,6 @@
 import { speakerNameLookup } from '@/lib/speakers'
-import { isSummaryStale } from '@/lib/summary-staleness'
-import type { Chapter, Job, Summary, Transcript } from '@/types/api'
+import { isSummaryStale } from '@/lib/staleness'
+import type { Chapter, Job, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 // 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
 // 這裡只負責「內容長什麼樣」，下載 / 複製由呼叫端處理。
@@ -192,6 +192,46 @@ export function toMarkdownReport(content: ExportContent): string {
       }
     }
   }
+
+  return blocks.join('\n\n') + '\n'
+}
+
+// 測驗的 Markdown：題目與選項在前（可以印出來作答），最後一節是解答、解說與依據的時間戳。
+export interface QuizExport {
+  fileName: string
+  /** When the quiz was made. */
+  madeAt: string
+  isStale: boolean
+  questions: QuizQuestion[]
+}
+
+// 檔名結尾與 MIME（跟 ExportFormat 一樣），但輸入是整份測驗，所以 render 分開成 toQuizMarkdown。
+export const QUIZ_MARKDOWN = { fileSuffix: '-測驗.md', mimeType: 'text/markdown' } as const
+
+const optionLetter = (index: number) => String.fromCharCode(65 + index) // A, B, C, D
+
+// A Markdown heading or list item is a single line.
+const oneLine = (text: string) => text.replace(/\s*\n\s*/g, ' ')
+
+export function toQuizMarkdown(quiz: QuizExport): string {
+  const blocks: string[] = [`# ${quiz.fileName}：測驗`]
+  blocks.push(`- 題數：${quiz.questions.length}\n- 產生時間：${localDateTime(quiz.madeAt)}`)
+  if (quiz.isStale) blocks.push('> 逐字稿在測驗產生後有修改，這份測驗可能過時')
+
+  blocks.push('## 題目')
+  quiz.questions.forEach((question, i) => {
+    blocks.push(`### ${i + 1}. ${oneLine(question.prompt)}`)
+    blocks.push(question.options.map((option, j) => `- ${optionLetter(j)}. ${oneLine(option)}`).join('\n'))
+  })
+
+  blocks.push('## 解答')
+  quiz.questions.forEach((question, i) => {
+    blocks.push(`### ${i + 1}. ${optionLetter(question.correctOption)}. ${oneLine(question.options[question.correctOption])}`)
+    blocks.push(question.explanation)
+    if (question.sourceTimestamps.length > 0) {
+      blocks.push(`依據：${question.sourceTimestamps.map((seconds) => `[${formatClock(seconds)}]`).join('、')}`)
+    }
+  })
 
   return blocks.join('\n\n') + '\n'
 }

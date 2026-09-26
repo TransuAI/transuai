@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
 import { UsageSection } from '@/pages/job-detail/usage-section'
-import type { Chapter, JobUsage, Quiz, Summary } from '@/types/api'
+import type { Chapter, JobUsage, Quiz, Summary, Transcript } from '@/types/api'
 
 interface StudioPaneProps {
   jobId: string
@@ -22,6 +22,7 @@ interface StudioPaneProps {
   isRequestingRegeneration: boolean
   usage: JobUsage | null
   quizzes: Quiz[]
+  transcript: Transcript | null
   onRequestQuiz: (questionCount: number) => void
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
@@ -39,6 +40,7 @@ export function StudioPane({
   isRequestingRegeneration,
   usage,
   quizzes,
+  transcript,
   onRequestQuiz,
   isRequestingQuiz,
   onQuizAttempted,
@@ -128,6 +130,7 @@ export function StudioPane({
             <QuizSection
               jobId={jobId}
               quizzes={quizzes}
+              transcript={transcript}
               onRequestQuiz={onRequestQuiz}
               isRequesting={isRequestingQuiz}
               onSeek={onSeek}

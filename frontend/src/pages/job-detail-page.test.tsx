@@ -2216,3 +2216,69 @@ describe('JobDetailPage taking a quiz (作答)', () => {
     expect(await screen.findByText('第 1 / 2 題')).toBeInTheDocument()
   })
 })
+
+describe('JobDetailPage quiz staleness and export', () => {
+  const quizQuestions: QuizQuestion[] = [
+    {
+      kind: 'true_false',
+      prompt: '講者主張砍一成。',
+      options: ['是', '否'],
+      correctOption: 0,
+      explanation: '他說要砍一成。',
+      sourceTimestamps: [12],
+    },
+  ]
+
+  it('flags a quiz made from an older transcript, which can still be taken', async () => {
+    stubDesktopLayout()
+    vi.mocked(quizApi.list).mockResolvedValue([doneQuiz, { ...doneQuiz, id: 'quiz-old', sourceRevision: 0 }])
+    await renderCompletedJob({ ...mockTranscript, revision: 1 }, [], {})
+    const card = await screen.findByRole('region', { name: '測驗' })
+
+    const items = await within(card).findAllByRole('listitem')
+    expect(items).toHaveLength(2)
+    for (const item of items) {
+      expect(item).toHaveTextContent('逐字稿已修改，這份測驗可能過時')
+      expect(within(item).getByRole('button', { name: '作答' })).toBeEnabled()
+    }
+  })
+
+  it('does not flag a quiz made from the current transcript', async () => {
+    stubDesktopLayout()
+    vi.mocked(quizApi.list).mockResolvedValue([{ ...doneQuiz, sourceRevision: 1 }])
+    await renderCompletedJob({ ...mockTranscript, revision: 1 })
+    const card = await screen.findByRole('region', { name: '測驗' })
+
+    await within(card).findByRole('listitem')
+    expect(within(card).queryByText('逐字稿已修改，這份測驗可能過時')).not.toBeInTheDocument()
+  })
+
+  it('downloads a quiz as Markdown named after the uploaded file', async () => {
+    stubDesktopLayout()
+    const blobs: Blob[] = []
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      blobs.push(blob as Blob)
+      return 'blob:quiz'
+    })
+    const names: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      names.push(this.download)
+    })
+    vi.mocked(quizApi.list).mockResolvedValue([doneQuiz, { ...doneQuiz, id: 'quiz-generating', status: 'GENERATING' }])
+    vi.mocked(quizApi.get).mockResolvedValue({ ...doneQuiz, questionCount: 1, questions: quizQuestions })
+    await renderCompletedJob()
+    const user = userEvent.setup()
+    await within(await screen.findByRole('region', { name: '測驗' })).findAllByRole('listitem')
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    const items = await screen.findAllByRole('menuitem', { name: /^下載測驗/ })
+    expect(items).toHaveLength(1) // only a finished quiz has anything to export
+    await user.click(items[0])
+
+    await waitFor(() => expect(names).toEqual(['interview-測驗.md']))
+    expect(quizApi.get).toHaveBeenCalledWith('job-1', 'quiz-1')
+    const markdown = await blobs[0].text()
+    expect(markdown).toContain('### 1. 講者主張砍一成。\n\n- A. 是\n- B. 否')
+    expect(markdown).toContain('## 解答\n\n### 1. A. 是\n\n他說要砍一成。\n\n依據：[00:12]')
+  })
+})

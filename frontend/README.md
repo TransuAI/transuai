@@ -78,12 +78,12 @@ src/
     current-segment.ts 依播放時間找出「目前片段」(定義見 CONTEXT.md),二分搜尋
     download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>);開啟伺服器給的下載 URL(跨網域 presigned 連結靠回應的 Content-Disposition 下載)
     editor-keys.ts     就地編輯器(片段文字、講者名稱)共用的按鍵:Enter 儲存、Esc 取消,輸入法組字中不處理
-    export-formats.ts  匯出格式轉換(不依賴畫面):`buildExportContent` 把工作區內容組成匯出輸入,每種格式是一個 `ExportFormat`(檔名結尾、MIME、render):TXT 純文字 / 含時間戳、SRT、VTT、Markdown 報告(長度與建立時間、摘要、章節、逐字稿,可選問答紀錄——只匯出已完成的回答;摘要過時時附註);共用規則——已清空片段不匯出、兩位以上講者才標示講者、文字格式時間戳 mm:ss / h:mm:ss、檔名取原始檔名去副檔名
-    media.ts           檔案型別判斷、讀取媒體長度、格式化工具
+    export-formats.ts  匯出格式轉換(不依賴畫面):`buildExportContent` 把工作區內容組成匯出輸入,每種格式是一個 `ExportFormat`(檔名結尾、MIME、render):TXT 純文字 / 含時間戳、SRT、VTT、Markdown 報告(長度與建立時間、摘要、章節、逐字稿,可選問答紀錄——只匯出已完成的回答;摘要過時時附註);測驗另外是 `toQuizMarkdown`(輸入是整份測驗而不是工作區內容,檔名結尾與 MIME 在 `QUIZ_MARKDOWN`):題目與選項在前,最後一節是解答、解說與依據的時間戳,過時時附註;共用規則——已清空片段不匯出、兩位以上講者才標示講者、文字格式時間戳 mm:ss / h:mm:ss、檔名取原始檔名去副檔名
+    media.ts           檔案型別判斷、讀取媒體長度、格式化工具(長度、檔案大小、「9/26 14:07」這種簡短時間)
     providers.ts       自有金鑰支援的廠商與顯示名稱;模型怎麼稱呼(「平台模型(…)」/「OpenAI · gpt-5」)、兩個模型是不是同一個
     usage-format.ts    用量數字的格式:token 數加千分位、轉錄秒數換成分鐘(Job 用量與本月用量共用)
     speakers.ts        講者:依標籤查顯示名稱(名稱由後端決定,逐字稿與匯出共用)、是否只有一位講者(未清空片段中出現的講者 < 2 時所有講者顯示都隱藏)、要列出的講者(還有未清空片段的)、逐字稿只在換人的第一個片段顯示講者(已清空片段不顯示也不算換人)、依顯示順序從固定配色(index.css 的 --speaker-1…8)取顏色
-    summary-staleness.ts 判斷摘要與章節是否過時(依據的逐字稿 revision < 逐字稿目前的 revision);Studio 提示跟匯出報告共用
+    staleness.ts       判斷摘要與章節、測驗是否過時(依據的逐字稿 revision < 逐字稿目前的 revision);Studio 與測驗卡片的提示、匯出的報告與測驗共用
     transcript-search.ts 逐字稿搜尋比對:只比對片段文字、英文不分大小寫、不跨片段;依片段分組
   pages/
     login-page.tsx / register-page.tsx
@@ -96,7 +96,7 @@ src/
       provider-keys-section.tsx 自有金鑰:OpenAI / Anthropic / Google Gemini / OpenRouter 各一列,存入(後端先向廠商驗證,失敗顯示原因並保留輸入)、替換、刪除(先確認;預設模型正在用它時提示已改回平台模型);存入後只顯示末四碼
     job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked;自動跟隨的狀態也在這層;版面切換重新掛載 media element 時用 use-playback-continuity 接著播)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
     job-detail/
-      export-menu.tsx          工作區頂列的「匯出」下拉選單(桌面 / 手機都有):下載各格式(報告可勾選是否包含問答紀錄)、複製逐字稿 / 摘要(以上全部在瀏覽器產生),以及下載原始檔(向 Gateway 要 `media-url?download=true` 的附件 URL)
+      export-menu.tsx          工作區頂列的「匯出」下拉選單(桌面 / 手機都有):下載各格式(報告可勾選是否包含問答紀錄)、每份已完成的測驗一項(選了才載入題目,轉成測驗 Markdown)、複製逐字稿 / 摘要(以上全部在瀏覽器產生),以及下載原始檔(向 Gateway 要 `media-url?download=true` 的附件 URL)
       completed-workspace.tsx  COMPLETED 的三欄工作區(桌面 grid / 手機 Sheet,確保同時只有一個 media element:桌面在來源欄、手機在迷你播放器;來源 Sheet 打開時聚焦 Sheet 本身而非搜尋框;標了 data-consumes-escape 的控制項(有內容的搜尋框、片段編輯器)按 Esc 做自己的事,不會關 Sheet)
       mini-player.tsx          手機版常駐底部播放列:播放 / 暫停、進度條、時間、一行目前片段文字(多位講者時前面加「名稱：」),影片顯示 16:9 小畫面
       source-pane.tsx          來源欄:檔案資訊、播放器(只有桌面 grid 那份有,由 completed-workspace 以 player slot 傳入)、講者區塊、逐字稿
@@ -106,7 +106,7 @@ src/
       usage-section.tsx        Studio 欄的「用量」區塊:這個 Job 每一次 LLM 呼叫與轉錄(時間、功能、模型、token 或分鐘數;未知顯示「—」,失敗標示),附總計;Job 完成時載入,每次問答結束、重新產生完成後重新載入
       timestamp-button.tsx     錄音裡的一個時間點,點了跳到那裡播放(問答的引用、測驗結果共用)
       quiz-dialog.tsx          作答視窗:每份測驗各自掛載(不會顯示或收到另一份的內容),載入失敗可以重試;載入整份測驗,一次一題(上一題 / 下一題,作答途中不顯示答案與解說),每題都選了才能送出;送出後由後端計分,結果頁是總分與每題的「你的答案 / 正確答案 / 解說 / 時間戳」(點時間戳跳到錄音對應的位置,沿用 seek);「重做」從第一題重來
-      quiz-section.tsx         Studio 欄的「測驗」卡片:題數(5 / 10 / 20,預設 10)與「產生測驗」、測驗列表(題數、產生時間(產生中時是要求時間)、「由 某模型 產生」、最佳成績、「作答」開作答視窗;產生中顯示「產生中…」;失敗顯示原因與「再試一次」,用同樣的題數再產生一份)
+      quiz-section.tsx         Studio 欄的「測驗」卡片:題數(5 / 10 / 20,預設 10)與「產生測驗」、測驗列表(題數、產生時間(產生中時是要求時間)、「由 某模型 產生」、最佳成績、「作答」開作答視窗、依據舊版逐字稿時提示「逐字稿已修改,這份測驗可能過時」(仍可作答);產生中顯示「產生中…」;失敗顯示原因與「再試一次」,用同樣的題數再產生一份)
       studio-pane.tsx          Studio 欄:AI 摘要(附「由 某模型 產生」)、章節、測驗、用量;逐字稿被編輯後顯示「逐字稿已修改,摘要與章節可能過時」與「重新產生摘要與章節」按鈕(產生中顯示「重新產生中…」)
       transcript-search-bar.tsx 逐字稿搜尋列(搜尋框、n / N、上一個 / 下一個;Enter / Shift+Enter / Esc)
       segment-speaker-menu.tsx 片段的「改講者」選單(還有片段的講者 + 「新增講者…」;點片段上的講者名稱也會打開);新增講者時片段前面出現名稱輸入框(可留空＝「講者 N」)。講者分離之前的舊逐字稿新增講者後會重新讀一次逐字稿(其他片段被後端一起歸給講者 1)
@@ -122,4 +122,4 @@ src/
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
-- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、測驗卡片(產生、輪詢、失敗與再試一次、手機 Studio Sheet)與作答(途中沒有答案、結果頁、點時間戳跳轉、重做與最佳成績)、用量區塊與重新載入、講者區塊與顏色、講者改名、改片段講者 / 新增講者(單一講者也能指定出第二位)、只有一位講者時隱藏、換人時顯示講者名稱、迷你播放器與匯出帶講者名稱)跟 sidebar / 深色模式;設定頁的預設模型、自有金鑰與本月用量另有頁面測試(`settings-page.test.tsx`);匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
+- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、測驗卡片(產生、輪詢、失敗與再試一次、手機 Studio Sheet)與作答(途中沒有答案、結果頁、點時間戳跳轉、重做與最佳成績)、測驗的過時提示與匯出、用量區塊與重新載入、講者區塊與顏色、講者改名、改片段講者 / 新增講者(單一講者也能指定出第二位)、只有一位講者時隱藏、換人時顯示講者名稱、迷你播放器與匯出帶講者名稱)跟 sidebar / 深色模式;設定頁的預設模型、自有金鑰與本月用量另有頁面測試(`settings-page.test.tsx`);匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。

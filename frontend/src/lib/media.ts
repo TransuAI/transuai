@@ -29,6 +29,13 @@ export function formatDuration(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
+/** A moment in local time as 「9/26 14:07」. */
+export function formatShortDateTime(isoTimestamp: string): string {
+  const date = new Date(isoTimestamp)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   const units = ['KB', 'MB', 'GB']
