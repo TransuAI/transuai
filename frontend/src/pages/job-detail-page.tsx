@@ -182,10 +182,20 @@ export function JobDetailPage() {
     )
   }
 
-  // 改片段的講者也是一次編輯：用回應的片段、講者列表（可能多了新增的講者）跟版本號更新逐字稿。
+  // 改片段的講者也是一次編輯：用回應的片段、講者列表（可能多了新增的講者）跟版本號更新逐字稿。講者分離之前的
+  // 舊逐字稿沒有講者，後端會把其他片段一起歸給新的講者 1——那些片段不在回應裡，直接重新讀一次逐字稿。
   const handleAssignSpeaker = async (segmentId: string, assignment: SpeakerAssignment) => {
     if (!jobId) return
+    const hadNoSpeakers = transcript?.speakers.length === 0
     const { segment, speakers, revision } = await transcriptApi.assignSegmentSpeaker(jobId, segmentId, assignment)
+    if (hadNoSpeakers) {
+      // The change is saved either way; if re-reading fails, the page just shows it once reloaded.
+      const reloaded = await transcriptApi.get(jobId).catch(() => null)
+      if (reloaded) {
+        setTranscript(reloaded)
+        return
+      }
+    }
     setTranscript((prev) =>
       prev
         ? { ...prev, revision, speakers, segments: prev.segments.map((s) => (s.id === segment.id ? segment : s)) }

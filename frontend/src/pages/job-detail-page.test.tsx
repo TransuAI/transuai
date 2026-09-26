@@ -774,7 +774,7 @@ describe('JobDetailPage mini player (COMPLETED, narrow viewport)', () => {
 })
 
 // 講者 1 speaks first, then 講者 2, then 講者 1 again.
-const diarizedTranscript: Transcript = {
+const multiSpeakerTranscript: Transcript = {
   jobId: 'job-1',
   language: 'zh-TW',
   fullText: '',
@@ -795,8 +795,8 @@ const diarizedTranscript: Transcript = {
 
 // A single-speaker recording (a solo podcast): speaker labels would only be noise.
 const soloTranscript: Transcript = {
-  ...diarizedTranscript,
-  segments: diarizedTranscript.segments.map((segment) => ({ ...segment, speakerLabel: 'S1' })),
+  ...multiSpeakerTranscript,
+  segments: multiSpeakerTranscript.segments.map((segment) => ({ ...segment, speakerLabel: 'S1' })),
   speakers: [{ label: 'S1', displayName: '講者 1', displayOrder: 1 }],
 }
 
@@ -805,7 +805,7 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
 
   it("shows the speaker's name only on the first segment of each turn", async () => {
     stubDesktopLayout()
-    await renderCompletedJob(diarizedTranscript)
+    await renderCompletedJob(multiSpeakerTranscript)
 
     expect(segmentRow('歡迎收聽')).toHaveTextContent('主持人：歡迎收聽')
     expect(segmentRow('今天請到來賓')).not.toHaveTextContent('主持人')
@@ -816,11 +816,11 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
   it('does not start a new turn after a cleared segment of the same speaker', async () => {
     stubDesktopLayout()
     await renderCompletedJob({
-      ...diarizedTranscript,
+      ...multiSpeakerTranscript,
       segments: [
-        diarizedTranscript.segments[0],
-        { ...diarizedTranscript.segments[2], text: '' },
-        diarizedTranscript.segments[3],
+        multiSpeakerTranscript.segments[0],
+        { ...multiSpeakerTranscript.segments[2], text: '' },
+        multiSpeakerTranscript.segments[3],
       ],
     })
 
@@ -829,7 +829,7 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
 
   it('lists the speakers who have segments above the transcript, each with its own colour', async () => {
     stubDesktopLayout()
-    await renderCompletedJob(diarizedTranscript)
+    await renderCompletedJob(multiSpeakerTranscript)
 
     const panel = screen.getByRole('list', { name: '講者' })
     const items = within(panel).getAllByRole('listitem')
@@ -840,12 +840,26 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
 
   it("marks a speaker's turn in the transcript with the speaker's colour", async () => {
     stubDesktopLayout()
-    await renderCompletedJob(diarizedTranscript)
+    await renderCompletedJob(multiSpeakerTranscript)
 
     const panelColour = (within(screen.getByRole('list', { name: '講者' })).getByText('講者 2').closest('li')
       ?.querySelector('[data-speaker-colour]') as HTMLElement).style.backgroundColor
     const turnColour = (segmentRow('大家好').querySelector('[data-speaker-colour]') as HTMLElement).style.backgroundColor
     expect(turnColour).toBe(panelColour)
+  })
+
+  it('does not list a speaker whose segments have all been cleared', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob({
+      ...multiSpeakerTranscript,
+      segments: [
+        ...multiSpeakerTranscript.segments,
+        { id: 'seg-d5', startTime: 8, endTime: 9, speakerLabel: 'S3', text: '', originalText: '被清空的話' },
+      ],
+    })
+
+    const items = within(screen.getByRole('list', { name: '講者' })).getAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual(['主持人', '講者 2'])
   })
 
   it('hides everything about speakers when only one speaker was found', async () => {
@@ -859,8 +873,8 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
   it("counts only segments that aren't cleared when deciding whether there is more than one speaker", async () => {
     stubDesktopLayout()
     await renderCompletedJob({
-      ...diarizedTranscript,
-      segments: diarizedTranscript.segments.map((segment) => (segment.speakerLabel === 'S2' ? { ...segment, text: '' } : segment)),
+      ...multiSpeakerTranscript,
+      segments: multiSpeakerTranscript.segments.map((segment) => (segment.speakerLabel === 'S2' ? { ...segment, text: '' } : segment)),
     })
 
     expect(screen.queryByRole('list', { name: '講者' })).not.toBeInTheDocument()
@@ -876,7 +890,7 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
     })
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     stubDesktopLayout()
-    await renderCompletedJob(diarizedTranscript)
+    await renderCompletedJob(multiSpeakerTranscript)
 
     await user.click(screen.getByRole('button', { name: '匯出' }))
     await user.click(await screen.findByRole('menuitem', { name: '下載字幕（SRT）' }))
@@ -891,7 +905,7 @@ describe('JobDetailPage renaming a speaker (COMPLETED, desktop layout)', () => {
   async function startRenaming(currentName: string) {
     const user = userEvent.setup()
     stubDesktopLayout()
-    await renderCompletedJob(diarizedTranscript)
+    await renderCompletedJob(multiSpeakerTranscript)
     await user.click(within(panel()).getByRole('button', { name: `改名：${currentName}` }))
     return { user, input: within(panel()).getByRole('textbox', { name: '講者名稱' }) }
   }
@@ -947,7 +961,7 @@ describe('JobDetailPage renaming a speaker (COMPLETED, desktop layout)', () => {
 
   it('cancels a rename on Escape inside the Source Sheet without closing the Sheet (narrow viewport)', async () => {
     const user = userEvent.setup()
-    await renderCompletedJob(diarizedTranscript)
+    await renderCompletedJob(multiSpeakerTranscript)
     await user.click(screen.getByRole('button', { name: '來源' }))
     const sheet = await screen.findByRole('dialog')
 
@@ -983,7 +997,7 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
   }
 
   it('offers the speakers who have segments, marking the current one, and a way to add a speaker', async () => {
-    const { menu } = await openSpeakerMenu(diarizedTranscript, '今天請到來賓')
+    const { menu } = await openSpeakerMenu(multiSpeakerTranscript, '今天請到來賓')
 
     const choices = within(menu).getAllByRole('menuitemradio')
     expect(choices.map((choice) => choice.textContent)).toEqual(['主持人', '講者 2'])
@@ -993,11 +1007,11 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
 
   it('gives the segment to the chosen speaker and marks the summary as possibly 過時', async () => {
     vi.mocked(transcriptApi.assignSegmentSpeaker).mockResolvedValue({
-      segment: { ...diarizedTranscript.segments[1], speakerLabel: 'S2' },
-      speakers: diarizedTranscript.speakers,
+      segment: { ...multiSpeakerTranscript.segments[1], speakerLabel: 'S2' },
+      speakers: multiSpeakerTranscript.speakers,
       revision: 1,
     })
-    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '今天請到來賓')
+    const { user, menu } = await openSpeakerMenu(multiSpeakerTranscript, '今天請到來賓')
 
     await user.click(within(menu).getByRole('menuitemradio', { name: '講者 2' }))
 
@@ -1009,7 +1023,7 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
   it("opens the same menu from the speaker's name at the start of a turn", async () => {
     const user = userEvent.setup()
     stubDesktopLayout()
-    await renderCompletedJob(diarizedTranscript)
+    await renderCompletedJob(multiSpeakerTranscript)
 
     await user.click(within(segmentRow('大家好')).getByRole('button', { name: '改講者：講者 2' }))
 
@@ -1017,7 +1031,7 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
   })
 
   it('does not send anything when the current speaker is chosen', async () => {
-    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '今天請到來賓')
+    const { user, menu } = await openSpeakerMenu(multiSpeakerTranscript, '今天請到來賓')
 
     await user.click(within(menu).getByRole('menuitemradio', { name: '主持人' }))
 
@@ -1026,11 +1040,11 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
 
   it('adds a new speaker, with a name, for the segment', async () => {
     vi.mocked(transcriptApi.assignSegmentSpeaker).mockResolvedValue({
-      segment: { ...diarizedTranscript.segments[3], speakerLabel: 'S4' },
-      speakers: [...diarizedTranscript.speakers, { label: 'S4', displayName: '李大華', displayOrder: 4 }],
+      segment: { ...multiSpeakerTranscript.segments[3], speakerLabel: 'S4' },
+      speakers: [...multiSpeakerTranscript.speakers, { label: 'S4', displayName: '李大華', displayOrder: 4 }],
       revision: 1,
     })
-    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '先聊聊近況')
+    const { user, menu } = await openSpeakerMenu(multiSpeakerTranscript, '先聊聊近況')
 
     await user.click(within(menu).getByRole('menuitem', { name: '新增講者…' }))
     await user.type(within(segmentRow('先聊聊近況')).getByRole('textbox', { name: '新講者名稱' }), '李大華{Enter}')
@@ -1056,8 +1070,40 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
     expect(segmentRow('大家好')).toHaveTextContent('講者 2：大家好')
   })
 
+  it('shows both speakers when a transcript from before speaker separation gets its first new speaker', async () => {
+    // Such a transcript has no speakers at all; the backend gives the other segments to a new 講者 1.
+    const oldTranscript: Transcript = {
+      ...soloTranscript,
+      segments: soloTranscript.segments.map((segment) => ({ ...segment, speakerLabel: null })),
+      speakers: [],
+    }
+    const speakers = [
+      { label: 'S1', displayName: '講者 1', displayOrder: 1 },
+      { label: 'S2', displayName: '講者 2', displayOrder: 2 },
+    ]
+    vi.mocked(transcriptApi.assignSegmentSpeaker).mockResolvedValue({
+      segment: { ...oldTranscript.segments[2], speakerLabel: 'S2' },
+      speakers,
+      revision: 1,
+    })
+    const { user, menu } = await openSpeakerMenu(oldTranscript, '大家好')
+    vi.mocked(transcriptApi.get).mockResolvedValue({
+      ...oldTranscript,
+      revision: 1,
+      segments: oldTranscript.segments.map((segment, i) => ({ ...segment, speakerLabel: i === 2 ? 'S2' : 'S1' })),
+      speakers,
+    })
+
+    await user.click(within(menu).getByRole('menuitem', { name: '新增講者…' }))
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByRole('list', { name: '講者' })).toBeInTheDocument()
+    expect(segmentRow('歡迎收聽')).toHaveTextContent('講者 1：歡迎收聽')
+    expect(segmentRow('大家好')).toHaveTextContent('講者 2：大家好')
+  })
+
   it('cancels adding a speaker on Escape', async () => {
-    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '先聊聊近況')
+    const { user, menu } = await openSpeakerMenu(multiSpeakerTranscript, '先聊聊近況')
 
     await user.click(within(menu).getByRole('menuitem', { name: '新增講者…' }))
     await user.keyboard('王{Escape}')
@@ -1068,7 +1114,7 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
 
   it('says so when changing the speaker fails', async () => {
     vi.mocked(transcriptApi.assignSegmentSpeaker).mockRejectedValue(new Error('network'))
-    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '今天請到來賓')
+    const { user, menu } = await openSpeakerMenu(multiSpeakerTranscript, '今天請到來賓')
 
     await user.click(within(menu).getByRole('menuitemradio', { name: '講者 2' }))
 
@@ -1078,7 +1124,7 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
 
 describe('JobDetailPage mini player speakers (COMPLETED, narrow viewport)', () => {
   it("puts the current speaker's name before the current segment's text", async () => {
-    await renderCompletedJob(diarizedTranscript)
+    await renderCompletedJob(multiSpeakerTranscript)
 
     playTo(renderedMediaElement(), 5)
 

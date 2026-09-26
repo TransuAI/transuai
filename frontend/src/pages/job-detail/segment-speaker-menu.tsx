@@ -1,7 +1,5 @@
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import { UserRoundPen } from 'lucide-react'
-import { toast } from 'sonner'
-import { handleEditorKeys } from '@/lib/editor-keys'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,38 +78,5 @@ export function SegmentSpeakerMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-/** Names the speaker being added for a segment (optional: an empty name means 「講者 N」). */
-export function NewSpeakerEditor({ onSave, onDone }: { onSave: (name: string) => Promise<void>; onDone: () => void }) {
-  const [draft, setDraft] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-
-  const save = async () => {
-    setIsSaving(true)
-    try {
-      await onSave(draft.trim())
-      onDone()
-    } catch {
-      toast.error('改講者失敗')
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <input
-      aria-label="新講者名稱"
-      placeholder="新講者名稱（可留空）"
-      // Esc here cancels; the Source Sheet must not treat it as "close" (see completed-workspace.tsx).
-      data-consumes-escape=""
-      autoFocus
-      maxLength={100}
-      value={draft}
-      disabled={isSaving}
-      onChange={(event) => setDraft(event.target.value)}
-      onKeyDown={(event) => handleEditorKeys(event, { save: () => void save(), cancel: onDone })}
-      className="mr-1.5 field-sizing-content min-w-40 rounded-md border bg-background px-1.5 py-0.5 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
-    />
   )
 }

@@ -5,7 +5,8 @@ import { handleEditorKeys } from '@/lib/editor-keys'
 import { formatDuration } from '@/lib/media'
 import type { TranscriptMatch } from '@/lib/transcript-search'
 import { cn } from '@/lib/utils'
-import { NewSpeakerEditor, SegmentSpeakerMenu } from '@/pages/job-detail/segment-speaker-menu'
+import { SegmentSpeakerMenu } from '@/pages/job-detail/segment-speaker-menu'
+import { SpeakerNameInput } from '@/pages/job-detail/speaker-name-input'
 import { SpeakerDot } from '@/pages/job-detail/speaker-dot'
 import type { Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
 
@@ -30,6 +31,8 @@ function HighlightedText({ text, matches, activeStart }: { text: string; matches
   if (cursor < text.length) parts.push(text.slice(cursor))
   return <>{parts}</>
 }
+
+const ASSIGN_SPEAKER_FAILED = '改講者失敗'
 
 interface SegmentRowProps {
   segment: TranscriptSegment
@@ -111,7 +114,7 @@ export function SegmentRow({
     try {
       await onAssignSpeaker({ speakerLabel: label })
     } catch {
-      toast.error('改講者失敗')
+      toast.error(ASSIGN_SPEAKER_FAILED)
     }
   }
   const hoverAction =
@@ -159,9 +162,15 @@ export function SegmentRow({
         <>
           <p className="min-w-0 flex-1 leading-relaxed">
             {isAddingSpeaker ? (
-              <NewSpeakerEditor
+              <SpeakerNameInput
+                label="新講者名稱"
+                initialName=""
+                placeholder="新講者名稱（可留空）"
+                failureMessage={ASSIGN_SPEAKER_FAILED}
+                saveUnchanged
                 onSave={(name) => onAssignSpeaker({ newSpeaker: { name } })}
                 onDone={() => setIsAddingSpeaker(false)}
+                className="mr-1.5 min-w-40 text-sm"
               />
             ) : (
               turnSpeaker && (

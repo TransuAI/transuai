@@ -19,9 +19,9 @@ export function hasMultipleSpeakers(segments: TranscriptSegment[]): boolean {
   return labels.size >= 2
 }
 
-/** The speakers to list: those that still have at least one segment, in display order. */
+/** The speakers to list: those with at least one segment that isn't cleared, in display order. */
 export function speakersWithSegments(segments: TranscriptSegment[], speakers: Speaker[]): Speaker[] {
-  const labels = new Set(segments.map((segment) => segment.speakerLabel))
+  const labels = new Set(segments.filter((segment) => segment.text !== '').map((segment) => segment.speakerLabel))
   return speakers.filter((speaker) => labels.has(speaker.label))
 }
 
