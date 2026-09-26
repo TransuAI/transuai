@@ -65,6 +65,21 @@ service AiService {
   // 同一份測驗可以重做，每次作答都保存。
   rpc SubmitQuizAttempt(SubmitQuizAttemptRequest) returns (QuizAttemptResult);
 
+  // 已連結的帳號（見 ai-service/CONTEXT.md）：Google、Notion 各一個，狀態是已連結、已失效或未連結。存取權杖過期時會先
+  // 用 refresh token 換新；對方拒絕（授權被撤銷、refresh token 失效）就標成已失效，暫時連不上則維持原狀。
+  // 權杖加密存在 ai-service，永遠不會出現在任何回應裡。
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  // 開始連結：記下這次授權（state；Notion 另外用 PKCE，第一次會先向 Notion 動態註冊 client），回傳要把使用者轉過去的
+  // 授權網址。redirect_uri 是 Gateway 的回呼網址，完成時用同一個。service 不認得回 INVALID_ARGUMENT；伺服器沒設定
+  // Google OAuth client 或加密主金鑰回 FAILED_PRECONDITION；連不上 Notion 註冊 client 回 UNAVAILABLE。
+  rpc StartConnection(StartConnectionRequest) returns (StartConnectionResponse);
+  // 完成連結（Gateway 的回呼）：用 state 找回開始連結的使用者，拿 code 換權杖並加密保存。state 不認得、過期、用過，
+  // 或 browser_binding 對不上回 INVALID_ARGUMENT；使用者在對方那邊拒絕（error 有值）或換權杖失敗回 FAILED_PRECONDITION。state 一律只能用一次。
+  rpc CompleteConnection(CompleteConnectionRequest) returns (CompleteConnectionResponse);
+  // 中斷連結：向對方撤銷授權並刪除權杖。撤銷失敗（例如連不上）時權杖仍然刪除，revoked 是 false；對方說權杖本來就已經
+  // 無效（授權早就不在了）算撤銷成功。
+  rpc DeleteConnection(DeleteConnectionRequest) returns (DeleteConnectionResponse);
+
   // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
   // 取得的使用者，不另外驗證。
   //
@@ -143,6 +158,67 @@ message Quiz {
   repeated QuizQuestion questions = 11;
   // 所有作答裡答對最多的題數；還沒作答過不設定。
   optional int32 best_correct_count = 12;
+}
+
+enum ConnectionStatus {
+  CONNECTION_STATUS_UNSPECIFIED = 0;
+  CONNECTION_STATUS_NOT_CONNECTED = 1;
+  CONNECTION_STATUS_CONNECTED = 2;
+  // 授權過期又換不到新的，或被使用者在對方那邊撤銷：要重新連結。
+  CONNECTION_STATUS_INVALID = 3;
+}
+
+message ListConnectionsRequest {
+  string user_id = 1;
+}
+
+message ListConnectionsResponse {
+  // 每個支援的服務一筆（google、notion），包含未連結的。
+  repeated Connection connections = 1;
+}
+
+message Connection {
+  // "google" 或 "notion"
+  string service = 1;
+  ConnectionStatus status = 2;
+  // 連結的時間；未連結時不設定。
+  google.protobuf.Timestamp connected_at = 3;
+}
+
+message StartConnectionRequest {
+  string user_id = 1;
+  string service = 2;
+  string redirect_uri = 3;
+  // Gateway 放進瀏覽器 cookie 的隨機值：只存它的雜湊，回呼時要帶同一個值，這次授權才算數——state 綁定開始連結的那個瀏覽器，
+  // 別人拿到授權網址誘騙使用者同意，也連不到自己的帳號上。不能是空的（否則 INVALID_ARGUMENT）。
+  string browser_binding = 4;
+}
+
+message StartConnectionResponse {
+  string authorize_url = 1;
+}
+
+message CompleteConnectionRequest {
+  string service = 1;
+  string state = 2;
+  string code = 3;
+  // 對方回呼帶的 error（例如使用者按了拒絕的 access_denied）；沒有就是空字串。
+  string error = 4;
+  // 回呼時瀏覽器帶回來的 cookie 值（見 StartConnectionRequest.browser_binding）；對不上就 INVALID_ARGUMENT。
+  string browser_binding = 5;
+}
+
+message CompleteConnectionResponse {
+  string user_id = 1;
+}
+
+message DeleteConnectionRequest {
+  string user_id = 1;
+  string service = 2;
+}
+
+message DeleteConnectionResponse {
+  bool revoked = 1;
 }
 
 message SubmitQuizAttemptRequest {
