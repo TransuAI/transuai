@@ -37,6 +37,8 @@ service AiService {
 message Summary {
   string job_id = 1;
   string summary_text = 2;
+  // 這份摘要（跟同一次產生的章節）依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時。
+  int32 source_revision = 3;
 }
 
 message GetSummaryRequest {

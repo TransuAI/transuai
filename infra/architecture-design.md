@@ -155,7 +155,7 @@ PATCH  /transcripts/{jobId}/segments/{segmentId}   編輯片段文字，body { "
 ### 3.4 AI Service
 
 ```
-GET    /summary/{jobId}                 取得摘要
+GET    /summary/{jobId}                 取得摘要（含 sourceRevision：依據的逐字稿 revision，前端比對判斷過時）
 GET    /chapters/{jobId}                取得章節列表
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string }，
@@ -266,15 +266,18 @@ CREATE TABLE transcript_segments (
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
+-- id 由應用程式產生（uuid4），不靠資料庫預設值
 CREATE TABLE summaries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    job_id UUID NOT NULL UNIQUE,
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL,
     summary_text TEXT,
-    created_at TIMESTAMPTZ DEFAULT now()
+    source_revision INT NOT NULL DEFAULT 0,  -- 依據的逐字稿 revision；小於逐字稿目前的 revision＝過時（章節共用）
+    created_at TIMESTAMP NOT NULL
 );
+CREATE UNIQUE INDEX ix_summaries_job_id ON summaries(job_id);
 
 CREATE TABLE chapters (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     job_id UUID NOT NULL,
     title VARCHAR(200) NOT NULL,
     start_time NUMERIC(10,2) NOT NULL,
@@ -283,26 +286,27 @@ CREATE TABLE chapters (
 CREATE INDEX ix_chapters_job_id ON chapters(job_id);
 
 CREATE TABLE embeddings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     job_id UUID NOT NULL,
-    chunk_text TEXT NOT NULL,
+    chunk_text TEXT NOT NULL,                -- 一個（未清空的）片段；編輯後由 transcript.edited 個別更新
     start_time NUMERIC(10,2),
     end_time NUMERIC(10,2),
-    embedding vector(1024),                 -- 依所選 embedding model 維度調整，目前用 1024
-    created_at TIMESTAMPTZ DEFAULT now()
+    embedding vector(1024) NOT NULL,         -- 依所選 embedding model 維度調整，目前用 1024
+    created_at TIMESTAMP NOT NULL
 );
-CREATE INDEX idx_embeddings_job_id ON embeddings(job_id);
+CREATE INDEX ix_embeddings_job_id ON embeddings(job_id);
 -- ivfflat 向量索引還沒建：MVP 資料量小、查詢一定先用 job_id 過濾縮小範圍，先不做這層優化
 
 CREATE TABLE qa_history (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     job_id UUID NOT NULL,
     user_id UUID NOT NULL,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
-    source_timestamps NUMERIC(10,2)[],
-    created_at TIMESTAMPTZ DEFAULT now()
+    source_timestamps NUMERIC(10,2)[] NOT NULL,
+    created_at TIMESTAMP NOT NULL
 );
+CREATE INDEX ix_qa_history_job_id ON qa_history(job_id);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
