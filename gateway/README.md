@@ -82,6 +82,7 @@ docker compose up -d
 | `GET` | `/transcripts/{jobId}/segments` | 只要片段列表，底層還是同一支 `GetTranscript`，這裡只是回應裁切成 `segments` 陣列（前端目前沒有用這支） |
 | `PATCH` | `/transcripts/{jobId}/segments/{segmentId}` | 編輯片段文字，body `{ text }`（空字串＝清空、送回 `originalText`＝還原），回傳 `{ segment, revision }`，轉給 `UpdateSegmentText` |
 | `PATCH` | `/transcripts/{jobId}/speakers/{label}` | 替講者命名，body `{ name }`（空字串＝恢復預設名稱「講者 N」），回傳 `{ speaker, revision }`，轉給 `RenameSpeaker` |
+| `PUT` | `/transcripts/{jobId}/segments/{segmentId}/speaker` | 改片段的講者，body `{ speakerLabel }`（改成現有講者）或 `{ newSpeaker: { name } }`（新增講者，`name` 可省略＝預設名稱），兩者恰好給一個否則 400；回傳 `{ segment, speakers, revision }`，轉給 `AssignSegmentSpeaker` |
 
 ### AI（`AiController` → `ai-service`）—— 需要登入，Gateway 用 `JobOwnershipGuard` 做 ownership 檢查
 

@@ -6,12 +6,15 @@ import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.gateway.grpc.JobOwnershipGuard;
+import com.transuai.gateway.web.dto.AssignSegmentSpeakerRequestDto;
 import com.transuai.gateway.web.dto.RenameSpeakerRequestDto;
 import com.transuai.gateway.web.dto.SegmentDto;
+import com.transuai.gateway.web.dto.SegmentSpeakerUpdateDto;
 import com.transuai.gateway.web.dto.SegmentUpdateDto;
 import com.transuai.gateway.web.dto.SpeakerDto;
 import com.transuai.gateway.web.dto.SpeakerUpdateDto;
@@ -19,7 +22,10 @@ import com.transuai.gateway.web.dto.TranscriptDto;
 import com.transuai.gateway.web.dto.UpdateSegmentTextRequestDto;
 
 import lombok.RequiredArgsConstructor;
+import transuai.transcription.v1.Transcription.AssignSegmentSpeakerRequest;
+import transuai.transcription.v1.Transcription.AssignSegmentSpeakerResponse;
 import transuai.transcription.v1.Transcription.GetTranscriptRequest;
+import transuai.transcription.v1.Transcription.NewSpeaker;
 import transuai.transcription.v1.Transcription.RenameSpeakerRequest;
 import transuai.transcription.v1.Transcription.RenameSpeakerResponse;
 import transuai.transcription.v1.Transcription.Speaker;
@@ -85,6 +91,30 @@ public class TranscriptionController {
                         .setName(request.name())
                         .build());
         return new SpeakerUpdateDto(toDto(response.getSpeaker()), response.getRevision());
+    }
+
+    // 把片段改成另一位講者，或新增一位講者給它，見 transcription.proto 的 AssignSegmentSpeaker。
+    @PutMapping("/transcripts/{jobId}/segments/{segmentId}/speaker")
+    public SegmentSpeakerUpdateDto assignSegmentSpeaker(@CurrentUserId UUID userId, @PathVariable String jobId,
+            @PathVariable String segmentId, @RequestBody AssignSegmentSpeakerRequestDto request) {
+        if (request == null || (request.speakerLabel() == null) == (request.newSpeaker() == null)) {
+            throw new IllegalArgumentException("exactly one of speakerLabel or newSpeaker is required"); // → 400
+        }
+        jobOwnershipGuard.check(userId, jobId);
+        AssignSegmentSpeakerRequest.Builder grpcRequest = AssignSegmentSpeakerRequest.newBuilder()
+                .setJobId(jobId)
+                .setSegmentId(segmentId);
+        if (request.speakerLabel() != null) {
+            grpcRequest.setSpeakerLabel(request.speakerLabel());
+        } else {
+            String name = request.newSpeaker().name();
+            grpcRequest.setNewSpeaker(NewSpeaker.newBuilder().setName(name == null ? "" : name));
+        }
+        AssignSegmentSpeakerResponse response = transcriptionServiceStub.assignSegmentSpeaker(grpcRequest.build());
+        List<SpeakerDto> speakers = response.getSpeakersList().stream()
+                .map(TranscriptionController::toDto)
+                .toList();
+        return new SegmentSpeakerUpdateDto(toDto(response.getSegment()), speakers, response.getRevision());
     }
 
     private Transcript fetchTranscript(String jobId) {
