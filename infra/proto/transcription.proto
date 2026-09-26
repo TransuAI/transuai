@@ -14,6 +14,12 @@ service TranscriptionService {
   // 永遠不變。job_id / segment_id 格式不對回 INVALID_ARGUMENT；job 沒有逐字稿、片段不存在或不屬於
   // 這個 job 回 NOT_FOUND；文字超過長度上限回 INVALID_ARGUMENT。同時編輯以最後寫入為準。
   rpc UpdateSegmentText(UpdateSegmentTextRequest) returns (UpdateSegmentTextResponse);
+
+  // 替講者命名（見 transcription-service/CONTEXT.md「講者」），也是一次編輯。名稱會先去掉前後空白；空字串
+  // 或等於預設名稱「講者 N」＝恢復預設名稱。顯示名稱跟目前相同時什麼都不做（revision 不變）；否則更新、
+  // revision +1，並發送 transcript.edited。job_id 格式不對、名稱超過 100 字回 INVALID_ARGUMENT；job 沒有
+  // 逐字稿或這個標籤的講者不存在回 NOT_FOUND。
+  rpc RenameSpeaker(RenameSpeakerRequest) returns (RenameSpeakerResponse);
 }
 
 message TranscriptSegment {
@@ -62,5 +68,16 @@ message UpdateSegmentTextRequest {
 
 message UpdateSegmentTextResponse {
   TranscriptSegment segment = 1;
+  int32 revision = 2;
+}
+
+message RenameSpeakerRequest {
+  string job_id = 1;
+  string label = 2;
+  string name = 3;
+}
+
+message RenameSpeakerResponse {
+  Speaker speaker = 1;
   int32 revision = 2;
 }
