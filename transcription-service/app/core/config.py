@@ -31,8 +31,10 @@ class Settings(BaseSettings):
 
     upload_service_grpc_target: str = "localhost:9090"
 
-    groq_api_key: str = ""
-    groq_model: str = "whisper-large-v3-turbo"
+    deepgram_api_key: str = ""
+    deepgram_model: str = "nova-3"
+    # 固定指定語言而不是讓 Deepgram 自動偵測：自動偵測的中文走的是通用模型，輸出簡體、錯字也明顯較多（見 ADR 0001）。
+    deepgram_language: str = "zh-TW"
 
     grpc_port: int = 8083
 

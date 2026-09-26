@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -32,6 +32,11 @@ class Transcript(Base):
         cascade="all, delete-orphan",
         order_by="TranscriptSegment.sequence_no",
     )
+    speakers: Mapped[list["Speaker"]] = relationship(
+        back_populates="transcript",
+        cascade="all, delete-orphan",
+        order_by="Speaker.display_order",
+    )
 
 
 class TranscriptSegment(Base):
@@ -44,8 +49,8 @@ class TranscriptSegment(Base):
     )
     start_time: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     end_time: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    speaker_label: Mapped[str | None] = mapped_column(
-        String(50))  # 講者分離功能預留欄位，MVP 先不啟用
+    # 說這個片段的講者（Speaker.label）；None＝沒有講者資訊（講者分離之前的舊 Job）。
+    speaker_label: Mapped[str | None] = mapped_column(String(50))
     # 目前的文字；空字串＝已清空片段（見 CONTEXT.md）。
     text: Mapped[str] = mapped_column(Text, nullable=False)
     # 人工編輯前的機器產出（原始文字），永遠不變，供還原使用。
@@ -53,3 +58,28 @@ class TranscriptSegment(Base):
     sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
 
     transcript: Mapped["Transcript"] = relationship(back_populates="segments")
+
+
+class Speaker(Base):
+    """講者分離找出的一位講者（見 CONTEXT.md「講者」），範圍只在這份逐字稿內。"""
+
+    __tablename__ = "speakers"
+    __table_args__ = (UniqueConstraint("transcript_id", "label"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    transcript_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("transcripts.id", ondelete="CASCADE"), nullable=False
+    )
+    # 這個 Job 內的標籤（S1、S2…），片段的 speaker_label 指向它。
+    label: Mapped[str] = mapped_column(String(50), nullable=False)
+    # 從 1 開始，決定預設名稱「講者 N」與前端的顏色。
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 使用者取的名稱；None＝沒有取名，顯示預設名稱。
+    name: Mapped[str | None] = mapped_column(String(100))
+
+    transcript: Mapped["Transcript"] = relationship(back_populates="speakers")
+
+    @property
+    def display_name(self) -> str:
+        return self.name or f"講者 {self.display_order}"

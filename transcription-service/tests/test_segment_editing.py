@@ -9,7 +9,7 @@ from pika.exceptions import AMQPConnectionError
 
 from app.proto_gen import transcription_pb2
 from app.repositories.transcript_repository import save_transcript
-from app.services.transcriber import TranscriptResult, TranscriptSegment
+from app.services.transcript_result import TranscriptResult, TranscriptSegment
 
 
 @pytest.fixture(autouse=True)

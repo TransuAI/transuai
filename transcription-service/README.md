@@ -1,6 +1,6 @@
 # transcription-service
 
-音訊/影片逐字稿 + AI 分析平台的 Transcription Service。消費 Upload Service 發出的 `transcription.requested` 事件，抽音軌、呼叫 Groq Whisper API 轉錄、把逐字稿存進自己的 `transcription_db`，並回寫 Job 狀態、發送 `transcription.completed` 事件給下游的 AI Service；也保存使用者對逐字稿的**編輯**（見 [`CONTEXT.md`](CONTEXT.md)）。是純內部服務（轉錄由 MQ 驅動），只暴露 gRPC 給其他內部服務查詢與編輯——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service) 一致）。
+音訊/影片逐字稿 + AI 分析平台的 Transcription Service。消費 Upload Service 發出的 `transcription.requested` 事件，抽音軌、呼叫 Deepgram 一次完成轉錄與**講者分離**、切成片段後把逐字稿存進自己的 `transcription_db`，並回寫 Job 狀態、發送 `transcription.completed` 事件給下游的 AI Service；也保存使用者對逐字稿的**編輯**（見 [`CONTEXT.md`](CONTEXT.md)）。是純內部服務（轉錄由 MQ 驅動），只暴露 gRPC 給其他內部服務查詢與編輯——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service) 一致）。
 
 ## 技術棧
 
@@ -9,7 +9,7 @@
 | 框架          | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework                                                                                |
 | API           | gRPC（`TranscriptionService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed` / `job.failed`；使用者編輯逐字稿後發送 `transcript.edited`     |
-| 轉錄          | Groq Whisper API（`whisper-large-v3-turbo`），`verbose_json` 拿片段 timestamp                                                                    |
+| 轉錄 + 講者分離 | Deepgram Nova-3（`zh-TW`，`httpx` 直接打 REST API），每個字的 timestamp 與講者；為什麼不是 Groq Whisper 見 [ADR 0001](docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md) |
 | 影片抽音軌    | moviepy（底層用 ffmpeg，經 `imageio-ffmpeg` 首次執行時自動下載 binary，本機不需另外安裝系統 ffmpeg）                                             |
 | 繁體轉換      | OpenCC（`opencc`，`s2tw` 逐字轉台灣標準字形，離線執行、預編譯 wheel），只套用在中文逐字稿                                                         |
 | 資料庫        | PostgreSQL（`transcription_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級                        |
@@ -20,10 +20,10 @@
 
 - 先啟動基礎設施：`cd ../infra && docker compose up -d`
 - Upload Service 要跑在 `localhost:9090`（見 [`../upload-service`](../upload-service)），因為要呼叫它的 `InternalJobService.UpdateJobStatus`
-- 一組 Groq API Key（[console.groq.com](https://console.groq.com)），填進 `.env` 的 `GROQ_API_KEY`
+- 一組 Deepgram API Key（[console.deepgram.com](https://console.deepgram.com)，新帳號送 $200 額度、不用綁卡），填進 `.env` 的 `DEEPGRAM_API_KEY`
 
 ```bash
-cp .env.example .env   # 第一次使用才需要，填入 GROQ_API_KEY
+cp .env.example .env   # 第一次使用才需要，填入 DEEPGRAM_API_KEY
 uv sync
 ```
 
@@ -46,13 +46,16 @@ uv run python -m app.main
   → UpdateJobStatus(TRANSCRIBING)
   → 從物件儲存下載檔案
   → file_type == VIDEO 才用 moviepy 抽音軌，AUDIO 直接用原始檔案
-  → 呼叫 Groq Whisper API（verbose_json，含片段 timestamp）
-  → 偵測語言是中文才轉成繁體（OpenCC s2tw，只換字形不換詞；其他語言原樣）
-  → 逐字稿存進 transcripts / transcript_segments
+  → 呼叫 Deepgram（音檔內容直接上傳，不傳 URL），拿回每個字的起訖時間、文字與講者
+  → 切成片段：換講者、句末標點、字間停頓 ≥ 0.5 秒時切，片段即將超過 15 秒時在字的邊界強制切
+    （每個片段只屬於一位講者；中文字之間不加空白、英文字之間加一個）
+  → 講者依第一次開口的順序換成這個 Job 的標籤 S1、S2…（預設名稱「講者 N」）
+  → 語言是中文才轉成繁體（OpenCC s2tw，只換字形不換詞；其他語言原樣）
+  → 逐字稿存進 transcripts / transcript_segments / speakers
   → UpdateJobStatus(TRANSCRIBED)
   → 發送 transcription.completed { jobId }
 
-Groq Whisper 呼叫遇到暫時性錯誤（429/503 類）且訊息還有重試預算 → 送進 TTL retry queue，過一段
+Deepgram 呼叫遇到暫時性錯誤（429、5xx、逾時或連不上）且訊息還有重試預算 → 送進 TTL retry queue，過一段
 時間後自動送回原 queue 重新處理整個 pipeline（訊息層級 requeue，最多 2 次、共 3 次嘗試，見下方
 「已知限制 / 待辦」跟 `app/services/retry.py`）。
 
@@ -68,7 +71,7 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 
 | RPC             | 說明                                                                                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 片段（id、timestamp、目前文字、原始文字）+ `revision`，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
+| `GetTranscript` | 依 `job_id` 取得逐字稿全文 + 片段（id、timestamp、講者標籤、目前文字、原始文字）+ `revision` + 講者列表（標籤、顯示名稱、顯示順序；顯示名稱在這裡決定：自訂名稱，否則「講者 N」），`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `UpdateSegmentText` | 編輯一個片段的文字：去前後空白，空字串＝清空；跟目前相同則不動作；否則更新文字、`revision` +1、以未清空片段依換行重組全文，並發送 `transcript.edited { jobId }`（逐字稿那列 `SELECT … FOR UPDATE`，同時編輯以最後寫入為準但 revision 各加一次）。id 格式錯誤 / 超過 2,000 字回 `INVALID_ARGUMENT`，逐字稿或片段不存在、片段不屬於該 job 回 `NOT_FOUND` |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
@@ -89,7 +92,7 @@ grpcurl -plaintext -d '{"jobId":"<job_id>"}' \
 新增或修改 model 之後，產生一支新的 migration、檢查內容，再重新啟動服務（啟動時自動升級）：
 
 ```bash
-uv run alembic revision --autogenerate --rev-id 0002 -m "describe the change"   # 版本號接續上一支，檔名才會依序排
+uv run alembic revision --autogenerate --rev-id 0004 -m "describe the change"   # 版本號接續上一支，檔名才會依序排
 uv run alembic check   # models 跟 migration 沒有差異時會回 No new upgrade operations detected
 ```
 
@@ -114,14 +117,17 @@ fixture 會在同一個 Postgres 上建（或清空重建）一個獨立的 `tra
 `init_db()` 跑 migration，再在 process 裡起一個真的 gRPC server 給測試呼叫（參考 upload-service 的 IT 做法）；
 絕對不會碰到 `transcription_db`。
 
-其餘 pipeline 測試不需要 infra 或任何 API key——`tests/conftest.py` 的 `mocks` fixture 把 pipeline 會碰到的所有外部 I/O（Groq、下載、
-抽音軌、gRPC 狀態回報、DB session / 存檔）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯：
-`tests/test_pipeline_retry.py` 驗證重試分流，`tests/test_pipeline_traditional_chinese.py` 驗證存進去的
-逐字稿有轉成繁體（以及非中文不轉、只換字形不換詞）；`tests/test_retry.py` 直接測 Groq 例外分類跟
-retry queue 路由這兩個純函式/邏輯，不碰真正的 RabbitMQ/pika。
+其餘 pipeline 測試不需要 infra 或任何 API key——`tests/conftest.py` 的 `mocks` fixture 把 pipeline 會碰到的所有外部 I/O（語音辨識、下載、
+抽音軌、gRPC 狀態回報、DB session / 存檔）都 mock 掉，語音辨識直接回傳不綁定廠商的逐字資料，驗證 `process_message()` 這個 seam 本身的邏輯：
+`tests/test_pipeline_segmentation.py` 驗證切片段與講者編號，`tests/test_pipeline_retry.py` 驗證重試分流，
+`tests/test_pipeline_traditional_chinese.py` 驗證存進去的逐字稿有轉成繁體（以及非中文不轉、只換字形不換詞）；
+`tests/test_retry.py` 直接測 retry queue 路由，不碰真正的 RabbitMQ/pika。
+
+廠商邊界只有一組測試：`tests/test_speech_recognition.py` 用 ADR 0001 實測時錄下的真實 Deepgram 回應
+（`tests/fixtures/`）驗證解析結果與暫時性錯誤的判斷，HTTP 層用 httpx 的 `MockTransport`。
 
 Mock 一定要 patch 在 `app/services/pipeline.py`「使用端」import 進來的名稱（例如
-`pipeline.transcribe`、`pipeline.job_status_client`），不是「定義端」的原始模組——`unittest.mock.patch`
+`pipeline.recognize`、`pipeline.job_status_client`），不是「定義端」的原始模組——`unittest.mock.patch`
 只替換掉 name binding，patch 定義端不會影響 pipeline.py 實際呼叫到的是誰（跟 `ai-service` 同一個
 坑，見 `ai-service/README.md` 測試一節）。
 
@@ -145,7 +151,7 @@ app/
   core/
     config.py                    pydantic-settings，讀 .env
   models/
-    transcript.py                 Transcript / TranscriptSegment（SQLAlchemy ORM）
+    transcript.py                 Transcript / TranscriptSegment / Speaker（SQLAlchemy ORM）
   controllers/
     transcript_controller.py       TranscriptionServiceServicer 實作（GetTranscript、UpdateSegmentText）
   services/
@@ -153,24 +159,29 @@ app/
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     storage.py                         從 MinIO/R2 下載檔案
     audio.py                            moviepy 抽音軌
-    transcriber.py                       Groq Whisper API 呼叫
-    traditional_chinese.py                中文逐字稿轉繁體（OpenCC s2tw），pipeline 在轉錄與存檔之間呼叫
+    speech_recognition.py                語音辨識 adapter（Deepgram）：回傳不綁定廠商的逐字資料，並判斷錯誤是否暫時性
+    segmentation.py                       把逐字資料切成片段、講者依第一次開口的順序編號（跟廠商無關）
+    transcript_result.py                  切好片段、準備存檔的逐字稿（dataclass）
+    traditional_chinese.py                中文逐字稿轉繁體（OpenCC s2tw），pipeline 在切片段與存檔之間呼叫
     job_status_client.py                  gRPC client，呼叫 Upload Service 的 UpdateJobStatus
     event_publisher.py                     發送 transcription.completed / job.failed（pipeline 用，走 consumer 的連線）
     edit_events.py                         編輯後發送 transcript.edited { jobId }：gRPC handler 自己開短連線，失敗做 3 次小型重試，仍失敗記 TRANSCRIPTION_SERVICE_TRANSCRIPT_EDITED_EVENT_LOST 但編輯照樣成功
   repositories/
-    transcript_repository.py               transcription_db 存取（transcripts / transcript_segments）
+    transcript_repository.py               transcription_db 存取（transcripts / transcript_segments / speakers）
   db/
     session.py                               engine / session / init_db（Alembic upgrade，含接手舊 create_all 資料庫）
-    migrations/                              Alembic migration（`0001_baseline` 是導入前 create_all 建出的 schema；`0002_segment_editing` 加 `original_text`、`revision`）
+    migrations/                              Alembic migration（`0001_baseline` 是導入前 create_all 建出的 schema；`0002_segment_editing` 加 `original_text`、`revision`；`0003_speakers` 加 `speakers` 表）
   proto_gen/                                  gRPC stub 產物（由 scripts/generate_grpc.sh 產生）
 scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```
 
 ## 已知限制 / 待辦
 
-- `transcribe()` 呼叫 Groq Whisper 遇到暫時性錯誤（429 rate limit、503 過載類）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、額度用盡等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
+- `recognize()` 呼叫 Deepgram 遇到暫時性錯誤（429、5xx、逾時、連不上）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、認證失敗、額度用完的 402 等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——`ai-service` 已經幫這一段補上獨立的 in-process 重試 + 高嚴重度 log marker，這裡還沒跟進，是目前真實存在的已知限制
-- 講者分離（`speaker_label`）欄位已預留但未實作
+- 講者分離只在新轉錄的 Job 上做，舊 Job 不回填（沒有講者，當成只有一位講者）。自動分離不完美：很短的插話（「對」「真的」）常被併進前一位講者，三人以上的對話偶爾只分出兩位（見 ADR 0001 的實測）
+- 語言固定指定 `zh-TW`（`DEEPGRAM_LANGUAGE`），不自動偵測：自動偵測的中文輸出簡體、錯字也明顯較多。代價是非中文的錄音辨識結果會很差，要換語言得改設定
+- Deepgram 的 $200 是一次性額度，用完就要付費（$0.0043/分鐘），不像 Groq 每天重置；額度監控與告警仍然沒有（`architecture-design.md` 第 7 節第 7 點）
+- 中文轉錄幾乎沒有標點，片段主要靠停頓切開；`smart_format` 偶爾把中文裡的數字和英文切碎（例如「200 3年」），照原樣保留
 - 繁體轉換只套用在新轉錄的 Job，這個功能上線前存進去的簡體逐字稿不回填
-- 測試涵蓋 pipeline seam、retry 分類/路由、gRPC 服務（查詢、編輯、啟動 migration，對真的 Postgres）；`storage`/`audio`/`transcriber` 等跟外部服務打交道的模組本身還只靠手動 smoke test
+- 測試涵蓋 pipeline seam（切片段、講者編號、重試分流、繁體轉換）、語音辨識 adapter 的回應解析與錯誤分類、retry queue 路由、gRPC 服務（查詢、編輯、啟動 migration，對真的 Postgres）；`storage`/`audio` 等跟外部服務打交道的模組本身還只靠手動 smoke test（語音辨識 adapter 有用錄下的真實回應測解析）

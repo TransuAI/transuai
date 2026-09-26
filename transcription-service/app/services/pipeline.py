@@ -8,10 +8,11 @@ from app.db import new_session
 from app.repositories.transcript_repository import save_transcript
 from app.services.audio import extract_audio_track
 from app.services.job_status_client import job_status_client
-from app.services.retry import RetryableMessageError, is_retryable_groq_error, retry_queue_for
+from app.services.retry import RetryableMessageError, retry_queue_for
+from app.services.segmentation import build_transcript
+from app.services.speech_recognition import is_transient_recognition_error, recognize
 from app.services.storage import download_object
 from app.services.traditional_chinese import to_traditional_if_chinese
-from app.services.transcriber import transcribe
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +23,11 @@ def process_message(
     publish_failed: Callable[[str, str, str], None],
     retry_count: int = 0,
 ) -> None:
-    """處理一則 transcription.requested 訊息：抽音軌 -> 轉錄 -> 中文轉繁體 -> 存逐字稿 -> 回寫狀態 -> 發 transcription.completed。
+    """處理一則 transcription.requested 訊息：抽音軌 -> 語音辨識（含講者分離）-> 切片段 -> 中文轉繁體 -> 存逐字稿
+    -> 回寫狀態 -> 發 transcription.completed。
 
     `retry_count` 是這則訊息目前已經被重新投遞過幾次（由 consumer.py 從訊息 header 讀出、傳進來），
-    第一次送達永遠是 0。`transcribe()` 遇到 Groq 暫時性錯誤（429/503 類，見 app/services/retry.py）
+    第一次送達永遠是 0。`recognize()` 遇到暫時性錯誤（429、5xx、逾時，見 app/services/speech_recognition.py）
     且還沒到重試預算上限時，raise RetryableMessageError，交給 consumer.py 決定送去哪條 retry queue，
     不落入下面的 FAILED 路徑。
 
@@ -50,7 +52,7 @@ def process_message(
         audio_path = extract_audio_track(
             downloaded) if file_type == "VIDEO" else downloaded
 
-        result = to_traditional_if_chinese(transcribe(audio_path))
+        result = to_traditional_if_chinese(build_transcript(recognize(audio_path)))
 
         session = new_session()
         try:
@@ -62,7 +64,7 @@ def process_message(
         publish_completed(job_id)
         logger.info("job %s transcribed successfully", job_id)
     except Exception as exc:
-        if is_retryable_groq_error(exc) and retry_queue_for(retry_count) is not None:
+        if is_transient_recognition_error(exc) and retry_queue_for(retry_count) is not None:
             raise RetryableMessageError(
                 f"job {job_id}: transient failure, retry_count={retry_count}") from exc
 

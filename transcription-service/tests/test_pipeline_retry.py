@@ -4,14 +4,14 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from groq import BadRequestError, RateLimitError
 
 from app.services import pipeline
 from app.services.retry import RetryableMessageError
 
 
-def _response(status_code: int) -> httpx.Response:
-    return httpx.Response(status_code=status_code, request=httpx.Request("POST", "https://example.invalid"))
+def _http_error(status_code: int, message: str) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://api.deepgram.com/v1/listen")
+    return httpx.HTTPStatusError(message, request=request, response=httpx.Response(status_code, request=request))
 
 
 def _job_body() -> tuple[str, bytes]:
@@ -21,9 +21,15 @@ def _job_body() -> tuple[str, bytes]:
     return job_id, body
 
 
-def test_transient_groq_error_in_transcribe_within_budget_raises_retryable(mocks):
+@pytest.mark.parametrize("error", [
+    _http_error(429, "rate limited"),
+    _http_error(503, "overloaded"),
+    httpx.ReadTimeout("timed out"),
+    httpx.ConnectError("connection refused"),
+])
+def test_transient_recognition_error_within_budget_raises_retryable(mocks, error):
     job_id, body = _job_body()
-    mocks.transcribe.side_effect = RateLimitError("rate limited", response=_response(429), body=None)
+    mocks.recognize.side_effect = error
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     with pytest.raises(RetryableMessageError):
@@ -34,9 +40,9 @@ def test_transient_groq_error_in_transcribe_within_budget_raises_retryable(mocks
     publish_completed.assert_not_called()
 
 
-def test_transient_groq_error_in_transcribe_budget_exhausted_falls_back_to_failed(mocks):
+def test_transient_recognition_error_budget_exhausted_falls_back_to_failed(mocks):
     job_id, body = _job_body()
-    mocks.transcribe.side_effect = RateLimitError("rate limited", response=_response(429), body=None)
+    mocks.recognize.side_effect = _http_error(429, "rate limited")
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     pipeline.process_message(body, publish_completed, publish_failed, retry_count=2)
@@ -46,9 +52,9 @@ def test_transient_groq_error_in_transcribe_budget_exhausted_falls_back_to_faile
     publish_completed.assert_not_called()
 
 
-def test_permanent_groq_error_in_transcribe_falls_back_to_failed_regardless_of_budget(mocks):
+def test_permanent_recognition_error_falls_back_to_failed_regardless_of_budget(mocks):
     job_id, body = _job_body()
-    mocks.transcribe.side_effect = BadRequestError("malformed", response=_response(400), body=None)
+    mocks.recognize.side_effect = _http_error(400, "malformed")
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     pipeline.process_message(body, publish_completed, publish_failed, retry_count=0)
@@ -57,7 +63,7 @@ def test_permanent_groq_error_in_transcribe_falls_back_to_failed_regardless_of_b
     publish_completed.assert_not_called()
 
 
-def test_non_groq_exception_falls_back_to_failed_unchanged(mocks):
+def test_other_exception_falls_back_to_failed_unchanged(mocks):
     job_id, body = _job_body()
     mocks.download_object.side_effect = OSError("storage unreachable")
     publish_completed, publish_failed = MagicMock(), MagicMock()

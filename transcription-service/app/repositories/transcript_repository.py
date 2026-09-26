@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Transcript, TranscriptSegment
-from app.services.transcriber import TranscriptResult
+from app.models import Speaker, Transcript, TranscriptSegment
+from app.services.transcript_result import TranscriptResult
 
 
 def save_transcript(session: Session, job_id: uuid.UUID, result: TranscriptResult) -> Transcript:
@@ -15,12 +15,15 @@ def save_transcript(session: Session, job_id: uuid.UUID, result: TranscriptResul
         TranscriptSegment(
             start_time=seg.start,
             end_time=seg.end,
+            speaker_label=seg.speaker_label,
             text=seg.text,
             original_text=seg.text,
             sequence_no=index,
         )
         for index, seg in enumerate(result.segments)
     ]
+    transcript.speakers = [
+        Speaker(label=label, display_order=order) for order, label in enumerate(result.speaker_labels, start=1)]
 
     session.add(transcript)
     session.commit()

@@ -5,7 +5,7 @@ from typing import NoReturn
 import grpc
 
 from app.db import new_session
-from app.models import TranscriptSegment
+from app.models import Speaker, TranscriptSegment
 from app.proto_gen import transcription_pb2, transcription_pb2_grpc
 from app.repositories.transcript_repository import SegmentNotFound, find_by_job_id, update_segment_text
 from app.services.edit_events import publish_transcript_edited
@@ -40,6 +40,11 @@ def _segment_to_proto(segment: TranscriptSegment) -> transcription_pb2.Transcrip
     )
 
 
+def _speaker_to_proto(speaker: Speaker) -> transcription_pb2.Speaker:
+    return transcription_pb2.Speaker(
+        label=speaker.label, display_name=speaker.display_name, display_order=speaker.display_order)
+
+
 class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
     def GetTranscript(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
@@ -56,6 +61,7 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
                 full_text=transcript.full_text or "",
                 segments=[_segment_to_proto(seg) for seg in transcript.segments],
                 revision=transcript.revision,
+                speakers=[_speaker_to_proto(speaker) for speaker in transcript.speakers],
             )
         finally:
             session.close()

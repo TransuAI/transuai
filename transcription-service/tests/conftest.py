@@ -1,4 +1,6 @@
+import json
 import os
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -20,31 +22,47 @@ from app.db import engine, init_db, new_session  # noqa: E402
 from app.proto_gen import transcription_pb2_grpc  # noqa: E402
 
 from app.services import pipeline
-from app.services.transcriber import TranscriptResult
+from app.services.speech_recognition import Recognition
+from app.services.transcript_result import TranscriptResult
 
 
 @pytest.fixture
 def mocks():
-    """驅動 `process_message()` 這個 seam 的共用 mocking boundary：pipeline 會碰到的外部 I/O（Groq、下載、
+    """驅動 `process_message()` 這個 seam 的共用 mocking boundary：pipeline 會碰到的外部 I/O（語音辨識、下載、
     抽音軌、gRPC 狀態回報、DB session / 存檔）全部 patch 在 pipeline 模組「使用端」import 進來的名稱
     （跟 ai-service/tests/test_pipeline_retry.py 同一種做法），並預先設好 happy-path 的回傳值。"""
     with (
         patch.object(pipeline, "job_status_client") as job_status_client,
         patch.object(pipeline, "download_object", return_value=Path("/tmp/fake-download.mp3")) as download_object,
         patch.object(pipeline, "extract_audio_track") as extract_audio_track,
-        patch.object(pipeline, "transcribe") as transcribe,
+        patch.object(pipeline, "recognize") as recognize,
         patch.object(pipeline, "new_session", return_value=MagicMock(name="session")),
         patch.object(pipeline, "save_transcript") as save_transcript,
         patch("pathlib.Path.unlink"),
     ):
-        transcribe.return_value = TranscriptResult(language="English", full_text="", segments=[])
+        recognize.return_value = Recognition(language="en", words=[])
         yield SimpleNamespace(
             job_status_client=job_status_client,
             download_object=download_object,
             extract_audio_track=extract_audio_track,
-            transcribe=transcribe,
+            recognize=recognize,
             save_transcript=save_transcript,
         )
+
+
+@pytest.fixture
+def run_pipeline(mocks):
+    """讓語音辨識回傳指定的逐字資料、跑一次 process_message()，回傳實際交給存檔的逐字稿。"""
+
+    def _run(recognition: Recognition) -> TranscriptResult:
+        mocks.recognize.return_value = recognition
+        body = json.dumps(
+            {"jobId": str(uuid.uuid4()), "storagePath": "uploads/foo.mp3", "fileType": "AUDIO"}).encode("utf-8")
+        pipeline.process_message(body, MagicMock(), MagicMock())
+        mocks.save_transcript.assert_called_once()
+        return mocks.save_transcript.call_args.args[2]
+
+    return _run
 
 
 def _reset_schema():
@@ -88,7 +106,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE transcripts, transcript_segments CASCADE"))
+        conn.execute(text("TRUNCATE transcripts, transcript_segments, speakers CASCADE"))
 
 
 @pytest.fixture(scope="session")

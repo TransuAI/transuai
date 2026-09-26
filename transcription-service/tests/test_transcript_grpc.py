@@ -6,7 +6,7 @@ from sqlalchemy import inspect, text
 
 from app.proto_gen import transcription_pb2
 from app.repositories.transcript_repository import save_transcript
-from app.services.transcriber import TranscriptResult, TranscriptSegment
+from app.services.transcript_result import TranscriptResult, TranscriptSegment
 
 
 def test_get_transcript_returns_a_saved_transcript(transcription_stub, db_session):
@@ -26,6 +26,39 @@ def test_get_transcript_returns_a_saved_transcript(transcription_stub, db_sessio
         (0.0, 1.5, "大家好"),
         (1.5, 3.25, "今天來聊預算"),
     ]
+
+
+def test_get_transcript_lists_the_speakers_with_default_names(transcription_stub, db_session):
+    job_id = uuid.uuid4()
+    save_transcript(db_session, job_id, TranscriptResult(
+        language="zh-TW",
+        full_text="主持人開場\n來賓回答\n主持人追問",
+        segments=[
+            TranscriptSegment(0.0, 1.0, "主持人開場", speaker_label="S1"),
+            TranscriptSegment(1.0, 2.0, "來賓回答", speaker_label="S2"),
+            TranscriptSegment(2.0, 3.0, "主持人追問", speaker_label="S1"),
+        ],
+        speaker_labels=["S1", "S2"],
+    ))
+
+    transcript = transcription_stub.GetTranscript(transcription_pb2.GetTranscriptRequest(job_id=str(job_id)))
+
+    assert [(s.label, s.display_name, s.display_order) for s in transcript.speakers] == [
+        ("S1", "講者 1", 1),
+        ("S2", "講者 2", 2),
+    ]
+    assert [s.speaker_label for s in transcript.segments] == ["S1", "S2", "S1"]
+
+
+def test_a_transcript_without_speaker_information_has_no_speakers(transcription_stub, db_session):
+    job_id = uuid.uuid4()
+    save_transcript(db_session, job_id, TranscriptResult(
+        language="zh-TW", full_text="只有一段", segments=[TranscriptSegment(0.0, 1.0, "只有一段")]))
+
+    transcript = transcription_stub.GetTranscript(transcription_pb2.GetTranscriptRequest(job_id=str(job_id)))
+
+    assert list(transcript.speakers) == []
+    assert transcript.segments[0].speaker_label == ""
 
 
 def test_get_transcript_for_an_unknown_job_is_not_found(transcription_stub):

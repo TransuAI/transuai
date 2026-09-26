@@ -23,18 +23,30 @@ class TranscriptSegment(_message.Message):
     def __init__(self, start_time: _Optional[float] = ..., end_time: _Optional[float] = ..., speaker_label: _Optional[str] = ..., text: _Optional[str] = ..., id: _Optional[str] = ..., original_text: _Optional[str] = ...) -> None: ...
 
 class Transcript(_message.Message):
-    __slots__ = ("job_id", "language", "full_text", "segments", "revision")
+    __slots__ = ("job_id", "language", "full_text", "segments", "revision", "speakers")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     LANGUAGE_FIELD_NUMBER: _ClassVar[int]
     FULL_TEXT_FIELD_NUMBER: _ClassVar[int]
     SEGMENTS_FIELD_NUMBER: _ClassVar[int]
     REVISION_FIELD_NUMBER: _ClassVar[int]
+    SPEAKERS_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     language: str
     full_text: str
     segments: _containers.RepeatedCompositeFieldContainer[TranscriptSegment]
     revision: int
-    def __init__(self, job_id: _Optional[str] = ..., language: _Optional[str] = ..., full_text: _Optional[str] = ..., segments: _Optional[_Iterable[_Union[TranscriptSegment, _Mapping]]] = ..., revision: _Optional[int] = ...) -> None: ...
+    speakers: _containers.RepeatedCompositeFieldContainer[Speaker]
+    def __init__(self, job_id: _Optional[str] = ..., language: _Optional[str] = ..., full_text: _Optional[str] = ..., segments: _Optional[_Iterable[_Union[TranscriptSegment, _Mapping]]] = ..., revision: _Optional[int] = ..., speakers: _Optional[_Iterable[_Union[Speaker, _Mapping]]] = ...) -> None: ...
+
+class Speaker(_message.Message):
+    __slots__ = ("label", "display_name", "display_order")
+    LABEL_FIELD_NUMBER: _ClassVar[int]
+    DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
+    DISPLAY_ORDER_FIELD_NUMBER: _ClassVar[int]
+    label: str
+    display_name: str
+    display_order: int
+    def __init__(self, label: _Optional[str] = ..., display_name: _Optional[str] = ..., display_order: _Optional[int] = ...) -> None: ...
 
 class GetTranscriptRequest(_message.Message):
     __slots__ = ("job_id",)
