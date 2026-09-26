@@ -132,6 +132,6 @@ export const qaApi = {
 }
 
 export const usageApi = {
-  // 這個 Job 的用量（目前只有 LLM 呼叫），依時間排序，附總計。
+  // 這個 Job 的用量：LLM 呼叫與轉錄，依時間排序，附總計。
   getJobUsage: (jobId: string) => apiFetch<JobUsage>(`/jobs/${jobId}/usage`),
 }

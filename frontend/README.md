@@ -95,7 +95,7 @@ src/
       speaker-panel.tsx        講者區塊:還有片段的講者,每位一個顏色點 + 名稱;點名稱就地改名(Enter 存 / Esc 取消,名稱清空＝恢復「講者 N」,存檔失敗保留輸入);只有一位講者時不顯示
       speaker-dot.tsx          講者的顏色點(講者區塊、逐字稿換人處共用)
       chat-pane.tsx            問答欄
-      usage-section.tsx        Studio 欄的「用量」區塊:這個 Job 每一次 LLM 呼叫(時間、功能、模型、token;未知顯示「—」,失敗標示),附總計;Job 完成時載入,每次問答結束、重新產生完成後重新載入
+      usage-section.tsx        Studio 欄的「用量」區塊:這個 Job 每一次 LLM 呼叫與轉錄(時間、功能、模型、token 或分鐘數;未知顯示「—」,失敗標示),附總計;Job 完成時載入,每次問答結束、重新產生完成後重新載入
       studio-pane.tsx          Studio 欄:AI 摘要、章節、用量;逐字稿被編輯後顯示「逐字稿已修改,摘要與章節可能過時」與「重新產生摘要與章節」按鈕(產生中顯示「重新產生中…」)
       transcript-search-bar.tsx 逐字稿搜尋列(搜尋框、n / N、上一個 / 下一個;Enter / Shift+Enter / Esc)
       segment-speaker-menu.tsx 片段的「改講者」選單(還有片段的講者 + 「新增講者…」;點片段上的講者名稱也會打開);新增講者時片段前面出現名稱輸入框(可留空＝「講者 N」)。講者分離之前的舊逐字稿新增講者後會重新讀一次逐字稿(其他片段被後端一起歸給講者 1)

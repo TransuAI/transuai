@@ -1199,6 +1199,35 @@ describe('JobDetailPage usage (COMPLETED, desktop layout)', () => {
     expect(section).toHaveTextContent('部分用量未知')
   })
 
+  it('shows the transcription in minutes alongside the model calls', async () => {
+    stubDesktopLayout()
+    vi.mocked(usageApi.getJobUsage).mockResolvedValue({
+      records: [
+        { ...llmRecord('transcription', null, null), kind: 'transcription', provider: 'deepgram', model: 'nova-3', audioSeconds: 1836 },
+        llmRecord('summary', 3000, 240),
+      ],
+      totals: { inputTokens: 3000, outputTokens: 240, audioSeconds: 1836 },
+    })
+    await renderCompletedJob()
+
+    const section = await screen.findByRole('region', { name: '用量' })
+    expect(within(section).getAllByRole('listitem')[0]).toHaveTextContent('轉錄nova-330.6 分鐘')
+    expect(section).toHaveTextContent('轉錄 30.6 分鐘')
+    expect(section).not.toHaveTextContent('部分用量未知')
+  })
+
+  it('shows a failed transcription with unknown minutes as a dash', async () => {
+    stubDesktopLayout()
+    vi.mocked(usageApi.getJobUsage).mockResolvedValue({
+      records: [{ ...llmRecord('transcription', null, null, false), kind: 'transcription', provider: 'deepgram', model: 'nova-3' }],
+      totals: { inputTokens: 0, outputTokens: 0, audioSeconds: 0 },
+    })
+    await renderCompletedJob()
+
+    const row = within(await screen.findByRole('region', { name: '用量' })).getByRole('listitem')
+    expect(row).toHaveTextContent('轉錄nova-3—失敗')
+  })
+
   it('says so when nothing has been used yet', async () => {
     stubDesktopLayout()
     await renderCompletedJob()
