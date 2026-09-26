@@ -3,13 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/sonner'
-import { modelsApi, providerKeysApi } from '@/lib/api'
+import { modelsApi, providerKeysApi, usageApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { SettingsPage } from './settings-page'
 
 vi.mock('@/lib/api', () => ({
   providerKeysApi: { list: vi.fn(), save: vi.fn(), remove: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
+  usageApi: { getMonthly: vi.fn() },
 }))
 
 afterEach(() => {
@@ -28,6 +29,7 @@ beforeEach(() => {
     openrouterCustom: false,
   })
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platform)
+  vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2026-09', llm: [], transcription: [] })
 })
 
 async function renderSettings() {
@@ -174,5 +176,102 @@ describe('SettingsPage default model (預設模型)', () => {
 
     expect(await screen.findByText('預設模型已改回平台模型')).toBeInTheDocument()
     expect(await within(section).findByRole('radio', { name: '平台模型（Qwen/Qwen3.5-9B）' })).toBeChecked()
+  })
+})
+
+describe('SettingsPage monthly usage (本月用量)', () => {
+  const llmSum = (provider: string, model: string, keySource: string, inputTokens: number, outputTokens: number, calls: number, callsWithUnknownUsage = 0) =>
+    ({ provider, model, keySource, inputTokens, outputTokens, calls, callsWithUnknownUsage })
+
+  async function renderUsage() {
+    await renderSettings()
+    return screen.findByRole('region', { name: '本月用量' })
+  }
+
+  it("shows this month's usage per model, keeping the platform model, own keys and transcription apart", async () => {
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({
+      month: '2026-09',
+      llm: [
+        llmSum('openai', 'gpt-5', 'own_key', 12000, 3400, 8),
+        llmSum('platform', 'Qwen/Qwen3.5-9B', 'platform', 5300, 700, 4),
+      ],
+      transcription: [{ provider: 'deepgram', model: 'nova-3', audioSeconds: 1530, calls: 3, callsWithUnknownUsage: 0 }],
+    })
+    const section = await renderUsage()
+
+    expect(usageApi.getMonthly).toHaveBeenCalledWith(undefined) // the server knows which month it is
+    expect(await within(section).findByText('2026 年 9 月')).toBeInTheDocument()
+    const platformGroup = within(section).getByRole('group', { name: '平台模型' })
+    expect(within(platformGroup).getByText('Qwen/Qwen3.5-9B')).toBeInTheDocument()
+    expect(within(platformGroup).getByText('輸入 5,300 · 輸出 700 tokens · 4 次')).toBeInTheDocument()
+    const ownKeyGroup = within(section).getByRole('group', { name: '自有金鑰' })
+    expect(within(ownKeyGroup).getByText('OpenAI · gpt-5')).toBeInTheDocument()
+    expect(within(ownKeyGroup).getByText('輸入 12,000 · 輸出 3,400 tokens · 8 次')).toBeInTheDocument()
+    const transcriptionGroup = within(section).getByRole('group', { name: '轉錄' })
+    expect(within(transcriptionGroup).getByText('nova-3')).toBeInTheDocument()
+    expect(within(transcriptionGroup).getByText('25.5 分鐘 · 3 次')).toBeInTheDocument()
+  })
+
+  it('says when some calls of a model had no reported usage', async () => {
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({
+      month: '2026-09',
+      llm: [llmSum('platform', 'Qwen/Qwen3.5-9B', 'platform', 300, 40, 3, 1)],
+      transcription: [],
+    })
+    const section = await renderUsage()
+
+    expect(await within(section).findByText('其中 1 次用量未知，未計入')).toBeInTheDocument()
+  })
+
+  it('goes back to an earlier month and forward again, but not past the current one', async () => {
+    const user = userEvent.setup()
+    const section = await renderUsage()
+    await within(section).findByText('2026 年 9 月')
+    expect(within(section).getByRole('button', { name: '下個月' })).toBeDisabled()
+
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({
+      month: '2026-08',
+      llm: [llmSum('platform', 'Qwen/Qwen3.5-9B', 'platform', 10, 1, 1)],
+      transcription: [],
+    })
+    await user.click(within(section).getByRole('button', { name: '上個月' }))
+
+    expect(usageApi.getMonthly).toHaveBeenLastCalledWith('2026-08')
+    expect(await within(section).findByText('2026 年 8 月')).toBeInTheDocument()
+    expect(within(section).getByText('輸入 10 · 輸出 1 tokens · 1 次')).toBeInTheDocument()
+
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2026-09', llm: [], transcription: [] })
+    await user.click(within(section).getByRole('button', { name: '下個月' }))
+
+    expect(usageApi.getMonthly).toHaveBeenLastCalledWith('2026-09')
+    expect(await within(section).findByText('2026 年 9 月')).toBeInTheDocument()
+  })
+
+  it('says so when a month has no usage', async () => {
+    const section = await renderUsage()
+
+    expect(await within(section).findByText('這個月沒有用量')).toBeInTheDocument()
+  })
+
+  it('offers to try again when the usage cannot be loaded', async () => {
+    const user = userEvent.setup()
+    vi.mocked(usageApi.getMonthly).mockRejectedValueOnce(new Error('network'))
+    const section = await renderUsage()
+
+    await user.click(await within(section).findByRole('button', { name: '重試' }))
+
+    expect(await within(section).findByText('2026 年 9 月')).toBeInTheDocument()
+    expect(usageApi.getMonthly).toHaveBeenLastCalledWith(undefined)
+  })
+
+  it('crosses into the previous year', async () => {
+    const user = userEvent.setup()
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2027-01', llm: [], transcription: [] })
+    const section = await renderUsage()
+    await within(section).findByText('2027 年 1 月')
+
+    await user.click(within(section).getByRole('button', { name: '上個月' }))
+
+    expect(usageApi.getMonthly).toHaveBeenLastCalledWith('2026-12')
   })
 })

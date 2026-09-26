@@ -1,4 +1,5 @@
 import { Gauge } from 'lucide-react'
+import { formatCount, formatMinutes } from '@/lib/usage-format'
 import type { JobUsage, UsageRecord } from '@/types/api'
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -11,20 +12,14 @@ const FEATURE_LABELS: Record<string, string> = {
   transcription: '轉錄',
 }
 
-const numberFormat = new Intl.NumberFormat('en-US')
-
 function tokens(value: number) {
-  return `${numberFormat.format(value)} tokens`
-}
-
-function minutes(seconds: number) {
-  return `${(seconds / 60).toFixed(1)} 分鐘`
+  return `${formatCount(value)} tokens`
 }
 
 // What one call consumed; each unknown number (the provider didn't report it) shows as 「—」, never 0.
 function consumption(record: UsageRecord) {
-  if (record.kind === 'transcription') return record.audioSeconds === null ? '—' : minutes(record.audioSeconds)
-  const known = (value: number | null) => (value === null ? '—' : numberFormat.format(value))
+  if (record.kind === 'transcription') return record.audioSeconds === null ? '—' : formatMinutes(record.audioSeconds)
+  const known = (value: number | null) => (value === null ? '—' : formatCount(value))
   return `${known(record.inputTokens)} → ${known(record.outputTokens)} tokens`
 }
 
@@ -52,7 +47,7 @@ export function UsageSection({ usage }: { usage: JobUsage | null }) {
         <>
           <p className="text-xs text-muted-foreground">
             輸入 {tokens(usage.totals.inputTokens)} · 輸出 {tokens(usage.totals.outputTokens)}
-            {usage.totals.audioSeconds > 0 && ` · 轉錄 ${minutes(usage.totals.audioSeconds)}`}
+            {usage.totals.audioSeconds > 0 && ` · 轉錄 ${formatMinutes(usage.totals.audioSeconds)}`}
             {/* The totals only add up what's known; say so rather than let them pass as complete. */}
             {records.some(hasUnknownNumbers) && '（部分用量未知，未計入）'}
           </p>

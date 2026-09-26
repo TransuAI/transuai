@@ -175,6 +175,35 @@ export interface JobUsage {
   totals: { inputTokens: number; outputTokens: number; audioSeconds: number }
 }
 
+/** LLM usage of one model and key source over a month; token counts add up only what's known. */
+export interface LlmUsageSum {
+  provider: string
+  model: string
+  /** platform (平台模型) or own_key (自有金鑰). */
+  keySource: string
+  inputTokens: number
+  outputTokens: number
+  /** Failed calls included. */
+  calls: number
+  /** Calls whose tokens the provider didn't report, left out of the sums. */
+  callsWithUnknownUsage: number
+}
+
+export interface TranscriptionUsageSum {
+  provider: string
+  model: string
+  audioSeconds: number
+  calls: number
+  callsWithUnknownUsage: number
+}
+
+/** A user's usage over one month (YYYY-MM, Taiwan time). */
+export interface MonthlyUsage {
+  month: string
+  llm: LlmUsageSum[]
+  transcription: TranscriptionUsageSum[]
+}
+
 /** One of the user's own API keys (自有金鑰): only its last four characters ever come back. */
 export interface ProviderKey {
   /** openai / anthropic / gemini / openrouter */

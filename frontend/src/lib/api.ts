@@ -9,6 +9,7 @@ import type {
   JobUsage,
   MediaUrlResponse,
   ModelChoice,
+  MonthlyUsage,
   PresignResponse,
   ProviderKey,
   QaTurn,
@@ -145,6 +146,8 @@ export const qaApi = {
 export const usageApi = {
   // 這個 Job 的用量：LLM 呼叫與轉錄，依時間排序，附總計。
   getJobUsage: (jobId: string) => apiFetch<JobUsage>(`/jobs/${jobId}/usage`),
+  // 這位使用者某個月（YYYY-MM）依模型加總的用量；省略就是這個月（由伺服器決定，台灣時間）。
+  getMonthly: (month?: string) => apiFetch<MonthlyUsage>(month ? `/me/usage?month=${month}` : '/me/usage'),
 }
 
 // 自有金鑰：存入前後端會先向廠商驗證；之後只看得到末四碼。
