@@ -37,7 +37,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history` 四張表）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`）。只剩多格式輸出還沒做。見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 
 ---
@@ -66,7 +66,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp
-- `ai_db`：摘要、章節分段、embedding、問答歷史（`summaries` / `chapters` / `embeddings` / `qa_history` 四張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` 五張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -179,9 +179,11 @@ GET    /chapters/{jobId}                取得章節列表
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string }，
                                          回傳 text/event-stream（SSE，逐字串流），不是一次性 JSON
+GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫，依時間排序，附總計）；轉錄用量還沒記錄，
+                                         之後由 Gateway 向 transcription-service 另外查詢再合併
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`，
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`ListJobLlmUsage`，
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -292,7 +294,7 @@ CREATE TABLE speakers (
 
 ### 4.4 ai_db
 
-**現況（已建立，四張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，五張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -339,6 +341,23 @@ CREATE TABLE qa_history (
     created_at TIMESTAMP NOT NULL
 );
 CREATE INDEX ix_qa_history_job_id ON qa_history(job_id);
+
+-- 用量：每一次 LLM 呼叫一筆（轉錄用量還沒記錄）
+CREATE TABLE llm_usage (
+    id UUID PRIMARY KEY,
+    user_id UUID,                           -- Job 擁有者 / 提問者；升級前排入的舊訊息沒有
+    job_id UUID NOT NULL,
+    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters
+    provider VARCHAR(32) NOT NULL,          -- platform 或廠商名稱
+    model VARCHAR(200) NOT NULL,
+    key_source VARCHAR(16) NOT NULL,        -- platform / own_key
+    input_tokens INT,                       -- NULL＝廠商沒回報（未知），不是 0
+    output_tokens INT,
+    succeeded BOOLEAN NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_llm_usage_job_id ON llm_usage(job_id);
+CREATE INDEX ix_llm_usage_user_id ON llm_usage(user_id);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
@@ -360,11 +379,11 @@ CREATE TABLE export_outputs (
 
 | Queue/Topic | Producer | Consumer | Payload |
 |---|---|---|---|
-| `transcription.requested` | Upload Service | Transcription Service | `{ jobId, storagePath, fileType }` |
-| `transcription.completed` | Transcription Service | AI Service | `{ jobId }` |
+| `transcription.requested` | Upload Service | Transcription Service | `{ jobId, userId, storagePath, fileType }`——`userId` 是 Job 擁有者，一路帶到 ai-service，用量記在他名下 |
+| `transcription.completed` | Transcription Service | AI Service | `{ jobId, userId }`（`userId` 原樣從 `transcription.requested` 帶過來；升級前排入的舊訊息沒有，照常處理，用量不記使用者） |
 | `ai.completed` | AI Service | Notification Service | `{ jobId, status }` |
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
-| `summary.regeneration.requested` | AI Service | AI Service | `{ jobId }`——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
+| `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
 | `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
 
 **實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
