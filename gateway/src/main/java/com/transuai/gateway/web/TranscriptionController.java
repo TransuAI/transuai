@@ -12,11 +12,13 @@ import org.springframework.web.bind.annotation.RestController;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.web.dto.SegmentDto;
 import com.transuai.gateway.web.dto.SegmentUpdateDto;
+import com.transuai.gateway.web.dto.SpeakerDto;
 import com.transuai.gateway.web.dto.TranscriptDto;
 import com.transuai.gateway.web.dto.UpdateSegmentTextRequestDto;
 
 import lombok.RequiredArgsConstructor;
 import transuai.transcription.v1.Transcription.GetTranscriptRequest;
+import transuai.transcription.v1.Transcription.Speaker;
 import transuai.transcription.v1.Transcription.Transcript;
 import transuai.transcription.v1.Transcription.TranscriptSegment;
 import transuai.transcription.v1.Transcription.UpdateSegmentTextRequest;
@@ -71,12 +73,20 @@ public class TranscriptionController {
         List<SegmentDto> segments = transcript.getSegmentsList().stream()
                 .map(TranscriptionController::toDto)
                 .toList();
+        List<SpeakerDto> speakers = transcript.getSpeakersList().stream()
+                .map(TranscriptionController::toDto)
+                .toList();
         return new TranscriptDto(transcript.getJobId(), transcript.getLanguage(), transcript.getFullText(),
-                segments, transcript.getRevision());
+                segments, transcript.getRevision(), speakers);
+    }
+
+    private static SpeakerDto toDto(Speaker s) {
+        return new SpeakerDto(s.getLabel(), s.getDisplayName(), s.getDisplayOrder());
     }
 
     private static SegmentDto toDto(TranscriptSegment s) {
-        return new SegmentDto(s.getId(), s.getStartTime(), s.getEndTime(), s.getSpeakerLabel(), s.getText(),
+        String speakerLabel = s.getSpeakerLabel().isEmpty() ? null : s.getSpeakerLabel();
+        return new SegmentDto(s.getId(), s.getStartTime(), s.getEndTime(), speakerLabel, s.getText(),
                 s.getOriginalText());
     }
 }
