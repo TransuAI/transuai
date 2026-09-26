@@ -92,7 +92,7 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 每一次 LLM 呼叫（摘要、章節、問答的回答與問題改寫、重新產生摘要與章節）結束時，記一筆**用量**到 `llm_usage`：使用者、Job、
 功能、廠商、模型、金鑰來源、輸入 / 輸出 token（取廠商回報的數字，沒回報就是未知，不估算）、成功或失敗。失敗的呼叫也記
 （通常沒有數字）；串流回答被中途放棄也算失敗。用量用自己的 session 立即寫入，跟摘要存檔無關；寫不進去只記 log，不讓
-Job 失敗。embedding 不記。`ListJobLlmUsage` 提供查詢，Gateway 查詢後給前端。
+Job 失敗。embedding 不記。`ListJobLlmUsage` 提供查詢，Gateway 跟 transcription-service 的轉錄用量合併後給前端。
 
 ### 重新產生摘要與章節（`summary.regeneration.requested`）
 

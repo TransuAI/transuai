@@ -58,6 +58,11 @@ class TranscriptionServiceStub:
                 request_serializer=transcription__pb2.AssignSegmentSpeakerRequest.SerializeToString,
                 response_deserializer=transcription__pb2.AssignSegmentSpeakerResponse.FromString,
                 _registered_method=True)
+        self.ListJobTranscriptionUsage = channel.unary_unary(
+                '/transuai.transcription.v1.TranscriptionService/ListJobTranscriptionUsage',
+                request_serializer=transcription__pb2.ListJobTranscriptionUsageRequest.SerializeToString,
+                response_deserializer=transcription__pb2.ListJobTranscriptionUsageResponse.FromString,
+                _registered_method=True)
 
 
 class TranscriptionServiceServicer:
@@ -105,6 +110,14 @@ class TranscriptionServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListJobTranscriptionUsage(self, request, context):
+        """一個 Job 的轉錄用量（見 transcription-service/CONTEXT.md「轉錄用量」），依時間升冪；每次呼叫語音辨識服務一筆，
+        失敗的也算。job_id 不合法回 INVALID_ARGUMENT；沒有紀錄回空列表。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TranscriptionServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -127,6 +140,11 @@ def add_TranscriptionServiceServicer_to_server(servicer, server):
                     servicer.AssignSegmentSpeaker,
                     request_deserializer=transcription__pb2.AssignSegmentSpeakerRequest.FromString,
                     response_serializer=transcription__pb2.AssignSegmentSpeakerResponse.SerializeToString,
+            ),
+            'ListJobTranscriptionUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListJobTranscriptionUsage,
+                    request_deserializer=transcription__pb2.ListJobTranscriptionUsageRequest.FromString,
+                    response_serializer=transcription__pb2.ListJobTranscriptionUsageResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -240,6 +258,33 @@ class TranscriptionService:
             '/transuai.transcription.v1.TranscriptionService/AssignSegmentSpeaker',
             transcription__pb2.AssignSegmentSpeakerRequest.SerializeToString,
             transcription__pb2.AssignSegmentSpeakerResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListJobTranscriptionUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.transcription.v1.TranscriptionService/ListJobTranscriptionUsage',
+            transcription__pb2.ListJobTranscriptionUsageRequest.SerializeToString,
+            transcription__pb2.ListJobTranscriptionUsageResponse.FromString,
             options,
             channel_credentials,
             insecure,

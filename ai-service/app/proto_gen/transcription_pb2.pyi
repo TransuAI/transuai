@@ -1,3 +1,6 @@
+import datetime
+
+from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -117,3 +120,29 @@ class AssignSegmentSpeakerResponse(_message.Message):
     speakers: _containers.RepeatedCompositeFieldContainer[Speaker]
     revision: int
     def __init__(self, segment: _Optional[_Union[TranscriptSegment, _Mapping]] = ..., speakers: _Optional[_Iterable[_Union[Speaker, _Mapping]]] = ..., revision: _Optional[int] = ...) -> None: ...
+
+class ListJobTranscriptionUsageRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class ListJobTranscriptionUsageResponse(_message.Message):
+    __slots__ = ("records",)
+    RECORDS_FIELD_NUMBER: _ClassVar[int]
+    records: _containers.RepeatedCompositeFieldContainer[TranscriptionUsage]
+    def __init__(self, records: _Optional[_Iterable[_Union[TranscriptionUsage, _Mapping]]] = ...) -> None: ...
+
+class TranscriptionUsage(_message.Message):
+    __slots__ = ("provider", "model", "audio_seconds", "succeeded", "created_at")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    AUDIO_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    model: str
+    audio_seconds: float
+    succeeded: bool
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., audio_seconds: _Optional[float] = ..., succeeded: _Optional[bool] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
