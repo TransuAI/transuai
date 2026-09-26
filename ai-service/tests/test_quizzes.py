@@ -11,7 +11,8 @@ import grpc
 import pytest
 from sqlalchemy import select
 
-from app.models import Quiz
+from app.db import new_session
+from app.models import DefaultModel, Quiz, QuizAttempt
 from app.proto_gen import ai_pb2, transcription_pb2
 from app.services import quizzes, usage_meter
 from app.services.retry import RetryableMessageError
@@ -57,8 +58,6 @@ def test_requesting_a_quiz_creates_one_being_generated_and_queues_it(ai_stub, db
 
 def test_a_quiz_is_saved_before_its_message_goes_out(ai_stub, db_session, rabbitmq):
     """The background work may pick the message up at once; it has to find the quiz."""
-    from app.db import new_session
-
     seen = []
 
     def publish(**kwargs):
@@ -281,8 +280,6 @@ def test_once_retries_run_out_the_quiz_fails_with_the_reason(ai_stub, requested,
 
 def test_a_default_model_without_its_key_fails_rather_than_using_the_platform_model(
         ai_stub, requested, fake_llm, db_session):
-    from app.models import DefaultModel
-
     db_session.add(DefaultModel(user_id=USER, provider="openai", model="gpt-5", supports_tools=True))
     db_session.commit()
 
@@ -312,3 +309,69 @@ def test_a_message_delivered_again_after_the_quiz_is_done_changes_nothing(ai_stu
 
     assert len(get_quiz(ai_stub, requested).questions) == 5
     assert len(fake_llm.requests) == 1  # the model isn't asked again
+
+
+# --- 作答（gRPC）---
+
+
+@pytest.fixture
+def completed(ai_stub, requested, fake_llm):
+    """The requested quiz, generated: correct options are 1, 0, 1, 1, 1 (see five_questions)."""
+    fake_llm.reply(five_questions())
+    generate(requested.message)
+    return requested
+
+
+def submit(stub, quiz, answers, user_id=USER):
+    return stub.SubmitQuizAttempt(ai_pb2.SubmitQuizAttemptRequest(
+        job_id=quiz.job_id, quiz_id=quiz.quiz_id, user_id=str(user_id), answers=answers))
+
+
+def test_an_attempt_is_scored_question_by_question(ai_stub, completed):
+    result = submit(ai_stub, completed, [1, 1, 0, 1, 1])
+
+    assert (result.correct_count, result.question_count) == (3, 5)
+    assert [(r.chosen_option, r.correct_option, r.correct) for r in result.results] == [
+        (1, 1, True), (1, 0, False), (0, 1, False), (1, 1, True), (1, 1, True)]
+    assert result.results[0].explanation == "講者說葉綠體吸收光能。"
+
+
+def test_every_attempt_is_kept_and_the_list_shows_the_best_one(ai_stub, completed):
+    listed = lambda: ai_stub.ListQuizzes(ai_pb2.ListQuizzesRequest(job_id=completed.job_id)).quizzes[0]
+    assert not listed().HasField("best_correct_count")
+
+    submit(ai_stub, completed, [1, 0, 1, 1, 1])  # 5
+    submit(ai_stub, completed, [0, 0, 0, 0, 0])  # 1
+
+    assert listed().best_correct_count == 5
+    assert get_quiz(ai_stub, completed).best_correct_count == 5
+    session = new_session()
+    try:
+        attempts = session.scalars(select(QuizAttempt).where(QuizAttempt.quiz_id == uuid.UUID(completed.quiz_id))).all()
+        assert sorted((a.correct_count, a.answers, a.user_id) for a in attempts) == [
+            (1, [0, 0, 0, 0, 0], USER), (5, [1, 0, 1, 1, 1], USER)]
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("answers", [[1, 0, 1, 1], [1, 0, 1, 1, 1, 0], [1, 2, 1, 1, 1], [4, 0, 1, 1, 1], [-1, 0, 1, 1, 1]])
+def test_an_attempt_needs_one_valid_option_per_question(ai_stub, completed, answers):
+    with pytest.raises(grpc.RpcError) as error:
+        submit(ai_stub, completed, answers)  # a true/false question only has options 0 and 1
+
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_a_quiz_still_being_generated_cannot_be_answered(ai_stub, requested):
+    with pytest.raises(grpc.RpcError) as error:
+        submit(ai_stub, requested, [0, 0, 0, 0, 0])
+
+    assert error.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_answering_a_quiz_of_another_job_is_not_found(ai_stub, completed):
+    with pytest.raises(grpc.RpcError) as error:
+        ai_stub.SubmitQuizAttempt(ai_pb2.SubmitQuizAttemptRequest(
+            job_id=str(uuid.uuid4()), quiz_id=completed.quiz_id, user_id=str(USER), answers=[1, 0, 1, 1, 1]))
+
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND

@@ -89,6 +89,11 @@ class AiServiceStub:
                 request_serializer=ai__pb2.GetQuizRequest.SerializeToString,
                 response_deserializer=ai__pb2.Quiz.FromString,
                 _registered_method=True)
+        self.SubmitQuizAttempt = channel.unary_unary(
+                '/transuai.ai.v1.AiService/SubmitQuizAttempt',
+                request_serializer=ai__pb2.SubmitQuizAttemptRequest.SerializeToString,
+                response_deserializer=ai__pb2.QuizAttemptResult.FromString,
+                _registered_method=True)
         self.SaveProviderKey = channel.unary_unary(
                 '/transuai.ai.v1.AiService/SaveProviderKey',
                 request_serializer=ai__pb2.SaveProviderKeyRequest.SerializeToString,
@@ -222,6 +227,15 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SubmitQuizAttempt(self, request, context):
+        """送出一次作答：後端計分並保存，回傳分數與每題結果。answers 依題目順序、每題一個選項位置（從 0 開始），題數
+        不對或選項超出範圍回 INVALID_ARGUMENT；測驗還沒完成回 FAILED_PRECONDITION；不存在或不屬於這個 job 回 NOT_FOUND。
+        同一份測驗可以重做，每次作答都保存。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SaveProviderKey(self, request, context):
         """自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
         取得的使用者，不另外驗證。
@@ -326,6 +340,11 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.GetQuiz,
                     request_deserializer=ai__pb2.GetQuizRequest.FromString,
                     response_serializer=ai__pb2.Quiz.SerializeToString,
+            ),
+            'SubmitQuizAttempt': grpc.unary_unary_rpc_method_handler(
+                    servicer.SubmitQuizAttempt,
+                    request_deserializer=ai__pb2.SubmitQuizAttemptRequest.FromString,
+                    response_serializer=ai__pb2.QuizAttemptResult.SerializeToString,
             ),
             'SaveProviderKey': grpc.unary_unary_rpc_method_handler(
                     servicer.SaveProviderKey,
@@ -632,6 +651,33 @@ class AiService:
             '/transuai.ai.v1.AiService/GetQuiz',
             ai__pb2.GetQuizRequest.SerializeToString,
             ai__pb2.Quiz.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SubmitQuizAttempt(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/SubmitQuizAttempt',
+            ai__pb2.SubmitQuizAttemptRequest.SerializeToString,
+            ai__pb2.QuizAttemptResult.FromString,
             options,
             channel_credentials,
             insecure,

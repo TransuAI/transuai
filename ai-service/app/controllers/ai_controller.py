@@ -14,7 +14,7 @@ from app.repositories.llm_usage_repository import list_job_llm_usage, sum_user_l
 from app.repositories.provider_key_repository import list_provider_keys
 from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_job_id
 from app.repositories.qa_repository import save_qa
-from app.repositories.quiz_repository import find_quiz, list_questions, list_quizzes
+from app.repositories.quiz_repository import best_correct_counts, find_quiz, list_questions, list_quizzes
 from app.repositories.summary_repository import find_by_job_id as find_summary_by_job_id
 from app.services.default_models import (
     ModelNotAvailable,
@@ -29,7 +29,16 @@ from app.services.llm_client import LlmError
 from app.services.model_catalog import CatalogUnreachable, ModelChoice, UnknownModel
 from app.services.provider_keys import InvalidKey, ProviderUnreachable, UnknownProvider, save_provider_key
 from app.services.qa import NoEmbeddingsError, stream_answer
-from app.services.quizzes import InvalidQuestionCount, QuizNotQueued, effective_status, request_quiz
+from app.services.quizzes import (
+    InvalidAnswers,
+    InvalidQuestionCount,
+    QuizNotFound,
+    QuizNotQueued,
+    QuizNotReady,
+    effective_status,
+    request_quiz,
+    submit_attempt,
+)
 from app.models import Quiz, QuizQuestion, QuizStatus, RegenerationStatus
 from app.services.regeneration import (
     RegenerationNotQueued,
@@ -308,7 +317,9 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         session = new_session()
         try:
-            return ai_pb2.ListQuizzesResponse(quizzes=[_quiz_to_proto(quiz) for quiz in list_quizzes(session, job_id)])
+            quizzes = list_quizzes(session, job_id)
+            best = best_correct_counts(session, [quiz.id for quiz in quizzes])
+            return ai_pb2.ListQuizzesResponse(quizzes=[_quiz_to_proto(quiz, best=best.get(quiz.id)) for quiz in quizzes])
         finally:
             session.close()
 
@@ -320,9 +331,28 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             quiz = find_quiz(session, job_id, quiz_id)
             if quiz is None:
                 _abort(context, grpc.StatusCode.NOT_FOUND, "quiz not found")
-            return _quiz_to_proto(quiz, list_questions(session, quiz_id))
+            return _quiz_to_proto(quiz, list_questions(session, quiz_id),
+                                  best=best_correct_counts(session, [quiz_id]).get(quiz_id))
         finally:
             session.close()
+
+    def SubmitQuizAttempt(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        quiz_id = _parse_uuid(request.quiz_id, "quiz_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            result = submit_attempt(job_id, quiz_id, user_id, list(request.answers))
+        except QuizNotFound:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "quiz not found")
+        except QuizNotReady:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "這份測驗還沒產生完成")
+        except InvalidAnswers:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "每一題都要選一個選項")
+        return ai_pb2.QuizAttemptResult(
+            correct_count=result.correct_count, question_count=len(result.results),
+            results=[ai_pb2.QuizQuestionResult(chosen_option=r.chosen_option, correct_option=r.correct_option,
+                                               correct=r.correct, explanation=r.explanation)
+                     for r in result.results])
 
 
 def _parse_uuid(value: str, field: str, context: grpc.ServicerContext) -> uuid.UUID:
@@ -339,7 +369,7 @@ _QUIZ_STATUS = {
 }
 
 
-def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = ()) -> ai_pb2.Quiz:
+def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = (), *, best: int | None = None) -> ai_pb2.Quiz:
     status, failure_reason = effective_status(quiz)
     message = ai_pb2.Quiz(
         id=str(quiz.id), job_id=str(quiz.job_id), question_count=quiz.question_count,
@@ -351,6 +381,8 @@ def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = ()) -> ai_pb2
     message.requested_at.FromDatetime(quiz.requested_at)
     if quiz.completed_at is not None:
         message.completed_at.FromDatetime(quiz.completed_at)
+    if best is not None:
+        message.best_correct_count = best
     return message
 
 

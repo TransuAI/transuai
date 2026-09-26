@@ -61,7 +61,7 @@ class GetQuizRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ..., quiz_id: _Optional[str] = ...) -> None: ...
 
 class Quiz(_message.Message):
-    __slots__ = ("id", "job_id", "question_count", "status", "failure_reason", "source_revision", "model_provider", "model", "requested_at", "completed_at", "questions")
+    __slots__ = ("id", "job_id", "question_count", "status", "failure_reason", "source_revision", "model_provider", "model", "requested_at", "completed_at", "questions", "best_correct_count")
     ID_FIELD_NUMBER: _ClassVar[int]
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     QUESTION_COUNT_FIELD_NUMBER: _ClassVar[int]
@@ -73,6 +73,7 @@ class Quiz(_message.Message):
     REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
     COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
     QUESTIONS_FIELD_NUMBER: _ClassVar[int]
+    BEST_CORRECT_COUNT_FIELD_NUMBER: _ClassVar[int]
     id: str
     job_id: str
     question_count: int
@@ -84,7 +85,42 @@ class Quiz(_message.Message):
     requested_at: _timestamp_pb2.Timestamp
     completed_at: _timestamp_pb2.Timestamp
     questions: _containers.RepeatedCompositeFieldContainer[QuizQuestion]
-    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., question_count: _Optional[int] = ..., status: _Optional[_Union[QuizStatus, str]] = ..., failure_reason: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., questions: _Optional[_Iterable[_Union[QuizQuestion, _Mapping]]] = ...) -> None: ...
+    best_correct_count: int
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., question_count: _Optional[int] = ..., status: _Optional[_Union[QuizStatus, str]] = ..., failure_reason: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., questions: _Optional[_Iterable[_Union[QuizQuestion, _Mapping]]] = ..., best_correct_count: _Optional[int] = ...) -> None: ...
+
+class SubmitQuizAttemptRequest(_message.Message):
+    __slots__ = ("job_id", "quiz_id", "user_id", "answers")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    QUIZ_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    ANSWERS_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    quiz_id: str
+    user_id: str
+    answers: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, job_id: _Optional[str] = ..., quiz_id: _Optional[str] = ..., user_id: _Optional[str] = ..., answers: _Optional[_Iterable[int]] = ...) -> None: ...
+
+class QuizAttemptResult(_message.Message):
+    __slots__ = ("correct_count", "question_count", "results")
+    CORRECT_COUNT_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_COUNT_FIELD_NUMBER: _ClassVar[int]
+    RESULTS_FIELD_NUMBER: _ClassVar[int]
+    correct_count: int
+    question_count: int
+    results: _containers.RepeatedCompositeFieldContainer[QuizQuestionResult]
+    def __init__(self, correct_count: _Optional[int] = ..., question_count: _Optional[int] = ..., results: _Optional[_Iterable[_Union[QuizQuestionResult, _Mapping]]] = ...) -> None: ...
+
+class QuizQuestionResult(_message.Message):
+    __slots__ = ("chosen_option", "correct_option", "correct", "explanation")
+    CHOSEN_OPTION_FIELD_NUMBER: _ClassVar[int]
+    CORRECT_OPTION_FIELD_NUMBER: _ClassVar[int]
+    CORRECT_FIELD_NUMBER: _ClassVar[int]
+    EXPLANATION_FIELD_NUMBER: _ClassVar[int]
+    chosen_option: int
+    correct_option: int
+    correct: bool
+    explanation: str
+    def __init__(self, chosen_option: _Optional[int] = ..., correct_option: _Optional[int] = ..., correct: _Optional[bool] = ..., explanation: _Optional[str] = ...) -> None: ...
 
 class QuizQuestion(_message.Message):
     __slots__ = ("kind", "prompt", "options", "correct_option", "explanation", "source_timestamps")

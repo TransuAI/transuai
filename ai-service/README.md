@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions` 九張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts` 十張表。
 
 原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)；embedding 仍用 `hf_client.py`。
 
@@ -143,6 +143,9 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 用完就是 FAILED。自有金鑰不能用時直接失敗並附原因，不改用平台模型。GENERATING 超過 5 分鐘視為卡住，`ListQuizzes` / `GetQuiz`
 回報成 FAILED（「產生逾時，請再產生一次」），使用者可以再產生一份。用量記在要求者名下，功能是 `quiz`。
 
+作答（`SubmitQuizAttempt`）由後端計分：每題的選擇跟正確選項比對，連同答對題數存進 `quiz_attempts`（同一份測驗可以重做，
+每次都留下）；列表的最佳成績是這份測驗所有作答裡答對題數的最大值。
+
 ### 逐字稿被編輯之後（`transcript.edited`）
 
 ```
@@ -171,8 +174,9 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、`answered_by` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`，模型呼叫失敗時訊息點出廠商與原因）。可以帶 `model` 臨時換模型（只用在這一次，必須是提問者用得到的：平台模型、有金鑰的廠商整理好的清單，或他目前的預設模型；否則在送出任何 chunk 前回 `INVALID_ARGUMENT`），不帶就用預設模型；問題改寫與回答用同一個模型，`qa_history` 記錄回答的模型。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，用來記錄 `qa_history`、決定用誰的預設模型與自有金鑰，不重新驗證 |
 | `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
 | `RequestQuiz` | 要求產生一份測驗（帶 `user_id`：要求的使用者，用他的預設模型、用量記在他名下）：新增 GENERATING 的測驗、排入 `quiz.requested` 後立即回傳（不含題目）；每次都是新的一份。題數不是 5、10、20 或 ID 不合法回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
-| `ListQuizzes` | 一個 Job 的所有測驗（新的在前）：題數、狀態（GENERATING 超過 5 分鐘回報成 FAILED）、失敗原因、依據的逐字稿 revision、產生的模型、要求與完成時間；不含題目 |
-| `GetQuiz` | 一份測驗含題目（題型、題目、選項、正確選項、解說、依據的片段開始時間）；不存在或不屬於這個 `job_id` 回 `NOT_FOUND` |
+| `ListQuizzes` | 一個 Job 的所有測驗（新的在前）：題數、狀態（GENERATING 超過 5 分鐘回報成 FAILED）、失敗原因、依據的逐字稿 revision、產生的模型、要求與完成時間、最佳成績（`best_correct_count`：所有作答裡答對最多的題數，沒作答過不設定）；不含題目 |
+| `GetQuiz` | 一份測驗含題目（題型、題目、選項、正確選項、解說、依據的片段開始時間）與最佳成績；不存在或不屬於這個 `job_id` 回 `NOT_FOUND` |
+| `SubmitQuizAttempt` | 送出一次作答（依題目順序、每題一個選項位置）：計分、存進 `quiz_attempts`，回傳答對題數與每題的選擇、正確選項、對錯、解說；同一份測驗可以重做，每次都保存。題數不對或選項超出範圍回 `INVALID_ARGUMENT`，還沒產生完成回 `FAILED_PRECONDITION`，不屬於這個 `job_id` 回 `NOT_FOUND` |
 | `SumUserLlmUsage` | 一位使用者在 `[start, end)` 之間的 LLM 用量，依廠商、模型、金鑰來源加總：輸入 / 輸出 token（已知數字的加總）、呼叫次數（失敗也算）、廠商沒回報 token 的次數；Gateway 把「某個月」換成時間範圍。`user_id` 不合法或沒給 `start` / `end` 回 `INVALID_ARGUMENT`，沒有用量回空列表 |
 | `SaveProviderKey` / `DeleteProviderKey` / `ListProviderKeys` | 自有金鑰（見上方「自有金鑰」）：存入或替換（先向廠商驗證，通過才加密存下，回傳末四碼；廠商不在清單、金鑰是空的或無效回 `INVALID_ARGUMENT` 附原因，廠商暫時連不上回 `UNAVAILABLE`，沒設定主金鑰回 `FAILED_PRECONDITION`）、刪除（沒有這把回 `deleted=false`；預設模型正在用它時一起改回平台模型，`default_model_reset=true`）、列出（只有末四碼） |
 | `ListAvailableModels` / `GetDefaultModel` / `SetDefaultModel` | 預設模型（見上方「預設模型」）：可以選的模型、目前的預設模型、設定預設模型（沒有那個廠商的自有金鑰回 `FAILED_PRECONDITION`，清單外的模型或 OpenRouter 上不存在回 `INVALID_ARGUMENT`，OpenRouter 查不到回 `UNAVAILABLE`） |
@@ -247,13 +251,13 @@ app/
     chapter.py                    Chapter（SQLAlchemy ORM）
     embedding.py                  Embedding（SQLAlchemy ORM，pgvector Vector(1024) 欄位）
     qa_history.py                 QaHistory（SQLAlchemy ORM）
-    quiz.py                       Quiz、QuizQuestion（SQLAlchemy ORM）
+    quiz.py                       Quiz、QuizQuestion、QuizAttempt（SQLAlchemy ORM）
   controllers/
     ai_controller.py               AiServiceServicer 實作（摘要、章節、問答、重新產生、用量、自有金鑰、預設模型、測驗的 rpc）
   services/
     reembed.py                       消費 transcript.edited：只重算文字有變的片段的 embedding
     regeneration.py                  RequestRegeneration（排入自己的 queue）與消費 summary.regeneration.requested：重新產生摘要與章節
-    quizzes.py                       RequestQuiz（排入自己的 queue）與消費 quiz.requested：產生測驗、失敗與卡住的判斷
+    quizzes.py                       RequestQuiz（排入自己的 queue）與消費 quiz.requested：產生測驗、失敗與卡住的判斷；作答的計分與保存
     quiz_generator.py                出題：組 prompt、呼叫 llm_client、驗證模型回的 JSON（格式不對 raise QuizFormatError）、過濾時間戳
     consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
@@ -282,7 +286,7 @@ app/
     llm_usage_repository.py                ai_db 存取（llm_usage）：每筆用量用自己的 session 立即寫入
     provider_key_repository.py             ai_db 存取（provider_keys）：存入或替換（upsert）、刪除、列出
     default_model_repository.py            ai_db 存取（default_models）
-    quiz_repository.py                     ai_db 存取（quizzes、quiz_questions）：題目與「完成」一起寫入
+    quiz_repository.py                     ai_db 存取（quizzes、quiz_questions、quiz_attempts）：題目與「完成」一起寫入、最佳成績
   db/
     session.py                              engine / session / init_db（Alembic upgrade）
     migrations/                             Alembic migration（`versions/0001_baseline.py` 是導入前 create_all 建出的 schema，只補建缺少的表）
@@ -309,4 +313,4 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - chat/embedding model 選擇都受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 embedding 模型 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `AI_HF_CHAT_MODEL`／`HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
 - 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了。還停在 768 維的舊表會讓服務拒絕啟動（baseline migration 檢查），要整張表 DROP 掉讓 migration 重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
 - `Qwen/Qwen3.5-9B` 屬於 Qwen3 系列，預設會開 thinking mode：完整思考過程另外算 completion tokens、放在 HF 回應的 `message.reasoning`（不是混進 `content` 的 `<think>` 標籤，這點實測跟原本 Groq `qwen3.6-27b` 的行為不同）。**已踩過的坑**：不設 `max_tokens` 時 provider 預設只給 2048，稍長的輸入光思考就把預算燒光，`content` 直接是空字串（`finish_reason="length"`）但整個呼叫不會報錯——摘要/章節分段因此曾經整段是空的，pipeline 卻顯示成功；而且單純拉高 `max_tokens` 治標不治本，實測 500+ 段的章節分段呼叫就算給到 32768 還是會在思考階段被 HF gateway 504 timeout 打斷。目前的做法是透過 `llm_client.DISABLE_THINKING`（chat template 的 `enable_thinking=False`）直接關掉 thinking mode，平台模型的每次呼叫都會帶上（`platform_chat_model()`），HF 的 OpenAI 相容路由會原樣轉給模型；`strip_thinking()`／`stream_without_thinking()` 保留作為防禦性 fallback（防之後換模型/provider 又變回把思考混進 `content` 的行為），正常情況下是 no-op。換其他 HF 聊天模型時要重新確認是否還會有類似的 thinking-mode 行為
-- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；摘要 / 章節 / 問答帶講者名稱（`tests/test_speaker_aware_pipeline.py`、`tests/test_qa.py`：`stream_answer()` mock 檢索與 transcript client，模型是假 AI 廠商）；gRPC controller 的 `GetSummary`、`RequestRegeneration`、`ListJobLlmUsage`、`SumUserLlmUsage`、測驗的三個 rpc 有 in-process 測試（測驗的背景產生也在 `tests/test_quizzes.py`，模型是假 AI 廠商）（真的 Postgres），問答 streaming 的 gRPC 層仍只靠手動 grpcurl smoke test
+- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；摘要 / 章節 / 問答帶講者名稱（`tests/test_speaker_aware_pipeline.py`、`tests/test_qa.py`：`stream_answer()` mock 檢索與 transcript client，模型是假 AI 廠商）；gRPC controller 的 `GetSummary`、`RequestRegeneration`、`ListJobLlmUsage`、`SumUserLlmUsage`、測驗的四個 rpc 有 in-process 測試（測驗的背景產生也在 `tests/test_quizzes.py`，模型是假 AI 廠商）（真的 Postgres），問答 streaming 的 gRPC 層仍只靠手動 grpcurl smoke test

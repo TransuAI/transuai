@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Quiz, QuizQuestion, QuizStatus
+from app.models import Quiz, QuizAttempt, QuizQuestion, QuizStatus
 
 
 def list_quizzes(session: Session, job_id: uuid.UUID) -> list[Quiz]:
@@ -46,3 +46,17 @@ def fail_quiz(session: Session, quiz_id: uuid.UUID, reason: str) -> None:
         quiz.status = QuizStatus.FAILED
         quiz.failure_reason = reason
     session.commit()
+
+
+def save_attempt(session: Session, attempt: QuizAttempt) -> None:
+    session.add(attempt)
+    session.commit()
+
+
+def best_correct_counts(session: Session, quiz_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    """每份（作答過的）測驗答對最多的題數。"""
+    rows = session.execute(
+        select(QuizAttempt.quiz_id, func.max(QuizAttempt.correct_count))
+        .where(QuizAttempt.quiz_id.in_(quiz_ids))
+        .group_by(QuizAttempt.quiz_id))
+    return {quiz_id: best for quiz_id, best in rows}

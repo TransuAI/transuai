@@ -56,3 +56,19 @@ class QuizQuestion(Base):
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     # 依據的片段開始時間（秒），一定對得到某個片段；可能沒有。
     source_timestamps: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)
+
+
+class QuizAttempt(Base):
+    """一次作答：每題選了哪個選項，後端計分。同一份測驗可以重做，每次都留下來。"""
+
+    __tablename__ = "quiz_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    quiz_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quizzes.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # 依題目順序，每題選的選項位置（從 0 開始）。
+    answers: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False)
+    correct_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))

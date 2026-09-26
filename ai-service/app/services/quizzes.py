@@ -4,13 +4,14 @@
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from pika import BlockingConnection
 
 from app.db import new_session
-from app.models import Quiz, QuizQuestion, QuizStatus
-from app.repositories.quiz_repository import complete_quiz, fail_quiz
+from app.models import Quiz, QuizAttempt, QuizQuestion, QuizStatus
+from app.repositories.quiz_repository import complete_quiz, fail_quiz, find_quiz, list_questions, save_attempt
 from app.services.default_models import resolve_chat_model
 from app.services.event_publisher import connection_params, publish_quiz_requested
 from app.services.llm_client import ChatModel, LlmError
@@ -33,6 +34,38 @@ class InvalidQuestionCount(Exception):
 
 class QuizNotQueued(Exception):
     """The request couldn't be put on the queue; no quiz was created."""
+
+
+class QuizNotFound(Exception):
+    """No such quiz under this job."""
+
+
+class QuizNotReady(Exception):
+    """The quiz isn't done (still generating, or failed): it has no questions to answer."""
+
+
+class InvalidAnswers(Exception):
+    """Not one valid option per question."""
+
+
+@dataclass(frozen=True)
+class QuestionResult:
+    chosen_option: int
+    correct_option: int
+    explanation: str
+
+    @property
+    def correct(self) -> bool:
+        return self.chosen_option == self.correct_option
+
+
+@dataclass(frozen=True)
+class AttemptResult:
+    results: list[QuestionResult]
+
+    @property
+    def correct_count(self) -> int:
+        return sum(result.correct for result in self.results)
 
 
 def effective_status(quiz: Quiz, now: datetime | None = None) -> tuple[QuizStatus, str | None]:
@@ -75,6 +108,30 @@ def request_quiz(job_id: uuid.UUID, user_id: uuid.UUID, question_count: int) -> 
             session.commit()
             raise QuizNotQueued() from exc
         return quiz
+    finally:
+        session.close()
+
+
+def submit_attempt(job_id: uuid.UUID, quiz_id: uuid.UUID, user_id: uuid.UUID, answers: list[int]) -> AttemptResult:
+    """計分並保存一次作答（answers 依題目順序、每題一個選項位置）。同一份測驗可以重做，每次都保存。"""
+    session = new_session()
+    try:
+        quiz = find_quiz(session, job_id, quiz_id)
+        if quiz is None:
+            raise QuizNotFound()
+        if quiz.status != QuizStatus.COMPLETED:
+            raise QuizNotReady()
+        questions = list_questions(session, quiz_id)
+        if len(answers) != len(questions) or any(
+                not 0 <= answer < len(question.options) for answer, question in zip(answers, questions)):
+            raise InvalidAnswers()
+        result = AttemptResult([
+            QuestionResult(chosen_option=answer, correct_option=question.correct_option, explanation=question.explanation)
+            for answer, question in zip(answers, questions)])
+        save_attempt(session, QuizAttempt(
+            quiz_id=quiz_id, user_id=user_id, answers=answers, correct_count=result.correct_count,
+            submitted_at=datetime.now(timezone.utc)))
+        return result
     finally:
         session.close()
 
