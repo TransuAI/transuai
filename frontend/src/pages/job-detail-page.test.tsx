@@ -13,7 +13,7 @@ vi.mock('@/lib/api', () => ({
       .fn()
       .mockResolvedValue({ downloadUrl: 'https://media.example.com/uploads/interview.mp3', expiresAt: '2026-01-01T01:00:00Z' }),
   },
-  transcriptApi: { get: vi.fn(), updateSegmentText: vi.fn() },
+  transcriptApi: { get: vi.fn(), updateSegmentText: vi.fn(), renameSpeaker: vi.fn() },
   summaryApi: { get: vi.fn(), regenerate: vi.fn() },
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
@@ -882,6 +882,91 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
     await user.click(await screen.findByRole('menuitem', { name: '下載字幕（SRT）' }))
 
     expect(await exported?.text()).toContain('00:00:04,000 --> 00:00:06,000\n講者 2：大家好\n')
+  })
+})
+
+describe('JobDetailPage renaming a speaker (COMPLETED, desktop layout)', () => {
+  const panel = () => screen.getByRole('list', { name: '講者' })
+
+  async function startRenaming(currentName: string) {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    await renderCompletedJob(diarizedTranscript)
+    await user.click(within(panel()).getByRole('button', { name: `改名：${currentName}` }))
+    return { user, input: within(panel()).getByRole('textbox', { name: '講者名稱' }) }
+  }
+
+  it('renames a speaker in place, everywhere the name is shown, and marks the summary as possibly 過時', async () => {
+    vi.mocked(transcriptApi.renameSpeaker).mockResolvedValue({
+      speaker: { label: 'S2', displayName: '王小明', displayOrder: 2 },
+      revision: 1,
+    })
+    const { user, input } = await startRenaming('講者 2')
+    expect(input).toHaveValue('講者 2')
+
+    await user.clear(input)
+    await user.type(input, '王小明{Enter}')
+
+    expect(transcriptApi.renameSpeaker).toHaveBeenCalledWith('job-1', 'S2', '王小明')
+    expect(await within(panel()).findByRole('button', { name: '改名：王小明' })).toBeInTheDocument()
+    expect(screen.getByText('大家好').closest('[data-segment-index]')).toHaveTextContent('王小明：大家好')
+    expect(screen.getByText('逐字稿已修改，摘要與章節可能過時')).toBeInTheDocument()
+  })
+
+  it('restores the default name when the name is cleared', async () => {
+    vi.mocked(transcriptApi.renameSpeaker).mockResolvedValue({
+      speaker: { label: 'S1', displayName: '講者 1', displayOrder: 1 },
+      revision: 1,
+    })
+    const { user, input } = await startRenaming('主持人')
+
+    await user.clear(input)
+    await user.keyboard('{Enter}')
+
+    expect(transcriptApi.renameSpeaker).toHaveBeenCalledWith('job-1', 'S1', '')
+    expect(await within(panel()).findByRole('button', { name: '改名：講者 1' })).toBeInTheDocument()
+  })
+
+  it('cancels on Escape without saving', async () => {
+    const { user, input } = await startRenaming('講者 2')
+
+    await user.type(input, '改到一半{Escape}')
+
+    expect(transcriptApi.renameSpeaker).not.toHaveBeenCalled()
+    expect(within(panel()).getByRole('button', { name: '改名：講者 2' })).toBeInTheDocument()
+  })
+
+  it('does not send anything when Enter is pressed without a change', async () => {
+    const { user } = await startRenaming('講者 2')
+
+    await user.keyboard('{Enter}')
+
+    expect(transcriptApi.renameSpeaker).not.toHaveBeenCalled()
+    expect(within(panel()).queryByRole('textbox', { name: '講者名稱' })).not.toBeInTheDocument()
+  })
+
+  it('cancels a rename on Escape inside the Source Sheet without closing the Sheet (narrow viewport)', async () => {
+    const user = userEvent.setup()
+    await renderCompletedJob(diarizedTranscript)
+    await user.click(screen.getByRole('button', { name: '來源' }))
+    const sheet = await screen.findByRole('dialog')
+
+    await user.click(within(sheet).getByRole('button', { name: '改名：講者 2' }))
+    await user.keyboard('{Escape}')
+
+    expect(within(sheet).queryByRole('textbox', { name: '講者名稱' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('keeps what the user typed and says so when saving fails', async () => {
+    vi.mocked(transcriptApi.renameSpeaker).mockRejectedValue(new Error('network'))
+    const { user, input } = await startRenaming('講者 2')
+
+    await user.clear(input)
+    await user.type(input, '王小明{Enter}')
+
+    expect(await screen.findByText('改名失敗')).toBeInTheDocument()
+    expect(input).toHaveValue('王小明')
   })
 })
 

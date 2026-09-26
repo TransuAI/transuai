@@ -18,6 +18,7 @@ interface SourcePaneProps {
   mediaAvailable: boolean
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
+  onRenameSpeaker: (label: string, name: string) => Promise<void>
 }
 
 export function SourcePane({
@@ -29,6 +30,7 @@ export function SourcePane({
   mediaAvailable,
   onSeek,
   onSaveSegmentText,
+  onRenameSpeaker,
 }: SourcePaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -42,7 +44,7 @@ export function SourcePane({
           {new Date(job.createdAt).toLocaleString()}
         </p>
         {player}
-        {transcript && <SpeakerPanel transcript={transcript} />}
+        {transcript && <SpeakerPanel transcript={transcript} onRename={onRenameSpeaker} />}
       </CardHeader>
       <CardContent className="min-h-0 flex-1 pt-4">
         {transcript ? (

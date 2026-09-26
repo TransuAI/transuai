@@ -91,6 +91,11 @@ export interface SegmentUpdate {
   revision: number
 }
 
+export interface SpeakerUpdate {
+  speaker: Speaker
+  revision: number
+}
+
 export interface Summary {
   jobId: string
   summaryText: string

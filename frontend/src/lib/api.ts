@@ -8,6 +8,7 @@ import type {
   PresignResponse,
   QaTurn,
   SegmentUpdate,
+  SpeakerUpdate,
   Summary,
   Transcript,
   User,
@@ -60,6 +61,13 @@ export const transcriptApi = {
   // 編輯片段文字：空字串＝清空、送回 originalText＝還原。
   updateSegmentText: (jobId: string, segmentId: string, text: string) =>
     apiFetch<SegmentUpdate>(`/transcripts/${jobId}/segments/${segmentId}`, { method: 'PATCH', body: { text } }),
+
+  // 替講者命名，空字串＝恢復預設名稱「講者 N」。
+  renameSpeaker: (jobId: string, label: string, name: string) =>
+    apiFetch<SpeakerUpdate>(`/transcripts/${jobId}/speakers/${encodeURIComponent(label)}`, {
+      method: 'PATCH',
+      body: { name },
+    }),
 }
 
 export const summaryApi = {

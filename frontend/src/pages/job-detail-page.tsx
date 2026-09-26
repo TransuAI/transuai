@@ -171,6 +171,17 @@ export function JobDetailPage() {
     )
   }
 
+  // 替講者命名也是一次編輯：用回應的講者跟版本號更新逐字稿，失敗時讓錯誤往外拋給改名的輸入框。
+  const handleRenameSpeaker = async (label: string, name: string) => {
+    if (!jobId) return
+    const { speaker, revision } = await transcriptApi.renameSpeaker(jobId, label, name)
+    setTranscript((prev) =>
+      prev
+        ? { ...prev, revision, speakers: prev.speakers.map((s) => (s.label === speaker.label ? speaker : s)) }
+        : prev,
+    )
+  }
+
   const handleAskQuestion = () => {
     const question = questionInput.trim()
     if (!jobId || !question || isAsking) return
@@ -296,6 +307,7 @@ export function JobDetailPage() {
       onAsk={handleAskQuestion}
       onSeek={seekTo}
       onSaveSegmentText={handleSaveSegmentText}
+      onRenameSpeaker={handleRenameSpeaker}
       onRegenerateSummary={regeneration.regenerate}
       isRegeneratingSummary={regeneration.isRegenerating}
       isRequestingRegeneration={regeneration.isRequesting}

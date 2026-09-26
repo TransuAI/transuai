@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Pencil, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { handleEditorKeys } from '@/lib/editor-keys'
 import { formatDuration } from '@/lib/media'
 import type { TranscriptMatch } from '@/lib/transcript-search'
 import { cn } from '@/lib/utils'
@@ -213,20 +214,6 @@ function SegmentEditor({
     }
   }
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    // While an IME is composing, Enter confirms the characters being typed and Esc drops the
-    // composition — neither is meant for the editor. (Safari reports the confirming Enter after
-    // compositionend, with keyCode 229.)
-    if (event.nativeEvent.isComposing || event.keyCode === 229) return
-    if (event.key === 'Enter') {
-      // A segment is a single line; Enter saves instead of inserting a newline.
-      event.preventDefault()
-      void save()
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      onDone()
-    }
-  }
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -240,7 +227,8 @@ function SegmentEditor({
         value={draft}
         disabled={isSaving}
         onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={handleKeyDown}
+        // A segment is a single line; Enter saves instead of inserting a newline.
+        onKeyDown={(event) => handleEditorKeys(event, { save: () => void save(), cancel: onDone })}
         className="field-sizing-content w-full resize-none rounded-md border bg-background px-2 py-1 leading-relaxed outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
       />
       <p className="text-xs text-muted-foreground">{isSaving ? '儲存中…' : 'Enter 儲存・Esc 取消'}</p>

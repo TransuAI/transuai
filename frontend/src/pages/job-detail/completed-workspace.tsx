@@ -31,6 +31,7 @@ interface CompletedWorkspaceProps {
   onAsk: () => void
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
+  onRenameSpeaker: (label: string, name: string) => Promise<void>
   onRegenerateSummary: () => void
   isRegeneratingSummary: boolean
   isRequestingRegeneration: boolean
@@ -77,6 +78,7 @@ export function CompletedWorkspace({
   onAsk,
   onSeek,
   onSaveSegmentText,
+  onRenameSpeaker,
   onRegenerateSummary,
   isRegeneratingSummary,
   isRequestingRegeneration,
@@ -95,7 +97,16 @@ export function CompletedWorkspace({
     }
   }
 
-  const sourcePaneProps = { job, transcript, currentSegmentIndex, autoFollow, mediaAvailable, onSeek, onSaveSegmentText }
+  const sourcePaneProps = {
+    job,
+    transcript,
+    currentSegmentIndex,
+    autoFollow,
+    mediaAvailable,
+    onSeek,
+    onSaveSegmentText,
+    onRenameSpeaker,
+  }
   const desktopPlayer =
     mediaUrl &&
     (job.fileType === 'VIDEO' ? (

@@ -76,6 +76,7 @@ src/
     auth-storage.ts    token/user 存 localStorage
     current-segment.ts 依播放時間找出「目前片段」(定義見 CONTEXT.md),二分搜尋
     download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>);開啟伺服器給的下載 URL(跨網域 presigned 連結靠回應的 Content-Disposition 下載)
+    editor-keys.ts     就地編輯器(片段文字、講者名稱)共用的按鍵:Enter 儲存、Esc 取消,輸入法組字中不處理
     export-formats.ts  匯出格式轉換(不依賴畫面):`buildExportContent` 把工作區內容組成匯出輸入,每種格式是一個 `ExportFormat`(檔名結尾、MIME、render):TXT 純文字 / 含時間戳、SRT、VTT、Markdown 報告(長度與建立時間、摘要、章節、逐字稿,可選問答紀錄——只匯出已完成的回答;摘要過時時附註);共用規則——已清空片段不匯出、兩位以上講者才標示講者、文字格式時間戳 mm:ss / h:mm:ss、檔名取原始檔名去副檔名
     media.ts           檔案型別判斷、讀取媒體長度、格式化工具
     speakers.ts        講者:依標籤查顯示名稱(名稱由後端決定,逐字稿與匯出共用)、是否只有一位講者(未清空片段中出現的講者 < 2 時所有講者顯示都隱藏)、要列出的講者(還有片段的)、逐字稿只在換人的第一個片段顯示講者(已清空片段不顯示也不算換人)、依顯示順序從固定配色(index.css 的 --speaker-1…8)取顏色
@@ -91,7 +92,7 @@ src/
       completed-workspace.tsx  COMPLETED 的三欄工作區(桌面 grid / 手機 Sheet,確保同時只有一個 media element:桌面在來源欄、手機在迷你播放器;來源 Sheet 打開時聚焦 Sheet 本身而非搜尋框;標了 data-consumes-escape 的控制項(有內容的搜尋框、片段編輯器)按 Esc 做自己的事,不會關 Sheet)
       mini-player.tsx          手機版常駐底部播放列:播放 / 暫停、進度條、時間、一行目前片段文字(多位講者時前面加「名稱：」),影片顯示 16:9 小畫面
       source-pane.tsx          來源欄:檔案資訊、播放器(只有桌面 grid 那份有,由 completed-workspace 以 player slot 傳入)、講者區塊、逐字稿
-      speaker-panel.tsx        講者區塊:還有片段的講者,每位一個顏色點 + 名稱;只有一位講者時不顯示
+      speaker-panel.tsx        講者區塊:還有片段的講者,每位一個顏色點 + 名稱;點名稱就地改名(Enter 存 / Esc 取消,名稱清空＝恢復「講者 N」,存檔失敗保留輸入);只有一位講者時不顯示
       speaker-dot.tsx          講者的顏色點(講者區塊、逐字稿換人處共用)
       chat-pane.tsx            問答欄
       studio-pane.tsx          Studio 欄:AI 摘要、章節;逐字稿被編輯後顯示「逐字稿已修改,摘要與章節可能過時」與「重新產生摘要與章節」按鈕(產生中顯示「重新產生中…」)
@@ -107,4 +108,4 @@ src/
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
-- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、講者區塊與顏色、只有一位講者時隱藏、換人時顯示講者名稱、迷你播放器與匯出帶講者名稱)跟 sidebar / 深色模式;匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
+- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、講者區塊與顏色、講者改名、只有一位講者時隱藏、換人時顯示講者名稱、迷你播放器與匯出帶講者名稱)跟 sidebar / 深色模式;匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
