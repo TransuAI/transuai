@@ -14,16 +14,21 @@ import org.springframework.web.bind.annotation.RestController;
 import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
+import com.transuai.gateway.web.dto.QuizAttemptRequestDto;
+import com.transuai.gateway.web.dto.QuizAttemptResultDto;
 import com.transuai.gateway.web.dto.QuizDto;
 import com.transuai.gateway.web.dto.QuizQuestionDto;
+import com.transuai.gateway.web.dto.QuizQuestionResultDto;
 import com.transuai.gateway.web.dto.QuizRequestDto;
 
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.GetQuizRequest;
 import transuai.ai.v1.Ai.ListQuizzesRequest;
 import transuai.ai.v1.Ai.Quiz;
+import transuai.ai.v1.Ai.QuizAttemptResult;
 import transuai.ai.v1.Ai.QuizQuestion;
 import transuai.ai.v1.Ai.RequestQuizRequest;
+import transuai.ai.v1.Ai.SubmitQuizAttemptRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
 // 測驗（見 ai-service/CONTEXT.md「測驗」）：在 ai-service 背景產生，前端輪詢列表直到不是 GENERATING。
@@ -68,13 +73,35 @@ public class QuizController {
                 true);
     }
 
+    // 後端計分並保存（同一份測驗可以重做，每次都保存）；每題要剛好一個有效選項，否則 400；還沒產生完成回 409。
+    @PostMapping("/jobs/{jobId}/quizzes/{quizId}/attempts")
+    public QuizAttemptResultDto submitAttempt(@CurrentUserId UUID userId, @PathVariable String jobId,
+            @PathVariable String quizId, @RequestBody QuizAttemptRequestDto request) {
+        jobOwnershipGuard.check(userId, jobId);
+        if (request == null || request.answers() == null || request.answers().contains(null)) {
+            throw new IllegalArgumentException("answers are required"); // → 400 via GrpcExceptionAdvice
+        }
+        QuizAttemptResult result = aiServiceStub.submitQuizAttempt(SubmitQuizAttemptRequest.newBuilder()
+                .setJobId(jobId)
+                .setQuizId(quizId)
+                .setUserId(userId.toString())
+                .addAllAnswers(request.answers())
+                .build());
+        return new QuizAttemptResultDto(result.getCorrectCount(), result.getQuestionCount(),
+                result.getResultsList().stream()
+                        .map(r -> new QuizQuestionResultDto(r.getChosenOption(), r.getCorrectOption(), r.getCorrect(),
+                                r.getExplanation()))
+                        .toList());
+    }
+
     private static QuizDto toDto(Quiz quiz, boolean withQuestions) {
         return new QuizDto(quiz.getId(), quiz.getJobId(), quiz.getQuestionCount(),
                 quiz.getStatus().name().replace("QUIZ_STATUS_", ""), GrpcStrings.emptyToNull(quiz.getFailureReason()),
                 quiz.getSourceRevision(), GrpcStrings.emptyToNull(quiz.getModelProvider()),
                 GrpcStrings.emptyToNull(quiz.getModel()), GrpcTimestamps.toInstant(quiz.getRequestedAt()),
                 quiz.hasCompletedAt() ? GrpcTimestamps.toInstant(quiz.getCompletedAt()) : null,
-                withQuestions ? quiz.getQuestionsList().stream().map(QuizController::toDto).toList() : null);
+                withQuestions ? quiz.getQuestionsList().stream().map(QuizController::toDto).toList() : null,
+                quiz.hasBestCorrectCount() ? quiz.getBestCorrectCount() : null);
     }
 
     private static QuizQuestionDto toDto(QuizQuestion question) {

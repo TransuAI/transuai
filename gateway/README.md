@@ -92,8 +92,9 @@ docker compose up -d
 | `POST` | `/summary/{jobId}/regenerate` | 在背景依最新逐字稿重新產生摘要與章節，回 `202` 與目前的摘要；轉給 `RequestRegeneration`，帶上當下使用者（用量記在他名下；Job 狀態不變） |
 | `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
 | `POST` | `/jobs/{jobId}/quizzes` | 產生一份測驗，body `{ "questionCount": 5 \| 10 \| 20 }`，回 `202` 與「產生中」的測驗（不含題目）；每次都多一份新的。題數不對回 400；轉給 `RequestQuiz`，帶上當下使用者（用他的預設模型、用量記在他名下） |
-| `GET` | `/jobs/{jobId}/quizzes` | 這個 Job 的測驗（新的在前）：`[{ id, jobId, questionCount, status, failureReason, sourceRevision, modelProvider, model, requestedAt, completedAt, questions: null }]`；`status` 是 `GENERATING` / `COMPLETED` / `FAILED`（產生中超過 5 分鐘回報成失敗），前端每 3 秒輪詢直到不是 `GENERATING`；轉給 `ListQuizzes` |
+| `GET` | `/jobs/{jobId}/quizzes` | 這個 Job 的測驗（新的在前）：`[{ id, jobId, questionCount, status, failureReason, sourceRevision, modelProvider, model, requestedAt, completedAt, questions: null, bestCorrectCount }]`（`bestCorrectCount` 是所有作答裡答對最多的題數，還沒作答過是 `null`）；`status` 是 `GENERATING` / `COMPLETED` / `FAILED`（產生中超過 5 分鐘回報成失敗），前端每 3 秒輪詢直到不是 `GENERATING`；轉給 `ListQuizzes` |
 | `GET` | `/jobs/{jobId}/quizzes/{quizId}` | 一份測驗含題目：`questions: [{ kind, prompt, options, correctOption, explanation, sourceTimestamps }]`（`kind` 是 `multiple_choice` / `true_false`；答案直接回傳，作答時不顯示是前端的事）；不屬於這個 Job 回 404；轉給 `GetQuiz` |
+| `POST` | `/jobs/{jobId}/quizzes/{quizId}/attempts` | 送出一次作答，body `{ "answers": number[] }`（依題目順序，每題選的選項位置，從 0 開始），ai-service 計分並保存（同一份測驗可以重做，每次都保存），回傳 `{ correctCount, questionCount, results: [{ chosenOption, correctOption, correct, explanation }] }`；題數不對或選項超出範圍回 400，還沒產生完成回 409；轉給 `SubmitQuizAttempt` |
 | `GET` | `/qa/{jobId}` | 取得這個 job 的完整問答紀錄（依時間升冪），回傳 `[{ question, answer, sourceTimestamps, createdAt, modelProvider, model }]`（`model` 是回答的模型，記錄模型之前的是 `null`）；一個 job 只有一段連續對話，沒有獨立的 conversation/thread（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)） |
 | `GET` | `/ai/models` | 可以選的模型：`{ models: [{ provider, model, supportsTools }], openrouterCustom }`，平台模型加上有自有金鑰的廠商整理好的清單；轉給 `ListAvailableModels` |
 | `GET` | `/me/default-model` | 目前的預設模型 `{ provider, model, supportsTools }`（沒選過就是平台模型）；轉給 `GetDefaultModel` |
