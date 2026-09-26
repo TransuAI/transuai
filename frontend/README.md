@@ -79,6 +79,7 @@ src/
     download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>);開啟伺服器給的下載 URL(跨網域 presigned 連結靠回應的 Content-Disposition 下載)
     editor-keys.ts     就地編輯器(片段文字、講者名稱)共用的按鍵:Enter 儲存、Esc 取消,輸入法組字中不處理
     export-formats.ts  匯出格式轉換(不依賴畫面):`buildExportContent` 把工作區內容組成匯出輸入,每種格式是一個 `ExportFormat`(檔名結尾、MIME、render):TXT 純文字 / 含時間戳、SRT、VTT、Markdown 報告(長度與建立時間、摘要、章節、逐字稿,可選問答紀錄——只匯出已完成的回答;摘要過時時附註);測驗另外是 `toQuizMarkdown`(輸入是整份測驗而不是工作區內容,檔名結尾與 MIME 在 `QUIZ_MARKDOWN`):題目與選項在前,最後一節是解答、解說與依據的時間戳,過時時附註;共用規則——已清空片段不匯出、兩位以上講者才標示講者、文字格式時間戳 mm:ss / h:mm:ss、檔名取原始檔名去副檔名
+    navigation.ts      離開這個網站到別的網址(連結帳號時到 Google / Notion);獨立出來讓測試可以替換(jsdom 不能換頁)
     media.ts           檔案型別判斷、讀取媒體長度、格式化工具(長度、檔案大小、「9/26 14:07」這種簡短時間)
     providers.ts       自有金鑰支援的廠商與顯示名稱;模型怎麼稱呼(「平台模型(…)」/「OpenAI · gpt-5」)、兩個模型是不是同一個
     usage-format.ts    用量數字的格式:token 數加千分位、轉錄秒數換成分鐘(Job 用量與本月用量共用)
@@ -89,9 +90,10 @@ src/
     login-page.tsx / register-page.tsx
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete
     jobs-page.tsx           Job 列表、分頁、刪除
-    settings-page.tsx       設定頁(側邊欄「設定」):預設模型、自有金鑰、本月用量;存入或刪除金鑰後重新載入可選的模型
+    settings-page.tsx       設定頁(側邊欄「設定」):預設模型、自有金鑰、已連結的帳號、本月用量;存入或刪除金鑰後重新載入可選的模型
     settings/
       default-model-section.tsx 預設模型:平台模型與有金鑰的廠商的模型(單選),有 OpenRouter 金鑰時可輸入模型 ID;換模型不會重做既有內容
+      connected-accounts-section.tsx 已連結的帳號:Google、Notion 各一列(已連結 / 已失效「請重新連結」/ 未連結);連結時向後端要授權網址再把使用者轉過去(lib/navigation.ts),回來時依網址的 ?connected= / ?connection_failed= 提示結果後清掉;中斷連結先確認,沒能通知對方撤銷時提示使用者自己去移除
       monthly-usage-section.tsx 本月用量:依模型加總,分平台模型 / 自有金鑰 / 轉錄三組(token 數與次數、轉錄分鐘數;有用量未知的呼叫會註明未計入);打開時是伺服器決定的這個月(台灣時間),可以往前看上個月、再回來;第一次載入失敗時可以重試
       provider-keys-section.tsx 自有金鑰:OpenAI / Anthropic / Google Gemini / OpenRouter 各一列,存入(後端先向廠商驗證,失敗顯示原因並保留輸入)、替換、刪除(先確認;預設模型正在用它時提示已改回平台模型);存入後只顯示末四碼
     job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked;自動跟隨的狀態也在這層;版面切換重新掛載 media element 時用 use-playback-continuity 接著播)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
@@ -122,4 +124,4 @@ src/
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
-- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、測驗卡片(產生、輪詢、失敗與再試一次、手機 Studio Sheet)與作答(途中沒有答案、結果頁、點時間戳跳轉、重做與最佳成績)、測驗的過時提示與匯出、用量區塊與重新載入、講者區塊與顏色、講者改名、改片段講者 / 新增講者(單一講者也能指定出第二位)、只有一位講者時隱藏、換人時顯示講者名稱、迷你播放器與匯出帶講者名稱)跟 sidebar / 深色模式;設定頁的預設模型、自有金鑰與本月用量另有頁面測試(`settings-page.test.tsx`);匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
+- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、測驗卡片(產生、輪詢、失敗與再試一次、手機 Studio Sheet)與作答(途中沒有答案、結果頁、點時間戳跳轉、重做與最佳成績)、測驗的過時提示與匯出、用量區塊與重新載入、講者區塊與顏色、講者改名、改片段講者 / 新增講者(單一講者也能指定出第二位)、只有一位講者時隱藏、換人時顯示講者名稱、迷你播放器與匯出帶講者名稱)跟 sidebar / 深色模式;設定頁的預設模型、自有金鑰、已連結的帳號與本月用量另有頁面測試(`settings-page.test.tsx`);匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。

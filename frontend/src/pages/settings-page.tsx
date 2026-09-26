@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ConnectedAccountsSection } from '@/pages/settings/connected-accounts-section'
 import { DefaultModelSection } from '@/pages/settings/default-model-section'
 import { MonthlyUsageSection } from '@/pages/settings/monthly-usage-section'
 import { ProviderKeysSection } from '@/pages/settings/provider-keys-section'
@@ -11,6 +12,7 @@ export function SettingsPage() {
       <h1 className="text-2xl font-semibold">設定</h1>
       <DefaultModelSection keysVersion={keysVersion} />
       <ProviderKeysSection onKeysChanged={() => setKeysVersion((version) => version + 1)} />
+      <ConnectedAccountsSection />
       <MonthlyUsageSection />
     </div>
   )

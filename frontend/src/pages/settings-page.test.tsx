@@ -3,15 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/sonner'
-import { modelsApi, providerKeysApi, usageApi } from '@/lib/api'
+import { connectionsApi, modelsApi, providerKeysApi, usageApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
+import { leaveTo } from '@/lib/navigation'
 import { SettingsPage } from './settings-page'
 
 vi.mock('@/lib/api', () => ({
   providerKeysApi: { list: vi.fn(), save: vi.fn(), remove: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
   usageApi: { getMonthly: vi.fn() },
+  connectionsApi: { list: vi.fn(), authorize: vi.fn(), remove: vi.fn() },
 }))
+
+vi.mock('@/lib/navigation', () => ({ leaveTo: vi.fn() }))
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -30,11 +34,15 @@ beforeEach(() => {
   })
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platform)
   vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2026-09', llm: [], transcription: [] })
+  vi.mocked(connectionsApi.list).mockResolvedValue([
+    { service: 'google', status: 'NOT_CONNECTED', connectedAt: null },
+    { service: 'notion', status: 'NOT_CONNECTED', connectedAt: null },
+  ])
 })
 
-async function renderSettings() {
+async function renderSettings(url = '/settings') {
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[url]}>
       <SettingsPage />
       <Toaster />
     </MemoryRouter>,
@@ -273,5 +281,103 @@ describe('SettingsPage monthly usage (本月用量)', () => {
     await user.click(within(section).getByRole('button', { name: '上個月' }))
 
     expect(usageApi.getMonthly).toHaveBeenLastCalledWith('2026-12')
+  })
+})
+
+describe('SettingsPage linked accounts (已連結的帳號)', () => {
+  async function renderAccounts(url?: string) {
+    await renderSettings(url)
+    return screen.findByRole('region', { name: '已連結的帳號' })
+  }
+  const account = (section: HTMLElement, name: string) => within(section).getByRole('group', { name })
+
+  it('shows whether Google and Notion are linked, and asks to link again when a link stopped working', async () => {
+    vi.mocked(connectionsApi.list).mockResolvedValue([
+      { service: 'google', status: 'CONNECTED', connectedAt: '2026-09-26T02:00:00Z' },
+      { service: 'notion', status: 'INVALID', connectedAt: '2026-09-20T02:00:00Z' },
+    ])
+    const section = await renderAccounts()
+
+    const google = await within(section).findByRole('group', { name: 'Google' })
+    expect(within(google).getByText('已連結')).toBeInTheDocument()
+    expect(within(google).getByRole('button', { name: '中斷連結' })).toBeInTheDocument()
+    const notion = account(section, 'Notion')
+    expect(within(notion).getByText('Notion 連結已失效，請重新連結')).toBeInTheDocument()
+    expect(within(notion).getByRole('button', { name: '重新連結' })).toBeInTheDocument()
+  })
+
+  it('sends the user to the service to link it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(connectionsApi.authorize).mockResolvedValue({ authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth?x=1' })
+    const section = await renderAccounts()
+    const google = await within(section).findByRole('group', { name: 'Google' })
+    expect(within(google).getByText('未連結')).toBeInTheDocument()
+
+    await user.click(within(google).getByRole('button', { name: '連結' }))
+
+    expect(connectionsApi.authorize).toHaveBeenCalledWith('google')
+    expect(leaveTo).toHaveBeenCalledWith('https://accounts.google.com/o/oauth2/v2/auth?x=1')
+  })
+
+  it('says why linking cannot start', async () => {
+    const user = userEvent.setup()
+    vi.mocked(connectionsApi.authorize).mockRejectedValue(
+      new ApiError(409, { error: 'FAILED_PRECONDITION', message: '伺服器沒有設定 Google OAuth client，暫時無法連結 Google' }),
+    )
+    const section = await renderAccounts()
+
+    await user.click(within(await within(section).findByRole('group', { name: 'Google' })).getByRole('button', { name: '連結' }))
+
+    expect(await screen.findByText('伺服器沒有設定 Google OAuth client，暫時無法連結 Google')).toBeInTheDocument()
+    expect(leaveTo).not.toHaveBeenCalled()
+  })
+
+  it('tells the user how linking went when they come back from the service', async () => {
+    await renderAccounts('/settings?connected=notion')
+    expect(await screen.findByText('已連結 Notion')).toBeInTheDocument()
+  })
+
+  it('tells the user when linking failed', async () => {
+    await renderAccounts('/settings?connection_failed=google')
+    expect(await screen.findByText('無法連結 Google，請再試一次')).toBeInTheDocument()
+  })
+
+  it('does not repeat whatever a crafted link puts in the address', async () => {
+    await renderAccounts('/settings?connected=Anything')
+    expect(await screen.findByText('已連結帳號')).toBeInTheDocument()
+    expect(screen.queryByText(/Anything/)).not.toBeInTheDocument()
+  })
+
+  it('unlinks after the user confirms', async () => {
+    const user = userEvent.setup()
+    vi.mocked(connectionsApi.list).mockResolvedValue([
+      { service: 'google', status: 'CONNECTED', connectedAt: '2026-09-26T02:00:00Z' },
+      { service: 'notion', status: 'NOT_CONNECTED', connectedAt: null },
+    ])
+    vi.mocked(connectionsApi.remove).mockResolvedValue({ revoked: true })
+    const section = await renderAccounts()
+    const google = await within(section).findByRole('group', { name: 'Google' })
+
+    await user.click(within(google).getByRole('button', { name: '中斷連結' }))
+    expect(connectionsApi.remove).not.toHaveBeenCalled()
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '中斷連結' }))
+
+    expect(connectionsApi.remove).toHaveBeenCalledWith('google')
+    expect(await within(google).findByText('未連結')).toBeInTheDocument()
+  })
+
+  it('says so when the service could not be told to revoke access', async () => {
+    const user = userEvent.setup()
+    vi.mocked(connectionsApi.list).mockResolvedValue([
+      { service: 'google', status: 'NOT_CONNECTED', connectedAt: null },
+      { service: 'notion', status: 'CONNECTED', connectedAt: '2026-09-26T02:00:00Z' },
+    ])
+    vi.mocked(connectionsApi.remove).mockResolvedValue({ revoked: false })
+    const section = await renderAccounts()
+
+    await user.click(within(await within(section).findByRole('group', { name: 'Notion' })).getByRole('button', { name: '中斷連結' }))
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '中斷連結' }))
+
+    expect(await screen.findByText('已中斷連結，但沒能通知 Notion 撤銷授權，請到 Notion 的設定移除 TransuAI')).toBeInTheDocument()
   })
 })

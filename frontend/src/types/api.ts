@@ -245,6 +245,14 @@ export interface QuizAttemptResult {
   results: { chosenOption: number; correctOption: number; correct: boolean; explanation: string }[]
 }
 
+/** A linked account (已連結的帳號): an outside service the user lets the platform use on their behalf. */
+export interface Connection {
+  service: 'google' | 'notion'
+  /** INVALID: the access expired and couldn't be renewed, or was revoked on the service's side — link again. */
+  status: 'CONNECTED' | 'INVALID' | 'NOT_CONNECTED'
+  connectedAt: string | null
+}
+
 /** One of the user's own API keys (自有金鑰): only its last four characters ever come back. */
 export interface ProviderKey {
   /** openai / anthropic / gemini / openrouter */

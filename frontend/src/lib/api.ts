@@ -4,6 +4,7 @@ import type {
   AuthResponse,
   AvailableModels,
   Chapter,
+  Connection,
   Job,
   JobListResponse,
   JobUsage,
@@ -162,6 +163,14 @@ export const usageApi = {
   getJobUsage: (jobId: string) => apiFetch<JobUsage>(`/jobs/${jobId}/usage`),
   // 這位使用者某個月（YYYY-MM）依模型加總的用量；省略就是這個月（由伺服器決定，台灣時間）。
   getMonthly: (month?: string) => apiFetch<MonthlyUsage>(month ? `/me/usage?month=${month}` : '/me/usage'),
+}
+
+// 已連結的帳號（Google、Notion）：權杖只在後端，這裡只看得到狀態。連結時後端給授權網址，由前端把使用者轉過去。
+export const connectionsApi = {
+  list: () => apiFetch<Connection[]>('/me/connections'),
+  authorize: (service: string) => apiFetch<{ authorizeUrl: string }>(`/me/connections/${service}/authorize`),
+  // revoked：有沒有成功通知對方撤銷授權（沒有的話權杖一樣已刪除）
+  remove: (service: string) => apiFetch<{ revoked: boolean }>(`/me/connections/${service}`, { method: 'DELETE' }),
 }
 
 // 自有金鑰：存入前後端會先向廠商驗證；之後只看得到末四碼。
