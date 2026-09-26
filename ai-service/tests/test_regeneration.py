@@ -19,9 +19,9 @@ EDITED_TRANSCRIPT = SimpleNamespace(
     full_text="大家好\n今天開會討論預算",
     revision=3,
     segments=[
-        SimpleNamespace(start_time=0.0, end_time=1.5, text="大家好"),
-        SimpleNamespace(start_time=1.5, end_time=3.0, text=""),
-        SimpleNamespace(start_time=3.0, end_time=6.0, text="今天開會討論預算"),
+        SimpleNamespace(start_time=0.0, end_time=1.5, text="大家好", speaker_label=""),
+        SimpleNamespace(start_time=1.5, end_time=3.0, text="", speaker_label=""),
+        SimpleNamespace(start_time=3.0, end_time=6.0, text="今天開會討論預算", speaker_label=""),
     ],
     speakers=[],
 )

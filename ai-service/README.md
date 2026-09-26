@@ -16,7 +16,7 @@
 | API | gRPC（`AiService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費 | RabbitMQ（`pika`），消費 `transcription.completed`，發送 `ai.completed` / `job.failed` |
 | 摘要 | HF Inference Providers（預設 `Qwen/Qwen3.5-9B`，可用 `AI_HF_CHAT_MODEL` 換模型），把逐字稿全文丟給模型產生摘要；兩位以上講者時改成每行「名稱：文字」（見下方「講者」） |
-| 章節分段 | 同一個 HF 聊天模型，把逐字稿分段（含時間戳，兩位以上講者時每行 `[開始時間] 名稱：文字`）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
+| 章節分段 | 同一個 HF 聊天模型，把逐字稿片段（含時間戳，兩位以上講者時每行 `[開始時間] 名稱：文字`）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
 | Embedding | HF Inference Providers 的 `BAAI/bge-m3`（1024 維，query/document 對稱，不用加任何 instruction 前綴）：pipeline 內把逐字稿分段轉成向量存進 `embeddings` |
 | RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個 HF 聊天模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段，組成 context 連同最近 5 輪對話歷史一起餵給模型，用 `stream=True` 逐字串流生成回答；兩位以上講者時 context 每行帶講者**目前的**名稱（回答當下呼叫 `GetTranscript` 取得） |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
@@ -57,7 +57,7 @@ uv run python -m app.main
   → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文 + 分段
   → 已清空片段（空字串）不算內容，從下面每個 AI 輸入排除
   → 呼叫 HF Inference Providers 產生摘要（兩位以上講者時輸入是每行「名稱：文字」，否則是逐字稿全文）
-  → 呼叫 HF Inference Providers 依分段時間戳切章節（兩位以上講者時每行 `[開始時間] 名稱：文字`）（逐字稿沒有分段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
+  → 呼叫 HF Inference Providers 依片段時間戳切章節（兩位以上講者時每行 `[開始時間] 名稱：文字`）（逐字稿沒有片段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
   → 呼叫 HF Inference Providers 把逐字稿分段轉成向量
   → 摘要（連同讀到的逐字稿 revision，記成 source_revision）存進 summaries，章節存進 chapters，向量存進 embeddings（都覆蓋該 job 舊的資料）
   → UpdateJobStatus(COMPLETED)
@@ -84,7 +84,7 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 **顯示名稱**：摘要每行「名稱：文字」、章節每行 `[開始時間] 名稱：文字`，prompt 要求點出誰說了什麼。問答的 embedding
 **只依片段文字**（名字會改，改名不能讓 embedding 過期）；回答當下才呼叫 `GetTranscript` 拿最新的片段與講者，用起訖時間把
 檢索到的片段對回逐字稿、換上講者目前的名字，prompt 要求用這些名字稱呼講者——改名後下一次提問就是新名字，什麼都不用重算。
-拿不到逐字稿時照樣回答，只是不帶名字。只有一位講者或講者分離之前的舊逐字稿，輸入維持原樣、不帶名字。
+拿不到逐字稿（失敗或超過 2 秒）時照樣回答，只是不帶名字。只有一位講者或講者分離之前的舊逐字稿，輸入維持原樣、不帶名字。
 
 ### 重新產生摘要與章節（`summary.regeneration.requested`）
 
@@ -206,7 +206,7 @@ app/
     chapter_generator.py                 HF Inference Providers 呼叫（章節分段）
     embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
     qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（多位講者時帶講者目前的名稱）+ 對話歷史 → streaming 生成回答
-    speaker_context.py                   讓 AI 知道講者是誰：兩位以上講者時把片段組成「名稱：文字」（摘要）、`[時間] 名稱：文字`（章節）；只有一位講者或舊逐字稿時維持原樣
+    speaker_context.py                   讓 AI 知道講者是誰：兩位以上講者時把片段組成「名稱：文字」（摘要）、`[時間] 名稱：文字`（章節），以及問答用的「片段起訖時間 → 講者目前的名字」；只有一位講者或舊逐字稿時維持原樣
     segment_times.py                     片段起訖時間的對應鍵（embedding 對回逐字稿片段用，重算 embedding 與問答共用）
     hf_client.py                         共用的 HF InferenceClient（lazy init，embedding + chat completion 共用同一個 client）+ DISABLE_THINKING（關閉 Qwen3 系列的 thinking mode，所有 chat completion 呼叫都要帶）+ strip_thinking()／stream_without_thinking()（防禦性濾掉 <think> 區塊，正常情況下是 no-op，後者是 streaming 版）
     job_status_client.py                 gRPC client，呼叫 upload-service 的 UpdateJobStatus

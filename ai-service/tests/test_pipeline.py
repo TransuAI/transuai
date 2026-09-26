@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.services import pipeline
-from app.services.speaker_context import TimedLine
+from app.services.chapter_generator import TimedLine
 
 
 class FakeSegment:

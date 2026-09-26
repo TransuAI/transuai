@@ -12,7 +12,7 @@ from app.repositories.qa_repository import find_by_job_id
 from app.services.embedder import embed_query
 from app.services.hf_client import DISABLE_THINKING, get_client, strip_thinking, stream_without_thinking
 from app.services.segment_times import time_key
-from app.services.speaker_context import named, speaker_names, spoken_segments
+from app.services.speaker_context import speaker_names_by_segment_time, with_speaker_name
 from app.services.transcript_client import transcript_client
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,8 @@ _CONDENSE_PROMPT_TEMPLATE = (
 )
 
 _TOP_K = 5
+# 回答前拿講者名字的等待上限：使用者正在等回答，逾時就不帶名字。
+_TRANSCRIPT_TIMEOUT_SECONDS = 2.0
 _MEMORY_TURNS = 5
 
 # 歷史對話的答案長度沒有上限——一段很長的舊答案，就算只有一輪歷史也可能單獨把 prompt
@@ -108,7 +110,7 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
     speaker_by_time = _current_speaker_names_by_time(job_id)
     context = "\n\n".join(
         f"[{float(chunk.start_time):.1f}s] "
-        + named(chunk.chunk_text, speaker_by_time.get(time_key(chunk.start_time, chunk.end_time)))
+        + with_speaker_name(chunk.chunk_text, speaker_by_time.get(time_key(chunk.start_time, chunk.end_time)))
         for chunk in chunks
     )
     source_timestamps = [float(chunk.start_time) for chunk in chunks]
@@ -144,21 +146,11 @@ def stream_answer(session: Session, job_id: uuid.UUID, question: str) -> Iterato
 
 
 def _current_speaker_names_by_time(job_id: uuid.UUID) -> dict[tuple[float, float], str]:
-    """片段起訖時間 -> 講者目前的顯示名稱，只在有兩位以上講者時才有內容（見 speaker_context）。
-
-    embedding 只存片段文字，名字在回答當下才向 transcription-service 拿，改名後下一次提問就是新名字。拿不到
-    逐字稿時照樣回答，只是不帶名字——名字是加分，不值得讓整輪問答失敗。
-    """
+    """embedding 只存片段文字，名字在回答當下才向 transcription-service 拿，改名後下一次提問就是新名字。拿不到
+    逐字稿（失敗或逾時）時照樣回答，只是不帶名字——名字是加分，不值得讓整輪問答失敗或卡住。"""
     try:
-        transcript = transcript_client.get_transcript(str(job_id))
+        transcript = transcript_client.get_transcript(str(job_id), timeout=_TRANSCRIPT_TIMEOUT_SECONDS)
     except grpc.RpcError:
         logger.warning("job %s: could not fetch the transcript for speaker names, answering without them", job_id)
         return {}
-    names = speaker_names(transcript)
-    if names is None:
-        return {}
-    return {
-        time_key(segment.start_time, segment.end_time): names[segment.speaker_label]
-        for segment in spoken_segments(transcript)
-        if segment.speaker_label in names
-    }
+    return speaker_names_by_segment_time(transcript)

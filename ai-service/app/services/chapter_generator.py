@@ -1,16 +1,24 @@
 import json
 import logging
+from dataclasses import dataclass
 
 from app.core.config import settings
-from app.services.speaker_context import TimedLine
 from app.services.hf_client import DISABLE_THINKING, get_client, strip_thinking
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass(frozen=True)
+class TimedLine:
+    """章節分段的一行輸入：開始時間（秒）與片段文字（多位講者時是「名稱：文字」，見 speaker_context）。"""
+
+    start_time: float
+    text: str
+
 _PROMPT_TEMPLATE = (
-    "你是一個逐字稿章節分段助手。以下是帶時間戳記（秒）的逐字稿分段（多人對話時每段前面標了講者名稱），"
+    "你是一個逐字稿章節分段助手。以下是帶時間戳記（秒）的逐字稿片段（多人對話時每個片段前面標了講者名稱），"
     "請依內容主題的轉換切出章節，每個章節給一個簡潔的繁體中文標題，"
-    "以及該章節開始的時間（取最接近的分段時間，單位秒）。\n"
+    "以及該章節開始的時間（取最接近的片段時間，單位秒）。\n"
     "只回傳 JSON 陣列，不要 Markdown code fence、不要其他文字，"
     '每個元素格式為 {{"title": string, "start_time": number}}，依 start_time 由小到大排序：\n\n{segments}'
 )

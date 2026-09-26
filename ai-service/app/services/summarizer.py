@@ -14,13 +14,13 @@ _PROMPT_TEMPLATE = (
 _MAX_TOKENS = 2048
 
 
-def summarize(full_text: str) -> str:
-    """呼叫 HF Inference Providers，把逐字稿全文濃縮成一段摘要（輸入見 speaker_context.summary_input）。"""
+def summarize(transcript_text: str) -> str:
+    """呼叫 HF Inference Providers，把逐字稿濃縮成一段摘要（輸入見 speaker_context.summary_input）。"""
     logger.info("calling HF Inference (%s) for summary, transcript length=%d",
-                settings.ai_hf_chat_model, len(full_text))
+                settings.ai_hf_chat_model, len(transcript_text))
     response = get_client().chat.completions.create(
         model=settings.ai_hf_chat_model,
-        messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(transcript=full_text)}],
+        messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(transcript=transcript_text)}],
         max_tokens=_MAX_TOKENS,
         extra_body=DISABLE_THINKING,
     )

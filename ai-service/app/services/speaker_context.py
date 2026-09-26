@@ -5,17 +5,9 @@
 embedding 永遠只依片段文字——名字會改，改名不能讓 embedding 過期（問答在回答當下才換上名字，見 qa.py）。
 """
 
-from dataclasses import dataclass
-
 from app.proto_gen import transcription_pb2
-
-
-@dataclass(frozen=True)
-class TimedLine:
-    """章節分段的一行輸入：開始時間（秒）與文字（多位講者時是「名稱：文字」）。"""
-
-    start_time: float
-    text: str
+from app.services.chapter_generator import TimedLine
+from app.services.segment_times import time_key
 
 
 def spoken_segments(transcript: transcription_pb2.Transcript) -> list[transcription_pb2.TranscriptSegment]:
@@ -32,7 +24,7 @@ def speaker_names(transcript: transcription_pb2.Transcript) -> dict[str, str] | 
     return names if len(speaking) >= 2 else None
 
 
-def named(text: str, name: str | None) -> str:
+def with_speaker_name(text: str, name: str | None) -> str:
     """交給 LLM 的一行：「名稱：文字」，沒有名字時就是文字本身。"""
     return f"{name}：{text}" if name else text
 
@@ -41,11 +33,25 @@ def summary_input(transcript: transcription_pb2.Transcript) -> str:
     names = speaker_names(transcript)
     if names is None:
         return transcript.full_text
-    return "\n".join(named(s.text, names.get(s.speaker_label)) for s in spoken_segments(transcript))
+    return "\n".join(with_speaker_name(s.text, names.get(s.speaker_label)) for s in spoken_segments(transcript))
 
 
 def chapter_input(transcript: transcription_pb2.Transcript) -> list[TimedLine]:
+    names = speaker_names(transcript) or {}
+    return [
+        TimedLine(float(s.start_time), with_speaker_name(s.text, names.get(s.speaker_label)))
+        for s in spoken_segments(transcript)
+    ]
+
+
+def speaker_names_by_segment_time(transcript: transcription_pb2.Transcript) -> dict[tuple[float, float], str]:
+    """片段起訖時間（`segment_times.time_key`）-> 講者目前的顯示名稱，讓問答把檢索到的 embedding 對回講者；
+    不帶名字時（見 speaker_names）是空的。"""
     names = speaker_names(transcript)
     if names is None:
-        return [TimedLine(float(s.start_time), s.text) for s in spoken_segments(transcript)]
-    return [TimedLine(float(s.start_time), named(s.text, names.get(s.speaker_label))) for s in spoken_segments(transcript)]
+        return {}
+    return {
+        time_key(segment.start_time, segment.end_time): names[segment.speaker_label]
+        for segment in spoken_segments(transcript)
+        if segment.speaker_label in names
+    }

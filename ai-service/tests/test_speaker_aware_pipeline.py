@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from app.proto_gen import transcription_pb2
 from app.services import pipeline, regeneration
-from app.services.speaker_context import TimedLine
+from app.services.chapter_generator import TimedLine
 
 
 def segment(start: float, text: str, speaker: str = "") -> transcription_pb2.TranscriptSegment:

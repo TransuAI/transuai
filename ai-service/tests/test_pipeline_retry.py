@@ -28,6 +28,7 @@ class _FakeSegment:
         self.start_time = start_time
         self.end_time = end_time
         self.text = text
+        self.speaker_label = ""
 
 
 def _response(status_code: int) -> httpx.Response:
