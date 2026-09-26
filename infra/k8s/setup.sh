@@ -75,7 +75,7 @@ echo "打通後可以測試（沒帶 token 預期回 401，代表服務有起來
 echo "  curl -i http://localhost:30080/auth/me"
 echo "  open http://localhost:30080/swagger-ui/index.html"
 echo
-echo "GROQ_API_KEY / GEMINI_API_KEY 還是空的，要補的話（不會印出 key 本身）："
-echo '  kubectl -n transuai patch secret app-secrets --type merge -p "{\"stringData\":{\"GROQ_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^GROQ_API_KEY= ../transcription-service/.env)")\"}}"'
-echo '  kubectl -n transuai patch secret app-secrets --type merge -p "{\"stringData\":{\"GEMINI_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^GEMINI_API_KEY= ../ai-service/.env)")\"}}"'
+echo "DEEPGRAM_API_KEY / HF_API_KEY 還是空的，要補的話（不會印出 key 本身）："
+echo '  kubectl -n transuai patch secret app-secrets --type merge -p "{\"stringData\":{\"DEEPGRAM_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^DEEPGRAM_API_KEY= ../transcription-service/.env)")\"}}"'
+echo '  kubectl -n transuai patch secret app-secrets --type merge -p "{\"stringData\":{\"HF_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^HF_API_KEY= ../ai-service/.env)")\"}}"'
 echo '  kubectl -n transuai rollout restart deployment transcription-service ai-service'

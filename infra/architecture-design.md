@@ -18,8 +18,9 @@
 
 Transcription Service 消費訊息
   → 抽音軌（若為影片，用 FFmpeg）
-  → 呼叫 Groq Whisper API 轉錄（含 timestamp）
-  → 偵測語言是中文時轉成繁體（OpenCC s2tw，只換字形不換詞）
+  → 呼叫 Deepgram Nova-3 一次完成轉錄與講者分離（每個字的 timestamp 與講者）
+  → 依換講者、句末標點、停頓、約 15 秒上限把字切成片段（每個片段只屬於一位講者）
+  → 中文轉成繁體（OpenCC s2tw，只換字形不換詞）
   → 更新 Job status: transcribing → transcribed
   → 逐字稿存入 DB（含片段 timestamp）
   → 發送訊息「轉錄完成」到 MQ
@@ -48,7 +49,7 @@ Notification Service 消費訊息
 | **API Gateway** | 統一入口、JWT 本地驗證、REST↔gRPC 轉譯 | Spring Boot（Web MVC）+ gRPC Client | 對外 |
 | **Auth Service** | 使用者註冊/登入、JWT 簽發與刷新 | Spring Boot + gRPC Server | 對內（僅供 Gateway 呼叫） |
 | **Upload Service** | 檔案上傳、產生 presigned URL、Job 建立與狀態管理 | Spring Boot + gRPC Server | 對內（僅供 Gateway / 下游服務呼叫） |
-| **Transcription Service** | 抽音軌（moviepy/ffmpeg）、呼叫 Groq Whisper、逐字稿產出與儲存 | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
+| **Transcription Service** | 抽音軌（moviepy/ffmpeg）、呼叫 Deepgram 轉錄與講者分離、逐字稿產出與儲存 | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
 | **AI Service** | 摘要生成、章節分段、embedding + RAG 問答（見上方實作現況） | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
 | **Notification Service** | Job 狀態即時推播 | Python + FastAPI（WebSocket）+ pika | 對內（WebSocket 對外） |
 | **Frontend** | 使用者介面、播放器、時間戳跳轉 | React | 對外 |
@@ -137,18 +138,23 @@ PATCH  /transcripts/{jobId}/segments/{segmentId}   編輯片段文字，body { "
 `revision` +1、以未清空片段重組 `fullText`，並發出 `transcript.edited` 讓 ai-service 更新問答用的 embedding，見 5.）。轉錄本身完全是 **MQ 驅動**（消費 `transcription.requested`），
 沒有另外開一支「觸發轉錄」的 API。
 
-逐字稿回傳格式範例（`language` 是轉錄模型回傳的語言名稱原樣，不是 locale 代碼；中文逐字稿在存檔前
-已轉成繁體，見 `transcription-service/README.md` Pipeline 一節）：
+逐字稿回傳格式範例（`language` 是轉錄時指定的語言代碼，例如 `zh-TW`；講者分離之前的舊 Job 存的是 Whisper
+回傳的語言全名，例如 `Chinese`。中文逐字稿在存檔前已轉成繁體，見 `transcription-service/README.md` Pipeline 一節）。
+`speakers` 是這個 Job 的講者（依 `displayOrder` 排序），`displayName` 由 transcription-service 決定（自訂名稱，否則
+「講者 N」）；片段的 `speakerLabel` 指向其中一位。舊 Job 沒有講者資訊：`speakers` 是空的、`speakerLabel` 是 `null`：
 ```json
 {
   "jobId": "uuid",
-  "language": "Chinese",
+  "language": "zh-TW",
   "segments": [
-    { "id": "uuid", "startTime": 12.3, "endTime": 15.8, "speakerLabel": "",
+    { "id": "uuid", "startTime": 12.3, "endTime": 15.8, "speakerLabel": "S1",
       "text": "今天想聊的主題是...", "originalText": "今天想聊的主題是..." }
   ],
   "fullText": "...",
-  "revision": 0
+  "revision": 0,
+  "speakers": [
+    { "label": "S1", "displayName": "講者 1", "displayOrder": 1 }
+  ]
 }
 ```
 
@@ -256,10 +262,19 @@ CREATE TABLE transcript_segments (
     transcript_id UUID NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
     start_time NUMERIC(10,2) NOT NULL,
     end_time NUMERIC(10,2) NOT NULL,
-    speaker_label VARCHAR(50),              -- 講者分離功能預留欄位
+    speaker_label VARCHAR(50),              -- 說這個片段的講者（speakers.label）；NULL＝沒有講者資訊（舊 Job）
     text TEXT NOT NULL,                     -- 目前的文字；空字串＝已清空片段
     original_text TEXT NOT NULL,            -- 人工編輯前的機器產出，供還原
     sequence_no INT NOT NULL
+);
+
+CREATE TABLE speakers (
+    id UUID PRIMARY KEY,
+    transcript_id UUID NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+    label VARCHAR(50) NOT NULL,             -- 這個 Job 內的標籤（S1、S2…，依第一次開口的順序）
+    display_order INT NOT NULL,             -- 從 1 開始；預設名稱「講者 N」與前端顏色依此決定
+    name VARCHAR(100),                      -- 使用者取的名稱；NULL＝顯示預設名稱
+    UNIQUE (transcript_id, label)
 );
 ```
 
@@ -362,7 +377,7 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | 向量資料庫 | pgvector（`ai_db.embeddings`，`BAAI/bge-m3` 1024 維，已在用） |
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 有部署但目前無服務使用） |
-| ASR | Groq Whisper API（`whisper-large-v3-turbo`，僅 transcription-service 使用）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體 |
+| ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體 |
 | LLM（摘要/章節分段/RAG 問答） | HF Inference Providers（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
@@ -384,7 +399,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 | **訊息佇列**（Redis） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；高頻率輪詢（如 worker 的 BRPOP loop）會快速消耗指令額度，MVP 階段要留意用量 |
 | **物件儲存**（音訊/影片檔案） | **Cloudflare R2** | 10GB 儲存空間、每月 100 萬次操作 | 超過額度另計費；免費層無 CDN 加速額外保證，大流量下載需注意頻寬成本 |
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
-| **ASR（語音轉文字，transcription-service）** | **Groq Whisper API** | 20 RPM、2,000 RPD（每日請求數）、7,200 秒/小時、28,800 秒/天 | 免費層檔案大小上限 25MB，30 分鐘音訊建議壓縮至 MP3 64-128kbps 以免超過限制 |
+| **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
 | **LLM（摘要/章節分段/問答，ai-service）** | **HF Inference Providers** | 依 provider 而定，沒有像 Groq 那樣公開逐模型的固定數字 | 免費額度會隨政策調整而變動，需定期查閱官方文件確認當下額度；特定模型是否有 provider 承載也會隨時間變動，換模型前建議先查（見 `ai-service/README.md` 已知限制） |
 | **Embedding（ai-service）** | **HF Inference Providers** | 依 provider 而定，一般有免費額度，無需信用卡即可申請 | 特定模型是否有 provider 承載會隨時間變動，需留意 |
 
@@ -406,18 +421,18 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
    沒有額外抽象一層 interface，各服務直接用 pika（Python）/ Spring AMQP（Java）。三個 Python
    consumer（ai-service/transcription-service/notification-service）連線斷線時有指數退避自動
    重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
-3. **講者分離**：MVP 先不做，`speaker_label` 欄位保留但先不啟用，之後可接 Groq 或其他支援 diarization 的服務
+3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），逐字稿在換人的地方顯示講者名稱；舊 Job 不回填。講者改名、手動指派講者、講者區塊與顏色、AI 使用講者資訊還沒做（見 8.5）
 4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown、複製、下載原始檔）混為一談
 5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
-7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Groq Whisper 時遇到 429/503，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了 Groq 呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。額度監控/告警仍然沒有，還是缺口
+7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。額度監控/告警仍然沒有，還是缺口
 
 ---
 
 ## 8. 待確認事項（開發前建議先想清楚）
 
-- [x] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制——**已解決**：不是二選一，兩者對應不同的東西，分開處理（見 `upload-service/docs/adr/0001-upload-size-limit-is-file-type-aware.md`）。時長限制（30 分鐘，前端強制）維持現狀，是獨立的 MVP 產品決策，也是 VIDEO 上傳唯一有意義的 Groq 相關把關（VIDEO 原始檔案大小含容器/畫面編碼開銷，不等於最終送進 Groq 的音軌大小）。新增兩層後端強制的大小限制：AUDIO 專用上限（20MB，對齊 Groq 免費層）跟不分類型的濫用防護上限（1GB）——過去這兩層完全沒有後端驗證，`file_size_bytes` 只檢查是否為正數，繞過前端就能上傳任意大小。`GetPresignedUploadUrl` 用呼叫端回報的大小做早期擋檢查，`CompleteUpload` 改問物件儲存實際存了多大（不信任呼叫端回報的數字），超過限制立即刪除物件。
+- [x] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制——**已解決**：不是二選一，兩者對應不同的東西，分開處理（見 `upload-service/docs/adr/0001-upload-size-limit-is-file-type-aware.md`）。時長限制（30 分鐘，前端強制）維持現狀，是獨立的 MVP 產品決策，當時也是 VIDEO 上傳唯一有意義的 Groq 相關把關（VIDEO 原始檔案大小含容器/畫面編碼開銷，不等於最終送進 Groq 的音軌大小）。新增兩層後端強制的大小限制：AUDIO 專用上限（20MB，當時對齊 Groq 免費層）跟不分類型的濫用防護上限（1GB）——過去這兩層完全沒有後端驗證，`file_size_bytes` 只檢查是否為正數，繞過前端就能上傳任意大小。`GetPresignedUploadUrl` 用呼叫端回報的大小做早期擋檢查，`CompleteUpload` 改問物件儲存實際存了多大（不信任呼叫端回報的數字），超過限制立即刪除物件。語音辨識已從 Groq 換成 Deepgram（沒有 25MB 上限），這兩個以 Groq 為前提的限制要不要放寬尚待另外評估（見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）。
 - [x] embedding model 選擇——**已解決**：`BAAI/bge-m3`（透過 HF Inference API），1024 維，
       query/document 對稱不用加 instruction 前綴；選型過程見 `ai-service/README.md` 已知限制
       （HF Inference Providers 當下有沒有 provider 實際托管該模型會隨時間變動，換模型前建議先查）
@@ -439,6 +454,6 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
 - **多格式輸出**（LLM 生成會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作，API 路徑待定（不使用 `/export`，見 3.4）
-- **講者分離**：`transcript_segments.speaker_label` 欄位存在但目前一律是 `null`
+- **講者分離的其餘部分**：自動講者分離與逐字稿顯示已實作（見 7. 第 3 點）；講者改名、手動指派片段講者／新增講者、講者區塊與顏色、只有一位講者時隱藏、AI 摘要/章節/問答使用講者名稱都還沒做
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
 - **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做
