@@ -3,7 +3,8 @@ import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { Chapter, Summary } from '@/types/api'
+import { UsageSection } from '@/pages/job-detail/usage-section'
+import type { Chapter, JobUsage, Summary } from '@/types/api'
 
 interface StudioPaneProps {
   summary: Summary | null
@@ -17,6 +18,7 @@ interface StudioPaneProps {
   isRegenerating: boolean
   /** The regenerate request itself is still on its way. */
   isRequestingRegeneration: boolean
+  usage: JobUsage | null
 }
 
 export function StudioPane({
@@ -28,6 +30,7 @@ export function StudioPane({
   onRegenerate,
   isRegenerating,
   isRequestingRegeneration,
+  usage,
 }: StudioPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -107,6 +110,8 @@ export function StudioPane({
                 <p className="text-sm text-muted-foreground">尚無章節</p>
               )}
             </section>
+
+            <UsageSection usage={usage} />
           </div>
         </ScrollArea>
       </CardContent>

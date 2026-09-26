@@ -3,8 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
-import type { Chapter, Job, QaTurn, Summary, Transcript } from '@/types/api'
+import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
+import type { Chapter, Job, JobUsage, QaTurn, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -17,6 +17,7 @@ vi.mock('@/lib/api', () => ({
   summaryApi: { get: vi.fn(), regenerate: vi.fn() },
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
+  usageApi: { getJobUsage: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -29,6 +30,10 @@ afterEach(() => {
   vi.restoreAllMocks()
   // Only forgets recorded calls (implementations stay), so "was not called" holds per test.
   vi.clearAllMocks()
+})
+
+beforeEach(() => {
+  vi.mocked(usageApi.getJobUsage).mockResolvedValue(noUsage)
 })
 
 beforeAll(async () => {
@@ -70,6 +75,8 @@ const mockTranscript: Transcript = {
 }
 
 const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容', sourceRevision: 0, regenerationStatus: 'IDLE' }
+
+const noUsage: JobUsage = { records: [], totals: { inputTokens: 0, outputTokens: 0, audioSeconds: 0 } }
 
 const mockChapters: Chapter[] = [{ id: 'ch-1', jobId: 'job-1', title: '開場', startTime: 12, sequenceNo: 0 }]
 
@@ -1142,6 +1149,78 @@ describe('JobDetailPage mini player speakers (COMPLETED, narrow viewport)', () =
   })
 })
 
+describe('JobDetailPage usage (COMPLETED, desktop layout)', () => {
+  const llmRecord = (feature: string, inputTokens: number | null, outputTokens: number | null, succeeded = true) => ({
+    kind: 'llm' as const,
+    feature,
+    provider: 'platform',
+    model: 'Qwen/Qwen3.5-9B',
+    keySource: 'platform',
+    inputTokens,
+    outputTokens,
+    audioSeconds: null,
+    succeeded,
+    createdAt: '2026-09-26T02:05:00Z',
+  })
+  const usage: JobUsage = {
+    records: [llmRecord('summary', 3000, 240), llmRecord('chapters', null, null), llmRecord('qa_answer', 800, 0, false)],
+    totals: { inputTokens: 3800, outputTokens: 240, audioSeconds: 0 },
+  }
+  const usageSection = () => screen.getByRole('region', { name: '用量' })
+
+  it("lists every call made for the job, with the job's totals", async () => {
+    stubDesktopLayout()
+    vi.mocked(usageApi.getJobUsage).mockResolvedValue(usage)
+    await renderCompletedJob()
+
+    const section = await screen.findByRole('region', { name: '用量' })
+    expect(section).toHaveTextContent('輸入 3,800 tokens')
+    expect(section).toHaveTextContent('輸出 240 tokens')
+    const rows = within(section).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('摘要')
+    expect(rows[0]).toHaveTextContent('Qwen/Qwen3.5-9B')
+    expect(rows[0]).toHaveTextContent('3,000 → 240 tokens')
+    expect(rows[1]).toHaveTextContent('章節')
+    expect(rows[1]).toHaveTextContent('— → — tokens')
+    expect(rows[2]).toHaveTextContent('問答')
+    expect(rows[2]).toHaveTextContent('失敗')
+  })
+
+  it('shows a known number even when the other one is unknown, and marks totals that leave some out', async () => {
+    stubDesktopLayout()
+    vi.mocked(usageApi.getJobUsage).mockResolvedValue({
+      records: [llmRecord('summary', 3000, null)],
+      totals: { inputTokens: 3000, outputTokens: 0, audioSeconds: 0 },
+    })
+    await renderCompletedJob()
+
+    const section = await screen.findByRole('region', { name: '用量' })
+    expect(within(section).getByRole('listitem')).toHaveTextContent('3,000 → — tokens')
+    expect(section).toHaveTextContent('部分用量未知')
+  })
+
+  it('says so when nothing has been used yet', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob()
+
+    expect(await within(usageSection()).findByText('尚無用量紀錄')).toBeInTheDocument()
+  })
+
+  it('reloads the usage once an answer has finished', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    await renderCompletedJob()
+    vi.mocked(qaApi.ask).mockImplementation(async (_jobId, _question, handlers) => {
+      handlers.onDelta('答案')
+    })
+    vi.mocked(usageApi.getJobUsage).mockResolvedValue(usage)
+
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), '預算怎麼分配？{Enter}')
+
+    expect(await within(usageSection()).findByText('3,000 → 240 tokens')).toBeInTheDocument()
+  })
+})
+
 describe('JobDetailPage export menu', () => {
   // jsdom doesn't navigate on link clicks: capture what would have been downloaded.
   function captureDownloads() {
@@ -1672,6 +1751,25 @@ describe('JobDetailPage regenerating the summary and chapters (COMPLETED, deskto
     expect(await screen.findByText('重新產生失敗')).toBeInTheDocument()
     expect(screen.getByText('這是摘要內容')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新產生摘要與章節' })).toBeEnabled()
+  })
+
+  it('shows the calls a failed regeneration made in the usage, too', async () => {
+    const user = await renderStale()
+    vi.mocked(summaryApi.regenerate).mockResolvedValue(running)
+    vi.mocked(summaryApi.get).mockResolvedValue({ ...mockSummary, regenerationStatus: 'FAILED' })
+    vi.mocked(usageApi.getJobUsage).mockResolvedValue({
+      records: [{
+        kind: 'llm', feature: 'regenerated_summary', provider: 'platform', model: 'Qwen/Qwen3.5-9B',
+        keySource: 'platform', inputTokens: null, outputTokens: null, audioSeconds: null, succeeded: false,
+        createdAt: '2026-09-26T02:05:00Z',
+      }],
+      totals: { inputTokens: 0, outputTokens: 0, audioSeconds: 0 },
+    })
+
+    await user.click(await screen.findByRole('button', { name: '重新產生摘要與章節' }))
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(await within(screen.getByRole('region', { name: '用量' })).findByText('重新產生摘要')).toBeInTheDocument()
   })
 
   it('keeps waiting for a regeneration that was already running when the page opened', async () => {

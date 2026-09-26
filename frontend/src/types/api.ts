@@ -144,3 +144,27 @@ export interface JobStatusEvent {
   stage?: string
   errorReason?: string
 }
+
+/** One billed call (用量): an LLM call counts tokens, a transcription counts audio seconds. */
+export interface UsageRecord {
+  kind: 'llm' | 'transcription'
+  /** What the call was for, e.g. summary, chapters, qa_answer, qa_rewrite, regenerated_summary, transcription. */
+  feature: string
+  provider: string
+  model: string
+  /** platform (平台模型) or own_key (自有金鑰). */
+  keySource: string
+  /** null when the provider didn't report it (unknown, not zero). */
+  inputTokens: number | null
+  outputTokens: number | null
+  audioSeconds: number | null
+  succeeded: boolean
+  createdAt: string
+}
+
+export interface JobUsage {
+  /** Oldest first. */
+  records: UsageRecord[]
+  /** Sums of the known numbers. */
+  totals: { inputTokens: number; outputTokens: number; audioSeconds: number }
+}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft } from 'lucide-react'
-import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
+import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { findCurrentSegmentIndex } from '@/lib/current-segment'
 import { formatBytes, formatDuration } from '@/lib/media'
@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { CompletedWorkspace } from '@/pages/job-detail/completed-workspace'
 import type { QaEntry } from '@/pages/job-detail/chat-pane'
-import type { Chapter, Job, JobStatusEvent, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobStatusEvent, JobUsage, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -26,6 +26,7 @@ export function JobDetailPage() {
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
+  const [usage, setUsage] = useState<JobUsage | null>(null)
   const [qaHistory, setQaHistory] = useState<QaEntry[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [questionInput, setQuestionInput] = useState('')
@@ -121,6 +122,7 @@ export function JobDetailPage() {
     if (jobStatus === 'COMPLETED') {
       summaryApi.get(jobId).then(setSummary).catch(() => setSummary(null))
       chapterApi.list(jobId).then(setChapters).catch(() => setChapters([]))
+      usageApi.getJobUsage(jobId).then(setUsage).catch(() => setUsage(null))
       setIsLoadingHistory(true)
       qaApi
         .history(jobId)
@@ -140,11 +142,22 @@ export function JobDetailPage() {
     }
   }, [jobId, jobStatus])
 
-  // After a regeneration: a failed reload keeps the chapters already on screen.
-  const reloadChapters = useCallback(() => {
-    if (jobId) chapterApi.list(jobId).then(setChapters).catch(() => {})
+  // 用量 grows with every model call: loaded with the workspace, then again after each answer and
+  // regeneration. A failed reload keeps what's on screen.
+  const reloadUsage = useCallback(() => {
+    if (jobId) usageApi.getJobUsage(jobId).then(setUsage).catch(() => {})
   }, [jobId])
-  const regeneration = useSummaryRegeneration(jobId, summary, setSummary, reloadChapters)
+
+  // After a regeneration: new chapters only if it succeeded (a failed reload keeps the ones on screen), new
+  // usage either way.
+  const reloadAfterRegeneration = useCallback(
+    (succeeded: boolean) => {
+      if (jobId && succeeded) chapterApi.list(jobId).then(setChapters).catch(() => {})
+      reloadUsage()
+    },
+    [jobId, reloadUsage],
+  )
+  const regeneration = useSummaryRegeneration(jobId, summary, setSummary, reloadAfterRegeneration)
 
   const seekTo = (seconds: number) => {
     if (mediaElement) {
@@ -239,7 +252,10 @@ export function JobDetailPage() {
         patchEntry({ status: 'error' })
         toast.error(err instanceof ApiError ? err.message : '問答失敗')
       })
-      .finally(() => setIsAsking(false))
+      .finally(() => {
+        setIsAsking(false)
+        reloadUsage()
+      })
   }
 
   if (isLoadingJob) {
@@ -333,6 +349,7 @@ export function JobDetailPage() {
       onRegenerateSummary={regeneration.regenerate}
       isRegeneratingSummary={regeneration.isRegenerating}
       isRequestingRegeneration={regeneration.isRequesting}
+      usage={usage}
       setMediaRef={setMediaElement}
     />
   )

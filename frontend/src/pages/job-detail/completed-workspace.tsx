@@ -12,7 +12,7 @@ import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
-import type { Chapter, Job, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobUsage, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
   job: Job
@@ -36,6 +36,7 @@ interface CompletedWorkspaceProps {
   onRegenerateSummary: () => void
   isRegeneratingSummary: boolean
   isRequestingRegeneration: boolean
+  usage: JobUsage | null
   setMediaRef: (el: HTMLMediaElement | null) => void
 }
 
@@ -84,6 +85,7 @@ export function CompletedWorkspace({
   onRegenerateSummary,
   isRegeneratingSummary,
   isRequestingRegeneration,
+  usage,
   setMediaRef,
 }: CompletedWorkspaceProps) {
   const isDesktop = useMediaQuery('(min-width: 1024px)')
@@ -127,6 +129,7 @@ export function CompletedWorkspace({
       onRegenerate={onRegenerateSummary}
       isRegenerating={isRegeneratingSummary}
       isRequestingRegeneration={isRequestingRegeneration}
+      usage={usage}
     />
   )
   const currentSegment = currentSegmentIndex !== null ? transcript?.segments[currentSegmentIndex] : undefined
