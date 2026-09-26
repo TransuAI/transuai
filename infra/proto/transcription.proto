@@ -19,6 +19,7 @@ service TranscriptionService {
 message TranscriptSegment {
   double start_time = 1;
   double end_time = 2;
+  // 說這個片段的講者，對應 Transcript.speakers 的 label；空字串＝沒有講者資訊（講者分離之前的舊 Job）。
   string speaker_label = 3;
   // 目前的文字；空字串代表已清空片段。
   string text = 4;
@@ -35,6 +36,18 @@ message Transcript {
   // 每次實際改動逐字稿（編輯）就 +1，從 0 開始。目的是讓 AI 產出（摘要/章節）記錄自己依據的版本，
   // 比對出是否過時。
   int32 revision = 5;
+  // 這個 Job 的講者，依 display_order 排序；沒有講者資訊時是空的。不保證每位講者都還有片段。
+  repeated Speaker speakers = 6;
+}
+
+// 講者分離找出的一位講者（見 transcription-service/CONTEXT.md「講者」）。
+message Speaker {
+  // 這個 Job 內的講者標籤（例如 "S1"），片段用它指向講者。
+  string label = 1;
+  // 要顯示的名稱，規則只在這裡決定：有自訂名稱就用自訂名稱，否則是「講者 N」（N＝display_order）。
+  string display_name = 2;
+  // 從 1 開始；講者分離找出的講者依第一次開口的順序編號。
+  int32 display_order = 3;
 }
 
 message GetTranscriptRequest {
