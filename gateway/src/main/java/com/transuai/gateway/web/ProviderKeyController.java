@@ -17,6 +17,7 @@ import com.transuai.gateway.web.dto.SaveProviderKeyRequestDto;
 
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.DeleteProviderKeyRequest;
+import transuai.ai.v1.Ai.DeleteProviderKeyResponse;
 import transuai.ai.v1.Ai.ListProviderKeysRequest;
 import transuai.ai.v1.Ai.ProviderKey;
 import transuai.ai.v1.Ai.SaveProviderKeyRequest;
@@ -53,10 +54,11 @@ public class ProviderKeyController {
 
     @DeleteMapping("/me/provider-keys/{provider}")
     public DeleteProviderKeyResponseDto deleteProviderKey(@CurrentUserId UUID userId, @PathVariable String provider) {
-        return new DeleteProviderKeyResponseDto(aiServiceStub.deleteProviderKey(DeleteProviderKeyRequest.newBuilder()
+        DeleteProviderKeyResponse response = aiServiceStub.deleteProviderKey(DeleteProviderKeyRequest.newBuilder()
                 .setUserId(userId.toString())
                 .setProvider(provider)
-                .build()).getDeleted());
+                .build());
+        return new DeleteProviderKeyResponseDto(response.getDeleted(), response.getDefaultModelReset());
     }
 
     private static ProviderKeyDto toDto(ProviderKey key) {

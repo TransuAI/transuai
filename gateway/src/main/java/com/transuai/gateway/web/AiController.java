@@ -76,7 +76,9 @@ public class AiController {
 
     private static SummaryDto toDto(Summary summary) {
         return new SummaryDto(summary.getJobId(), summary.getSummaryText(), summary.getSourceRevision(),
-                summary.getRegenerationStatus().name().replace("REGENERATION_STATUS_", ""));
+                summary.getRegenerationStatus().name().replace("REGENERATION_STATUS_", ""),
+                summary.getModelProvider().isEmpty() ? null : summary.getModelProvider(),
+                summary.getModel().isEmpty() ? null : summary.getModel());
     }
 
     @GetMapping("/chapters/{jobId}")

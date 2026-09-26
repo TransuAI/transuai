@@ -88,13 +88,16 @@ docker compose up -d
 
 | Method | Path | 說明 |
 |---|---|---|
-| `GET` | `/summary/{jobId}` | 取得摘要（含 `sourceRevision`，前端跟逐字稿的 `revision` 比對判斷過時；`regenerationStatus`：`IDLE`／`RUNNING`／`FAILED`） |
+| `GET` | `/summary/{jobId}` | 取得摘要（含 `sourceRevision`，前端跟逐字稿的 `revision` 比對判斷過時；`regenerationStatus`：`IDLE`／`RUNNING`／`FAILED`；`modelProvider` / `model`：產生它的模型，記錄模型之前的摘要是 `null`） |
 | `POST` | `/summary/{jobId}/regenerate` | 在背景依最新逐字稿重新產生摘要與章節，回 `202` 與目前的摘要；轉給 `RequestRegeneration`，帶上當下使用者（用量記在他名下；Job 狀態不變） |
 | `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
 | `GET` | `/qa/{jobId}` | 取得這個 job 的完整問答紀錄（依時間升冪），回傳 `[{ question, answer, sourceTimestamps, createdAt }]`；一個 job 只有一段連續對話，沒有獨立的 conversation/thread（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)） |
+| `GET` | `/ai/models` | 可以選的模型：`{ models: [{ provider, model, supportsTools }], openrouterCustom }`，平台模型加上有自有金鑰的廠商整理好的清單；轉給 `ListAvailableModels` |
+| `GET` | `/me/default-model` | 目前的預設模型 `{ provider, model, supportsTools }`（沒選過就是平台模型）；轉給 `GetDefaultModel` |
+| `PUT` | `/me/default-model` | 設定預設模型，body `{ provider, model }`（`provider` 是 `platform` 時 `model` 可省略）；清單外的模型回 400、沒有那個廠商的自有金鑰回 409、OpenRouter 查不到回 503；轉給 `SetDefaultModel` |
 | `GET` | `/me/provider-keys` | 登入者的自有金鑰：`[{ provider, last4, createdAt }]`，金鑰本身永遠不回傳；轉給 `ListProviderKeys` |
 | `PUT` | `/me/provider-keys/{provider}` | 存入或替換自有金鑰，body `{ key }`（`provider` 是 `openai` / `anthropic` / `gemini` / `openrouter`）；ai-service 先向廠商驗證，無效回 400（附原因）、廠商暫時連不上回 503、沒設定主金鑰回 409，都不會存；轉給 `SaveProviderKey` |
-| `DELETE` | `/me/provider-keys/{provider}` | 刪除自有金鑰，回 `{ deleted }`；轉給 `DeleteProviderKey` |
+| `DELETE` | `/me/provider-keys/{provider}` | 刪除自有金鑰，回 `{ deleted, defaultModelReset }`（預設模型正在用它時改回平台模型）；轉給 `DeleteProviderKey` |
 | `GET` | `/jobs/{jobId}/usage` | 這個 Job 的用量：`{ records, totals }`，`records` 依時間排序，每筆有 `kind`（`llm` / `transcription`）、`feature`、`provider`、`model`、`keySource`、`inputTokens`、`outputTokens`、`audioSeconds`（未知是 `null`）、`succeeded`、`createdAt`；`totals` 是已知數字的加總。LLM 用量來自 ai-service 的 `ListJobLlmUsage`，轉錄用量來自 transcription-service 的 `ListJobTranscriptionUsage`（`feature` 是 `transcription`、`keySource` 是 `platform`），在這裡合併 |
 | `POST` | `/qa/{jobId}` | RAG 問答（含最近 5 輪對話記憶），body `{ "question": string }`，回傳 `text/event-stream`（SSE，見下方「問答 streaming」一節）；還沒有 embedding（pipeline 沒跑完）在串流開始前就回 404，不會是 SSE error event |
 
