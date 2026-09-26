@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.web.dto.ChapterDto;
@@ -79,7 +80,7 @@ public class AiController {
     private static SummaryDto toDto(Summary summary) {
         return new SummaryDto(summary.getJobId(), summary.getSummaryText(), summary.getSourceRevision(),
                 summary.getRegenerationStatus().name().replace("REGENERATION_STATUS_", ""),
-                emptyToNull(summary.getModelProvider()), emptyToNull(summary.getModel()));
+                GrpcStrings.emptyToNull(summary.getModelProvider()), GrpcStrings.emptyToNull(summary.getModel()));
     }
 
     @GetMapping("/chapters/{jobId}")
@@ -102,8 +103,8 @@ public class AiController {
                 .listQaHistory(ListQaHistoryRequest.newBuilder().setJobId(jobId).build())
                 .getTurnsList().stream()
                 .map(t -> new QaTurnDto(t.getQuestion(), t.getAnswer(), t.getSourceTimestampsList(),
-                        GrpcTimestamps.toInstant(t.getCreatedAt()), emptyToNull(t.getModelProvider()),
-                        emptyToNull(t.getModel())))
+                        GrpcTimestamps.toInstant(t.getCreatedAt()), GrpcStrings.emptyToNull(t.getModelProvider()),
+                        GrpcStrings.emptyToNull(t.getModel())))
                 .toList();
     }
 
@@ -174,11 +175,6 @@ public class AiController {
                             "model", chunk.getAnsweredBy().getModel()))));
             case PAYLOAD_NOT_SET -> log.warn("AskQuestionChunk with no payload set, skipping");
         }
-    }
-
-    // proto3 的字串沒有「沒設定」：空字串代表不知道（例如記錄模型之前的資料），API 回 null。
-    private static String emptyToNull(String value) {
-        return value.isEmpty() ? null : value;
     }
 
     private static boolean isBlank(String value) {
