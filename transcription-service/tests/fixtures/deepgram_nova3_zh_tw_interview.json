@@ -1,0 +1,890 @@
+{
+  "metadata": {
+    "transaction_key": "deprecated",
+    "request_id": "01a0dbf2-ddad-7473-8f2b-77e07e012c38",
+    "sha256": "ff6c3a05a359c66236f7b6aecaa6590088e9eafa6b7e50ec6ee56f7ef5dda750",
+    "created": "2026-09-26T04:22:02.770Z",
+    "duration": 32.076,
+    "channels": 1,
+    "models": [
+      "e72a1568-40bd-4ef3-b96a-e8f4d28a1460"
+    ],
+    "model_info": {
+      "e72a1568-40bd-4ef3-b96a-e8f4d28a1460": {
+        "name": "general-nova-3",
+        "version": "2026-04-01.30000",
+        "arch": "nova-3"
+      }
+    },
+    "diarize_info": {
+      "model_uuid": "a9f85c2b-5afb-4b9d-b49b-492c43a01cfb",
+      "arch": "v1"
+    }
+  },
+  "results": {
+    "channels": [
+      {
+        "alternatives": [
+          {
+            "transcript": "已經開始了很久但是黃立成做的木飲的確不太一樣那其實你說的你的木耳飲能量老實說都很低對卡洛里都非常低它只是很好協助那個做控制然後不過除了木質會讓你飽嘛會它會讓你飽對它會讓你就是說我們我自己最大的心得是控制飲食的調整不是說什麼都不能吃像人生也太太難過就是你什麼都不能吃反正什麼都不能吃你不會成功這個我也剪過",
+            "confidence": 0.98095703,
+            "words": [
+              {
+                "word": "已經開始",
+                "start": 0.16,
+                "end": 0.64,
+                "confidence": 0.39086914,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "已經開始"
+              },
+              {
+                "word": "了很久",
+                "start": 0.64,
+                "end": 1.12,
+                "confidence": 0.99609375,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "了很久"
+              },
+              {
+                "word": "但是",
+                "start": 1.12,
+                "end": 1.52,
+                "confidence": 0.9892578,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "但是"
+              },
+              {
+                "word": "黃",
+                "start": 1.52,
+                "end": 1.76,
+                "confidence": 0.93115234,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "黃"
+              },
+              {
+                "word": "立",
+                "start": 1.76,
+                "end": 1.92,
+                "confidence": 0.7841797,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "立"
+              },
+              {
+                "word": "成",
+                "start": 1.92,
+                "end": 2.08,
+                "confidence": 0.64697266,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "成"
+              },
+              {
+                "word": "做",
+                "start": 2.08,
+                "end": 2.24,
+                "confidence": 0.96972656,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "做"
+              },
+              {
+                "word": "的",
+                "start": 2.24,
+                "end": 2.3999999,
+                "confidence": 0.99902344,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "的"
+              },
+              {
+                "word": "木",
+                "start": 2.3999999,
+                "end": 2.8799999,
+                "confidence": 0.9863281,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "木"
+              },
+              {
+                "word": "飲",
+                "start": 2.72,
+                "end": 2.8799999,
+                "confidence": 0.67626953,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "飲"
+              },
+              {
+                "word": "的確",
+                "start": 2.8799999,
+                "end": 3.1999998,
+                "confidence": 0.9980469,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "的確"
+              },
+              {
+                "word": "不太一樣",
+                "start": 3.1999998,
+                "end": 3.9199998,
+                "confidence": 0.99902344,
+                "speaker": 0,
+                "speaker_confidence": 0.53608215,
+                "punctuated_word": "不太一樣"
+              },
+              {
+                "word": "那其實",
+                "start": 3.9199998,
+                "end": 4.64,
+                "confidence": 0.64990234,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "那其實"
+              },
+              {
+                "word": "你說",
+                "start": 5.7599998,
+                "end": 6.16,
+                "confidence": 0.98535156,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "你說"
+              },
+              {
+                "word": "的",
+                "start": 6.16,
+                "end": 6.3999996,
+                "confidence": 0.96777344,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "的"
+              },
+              {
+                "word": "你",
+                "start": 6.3999996,
+                "end": 6.56,
+                "confidence": 0.9560547,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "你"
+              },
+              {
+                "word": "的",
+                "start": 6.56,
+                "end": 6.72,
+                "confidence": 0.99902344,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "的"
+              },
+              {
+                "word": "木",
+                "start": 6.72,
+                "end": 7.12,
+                "confidence": 1.0,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "木"
+              },
+              {
+                "word": "耳",
+                "start": 7.12,
+                "end": 7.2,
+                "confidence": 1.0,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "耳"
+              },
+              {
+                "word": "飲",
+                "start": 7.2,
+                "end": 7.76,
+                "confidence": 0.984375,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "飲"
+              },
+              {
+                "word": "能量",
+                "start": 8.0,
+                "end": 8.48,
+                "confidence": 0.9941406,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "能量"
+              },
+              {
+                "word": "老實說",
+                "start": 8.48,
+                "end": 9.04,
+                "confidence": 0.99609375,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "老實說"
+              },
+              {
+                "word": "都",
+                "start": 9.04,
+                "end": 9.28,
+                "confidence": 0.99609375,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "都"
+              },
+              {
+                "word": "很低",
+                "start": 9.28,
+                "end": 9.679999,
+                "confidence": 1.0,
+                "speaker": 0,
+                "speaker_confidence": 0.5336757,
+                "punctuated_word": "很低"
+              },
+              {
+                "word": "對",
+                "start": 9.679999,
+                "end": 10.24,
+                "confidence": 0.40356445,
+                "speaker": 1,
+                "speaker_confidence": 0.5192859,
+                "punctuated_word": "對"
+              },
+              {
+                "word": "卡",
+                "start": 10.24,
+                "end": 10.8,
+                "confidence": 0.35717773,
+                "speaker": 1,
+                "speaker_confidence": 0.5192859,
+                "punctuated_word": "卡"
+              },
+              {
+                "word": "洛",
+                "start": 10.8,
+                "end": 10.96,
+                "confidence": 0.8798828,
+                "speaker": 1,
+                "speaker_confidence": 0.5192859,
+                "punctuated_word": "洛"
+              },
+              {
+                "word": "里",
+                "start": 10.96,
+                "end": 11.12,
+                "confidence": 0.90722656,
+                "speaker": 1,
+                "speaker_confidence": 0.5192859,
+                "punctuated_word": "里"
+              },
+              {
+                "word": "都非常",
+                "start": 11.12,
+                "end": 11.44,
+                "confidence": 0.95166016,
+                "speaker": 1,
+                "speaker_confidence": 0.5192859,
+                "punctuated_word": "都非常"
+              },
+              {
+                "word": "低",
+                "start": 11.44,
+                "end": 11.599999,
+                "confidence": 0.99902344,
+                "speaker": 1,
+                "speaker_confidence": 0.5192859,
+                "punctuated_word": "低"
+              },
+              {
+                "word": "它",
+                "start": 11.599999,
+                "end": 11.84,
+                "confidence": 0.25756836,
+                "speaker": 1,
+                "speaker_confidence": 0.5192859,
+                "punctuated_word": "它"
+              },
+              {
+                "word": "只是",
+                "start": 11.84,
+                "end": 12.0,
+                "confidence": 0.81396484,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "只是"
+              },
+              {
+                "word": "很好",
+                "start": 12.0,
+                "end": 12.48,
+                "confidence": 0.99316406,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "很好"
+              },
+              {
+                "word": "協助",
+                "start": 12.48,
+                "end": 13.04,
+                "confidence": 0.99902344,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "協助"
+              },
+              {
+                "word": "那個",
+                "start": 13.04,
+                "end": 13.36,
+                "confidence": 0.61572266,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "那個"
+              },
+              {
+                "word": "做",
+                "start": 13.36,
+                "end": 13.679999,
+                "confidence": 0.9892578,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "做"
+              },
+              {
+                "word": "控制",
+                "start": 13.679999,
+                "end": 14.16,
+                "confidence": 1.0,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "控制"
+              },
+              {
+                "word": "然後",
+                "start": 14.415,
+                "end": 14.655,
+                "confidence": 0.97265625,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "然後"
+              },
+              {
+                "word": "不過",
+                "start": 14.655,
+                "end": 15.055,
+                "confidence": 0.97998047,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "不過"
+              },
+              {
+                "word": "除了",
+                "start": 15.135,
+                "end": 15.375,
+                "confidence": 0.9941406,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "除了"
+              },
+              {
+                "word": "木",
+                "start": 15.375,
+                "end": 15.535,
+                "confidence": 0.3798828,
+                "speaker": 1,
+                "speaker_confidence": 0.54888767,
+                "punctuated_word": "木"
+              },
+              {
+                "word": "質",
+                "start": 15.535,
+                "end": 15.615,
+                "confidence": 0.7260742,
+                "speaker": 0,
+                "speaker_confidence": 0.37700468,
+                "punctuated_word": "質"
+              },
+              {
+                "word": "會讓你",
+                "start": 15.615,
+                "end": 16.095,
+                "confidence": 0.8769531,
+                "speaker": 0,
+                "speaker_confidence": 0.37700468,
+                "punctuated_word": "會讓你"
+              },
+              {
+                "word": "飽",
+                "start": 16.095,
+                "end": 16.415,
+                "confidence": 0.98535156,
+                "speaker": 0,
+                "speaker_confidence": 0.24349171,
+                "punctuated_word": "飽"
+              },
+              {
+                "word": "嘛",
+                "start": 16.415,
+                "end": 17.055,
+                "confidence": 0.42382812,
+                "speaker": 0,
+                "speaker_confidence": 0.24349171,
+                "punctuated_word": "嘛"
+              },
+              {
+                "word": "會",
+                "start": 17.135,
+                "end": 17.375,
+                "confidence": 0.97314453,
+                "speaker": 1,
+                "speaker_confidence": 0.27339005,
+                "punctuated_word": "會"
+              },
+              {
+                "word": "它",
+                "start": 17.375,
+                "end": 17.535,
+                "confidence": 0.96777344,
+                "speaker": 1,
+                "speaker_confidence": 0.27339005,
+                "punctuated_word": "它"
+              },
+              {
+                "word": "會讓你",
+                "start": 17.535,
+                "end": 17.935,
+                "confidence": 0.9980469,
+                "speaker": 1,
+                "speaker_confidence": 0.27339005,
+                "punctuated_word": "會讓你"
+              },
+              {
+                "word": "飽",
+                "start": 17.935,
+                "end": 18.255001,
+                "confidence": 0.99902344,
+                "speaker": 1,
+                "speaker_confidence": 0.27339005,
+                "punctuated_word": "飽"
+              },
+              {
+                "word": "對",
+                "start": 18.255001,
+                "end": 18.494999,
+                "confidence": 0.7080078,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "對"
+              },
+              {
+                "word": "它",
+                "start": 18.494999,
+                "end": 18.735,
+                "confidence": 0.9760742,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "它"
+              },
+              {
+                "word": "會讓你",
+                "start": 18.735,
+                "end": 19.055,
+                "confidence": 0.99609375,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "會讓你"
+              },
+              {
+                "word": "就是說我們",
+                "start": 19.055,
+                "end": 19.695,
+                "confidence": 0.8510742,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "就是說我們"
+              },
+              {
+                "word": "我自己",
+                "start": 20.175,
+                "end": 20.735,
+                "confidence": 0.9951172,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "我自己"
+              },
+              {
+                "word": "最大的",
+                "start": 20.735,
+                "end": 21.055,
+                "confidence": 0.9580078,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "最大的"
+              },
+              {
+                "word": "心得",
+                "start": 21.055,
+                "end": 21.455,
+                "confidence": 0.9526367,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "心得"
+              },
+              {
+                "word": "是",
+                "start": 21.455,
+                "end": 21.935,
+                "confidence": 0.9980469,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "是"
+              },
+              {
+                "word": "控制",
+                "start": 21.935,
+                "end": 22.415,
+                "confidence": 0.9980469,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "控制"
+              },
+              {
+                "word": "飲食",
+                "start": 22.415,
+                "end": 22.814999,
+                "confidence": 1.0,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "飲食"
+              },
+              {
+                "word": "的",
+                "start": 22.814999,
+                "end": 22.975,
+                "confidence": 0.99902344,
+                "speaker": 1,
+                "speaker_confidence": 0.58124816,
+                "punctuated_word": "的"
+              },
+              {
+                "word": "調整",
+                "start": 22.975,
+                "end": 23.295,
+                "confidence": 1.0,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "調整"
+              },
+              {
+                "word": "不是說",
+                "start": 23.295,
+                "end": 23.855,
+                "confidence": 0.7036133,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "不是說"
+              },
+              {
+                "word": "什麼",
+                "start": 23.855,
+                "end": 24.095001,
+                "confidence": 0.9194336,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "什麼"
+              },
+              {
+                "word": "都不能",
+                "start": 24.095001,
+                "end": 24.415,
+                "confidence": 1.0,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "都不能"
+              },
+              {
+                "word": "吃",
+                "start": 24.415,
+                "end": 24.575,
+                "confidence": 0.9980469,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "吃"
+              },
+              {
+                "word": "像",
+                "start": 24.575,
+                "end": 24.814999,
+                "confidence": 0.72998047,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "像"
+              },
+              {
+                "word": "人生",
+                "start": 24.814999,
+                "end": 25.135,
+                "confidence": 0.99121094,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "人生"
+              },
+              {
+                "word": "也太",
+                "start": 25.135,
+                "end": 27.055,
+                "confidence": 0.93115234,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "也太"
+              },
+              {
+                "word": "太難",
+                "start": 25.760937,
+                "end": 26.480936,
+                "confidence": 0.2788086,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "太難"
+              },
+              {
+                "word": "過",
+                "start": 26.480936,
+                "end": 26.640936,
+                "confidence": 0.9970703,
+                "speaker": 1,
+                "speaker_confidence": 0.65546197,
+                "punctuated_word": "過"
+              },
+              {
+                "word": "就是你",
+                "start": 26.640936,
+                "end": 27.760937,
+                "confidence": 0.6323242,
+                "speaker": 1,
+                "speaker_confidence": 0.5292836,
+                "punctuated_word": "就是你"
+              },
+              {
+                "word": "什麼",
+                "start": 27.760937,
+                "end": 28.000937,
+                "confidence": 0.98095703,
+                "speaker": 1,
+                "speaker_confidence": 0.5292836,
+                "punctuated_word": "什麼"
+              },
+              {
+                "word": "都不能",
+                "start": 28.000937,
+                "end": 28.320936,
+                "confidence": 1.0,
+                "speaker": 1,
+                "speaker_confidence": 0.5292836,
+                "punctuated_word": "都不能"
+              },
+              {
+                "word": "吃",
+                "start": 28.320936,
+                "end": 28.560936,
+                "confidence": 0.9941406,
+                "speaker": 1,
+                "speaker_confidence": 0.5292836,
+                "punctuated_word": "吃"
+              },
+              {
+                "word": "反正",
+                "start": 28.560936,
+                "end": 28.880936,
+                "confidence": 0.46118164,
+                "speaker": 1,
+                "speaker_confidence": 0.5292836,
+                "punctuated_word": "反正"
+              },
+              {
+                "word": "什麼",
+                "start": 28.880936,
+                "end": 29.440937,
+                "confidence": 0.90722656,
+                "speaker": 0,
+                "speaker_confidence": 0.48481476,
+                "punctuated_word": "什麼"
+              },
+              {
+                "word": "都不能",
+                "start": 29.440937,
+                "end": 29.760937,
+                "confidence": 0.98095703,
+                "speaker": 0,
+                "speaker_confidence": 0.48481476,
+                "punctuated_word": "都不能"
+              },
+              {
+                "word": "吃",
+                "start": 29.760937,
+                "end": 29.920937,
+                "confidence": 0.9980469,
+                "speaker": 0,
+                "speaker_confidence": 0.48481476,
+                "punctuated_word": "吃"
+              },
+              {
+                "word": "你不會",
+                "start": 29.920937,
+                "end": 30.240936,
+                "confidence": 0.9873047,
+                "speaker": 0,
+                "speaker_confidence": 0.48481476,
+                "punctuated_word": "你不會"
+              },
+              {
+                "word": "成功",
+                "start": 30.240936,
+                "end": 30.640938,
+                "confidence": 0.9482422,
+                "speaker": 0,
+                "speaker_confidence": 0.48481476,
+                "punctuated_word": "成功"
+              },
+              {
+                "word": "這個",
+                "start": 30.640938,
+                "end": 31.280937,
+                "confidence": 0.67089844,
+                "speaker": 0,
+                "speaker_confidence": 0.48481476,
+                "punctuated_word": "這個"
+              },
+              {
+                "word": "我也",
+                "start": 31.280937,
+                "end": 31.680937,
+                "confidence": 0.99609375,
+                "speaker": 0,
+                "speaker_confidence": 0.48481476,
+                "punctuated_word": "我也"
+              },
+              {
+                "word": "剪",
+                "start": 31.680937,
+                "end": 31.920937,
+                "confidence": 0.5683594,
+                "speaker": 1,
+                "speaker_confidence": 0.0,
+                "punctuated_word": "剪"
+              },
+              {
+                "word": "過",
+                "start": 31.920937,
+                "end": 33.440937,
+                "confidence": 0.99902344,
+                "speaker": 0,
+                "speaker_confidence": 0.0,
+                "punctuated_word": "過"
+              }
+            ],
+            "paragraphs": {
+              "transcript": "\nSpeaker 0: 已經開始了很久但是黃立成做的木飲的確不太一樣那其實你說的你的木耳飲能量老實說都很低\n\nSpeaker 1: 對卡洛里都非常低它只是很好協助那個做控制然後不過除了木\n\nSpeaker 0: 質會讓你飽嘛\n\nSpeaker 1: 會它會讓你飽對它會讓你就是說我們我自己最大的心得是控制飲食的調整不是說什麼都不能吃像人生也太太難過就是你什麼都不能吃反正\n\nSpeaker 0: 什麼都不能吃你不會成功這個我也\n\nSpeaker 1: 剪\n\nSpeaker 0: 過",
+              "paragraphs": [
+                {
+                  "sentences": [
+                    {
+                      "text": "已經開始了很久但是黃立成做的木飲的確不太一樣那其實你說的你的木耳飲能量老實說都很低",
+                      "start": 0.16,
+                      "end": 9.679999
+                    }
+                  ],
+                  "speaker": 0,
+                  "num_words": 24,
+                  "start": 0.16,
+                  "end": 9.679999
+                },
+                {
+                  "sentences": [
+                    {
+                      "text": "對卡洛里都非常低它只是很好協助那個做控制然後不過除了木",
+                      "start": 9.679999,
+                      "end": 15.535
+                    }
+                  ],
+                  "speaker": 1,
+                  "num_words": 17,
+                  "start": 9.679999,
+                  "end": 15.535
+                },
+                {
+                  "sentences": [
+                    {
+                      "text": "質會讓你飽嘛",
+                      "start": 15.535,
+                      "end": 17.055
+                    }
+                  ],
+                  "speaker": 0,
+                  "num_words": 4,
+                  "start": 15.535,
+                  "end": 17.055
+                },
+                {
+                  "sentences": [
+                    {
+                      "text": "會它會讓你飽對它會讓你就是說我們我自己最大的心得是控制飲食的調整不是說什麼都不能吃像人生也太太難過就是你什麼都不能吃反正",
+                      "start": 17.135,
+                      "end": 28.880936
+                    }
+                  ],
+                  "speaker": 1,
+                  "num_words": 30,
+                  "start": 17.135,
+                  "end": 28.880936
+                },
+                {
+                  "sentences": [
+                    {
+                      "text": "什麼都不能吃你不會成功這個我也",
+                      "start": 28.880936,
+                      "end": 31.680937
+                    }
+                  ],
+                  "speaker": 0,
+                  "num_words": 7,
+                  "start": 28.880936,
+                  "end": 31.680937
+                },
+                {
+                  "sentences": [
+                    {
+                      "text": "剪",
+                      "start": 31.680937,
+                      "end": 31.920937
+                    }
+                  ],
+                  "speaker": 1,
+                  "num_words": 1,
+                  "start": 31.680937,
+                  "end": 31.920937
+                },
+                {
+                  "sentences": [
+                    {
+                      "text": "過",
+                      "start": 31.920937,
+                      "end": 33.440937
+                    }
+                  ],
+                  "speaker": 0,
+                  "num_words": 1,
+                  "start": 31.920937,
+                  "end": 33.440937
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
