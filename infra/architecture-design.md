@@ -610,10 +610,12 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
       HF Inference Providers 的聊天模型，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見
       `ai-service/app/services/chapter_generator.py`
 - [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
-- [ ] Google 的權限審查與 Workspace 遠端 MCP 預覽計畫——連結 Google 帳號已實作，但 `gmail.compose`（建立草稿）是 Google
-      的受限權限，通過 Google 的應用程式審查之前只有同意畫面登記的測試使用者能連結；會後處理要用的 Google Calendar / Gmail
-      官方遠端 MCP 是 Developer Preview，要先加入預覽計畫。兩者都還沒申請，Google 與 Notion 的連結也還沒用真的帳號走過
-      （見 `ai-service/README.md` 已知限制）
+- [ ] Google 的權限審查——連結 Google 帳號已實作，但 `gmail.compose`（建立草稿）是 Google 的受限權限，通過 Google 的
+      應用程式審查之前只有同意畫面登記的測試使用者能連結，還沒申請；Google 與 Notion 的連結也還沒用真的帳號走過
+      （見 `ai-service/README.md` 已知限制）。Google 日曆與 Gmail 不用官方的遠端 MCP（預覽計畫 GA 前不能開放給網域外的
+      使用者），會後處理改用自己寫的 REST API 工具（見 `ai-service/docs/adr/0006-post-meeting-agent-model-and-google-tools.md`）
+- [ ] 會後處理的平台模型——實測後決定用 Groq `openai/gpt-oss-120b`，但免費層的額度不夠（一次要等 3～5 分鐘、全平台一天
+      3～4 次），要有付費的 Groq 金鑰才對所有人開放；在那之前會後處理只能用自有金鑰、支援工具呼叫的模型（同一份 ADR）
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
       靠背景清理排除）。但這只清 upload_db 自己的資料，**不會**連帶清 transcription_db / ai_db
