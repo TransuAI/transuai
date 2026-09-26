@@ -37,7 +37,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`）。只剩多格式輸出還沒做。見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 
 ---
@@ -66,7 +66,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` 九張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` 十張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -178,8 +178,9 @@ POST   /summary/{jobId}/regenerate      摘要與章節過時後，在背景依�
 GET    /chapters/{jobId}                取得章節列表
 POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCount": 5 | 10 | 20 }，回 202（背景產生，前端每 3 秒
                                          輪詢列表直到不是 GENERATING）
-GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型
+GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型、最佳成績
 GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
+POST   /jobs/{jobId}/quizzes/{quizId}/attempts  送出一次作答，body { "answers": number[] }；後端計分並保存，回傳分數與每題結果
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料；每則附回答的 modelProvider / model）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string, "model"?: { provider, model } }
                                          （model 只用在這一次提問，省略就用預設模型），回傳 text/event-stream（SSE，
@@ -199,7 +200,7 @@ GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省�
                                          Gateway 把月份換成時間範圍，向兩個服務分別查詢
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -324,7 +325,7 @@ CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
 
 ### 4.4 ai_db
 
-**現況（已建立，九張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，十張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -443,6 +444,17 @@ CREATE TABLE quiz_questions (
     source_timestamps DOUBLE PRECISION[] NOT NULL  -- 依據的片段開始時間（秒），一定對得到某個片段
 );
 CREATE INDEX ix_quiz_questions_quiz_id ON quiz_questions (quiz_id);
+
+-- 作答：每次作答一筆（同一份測驗可以重做），後端計分；列表的最佳成績是答對題數的最大值
+CREATE TABLE quiz_attempts (
+    id UUID PRIMARY KEY,
+    quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL,
+    answers INTEGER[] NOT NULL,             -- 依題目順序，每題選的選項位置（從 0 開始）
+    correct_count INTEGER NOT NULL,
+    submitted_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_quiz_attempts_quiz_id ON quiz_attempts (quiz_id);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
