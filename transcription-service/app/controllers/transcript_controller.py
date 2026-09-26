@@ -55,7 +55,7 @@ def _speaker_to_proto(speaker: Speaker) -> transcription_pb2.Speaker:
         label=speaker.label, display_name=speaker.display_name, display_order=speaker.display_order)
 
 
-def _speaker_name(name: str, context: grpc.ServicerContext) -> str | None:
+def _normalized_speaker_name(name: str, context: grpc.ServicerContext) -> str | None:
     """去前後空白；空字串＝沒有名稱（預設名稱「講者 N」）。"""
     name = name.strip()
     if len(name) > MAX_SPEAKER_NAME_LENGTH:
@@ -108,7 +108,7 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
 
     def RenameSpeaker(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
-        name = _speaker_name(request.name, context)
+        name = _normalized_speaker_name(request.name, context)
 
         session = new_session()
         try:
@@ -130,7 +130,7 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
             case "speaker_label":
                 target: str | NewSpeaker = request.speaker_label
             case "new_speaker":
-                target = NewSpeaker(_speaker_name(request.new_speaker.name, context))
+                target = NewSpeaker(_normalized_speaker_name(request.new_speaker.name, context))
             case _:
                 _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "either speaker_label or new_speaker is required")
 

@@ -87,3 +87,7 @@ class Speaker(Base):
     @property
     def display_name(self) -> str:
         return self.name or self.default_name
+
+    def set_name(self, name: str | None) -> None:
+        """取名；None 或等於預設名稱「講者 N」＝沒有自訂名稱。"""
+        self.name = None if name == self.default_name else name

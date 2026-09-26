@@ -49,11 +49,7 @@ class SegmentEdit:
 def update_segment_text(session: Session, job_id: uuid.UUID, segment_id: uuid.UUID, text: str) -> SegmentEdit:
     """編輯一個片段的文字（text 已由呼叫端正規化，空字串＝清空）。文字沒變時什麼都不做；否則
     revision +1、以未清空片段依換行重組 full_text。同時兩個編輯是「最後寫入為準」。"""
-    transcript = _lock_transcript(session, job_id)
-    segment = next((s for s in transcript.segments if s.id == segment_id), None) if transcript else None
-    if transcript is None or segment is None:
-        session.rollback()
-        raise SegmentNotFound()
+    transcript, segment = _lock_segment(session, job_id, segment_id)
 
     if segment.text == text:
         session.rollback()
@@ -69,6 +65,16 @@ def update_segment_text(session: Session, job_id: uuid.UUID, segment_id: uuid.UU
 def _lock_transcript(session: Session, job_id: uuid.UUID) -> Transcript | None:
     # 逐字稿那一列用 SELECT ... FOR UPDATE 鎖住：同一份逐字稿的編輯一個一個來，revision 才會各加一次。
     return session.scalar(select(Transcript).where(Transcript.job_id == job_id).with_for_update())
+
+
+def _lock_segment(session: Session, job_id: uuid.UUID, segment_id: uuid.UUID) -> tuple[Transcript, TranscriptSegment]:
+    """鎖住逐字稿並找出這個片段；job 沒有逐字稿或片段不屬於它時 rollback 並 raise SegmentNotFound。"""
+    transcript = _lock_transcript(session, job_id)
+    segment = next((s for s in transcript.segments if s.id == segment_id), None) if transcript else None
+    if transcript is None or segment is None:
+        session.rollback()
+        raise SegmentNotFound()
+    return transcript, segment
 
 
 class SpeakerNotFound(Exception):
@@ -91,13 +97,12 @@ def rename_speaker(session: Session, job_id: uuid.UUID, label: str, name: str | 
         session.rollback()
         raise SpeakerNotFound()
 
-    if name == speaker.default_name:
-        name = None
-    if speaker.name == name:
+    previous_name = speaker.name
+    speaker.set_name(name)
+    if speaker.name == previous_name:
         session.rollback()
         return SpeakerEdit(speaker, transcript.revision, changed=False)
 
-    speaker.name = name
     transcript.revision += 1
     session.commit()
     return SpeakerEdit(speaker, transcript.revision, changed=True)
@@ -121,11 +126,7 @@ def assign_segment_speaker(
 ) -> SpeakerAssignment:
     """把片段改成另一位講者（target 是現有講者的標籤），或新增一位講者給它（排在顯示順序最後）。片段本來就是
     這位講者時什麼都不做，否則 revision +1。"""
-    transcript = _lock_transcript(session, job_id)
-    segment = next((s for s in transcript.segments if s.id == segment_id), None) if transcript else None
-    if transcript is None or segment is None:
-        session.rollback()
-        raise SegmentNotFound()
+    transcript, segment = _lock_segment(session, job_id, segment_id)
 
     if isinstance(target, NewSpeaker):
         _give_unlabelled_segments_to_speaker_1(transcript)
@@ -163,6 +164,6 @@ def _add_speaker(transcript: Transcript, name: str | None) -> Speaker:
         number += 1
     speaker = Speaker(
         label=f"S{number}", display_order=max((s.display_order for s in transcript.speakers), default=0) + 1)
-    speaker.name = None if name == speaker.default_name else name
+    speaker.set_name(name)
     transcript.speakers.append(speaker)
     return speaker
