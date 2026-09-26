@@ -103,6 +103,10 @@ docker compose up -d
 | `PUT` | `/me/provider-keys/{provider}` | 存入或替換自有金鑰，body `{ key }`（`provider` 是 `openai` / `anthropic` / `gemini` / `openrouter`）；ai-service 先向廠商驗證，無效回 400（附原因）、廠商暫時連不上回 503、沒設定主金鑰回 409，都不會存；轉給 `SaveProviderKey` |
 | `DELETE` | `/me/provider-keys/{provider}` | 刪除自有金鑰，回 `{ deleted, defaultModelReset }`（預設模型正在用它時改回平台模型）；轉給 `DeleteProviderKey` |
 | `GET` | `/jobs/{jobId}/usage` | 這個 Job 的用量：`{ records, totals }`，`records` 依時間排序，每筆有 `kind`（`llm` / `transcription`）、`feature`、`provider`、`model`、`keySource`、`inputTokens`、`outputTokens`、`audioSeconds`（未知是 `null`）、`succeeded`、`createdAt`；`totals` 是已知數字的加總。LLM 用量來自 ai-service 的 `ListJobLlmUsage`，轉錄用量來自 transcription-service 的 `ListJobTranscriptionUsage`（`feature` 是 `transcription`、`keySource` 是 `platform`），在這裡合併 |
+| `GET` | `/me/connections` | 已連結的帳號（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)）：`[{ service, status, connectedAt }]`，`service` 是 `google` / `notion`，`status` 是 `CONNECTED` / `INVALID`（已失效，要重新連結）/ `NOT_CONNECTED`；權杖永遠不回傳。轉給 `ListConnections` |
+| `GET` | `/me/connections/{service}/authorize` | 回傳 `{ authorizeUrl }`，前端把使用者轉過去（不是 302：前端的 JWT 在 header 裡，瀏覽器轉址帶不過來），同時設一個 10 分鐘的 HttpOnly、SameSite=Lax cookie（`transuai_oauth_binding`，隨機值；ai-service 只存雜湊），把這次授權綁定在這個瀏覽器；回呼網址用 `OAUTH_CALLBACK_BASE_URL`。不支援的服務回 400，伺服器沒設定 Google OAuth client 回 409，連不上 Notion 回 503；轉給 `StartConnection` |
+| `GET` | `/oauth/{service}/callback` | Google / Notion 的回呼，**不需要 JWT**（使用者由 `state` 認出來，而且要帶回開始連結時的 cookie——別人的授權網址在使用者瀏覽器裡按同意也連不到使用者的帳號上；用完就清掉 cookie）；轉給 `CompleteConnection`，成功轉址到 `{FRONTEND_URL}/settings?connected={service}`、失敗到 `?connection_failed={service}`（原因只記 log） |
+| `DELETE` | `/me/connections/{service}` | 中斷連結：向對方撤銷授權並刪除權杖，回 `{ revoked }`（撤銷失敗時權杖照樣刪除，`revoked` 是 false）；轉給 `DeleteConnection` |
 | `GET` | `/me/usage?month=YYYY-MM` | 登入者某個月的用量：`{ month, llm: [{ provider, model, keySource, inputTokens, outputTokens, calls, callsWithUnknownUsage }], transcription: [{ provider, model, audioSeconds, calls, callsWithUnknownUsage }] }`。月份依台灣時間（`Asia/Taipei`）切成時間範圍，省略就是這個月，格式不對回 400；數字是已知的加總，`callsWithUnknownUsage` 是沒回報用量的呼叫次數。分別轉給 ai-service 的 `SumUserLlmUsage` 與 transcription-service 的 `SumUserTranscriptionUsage` |
 | `POST` | `/qa/{jobId}` | RAG 問答（含最近 5 輪對話記憶），body `{ "question": string, "model"?: { provider, model } }`（`model` 只用在這一次提問，省略就用預設模型；用不到的模型回 400），回傳 `text/event-stream`（SSE，見下方「問答 streaming」一節）；還沒有 embedding（pipeline 沒跑完）在串流開始前就回 404，不會是 SSE error event |
 
@@ -140,6 +144,8 @@ docker compose up -d
 | `UPLOAD_SERVICE_GRPC_TARGET` | `localhost:9090` | upload-service |
 | `TRANSCRIPTION_SERVICE_GRPC_TARGET` | `localhost:8083` | transcription-service |
 | `AI_SERVICE_GRPC_TARGET` | `localhost:8084` | ai-service |
+| `OAUTH_CALLBACK_BASE_URL` | `http://localhost:5173/api` | 已連結的帳號：Google / Notion 回呼的是 `{這個}/oauth/{service}/callback`（要登記在 Google 的 OAuth client）；本地開發時瀏覽器經過 Vite 的 `/api` proxy 到 Gateway |
+| `FRONTEND_URL` | `http://localhost:5173` | 連結完成（或失敗）後把使用者轉回 `{這個}/settings` |
 
 ## 專案結構
 
@@ -148,11 +154,12 @@ src/main/java/com/transuai/gateway/
   config/            GrpcClientConfig（4 個 ManagedChannel + blocking stub bean）、GrpcProperties、WebConfig
   security/           JwtProperties、JwtService（只驗證 access token）、JwtAuthenticationFilter、InvalidTokenException
   web/                CurrentUserId annotation + CurrentUserIdArgumentResolver、AuthController、UploadController、
-                       TranscriptionController、AiController
+                       TranscriptionController、AiController、QuizController、UsageController、ModelController、
+                       ProviderKeyController、ConnectionController
   web/dto/            REST 用的 JSON DTO（跟 proto message 分開，不直接把 protobuf 型別序列化給前端）
   web/advice/         GrpcExceptionAdvice（StatusRuntimeException → HTTP status + JSON error body）
   grpc/               GrpcMetadataSupport（組 x-user-id metadata）、JobOwnershipGuard（Transcription/AI 端點的 ownership 檢查）、
-                       GrpcTimestamps、UploadMapper（proto ↔ DTO）
+                       GrpcTimestamps、GrpcStrings（空字串 → null）、UploadMapper（proto ↔ DTO）
 ```
 
 ## 已知限制 / 待辦

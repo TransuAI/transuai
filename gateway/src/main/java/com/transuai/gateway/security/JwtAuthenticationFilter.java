@@ -3,6 +3,7 @@ package com.transuai.gateway.security;
 import java.io.IOException;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -37,6 +38,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     // Register/Login/Refresh 呼叫時使用者還沒有 token，這三條路徑不驗證。
     private static final Set<String> PUBLIC_PATHS = Set.of("/auth/register", "/auth/login", "/auth/refresh");
+    // Google / Notion 把瀏覽器轉回來時不會帶我們的 token；使用者由 state 與綁定瀏覽器的 cookie 認出來（見 ConnectionController）。
+    private static final Pattern OAUTH_CALLBACK = Pattern.compile("/oauth/[^/]+/callback");
 
     private final JwtService jwtService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -48,7 +51,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return PUBLIC_PATHS.contains(path) || path.startsWith("/v3/api-docs") || path.startsWith("/swagger-ui");
+        return PUBLIC_PATHS.contains(path) || OAUTH_CALLBACK.matcher(path).matches() || path.startsWith("/v3/api-docs")
+                || path.startsWith("/swagger-ui");
     }
 
     @Override
