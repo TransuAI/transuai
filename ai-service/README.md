@@ -321,8 +321,9 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 ## 已知限制 / 待辦
 
 - 已連結的帳號：Google 的 `gmail.compose`（建立草稿）屬於 Google 的受限權限，應用程式通過 Google 的審查之前，只有 OAuth
-  同意畫面登記的測試使用者能連結；會後處理要用的 Google Calendar / Gmail 官方遠端 MCP 目前是 Developer Preview，要先加入
-  Google Workspace 的預覽計畫。兩者都還沒實際申請過，Google 的連結流程只用假的 OAuth 端點測過；Notion 的端點照它公開的
+  同意畫面登記的測試使用者能連結（還沒申請審查）。Google 日曆與 Gmail 不用官方的遠端 MCP（Developer Preview 只給 Workspace
+  帳號、GA 前不能開放給網域外的使用者），會後處理改用自己寫的 REST API 工具，見 [ADR 0006](docs/adr/0006-post-meeting-agent-model-and-google-tools.md)。
+  Google 的連結流程只用假的 OAuth 端點測過；Notion 的端點照它公開的
   `/.well-known/oauth-authorization-server` 設定，也還沒用真的帳號走過一次。
 
 - 訊息處理遇到暫時性失敗（HF 429/503、內部 gRPC 服務短暫不可用）會自動重試（訊息層級 requeue，
