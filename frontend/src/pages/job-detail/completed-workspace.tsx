@@ -30,6 +30,9 @@ interface CompletedWorkspaceProps {
   onAsk: () => void
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
+  onRegenerateSummary: () => void
+  isRegeneratingSummary: boolean
+  isRequestingRegeneration: boolean
   setMediaRef: (el: HTMLMediaElement | null) => void
 }
 
@@ -73,6 +76,9 @@ export function CompletedWorkspace({
   onAsk,
   onSeek,
   onSaveSegmentText,
+  onRegenerateSummary,
+  isRegeneratingSummary,
+  isRequestingRegeneration,
   setMediaRef,
 }: CompletedWorkspaceProps) {
   const isDesktop = useMediaQuery('(min-width: 1024px)')
@@ -103,6 +109,9 @@ export function CompletedWorkspace({
       onSeek={onSeek}
       mediaAvailable={mediaAvailable}
       isStale={isSummaryStale(summary, transcript)}
+      onRegenerate={onRegenerateSummary}
+      isRegenerating={isRegeneratingSummary}
+      isRequestingRegeneration={isRequestingRegeneration}
     />
   )
   const currentSegment = currentSegmentIndex !== null ? transcript?.segments[currentSegmentIndex] : undefined

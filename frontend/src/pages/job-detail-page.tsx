@@ -9,6 +9,7 @@ import { formatBytes, formatDuration } from '@/lib/media'
 import { useAutoFollow } from '@/hooks/use-auto-follow'
 import { useJobSocket } from '@/hooks/use-job-socket'
 import { usePlaybackContinuity } from '@/hooks/use-playback-continuity'
+import { useSummaryRegeneration } from '@/hooks/use-summary-regeneration'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -138,6 +139,12 @@ export function JobDetailPage() {
         .finally(() => setIsLoadingHistory(false))
     }
   }, [jobId, jobStatus])
+
+  // After a regeneration: a failed reload keeps the chapters already on screen.
+  const reloadChapters = useCallback(() => {
+    if (jobId) chapterApi.list(jobId).then(setChapters).catch(() => {})
+  }, [jobId])
+  const regeneration = useSummaryRegeneration(jobId, summary, setSummary, reloadChapters)
 
   const seekTo = (seconds: number) => {
     if (mediaElement) {
@@ -289,6 +296,9 @@ export function JobDetailPage() {
       onAsk={handleAskQuestion}
       onSeek={seekTo}
       onSaveSegmentText={handleSaveSegmentText}
+      onRegenerateSummary={regeneration.regenerate}
+      isRegeneratingSummary={regeneration.isRegenerating}
+      isRequestingRegeneration={regeneration.isRequesting}
       setMediaRef={setMediaElement}
     />
   )

@@ -1,4 +1,5 @@
-import { History, List, Sparkles } from 'lucide-react'
+import { History, List, Loader2Icon, RefreshCw, Sparkles } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -11,9 +12,23 @@ interface StudioPaneProps {
   mediaAvailable: boolean
   /** The summary and chapters predate an edit of the transcript (過時). */
   isStale: boolean
+  onRegenerate: () => void
+  /** A regeneration is running in the background; the old content stays visible meanwhile. */
+  isRegenerating: boolean
+  /** The regenerate request itself is still on its way. */
+  isRequestingRegeneration: boolean
 }
 
-export function StudioPane({ summary, chapters, onSeek, mediaAvailable, isStale }: StudioPaneProps) {
+export function StudioPane({
+  summary,
+  chapters,
+  onSeek,
+  mediaAvailable,
+  isStale,
+  onRegenerate,
+  isRegenerating,
+  isRequestingRegeneration,
+}: StudioPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="border-b pb-4">
@@ -25,10 +40,31 @@ export function StudioPane({ summary, chapters, onSeek, mediaAvailable, isStale 
       <CardContent className="min-h-0 flex-1 pt-4">
         <ScrollArea className="h-full pr-4">
           <div className="flex flex-col gap-6">
-            {isStale && (
-              <div className="flex items-start gap-2 rounded-md border bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
-                <History className="mt-0.5 size-4 shrink-0" />
-                <p>逐字稿已修改，摘要與章節可能過時</p>
+            {(isStale || isRegenerating) && (
+              <div className="flex flex-col gap-2 rounded-md border bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
+                {isStale && (
+                  <p className="flex items-start gap-2">
+                    <History className="mt-0.5 size-4 shrink-0" />
+                    逐字稿已修改，摘要與章節可能過時
+                  </p>
+                )}
+                {isRegenerating ? (
+                  <p className="flex items-center gap-2" aria-live="polite">
+                    <Loader2Icon className="size-4 animate-spin" />
+                    重新產生中…
+                  </p>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-fit"
+                    disabled={isRequestingRegeneration}
+                    onClick={onRegenerate}
+                  >
+                    <RefreshCw className="size-4" />
+                    重新產生摘要與章節
+                  </Button>
+                )}
               </div>
             )}
             <section className="flex flex-col gap-2">

@@ -64,6 +64,9 @@ export const transcriptApi = {
 
 export const summaryApi = {
   get: (jobId: string) => apiFetch<Summary>(`/summary/${jobId}`),
+
+  // 在背景依最新逐字稿重新產生摘要與章節；回傳目前的摘要（regenerationStatus 通常是 RUNNING）。
+  regenerate: (jobId: string) => apiFetch<Summary>(`/summary/${jobId}/regenerate`, { method: 'POST' }),
 }
 
 export const chapterApi = {

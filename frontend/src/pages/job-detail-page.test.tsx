@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chapterApi, jobsApi, qaApi, summaryApi, transcriptApi } from '@/lib/api'
 import type { Chapter, Job, QaTurn, Summary, Transcript } from '@/types/api'
 
@@ -14,7 +14,7 @@ vi.mock('@/lib/api', () => ({
       .mockResolvedValue({ downloadUrl: 'https://media.example.com/uploads/interview.mp3', expiresAt: '2026-01-01T01:00:00Z' }),
   },
   transcriptApi: { get: vi.fn(), updateSegmentText: vi.fn() },
-  summaryApi: { get: vi.fn() },
+  summaryApi: { get: vi.fn(), regenerate: vi.fn() },
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
 }))
@@ -68,7 +68,7 @@ const mockTranscript: Transcript = {
   segments: [{ id: 'seg-1', startTime: 5, endTime: 8, speakerLabel: 'A', text: '哈囉世界', originalText: '哈囉世界' }],
 }
 
-const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容', sourceRevision: 0 }
+const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容', sourceRevision: 0, regenerationStatus: 'IDLE' }
 
 const mockChapters: Chapter[] = [{ id: 'ch-1', jobId: 'job-1', title: '開場', startTime: 12, sequenceNo: 0 }]
 
@@ -1231,5 +1231,105 @@ describe('JobDetailPage 過時 summary and chapters (COMPLETED, desktop layout)'
     await user.click(await screen.findByRole('menuitem', { name: '下載報告（Markdown）' }))
 
     expect(await downloads[0].text()).toContain('> 逐字稿在摘要產生後有修改，摘要與章節可能過時')
+  })
+})
+
+describe('JobDetailPage regenerating the summary and chapters (COMPLETED, desktop layout)', () => {
+  const staleTranscript: Transcript = { ...gappedTranscript, revision: 1 }
+  const fresh: Summary = { jobId: 'job-1', summaryText: '重新產生的摘要', sourceRevision: 1, regenerationStatus: 'IDLE' }
+  const running: Summary = { ...mockSummary, regenerationStatus: 'RUNNING' }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function renderStale(summary: Summary = mockSummary) {
+    stubDesktopLayout()
+    vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
+    vi.mocked(transcriptApi.get).mockResolvedValue(staleTranscript)
+    vi.mocked(summaryApi.get).mockResolvedValue(summary)
+    vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
+    vi.mocked(qaApi.history).mockResolvedValue([])
+    renderJobDetail()
+    await screen.findByText('第一句')
+    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+  }
+
+  it('offers no regeneration while the summary is up to date', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(gappedTranscript)
+
+    expect(screen.queryByRole('button', { name: '重新產生摘要與章節' })).not.toBeInTheDocument()
+  })
+
+  it('regenerates in the background and swaps in the new summary and chapters when done', async () => {
+    const user = await renderStale()
+    vi.mocked(summaryApi.regenerate).mockResolvedValue(running)
+    vi.mocked(summaryApi.get).mockResolvedValue(fresh)
+    vi.mocked(chapterApi.list).mockResolvedValue([{ id: 'ch-9', jobId: 'job-1', title: '新章節', startTime: 5, sequenceNo: 0 }])
+
+    await user.click(await screen.findByRole('button', { name: '重新產生摘要與章節' }))
+
+    expect(summaryApi.regenerate).toHaveBeenCalledWith('job-1')
+    expect(screen.getByText('重新產生中…')).toBeInTheDocument()
+    expect(screen.getByText('這是摘要內容')).toBeInTheDocument() // the old content stays meanwhile
+
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(await screen.findByText('重新產生的摘要')).toBeInTheDocument()
+    expect(screen.getByText('新章節')).toBeInTheDocument()
+    expect(screen.queryByText('逐字稿已修改，摘要與章節可能過時')).not.toBeInTheDocument()
+  })
+
+  it('keeps the old content and says so when the regeneration fails', async () => {
+    const user = await renderStale()
+    vi.mocked(summaryApi.regenerate).mockResolvedValue(running)
+    vi.mocked(summaryApi.get).mockResolvedValue({ ...mockSummary, regenerationStatus: 'FAILED' })
+
+    await user.click(await screen.findByRole('button', { name: '重新產生摘要與章節' }))
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(await screen.findByText('重新產生失敗')).toBeInTheDocument()
+    expect(screen.getByText('這是摘要內容')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新產生摘要與章節' })).toBeEnabled()
+  })
+
+  it('keeps waiting for a regeneration that was already running when the page opened', async () => {
+    await renderStale(running)
+    vi.mocked(summaryApi.get).mockResolvedValue(fresh)
+
+    expect(await screen.findByText('重新產生中…')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(await screen.findByText('重新產生的摘要')).toBeInTheDocument()
+  })
+
+  it('sends one request even when the button is clicked twice before it answers', async () => {
+    const user = await renderStale()
+    vi.mocked(summaryApi.regenerate).mockReturnValue(new Promise(() => {}))
+
+    const button = await screen.findByRole('button', { name: '重新產生摘要與章節' })
+    await user.click(button)
+    await user.click(button)
+
+    expect(summaryApi.regenerate).toHaveBeenCalledTimes(1)
+    expect(button).toBeDisabled()
+  })
+
+  it('keeps the old chapters if reloading them after a regeneration fails', async () => {
+    const user = await renderStale()
+    vi.mocked(summaryApi.regenerate).mockResolvedValue(running)
+    vi.mocked(summaryApi.get).mockResolvedValue(fresh)
+    vi.mocked(chapterApi.list).mockRejectedValue(new Error('network'))
+
+    await user.click(await screen.findByRole('button', { name: '重新產生摘要與章節' }))
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(await screen.findByText('重新產生的摘要')).toBeInTheDocument()
+    expect(screen.getByText('開場')).toBeInTheDocument()
   })
 })

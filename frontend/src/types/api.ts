@@ -85,6 +85,8 @@ export interface Summary {
   summaryText: string
   /** The transcript revision this summary (and its chapters) was built from. */
   sourceRevision: number
+  /** State of a user-requested regeneration of the summary and chapters. */
+  regenerationStatus: 'IDLE' | 'RUNNING' | 'FAILED'
 }
 
 export interface Chapter {
