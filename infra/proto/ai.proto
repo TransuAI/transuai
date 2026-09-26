@@ -60,6 +60,10 @@ service AiService {
   // 一份測驗，含題目與正確答案（測驗屬於使用者自己，「作答時看不到答案」由前端處理）。
   // 不存在或不屬於這個 job 回 NOT_FOUND。
   rpc GetQuiz(GetQuizRequest) returns (Quiz);
+  // 送出一次作答：後端計分並保存，回傳分數與每題結果。answers 依題目順序、每題一個選項位置（從 0 開始），題數
+  // 不對或選項超出範圍回 INVALID_ARGUMENT；測驗還沒完成回 FAILED_PRECONDITION；不存在或不屬於這個 job 回 NOT_FOUND。
+  // 同一份測驗可以重做，每次作答都保存。
+  rpc SubmitQuizAttempt(SubmitQuizAttemptRequest) returns (QuizAttemptResult);
 
   // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
   // 取得的使用者，不另外驗證。
@@ -137,6 +141,29 @@ message Quiz {
   google.protobuf.Timestamp completed_at = 10;
   // 只有 GetQuiz 帶題目，依順序排列。
   repeated QuizQuestion questions = 11;
+  // 所有作答裡答對最多的題數；還沒作答過不設定。
+  optional int32 best_correct_count = 12;
+}
+
+message SubmitQuizAttemptRequest {
+  string job_id = 1;
+  string quiz_id = 2;
+  string user_id = 3;
+  repeated int32 answers = 4;
+}
+
+message QuizAttemptResult {
+  int32 correct_count = 1;
+  int32 question_count = 2;
+  // 依題目順序。
+  repeated QuizQuestionResult results = 3;
+}
+
+message QuizQuestionResult {
+  int32 chosen_option = 1;
+  int32 correct_option = 2;
+  bool correct = 3;
+  string explanation = 4;
 }
 
 message QuizQuestion {
