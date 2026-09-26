@@ -39,6 +39,10 @@ service AiService {
   // 內時不重複排入（直接回傳目前狀態）；超過 5 分鐘視為上一次卡住，允許再排一次。這個 job 還沒有摘要
   // 回 NOT_FOUND，job_id 不合法回 INVALID_ARGUMENT，排入 queue 失敗回 UNAVAILABLE（狀態不變）。
   rpc RequestRegeneration(RequestRegenerationRequest) returns (Summary);
+
+  // 一個 Job 的 LLM 用量（見 ai-service/CONTEXT.md「用量」），依時間升冪。job_id 不合法回 INVALID_ARGUMENT；沒有紀錄回空列表。
+  // 不驗證使用者，Gateway 已經做過 ownership 檢查。
+  rpc ListJobLlmUsage(ListJobLlmUsageRequest) returns (ListJobLlmUsageResponse);
 }
 
 enum RegenerationStatus {
@@ -51,6 +55,32 @@ enum RegenerationStatus {
 
 message RequestRegenerationRequest {
   string job_id = 1;
+  // 要求重新產生的使用者（Gateway 驗證過 ownership），用量記在他名下。
+  string user_id = 2;
+}
+
+message ListJobLlmUsageRequest {
+  string job_id = 1;
+}
+
+message ListJobLlmUsageResponse {
+  repeated LlmUsage records = 1;
+}
+
+// 一次 LLM 呼叫的用量。
+message LlmUsage {
+  // summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters
+  string feature = 1;
+  // "platform"（平台模型）或廠商名稱
+  string provider = 2;
+  string model = 3;
+  // "platform"（平台模型）或 "own_key"（自有金鑰）
+  string key_source = 4;
+  // 廠商沒有回報時不設定（未知），不是 0。
+  optional int32 input_tokens = 5;
+  optional int32 output_tokens = 6;
+  bool succeeded = 7;
+  google.protobuf.Timestamp created_at = 8;
 }
 
 message Summary {
