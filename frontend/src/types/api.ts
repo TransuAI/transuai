@@ -113,6 +113,9 @@ export interface Summary {
   sourceRevision: number
   /** State of a user-requested regeneration of the summary and chapters. */
   regenerationStatus: 'IDLE' | 'RUNNING' | 'FAILED'
+  /** The model that made this summary and its chapters ("platform" is 平台模型); null for summaries made before models were recorded. */
+  modelProvider: string | null
+  model: string | null
 }
 
 export interface Chapter {
@@ -175,4 +178,18 @@ export interface ProviderKey {
   provider: string
   last4: string
   createdAt: string
+}
+
+/** A model the user can pick: provider is "platform" (平台模型) or an AI provider. */
+export interface ModelChoice {
+  provider: string
+  model: string
+  /** Whether it can call tools (needed for 會後處理). */
+  supportsTools: boolean
+}
+
+export interface AvailableModels {
+  models: ModelChoice[]
+  /** With an OpenRouter key, any OpenRouter model ID can be typed in. */
+  openrouterCustom: boolean
 }

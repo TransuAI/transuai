@@ -1,11 +1,13 @@
 import { apiFetch, apiFetchVoid, requestSse } from '@/lib/api-client'
 import type {
   AuthResponse,
+  AvailableModels,
   Chapter,
   Job,
   JobListResponse,
   JobUsage,
   MediaUrlResponse,
+  ModelChoice,
   PresignResponse,
   ProviderKey,
   QaTurn,
@@ -142,5 +144,15 @@ export const providerKeysApi = {
   list: () => apiFetch<ProviderKey[]>('/me/provider-keys'),
   save: (provider: string, key: string) =>
     apiFetch<ProviderKey>(`/me/provider-keys/${provider}`, { method: 'PUT', body: { key } }),
-  remove: (provider: string) => apiFetch<{ deleted: boolean }>(`/me/provider-keys/${provider}`, { method: 'DELETE' }),
+  // defaultModelReset: the default model was using this key and is back on the platform model.
+  remove: (provider: string) =>
+    apiFetch<{ deleted: boolean; defaultModelReset: boolean }>(`/me/provider-keys/${provider}`, { method: 'DELETE' }),
+}
+
+// 預設模型：上傳後的摘要與章節、重新產生、問答都用它。
+export const modelsApi = {
+  available: () => apiFetch<AvailableModels>('/ai/models'),
+  getDefault: () => apiFetch<ModelChoice>('/me/default-model'),
+  setDefault: (provider: string, model: string) =>
+    apiFetch<ModelChoice>('/me/default-model', { method: 'PUT', body: { provider, model } }),
 }

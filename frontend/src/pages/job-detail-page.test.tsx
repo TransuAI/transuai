@@ -74,7 +74,14 @@ const mockTranscript: Transcript = {
   speakers: [],
 }
 
-const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容', sourceRevision: 0, regenerationStatus: 'IDLE' }
+const mockSummary: Summary = {
+  jobId: 'job-1',
+  summaryText: '這是摘要內容',
+  sourceRevision: 0,
+  regenerationStatus: 'IDLE',
+  modelProvider: 'openai',
+  model: 'gpt-5-mini',
+}
 
 const noUsage: JobUsage = { records: [], totals: { inputTokens: 0, outputTokens: 0, audioSeconds: 0 } }
 
@@ -1149,6 +1156,28 @@ describe('JobDetailPage mini player speakers (COMPLETED, narrow viewport)', () =
   })
 })
 
+describe('JobDetailPage summary model (COMPLETED, desktop layout)', () => {
+  it('says which model made the summary', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob()
+
+    expect(await screen.findByText('由 gpt-5-mini 產生')).toBeInTheDocument()
+  })
+
+  it('says nothing about the model for a summary made before models were recorded', async () => {
+    stubDesktopLayout()
+    vi.mocked(summaryApi.get).mockResolvedValue({ ...mockSummary, modelProvider: null, model: null })
+    vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
+    vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
+    vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
+    vi.mocked(qaApi.history).mockResolvedValue([])
+    renderJobDetail()
+
+    expect(await screen.findByText('這是摘要內容')).toBeInTheDocument()
+    expect(screen.queryByText(/產生$/)).not.toBeInTheDocument()
+  })
+})
+
 describe('JobDetailPage usage (COMPLETED, desktop layout)', () => {
   const llmRecord = (feature: string, inputTokens: number | null, outputTokens: number | null, succeeded = true) => ({
     kind: 'llm' as const,
@@ -1720,7 +1749,7 @@ describe('JobDetailPage 過時 summary and chapters (COMPLETED, desktop layout)'
 
 describe('JobDetailPage regenerating the summary and chapters (COMPLETED, desktop layout)', () => {
   const staleTranscript: Transcript = { ...gappedTranscript, revision: 1 }
-  const fresh: Summary = { jobId: 'job-1', summaryText: '重新產生的摘要', sourceRevision: 1, regenerationStatus: 'IDLE' }
+  const fresh: Summary = { ...mockSummary, summaryText: '重新產生的摘要', sourceRevision: 1 }
   const running: Summary = { ...mockSummary, regenerationStatus: 'RUNNING' }
 
   beforeEach(() => {

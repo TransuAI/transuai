@@ -3,6 +3,7 @@ import { KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { providerKeysApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
+import { PROVIDERS, type Provider } from '@/lib/providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -17,18 +18,9 @@ import {
 } from '@/components/ui/alert-dialog'
 import type { ProviderKey } from '@/types/api'
 
-const PROVIDERS = [
-  { id: 'openai', name: 'OpenAI' },
-  { id: 'anthropic', name: 'Anthropic' },
-  { id: 'gemini', name: 'Google Gemini' },
-  { id: 'openrouter', name: 'OpenRouter' },
-] as const
-
-type Provider = (typeof PROVIDERS)[number]
-
 // 自有金鑰 (see ai-service CONTEXT.md): one key per provider. A saved key is never shown again, only its
 // last four characters; typing a new one replaces it.
-export function ProviderKeysSection() {
+export function ProviderKeysSection({ onKeysChanged }: { onKeysChanged: () => void }) {
   const [keys, setKeys] = useState<ProviderKey[]>([])
   const [deleting, setDeleting] = useState<Provider | null>(null)
 
@@ -44,8 +36,10 @@ export function ProviderKeysSection() {
     if (!deleting) return
     const provider = deleting
     try {
-      await providerKeysApi.remove(provider.id)
+      const { defaultModelReset } = await providerKeysApi.remove(provider.id)
       replace(provider, null)
+      if (defaultModelReset) toast.info('預設模型已改回平台模型')
+      onKeysChanged()
     } catch {
       toast.error('刪除失敗')
     }
@@ -68,7 +62,10 @@ export function ProviderKeysSection() {
             key={provider.id}
             provider={provider}
             saved={keyOf(provider)}
-            onSaved={(key) => replace(provider, key)}
+            onSaved={(key) => {
+              replace(provider, key)
+              onKeysChanged()
+            }}
             onDelete={() => setDeleting(provider)}
           />
         ))}

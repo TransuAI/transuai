@@ -76,9 +76,12 @@ export function StudioPane({
                 AI 摘要
               </h3>
               {summary ? (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                  {summary.summaryText}
-                </p>
+                <>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                    {summary.summaryText}
+                  </p>
+                  {summary.model && <p className="text-xs text-muted-foreground/80">由 {summary.model} 產生</p>}
+                </>
               ) : (
                 <p className="text-sm text-muted-foreground">尚無摘要</p>
               )}

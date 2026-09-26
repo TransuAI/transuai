@@ -3,22 +3,31 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/sonner'
-import { providerKeysApi } from '@/lib/api'
+import { modelsApi, providerKeysApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { SettingsPage } from './settings-page'
 
 vi.mock('@/lib/api', () => ({
   providerKeysApi: { list: vi.fn(), save: vi.fn(), remove: vi.fn() },
+  modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
 }))
 
 afterEach(() => {
   vi.clearAllMocks()
 })
 
+const platform = { provider: 'platform', model: 'Qwen/Qwen3.5-9B', supportsTools: false }
+const gpt5mini = { provider: 'openai', model: 'gpt-5-mini', supportsTools: true }
+
 beforeEach(() => {
   vi.mocked(providerKeysApi.list).mockResolvedValue([
     { provider: 'openai', last4: 'a3F9', createdAt: '2026-09-26T02:00:00Z' },
   ])
+  vi.mocked(modelsApi.available).mockResolvedValue({
+    models: [platform, { provider: 'openai', model: 'gpt-5', supportsTools: true }, gpt5mini],
+    openrouterCustom: false,
+  })
+  vi.mocked(modelsApi.getDefault).mockResolvedValue(platform)
 })
 
 async function renderSettings() {
@@ -96,7 +105,7 @@ describe('SettingsPage own API keys (自有金鑰)', () => {
 
   it('deletes a key after the user confirms', async () => {
     const user = userEvent.setup()
-    vi.mocked(providerKeysApi.remove).mockResolvedValue({ deleted: true })
+    vi.mocked(providerKeysApi.remove).mockResolvedValue({ deleted: true, defaultModelReset: false })
     const section = await renderSettings()
     const openai = row(section, 'OpenAI')
     await within(openai).findByText('…a3F9')
@@ -107,5 +116,63 @@ describe('SettingsPage own API keys (自有金鑰)', () => {
 
     expect(providerKeysApi.remove).toHaveBeenCalledWith('openai')
     expect(await within(openai).findByText('未設定')).toBeInTheDocument()
+  })
+})
+
+describe('SettingsPage default model (預設模型)', () => {
+  async function renderDefaultModel() {
+    await renderSettings()
+    return screen.findByRole('region', { name: '預設模型' })
+  }
+
+  it('starts on the platform model and offers the models of every provider with a key', async () => {
+    const section = await renderDefaultModel()
+
+    expect(await within(section).findByRole('radio', { name: '平台模型（Qwen/Qwen3.5-9B）' })).toBeChecked()
+    expect(within(section).getByRole('radio', { name: 'OpenAI · gpt-5-mini' })).not.toBeChecked()
+    expect(within(section).queryByLabelText('OpenRouter 模型 ID')).not.toBeInTheDocument()
+  })
+
+  it('makes a chosen model the default', async () => {
+    const user = userEvent.setup()
+    vi.mocked(modelsApi.setDefault).mockResolvedValue(gpt5mini)
+    const section = await renderDefaultModel()
+
+    await user.click(await within(section).findByRole('radio', { name: 'OpenAI · gpt-5-mini' }))
+
+    expect(modelsApi.setDefault).toHaveBeenCalledWith('openai', 'gpt-5-mini')
+    expect(await within(section).findByRole('radio', { name: 'OpenAI · gpt-5-mini' })).toBeChecked()
+    expect(await screen.findByText('預設模型已改成 gpt-5-mini')).toBeInTheDocument()
+  })
+
+  it('takes any OpenRouter model ID when there is an OpenRouter key, and says why one is refused', async () => {
+    const user = userEvent.setup()
+    vi.mocked(modelsApi.available).mockResolvedValue({ models: [platform], openrouterCustom: true })
+    vi.mocked(modelsApi.setDefault).mockRejectedValue(
+      new ApiError(400, { error: 'INVALID_ARGUMENT', message: 'OpenRouter 上找不到「deepseek/nope」這個模型' }),
+    )
+    const section = await renderDefaultModel()
+
+    await user.type(await within(section).findByLabelText('OpenRouter 模型 ID'), 'deepseek/nope')
+    await user.click(within(section).getByRole('button', { name: '使用這個模型' }))
+
+    expect(modelsApi.setDefault).toHaveBeenCalledWith('openrouter', 'deepseek/nope')
+    expect(await within(section).findByText('OpenRouter 上找不到「deepseek/nope」這個模型')).toBeInTheDocument()
+  })
+
+  it('says so when deleting a key brings the default back to the platform model', async () => {
+    const user = userEvent.setup()
+    vi.mocked(modelsApi.getDefault).mockResolvedValueOnce(gpt5mini).mockResolvedValue(platform)
+    vi.mocked(providerKeysApi.remove).mockResolvedValue({ deleted: true, defaultModelReset: true })
+    const section = await renderDefaultModel()
+    expect(await within(section).findByRole('radio', { name: 'OpenAI · gpt-5-mini' })).toBeChecked()
+    vi.mocked(modelsApi.available).mockResolvedValue({ models: [platform], openrouterCustom: false })
+
+    const keys = screen.getByRole('region', { name: '自有金鑰' })
+    await user.click(within(row(keys, 'OpenAI')).getByRole('button', { name: '刪除' }))
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '刪除' }))
+
+    expect(await screen.findByText('預設模型已改回平台模型')).toBeInTheDocument()
+    expect(await within(section).findByRole('radio', { name: '平台模型（Qwen/Qwen3.5-9B）' })).toBeChecked()
   })
 })
