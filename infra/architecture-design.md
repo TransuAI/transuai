@@ -37,7 +37,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`）。只剩多格式輸出還沒做。見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 
 ---
@@ -66,7 +66,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` 七張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` 九張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -176,6 +176,10 @@ GET    /summary/{jobId}                 取得摘要（含 sourceRevision：依�
 POST   /summary/{jobId}/regenerate      摘要與章節過時後，在背景依最新逐字稿重新產生兩者，回 202（Job 狀態不變，
                                          前端每 3 秒輪詢 GET /summary 直到不是 RUNNING）
 GET    /chapters/{jobId}                取得章節列表
+POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCount": 5 | 10 | 20 }，回 202（背景產生，前端每 3 秒
+                                         輪詢列表直到不是 GENERATING）
+GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型
+GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料；每則附回答的 modelProvider / model）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string, "model"?: { provider, model } }
                                          （model 只用在這一次提問，省略就用預設模型），回傳 text/event-stream（SSE，
@@ -195,7 +199,7 @@ GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省�
                                          Gateway 把月份換成時間範圍，向兩個服務分別查詢
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -320,7 +324,7 @@ CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
 
 ### 4.4 ai_db
 
-**現況（已建立，七張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，九張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -377,7 +381,7 @@ CREATE TABLE llm_usage (
     id UUID PRIMARY KEY,
     user_id UUID,                           -- Job 擁有者 / 提問者；升級前排入的舊訊息沒有
     job_id UUID NOT NULL,
-    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters
+    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz
     provider VARCHAR(32) NOT NULL,          -- platform 或廠商名稱
     model VARCHAR(200) NOT NULL,
     key_source VARCHAR(16) NOT NULL,        -- platform / own_key
@@ -409,6 +413,36 @@ CREATE TABLE default_models (
     supports_tools BOOLEAN NOT NULL,        -- 選的時候確認過能不能呼叫工具（會後處理需要）
     updated_at TIMESTAMPTZ NOT NULL
 );
+
+-- 測驗：使用者要求產生的一份測驗（每次要求多一份），背景產生；GENERATING 超過 5 分鐘回報成 FAILED
+CREATE TABLE quizzes (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL,
+    user_id UUID NOT NULL,                  -- 要求產生的使用者（用他的預設模型、用量記在他名下）
+    question_count INTEGER NOT NULL,        -- 5 / 10 / 20
+    status VARCHAR(10) NOT NULL,            -- GENERATING / COMPLETED / FAILED
+    failure_reason TEXT,                    -- 給使用者看的失敗原因
+    source_revision INTEGER,                -- 依據的逐字稿 revision（完成後才有）
+    model_provider VARCHAR(32),             -- 產生的模型（完成後才有）
+    model VARCHAR(200),
+    requested_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ
+);
+CREATE INDEX ix_quizzes_job_id ON quizzes (job_id);
+
+-- 測驗的題目：跟「完成」一起寫入
+CREATE TABLE quiz_questions (
+    id UUID PRIMARY KEY,
+    quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,              -- 從 1 開始
+    kind VARCHAR(16) NOT NULL,              -- multiple_choice（4 個選項）/ true_false（「是」「否」）
+    prompt TEXT NOT NULL,
+    options TEXT[] NOT NULL,
+    correct_option INTEGER NOT NULL,        -- 正確選項的位置（從 0 開始）
+    explanation TEXT NOT NULL,
+    source_timestamps DOUBLE PRECISION[] NOT NULL  -- 依據的片段開始時間（秒），一定對得到某個片段
+);
+CREATE INDEX ix_quiz_questions_quiz_id ON quiz_questions (quiz_id);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
@@ -435,6 +469,7 @@ CREATE TABLE export_outputs (
 | `ai.completed` | AI Service | Notification Service | `{ jobId, status }` |
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
 | `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
+| `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
 | `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
 
 **實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
