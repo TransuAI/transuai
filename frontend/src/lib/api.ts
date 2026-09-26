@@ -58,7 +58,13 @@ export const jobsApi = {
 }
 
 export const transcriptApi = {
-  get: (jobId: string) => apiFetch<Transcript>(`/transcripts/${jobId}`),
+  // 講者分離之前的後端（例如還沒更新的 Gateway）不回傳 speakers，當成沒有講者資訊。
+  get: async (jobId: string): Promise<Transcript> => {
+    const transcript = await apiFetch<Omit<Transcript, 'speakers'> & { speakers?: Transcript['speakers'] }>(
+      `/transcripts/${jobId}`,
+    )
+    return { ...transcript, speakers: transcript.speakers ?? [] }
+  },
 
   // 編輯片段文字：空字串＝清空、送回 originalText＝還原。
   updateSegmentText: (jobId: string, segmentId: string, text: string) =>
