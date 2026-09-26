@@ -49,3 +49,8 @@ data:
   DEEPGRAM_LANGUAGE: "zh-TW"
   AI_HF_CHAT_MODEL: "Qwen/Qwen3.5-9B"
   HF_EMBEDDING_MODEL: "BAAI/bge-m3"
+
+  # 已連結的帳號（Google / Notion OAuth，gateway）：對方回呼 {OAUTH_CALLBACK_BASE_URL}/oauth/{service}/callback，這個網址要
+  # 登記在 Google Cloud 的 OAuth client；完成後轉回 {FRONTEND_URL}/settings。前端目前在本機跑 Vite（/api proxy 到 gateway）。
+  OAUTH_CALLBACK_BASE_URL: "http://localhost:5173/api"
+  FRONTEND_URL: "http://localhost:5173"

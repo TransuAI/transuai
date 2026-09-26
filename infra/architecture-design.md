@@ -37,7 +37,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`）。只剩多格式輸出還沒做。見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 
 ---
@@ -66,7 +66,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` 十張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` 十三張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -196,11 +196,17 @@ PUT    /me/provider-keys/{provider}     存入或替換自有金鑰，body { "ke
 DELETE /me/provider-keys/{provider}     刪除自有金鑰，回 { deleted, defaultModelReset }（預設模型正在用它時改回平台模型）
 GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫與轉錄，依時間排序，附總計）；Gateway 向
                                          ai-service（LLM）與 transcription-service（轉錄）分別查詢再合併
+GET    /me/connections                  已連結的帳號：Google、Notion 各自的狀態（已連結、已失效、未連結）與連結時間
+GET    /me/connections/{service}/authorize  回傳 { authorizeUrl }，前端把使用者轉過去連結（前端的 JWT 在 header 裡，
+                                         瀏覽器轉址帶不過來，所以不是 302）；同時設 HttpOnly cookie 把這次授權綁定在這個瀏覽器
+GET    /oauth/{service}/callback        Google / Notion 的回呼（不需要 JWT，使用者由 state 認出來，還要帶回同一個 cookie）；完成後轉回
+                                         前端設定頁 ?connected= 或 ?connection_failed=
+DELETE /me/connections/{service}        中斷連結：向對方撤銷授權並刪除權杖，回 { revoked }
 GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省略就是這個月）的用量：LLM 依模型與金鑰來源、轉錄依模型加總；
                                          Gateway 把月份換成時間範圍，向兩個服務分別查詢
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -325,7 +331,7 @@ CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
 
 ### 4.4 ai_db
 
-**現況（已建立，十張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，十三張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -455,6 +461,40 @@ CREATE TABLE quiz_attempts (
     submitted_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX ix_quiz_attempts_quiz_id ON quiz_attempts (quiz_id);
+
+-- 已連結的帳號：使用者授權平台代他存取的 Google / Notion；權杖用自有金鑰那套 AES-GCM 加密，永遠不回傳前端
+CREATE TABLE oauth_connections (
+    user_id UUID NOT NULL,
+    service VARCHAR(16) NOT NULL,           -- google / notion
+    status VARCHAR(10) NOT NULL,            -- CONNECTED / INVALID（換不到新的存取權杖，要重新連結）
+    encrypted_access_token BYTEA NOT NULL,
+    encrypted_refresh_token BYTEA,
+    expires_at TIMESTAMPTZ,                 -- 存取權杖到期的時間，快到期時用 refresh token 換新
+    client_id VARCHAR(200) NOT NULL,        -- 換權杖、撤銷時要帶的 client（Notion 是動態註冊的那一個）
+    connected_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (user_id, service)
+);
+
+-- 開始連結後、對方回呼前的授權：用 state 找回使用者，只能用一次、10 分鐘後作廢
+CREATE TABLE oauth_pending_authorizations (
+    state VARCHAR(64) PRIMARY KEY,
+    user_id UUID NOT NULL,
+    service VARCHAR(16) NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    client_id VARCHAR(200) NOT NULL,
+    browser_binding_hash VARCHAR(64) NOT NULL,  -- 瀏覽器 cookie 值的 SHA-256：回呼要帶回同一個值，state 才算數
+    code_verifier VARCHAR(128),             -- PKCE（Notion）
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+-- 向 Notion 動態註冊的 client：每個回呼網址一個，重複使用
+CREATE TABLE oauth_clients (
+    service VARCHAR(16) NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    client_id VARCHAR(200) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (service, redirect_uri)
+);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
@@ -509,6 +549,7 @@ Redis 本身仍有部署（k8s/docker-compose 都有），但目前沒有任何�
 | ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體 |
 | LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型（問答可以臨時換成別的模型）：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型是 HF Inference Providers 的 OpenAI 相容路由（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
+| 已連結的帳號（會後處理用） | Google OAuth（平台自己的 OAuth client，只要 Calendar 活動、Gmail 建立草稿、Tasks 的權限）與 Notion 官方遠端 MCP 的 OAuth（PKCE + 動態註冊 client）；權杖用自有金鑰那套 AES-GCM 加密存在 ai-service，state 綁定開始連結的瀏覽器（見 `ai-service/README.md`「已連結的帳號」） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
 
@@ -569,6 +610,10 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
       HF Inference Providers 的聊天模型，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見
       `ai-service/app/services/chapter_generator.py`
 - [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
+- [ ] Google 的權限審查與 Workspace 遠端 MCP 預覽計畫——連結 Google 帳號已實作，但 `gmail.compose`（建立草稿）是 Google
+      的受限權限，通過 Google 的應用程式審查之前只有同意畫面登記的測試使用者能連結；會後處理要用的 Google Calendar / Gmail
+      官方遠端 MCP 是 Developer Preview，要先加入預覽計畫。兩者都還沒申請，Google 與 Notion 的連結也還沒用真的帳號走過
+      （見 `ai-service/README.md` 已知限制）
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
       靠背景清理排除）。但這只清 upload_db 自己的資料，**不會**連帶清 transcription_db / ai_db

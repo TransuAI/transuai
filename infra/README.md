@@ -127,7 +127,17 @@ docker compose exec rabbitmq rabbitmqctl list_queues
    kubectl -n transuai rollout restart deployment transcription-service ai-service
    ```
    `DEEPGRAM_API_KEY` 只有 transcription-service（語音辨識 + 講者分離）會用到；`HF_API_KEY` 是 ai-service 的
-   摘要/章節/RAG 問答跟 embedding 用的（見 [`../ai-service/README.md`](../ai-service/README.md)）；`KEY_ENCRYPTION_KEY` 是 ai-service 加密使用者自有金鑰的主金鑰，產生後不要再換，換了之後已存的自有金鑰都解不開。
+   摘要/章節/RAG 問答跟 embedding 用的（見 [`../ai-service/README.md`](../ai-service/README.md)）；`KEY_ENCRYPTION_KEY` 是 ai-service 加密使用者自有金鑰與已連結帳號權杖的主金鑰，產生後不要再換，換了之後已存的自有金鑰都解不開、已連結的帳號都會變成已失效。
+7. （要連結 Google 帳號才需要）到 Google Cloud Console 建一個「網頁應用程式」OAuth client，已授權的重新導向 URI 填
+   `http://localhost:5173/api/oauth/google/callback`（`01-configmap.yaml` 的 `OAUTH_CALLBACK_BASE_URL` + `/oauth/google/callback`），
+   啟用 Calendar、Gmail、Tasks API，再把 client id / secret 補進 secret（Notion 不用事先申請，連結時自動註冊 client）：
+   ```bash
+   kubectl -n transuai patch secret app-secrets --type merge -p \
+     '{"stringData":{"GOOGLE_OAUTH_CLIENT_ID":"<client id>","GOOGLE_OAUTH_CLIENT_SECRET":"<client secret>"}}'
+   kubectl -n transuai rollout restart deployment ai-service
+   ```
+   Gmail 建立草稿的權限（`gmail.compose`）屬於 Google 的受限權限：應用程式通過 Google 的審查之前，只有 OAuth 同意畫面裡
+   登記的測試使用者能連結。
 
 ### 從本機用 localhost 存取
 
