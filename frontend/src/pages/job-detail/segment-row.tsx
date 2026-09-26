@@ -30,6 +30,8 @@ function HighlightedText({ text, matches, activeStart }: { text: string; matches
 
 interface SegmentRowProps {
   segment: TranscriptSegment
+  /** Shown before the text on the first segment of a speaker's turn; null elsewhere. */
+  speakerName: string | null
   index: number
   isCurrent: boolean
   matches: TranscriptMatch[]
@@ -48,6 +50,7 @@ interface SegmentRowProps {
 // is a faint 「已清空 · 還原」 row that keeps its time range (it can still be the current segment).
 export function SegmentRow({
   segment,
+  speakerName,
   index,
   isCurrent,
   matches,
@@ -138,7 +141,7 @@ export function SegmentRow({
       ) : (
         <>
           <p className="min-w-0 flex-1 leading-relaxed">
-            {segment.speakerLabel && <span className="mr-1 font-medium">{segment.speakerLabel}:</span>}
+            {speakerName && <span className="font-medium">{speakerName}：</span>}
             <HighlightedText text={segment.text} matches={matches} activeStart={activeMatchStart} />
             {isEdited && (
               <span className="ml-1.5 rounded bg-muted px-1 align-middle text-xs text-muted-foreground">

@@ -1,3 +1,4 @@
+import { speakerNameLookup } from '@/lib/speakers'
 import { isSummaryStale } from '@/lib/summary-staleness'
 import type { Chapter, Job, Summary, Transcript } from '@/types/api'
 
@@ -35,6 +36,7 @@ export interface ExportSource {
 
 export function buildExportContent(source: ExportSource): ExportContent {
   const { job, transcript, summary, chapters, qaHistory } = source
+  const speakerName = speakerNameLookup(transcript?.speakers ?? [])
   return {
     fileName: job.fileName,
     durationSeconds: job.durationSeconds,
@@ -44,8 +46,7 @@ export function buildExportContent(source: ExportSource): ExportContent {
         startTime: segment.startTime,
         endTime: segment.endTime,
         text: segment.text,
-        // Until speaker diarization provides display names, the raw label is all there is.
-        speakerName: segment.speakerLabel,
+        speakerName: speakerName(segment.speakerLabel),
       })) ?? [],
     summary: summary ? { text: summary.summaryText, isStale: isSummaryStale(summary, transcript) } : null,
     chapters: chapters.map((chapter) => ({ title: chapter.title, startTime: chapter.startTime })),

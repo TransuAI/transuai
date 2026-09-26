@@ -65,7 +65,8 @@ const mockTranscript: Transcript = {
   language: 'zh',
   fullText: 'hello world',
   revision: 0,
-  segments: [{ id: 'seg-1', startTime: 5, endTime: 8, speakerLabel: 'A', text: '哈囉世界', originalText: '哈囉世界' }],
+  segments: [{ id: 'seg-1', startTime: 5, endTime: 8, speakerLabel: null, text: '哈囉世界', originalText: '哈囉世界' }],
+  speakers: [],
 }
 
 const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容', sourceRevision: 0, regenerationStatus: 'IDLE' }
@@ -275,6 +276,7 @@ const gappedTranscript: Transcript = {
     { id: 'seg-3', startTime: 8, endTime: 10, speakerLabel: null, text: '第二句', originalText: '第二句' },
     { id: 'seg-4', startTime: 12, endTime: 15, speakerLabel: null, text: '第三句', originalText: '第三句' },
   ],
+  speakers: [],
 }
 
 async function renderGappedTranscriptOnDesktop(qaHistory: QaTurn[] = []) {
@@ -511,6 +513,7 @@ const searchableTranscript: Transcript = {
     { id: 'seg-7', startTime: 8, endTime: 12, speakerLabel: null, text: '文件放在 API 規格裡', originalText: '文件放在 API 規格裡' },
     { id: 'seg-8', startTime: 12, endTime: 16, speakerLabel: null, text: 'api 的版本下週定案', originalText: 'api 的版本下週定案' },
   ],
+  speakers: [],
 }
 
 describe('JobDetailPage transcript search (COMPLETED, desktop layout)', () => {
@@ -763,6 +766,69 @@ describe('JobDetailPage mini player (COMPLETED, narrow viewport)', () => {
 
     expect(screen.queryByRole('region', { name: '播放器' })).not.toBeInTheDocument()
     expect(document.querySelectorAll('audio, video')).toHaveLength(1)
+  })
+})
+
+// 講者 1 speaks first, then 講者 2, then 講者 1 again.
+const diarizedTranscript: Transcript = {
+  jobId: 'job-1',
+  language: 'zh-TW',
+  fullText: '',
+  revision: 0,
+  segments: [
+    { id: 'seg-d1', startTime: 0, endTime: 2, speakerLabel: 'S1', text: '歡迎收聽', originalText: '歡迎收聽' },
+    { id: 'seg-d2', startTime: 2, endTime: 4, speakerLabel: 'S1', text: '今天請到來賓', originalText: '今天請到來賓' },
+    { id: 'seg-d3', startTime: 4, endTime: 6, speakerLabel: 'S2', text: '大家好', originalText: '大家好' },
+    { id: 'seg-d4', startTime: 6, endTime: 8, speakerLabel: 'S1', text: '先聊聊近況', originalText: '先聊聊近況' },
+  ],
+  speakers: [
+    { label: 'S1', displayName: '主持人', displayOrder: 1 },
+    { label: 'S2', displayName: '講者 2', displayOrder: 2 },
+  ],
+}
+
+describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
+  const segmentRow = (text: string) => screen.getByText(text).closest('[data-segment-index]') as HTMLElement
+
+  it("shows the speaker's name only on the first segment of each turn", async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(diarizedTranscript)
+
+    expect(segmentRow('歡迎收聽')).toHaveTextContent('主持人：歡迎收聽')
+    expect(segmentRow('今天請到來賓')).not.toHaveTextContent('主持人')
+    expect(segmentRow('大家好')).toHaveTextContent('講者 2：大家好')
+    expect(segmentRow('先聊聊近況')).toHaveTextContent('主持人：先聊聊近況')
+  })
+
+  it('does not start a new turn after a cleared segment of the same speaker', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob({
+      ...diarizedTranscript,
+      segments: [
+        diarizedTranscript.segments[0],
+        { ...diarizedTranscript.segments[2], text: '' },
+        diarizedTranscript.segments[3],
+      ],
+    })
+
+    expect(segmentRow('先聊聊近況')).not.toHaveTextContent('主持人')
+  })
+
+  it('exports subtitles with the speakers\' names', async () => {
+    const user = userEvent.setup()
+    let exported: Blob | undefined
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      exported = blob as Blob
+      return 'blob:export'
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    stubDesktopLayout()
+    await renderCompletedJob(diarizedTranscript)
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載字幕（SRT）' }))
+
+    expect(await exported?.text()).toContain('00:00:04,000 --> 00:00:06,000\n講者 2：大家好\n')
   })
 })
 

@@ -78,6 +78,7 @@ src/
     download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>);開啟伺服器給的下載 URL(跨網域 presigned 連結靠回應的 Content-Disposition 下載)
     export-formats.ts  匯出格式轉換(不依賴畫面):`buildExportContent` 把工作區內容組成匯出輸入,每種格式是一個 `ExportFormat`(檔名結尾、MIME、render):TXT 純文字 / 含時間戳、SRT、VTT、Markdown 報告(長度與建立時間、摘要、章節、逐字稿,可選問答紀錄——只匯出已完成的回答;摘要過時時附註);共用規則——已清空片段不匯出、兩位以上講者才標示講者、文字格式時間戳 mm:ss / h:mm:ss、檔名取原始檔名去副檔名
     media.ts           檔案型別判斷、讀取媒體長度、格式化工具
+    speakers.ts        講者:依標籤查顯示名稱(名稱由後端決定,逐字稿與匯出共用)、逐字稿只在換人的第一個片段顯示名稱(已清空片段不顯示也不算換人)
     summary-staleness.ts 判斷摘要與章節是否過時(依據的逐字稿 revision < 逐字稿目前的 revision);Studio 提示跟匯出報告共用
     transcript-search.ts 逐字稿搜尋比對:只比對片段文字、英文不分大小寫、不跨片段;依片段分組
   pages/
@@ -94,7 +95,7 @@ src/
       studio-pane.tsx          Studio 欄:AI 摘要、章節;逐字稿被編輯後顯示「逐字稿已修改,摘要與章節可能過時」與「重新產生摘要與章節」按鈕(產生中顯示「重新產生中…」)
       transcript-search-bar.tsx 逐字稿搜尋列(搜尋框、n / N、上一個 / 下一個;Enter / Shift+Enter / Esc)
       segment-row.tsx          單一片段:時間戳(點了 seek)、文字(搜尋高亮)、就地編輯(鉛筆 → 輸入框,Enter 存 / Esc 取消,存檔中 / 失敗保留輸入;存空字串＝清空)、已編輯片段的標記與「還原成原始文字」、已清空片段的淡色「已清空 · 還原」列
-      transcript-view.tsx      逐字稿列表:目前片段高亮、自動跟隨(目前片段離開視野中段才平滑捲回中間,掛載當下那次直接跳到位置;使用者滾輪 / 觸控 / 捲動鍵 / 拖曳捲軸時暫停,顯示「回到播放位置」)、搜尋結果的高亮與捲動(只捲動不改播放位置)、同時只能編輯一個片段(編輯時暫停自動跟隨,也不會把正在編輯的那行捲走)
+      transcript-view.tsx      逐字稿列表:目前片段高亮、自動跟隨(目前片段離開視野中段才平滑捲回中間,掛載當下那次直接跳到位置;使用者滾輪 / 觸控 / 捲動鍵 / 拖曳捲軸時暫停,顯示「回到播放位置」)、搜尋結果的高亮與捲動(只捲動不改播放位置)、同時只能編輯一個片段(編輯時暫停自動跟隨,也不會把正在編輯的那行捲走)、在換人的第一個片段前面顯示「講者名稱：」
   test/
     setup.ts            Vitest 共用設定:jest-dom matcher、每則測試後 cleanup,以及 jsdom 沒實作的 ResizeObserver / matchMedia / 元素 scrollTo / URL.createObjectURL stub
   types/
@@ -104,4 +105,4 @@ src/
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
-- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生)跟 sidebar / 深色模式;匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。
+- 測試集中在 Job Detail 頁面(狀態分支、Source/Studio Sheet、問答、點時間戳 seek、目前片段高亮、自動跟隨的暫停與恢復、逐字稿搜尋、手機迷你播放器與版面切換時接著播放、匯出選單、片段編輯 / 還原 / 清空、摘要與章節過時提示與重新產生、換人時顯示講者名稱與匯出帶講者名稱)跟 sidebar / 深色模式;匯出格式另有 `lib/export-formats.test.ts` 直接比對輸出文字;Jobs 列表只有 smoke test,Upload / Login / Register 頁面仍只靠手動跑 `npm run dev` 對照後端 API 驗證。

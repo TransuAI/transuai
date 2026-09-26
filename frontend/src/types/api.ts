@@ -59,6 +59,7 @@ export interface TranscriptSegment {
   id: string
   startTime: number
   endTime: number
+  /** The 講者 who says this segment (a label in `Transcript.speakers`); null when the transcript has no speaker information. */
   speakerLabel: string | null
   /** Current text; an empty string is a cleared segment (已清空片段). */
   text: string
@@ -73,6 +74,16 @@ export interface Transcript {
   segments: TranscriptSegment[]
   /** +1 on every edit — what an AI output's source revision is checked against to tell whether it's 過時. */
   revision: number
+  /** The job's speakers (講者) in display order; empty when the transcript has no speaker information. */
+  speakers: Speaker[]
+}
+
+export interface Speaker {
+  label: string
+  /** What to show: the user's name for the speaker, or the default 「講者 N」. */
+  displayName: string
+  /** Starts at 1; picks the speaker's colour. */
+  displayOrder: number
 }
 
 export interface SegmentUpdate {

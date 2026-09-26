@@ -46,6 +46,7 @@ export function SourcePane({
         {transcript ? (
           <TranscriptView
             segments={transcript.segments}
+            speakers={transcript.speakers}
             currentSegmentIndex={currentSegmentIndex}
             autoFollow={autoFollow}
             mediaAvailable={mediaAvailable}

@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react'
 import { LocateFixed } from 'lucide-react'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useTranscriptSearch } from '@/hooks/use-transcript-search'
+import { speakerNamesAtTurns } from '@/lib/speakers'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SegmentRow } from '@/pages/job-detail/segment-row'
 import { TranscriptSearchBar } from '@/pages/job-detail/transcript-search-bar'
-import type { TranscriptSegment } from '@/types/api'
+import type { Speaker, TranscriptSegment } from '@/types/api'
 
 // Markup of the shadcn ScrollArea (components/ui/scroll-area.tsx) this view relies on.
 const VIEWPORT_SELECTOR = '[data-slot="scroll-area-viewport"]'
@@ -31,6 +32,7 @@ function centerIfOutsideMiddleBand(viewport: HTMLElement, segment: HTMLElement, 
 
 interface TranscriptViewProps {
   segments: TranscriptSegment[]
+  speakers: Speaker[]
   currentSegmentIndex: number | null
   autoFollow: AutoFollow
   mediaAvailable: boolean
@@ -40,6 +42,7 @@ interface TranscriptViewProps {
 
 export function TranscriptView({
   segments,
+  speakers,
   currentSegmentIndex,
   autoFollow,
   mediaAvailable,
@@ -51,6 +54,7 @@ export function TranscriptView({
   const search = useTranscriptSearch(segments, pause)
   const { activeMatch, matchesBySegment } = search
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null)
+  const speakerNames = useMemo(() => speakerNamesAtTurns(segments, speakers), [segments, speakers])
 
   // Clicking the transcript text should give the viewport keyboard focus, so that a
   // following PageDown/Space — which the browser uses to scroll the viewport — also reaches
@@ -120,6 +124,7 @@ export function TranscriptView({
             <SegmentRow
               key={segment.id}
               segment={segment}
+              speakerName={speakerNames[i]}
               index={i}
               isCurrent={i === currentSegmentIndex}
               matches={matchesBySegment.get(i) ?? []}
