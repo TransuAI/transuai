@@ -5,11 +5,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -29,6 +31,7 @@ import transuai.ai.v1.Ai.Chapter;
 import transuai.ai.v1.Ai.GetSummaryRequest;
 import transuai.ai.v1.Ai.ListChaptersRequest;
 import transuai.ai.v1.Ai.ListQaHistoryRequest;
+import transuai.ai.v1.Ai.RequestRegenerationRequest;
 import transuai.ai.v1.Ai.Summary;
 import transuai.ai.v1.AiServiceGrpc;
 
@@ -56,7 +59,21 @@ public class AiController {
     public SummaryDto getSummary(@CurrentUserId UUID userId, @PathVariable String jobId) {
         jobOwnershipGuard.check(userId, jobId);
         Summary summary = aiServiceStub.getSummary(GetSummaryRequest.newBuilder().setJobId(jobId).build());
-        return new SummaryDto(summary.getJobId(), summary.getSummaryText(), summary.getSourceRevision());
+        return toDto(summary);
+    }
+
+    // 摘要與章節過時之後，在背景依最新逐字稿重新產生（Job 狀態不變）。回傳目前的摘要（regenerationStatus
+    // 通常是 RUNNING），前端輪詢 GET /summary 直到不是 RUNNING。
+    @PostMapping("/summary/{jobId}/regenerate")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public SummaryDto regenerateSummary(@CurrentUserId UUID userId, @PathVariable String jobId) {
+        jobOwnershipGuard.check(userId, jobId);
+        return toDto(aiServiceStub.requestRegeneration(RequestRegenerationRequest.newBuilder().setJobId(jobId).build()));
+    }
+
+    private static SummaryDto toDto(Summary summary) {
+        return new SummaryDto(summary.getJobId(), summary.getSummaryText(), summary.getSourceRevision(),
+                summary.getRegenerationStatus().name().replace("REGENERATION_STATUS_", ""));
     }
 
     @GetMapping("/chapters/{jobId}")
