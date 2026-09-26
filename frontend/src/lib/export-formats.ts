@@ -1,3 +1,4 @@
+import { isSummaryStale } from '@/lib/summary-staleness'
 import type { Chapter, Job, Summary, Transcript } from '@/types/api'
 
 // 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
@@ -46,8 +47,7 @@ export function buildExportContent(source: ExportSource): ExportContent {
         // Until speaker diarization provides display names, the raw label is all there is.
         speakerName: segment.speakerLabel,
       })) ?? [],
-    // Whether the summary is 過時 comes from transcript editing (not built yet).
-    summary: summary ? { text: summary.summaryText, isStale: false } : null,
+    summary: summary ? { text: summary.summaryText, isStale: isSummaryStale(summary, transcript) } : null,
     chapters: chapters.map((chapter) => ({ title: chapter.title, startTime: chapter.startTime })),
     // A half-streamed or failed answer isn't something to hand to other people.
     qaHistory: qaHistory

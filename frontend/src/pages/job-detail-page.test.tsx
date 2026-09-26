@@ -68,7 +68,7 @@ const mockTranscript: Transcript = {
   segments: [{ id: 'seg-1', startTime: 5, endTime: 8, speakerLabel: 'A', text: '哈囉世界', originalText: '哈囉世界' }],
 }
 
-const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容' }
+const mockSummary: Summary = { jobId: 'job-1', summaryText: '這是摘要內容', sourceRevision: 0 }
 
 const mockChapters: Chapter[] = [{ id: 'ch-1', jobId: 'job-1', title: '開場', startTime: 12, sequenceNo: 0 }]
 
@@ -1184,5 +1184,52 @@ describe('JobDetailPage edited and cleared segments (COMPLETED, desktop layout)'
     await screen.findByText('已清空')
 
     expect(row(0).queryByRole('button', { name: /^還原/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('JobDetailPage 過時 summary and chapters (COMPLETED, desktop layout)', () => {
+  const staleNotice = '逐字稿已修改，摘要與章節可能過時'
+
+  async function editFirstSegment() {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockResolvedValue({
+      segment: { ...gappedTranscript.segments[0], text: '第一句改' },
+      revision: 1,
+    })
+    const row = screen.getByText('第一句').closest('[data-segment-index]') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '編輯片段' }))
+    await user.type(screen.getByRole('textbox', { name: '編輯片段文字' }), '改{Enter}')
+    await screen.findByText('第一句改')
+    return user
+  }
+
+  it('shows no notice while the summary matches the transcript', async () => {
+    await renderGappedTranscriptOnDesktop()
+
+    expect(screen.queryByText(staleNotice)).not.toBeInTheDocument()
+  })
+
+  it('flags the summary and chapters as 過時 as soon as an edit is saved', async () => {
+    await renderGappedTranscriptOnDesktop()
+
+    await editFirstSegment()
+
+    expect(screen.getByText(staleNotice)).toBeInTheDocument()
+  })
+
+  it('carries the 過時 note into the Markdown report', async () => {
+    const downloads: Blob[] = []
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      downloads.push(blob as Blob)
+      return 'blob:report'
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    await renderGappedTranscriptOnDesktop()
+    const user = await editFirstSegment()
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載報告（Markdown）' }))
+
+    expect(await downloads[0].text()).toContain('> 逐字稿在摘要產生後有修改，摘要與章節可能過時')
   })
 })

@@ -1,4 +1,4 @@
-import { List, Sparkles } from 'lucide-react'
+import { History, List, Sparkles } from 'lucide-react'
 import { formatDuration } from '@/lib/media'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -9,9 +9,11 @@ interface StudioPaneProps {
   chapters: Chapter[]
   onSeek: (seconds: number) => void
   mediaAvailable: boolean
+  /** The summary and chapters predate an edit of the transcript (過時). */
+  isStale: boolean
 }
 
-export function StudioPane({ summary, chapters, onSeek, mediaAvailable }: StudioPaneProps) {
+export function StudioPane({ summary, chapters, onSeek, mediaAvailable, isStale }: StudioPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="border-b pb-4">
@@ -23,6 +25,12 @@ export function StudioPane({ summary, chapters, onSeek, mediaAvailable }: Studio
       <CardContent className="min-h-0 flex-1 pt-4">
         <ScrollArea className="h-full pr-4">
           <div className="flex flex-col gap-6">
+            {isStale && (
+              <div className="flex items-start gap-2 rounded-md border bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
+                <History className="mt-0.5 size-4 shrink-0" />
+                <p>逐字稿已修改，摘要與章節可能過時</p>
+              </div>
+            )}
             <section className="flex flex-col gap-2">
               <h3 className="flex items-center gap-2 text-sm font-medium">
                 <Sparkles className="size-4" />

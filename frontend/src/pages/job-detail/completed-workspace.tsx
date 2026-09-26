@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ArrowLeft, FileText, Sparkles } from 'lucide-react'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { isSummaryStale } from '@/lib/summary-staleness'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { SourcePane } from '@/pages/job-detail/source-pane'
@@ -95,6 +96,15 @@ export function CompletedWorkspace({
     ) : (
       <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
     ))
+  const studioPane = (
+    <StudioPane
+      summary={summary}
+      chapters={chapters}
+      onSeek={onSeek}
+      mediaAvailable={mediaAvailable}
+      isStale={isSummaryStale(summary, transcript)}
+    />
+  )
   const currentSegment = currentSegmentIndex !== null ? transcript?.segments[currentSegmentIndex] : undefined
 
   const chatPane = (
@@ -139,7 +149,7 @@ export function CompletedWorkspace({
         <div className="grid min-h-0 flex-1 grid-cols-[20rem_minmax(0,1fr)_20rem] gap-4">
           <SourcePane {...sourcePaneProps} player={desktopPlayer} />
           {chatPane}
-          <StudioPane summary={summary} chapters={chapters} onSeek={onSeek} mediaAvailable={mediaAvailable} />
+          {studioPane}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -173,7 +183,7 @@ export function CompletedWorkspace({
       <Sheet open={studioOpen} onOpenChange={setStudioOpen}>
         <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
           <SheetTitle className="sr-only">Studio</SheetTitle>
-          <StudioPane summary={summary} chapters={chapters} onSeek={onSeek} mediaAvailable={mediaAvailable} />
+          {studioPane}
         </SheetContent>
       </Sheet>
     </div>

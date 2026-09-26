@@ -83,6 +83,8 @@ export interface SegmentUpdate {
 export interface Summary {
   jobId: string
   summaryText: string
+  /** The transcript revision this summary (and its chapters) was built from. */
+  sourceRevision: number
 }
 
 export interface Chapter {
