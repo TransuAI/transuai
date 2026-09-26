@@ -137,11 +137,16 @@ PUT    /transcripts/{jobId}/segments/{segmentId}/speaker   改片段的講者，
                                    { "newSpeaker": { "name": string } }，回傳 { segment, speakers, revision }
 ```
 
-兩個 GET 都是 Gateway 呼叫同一支 gRPC `GetTranscript` 後，視需要只回傳 `segments` 欄位；PATCH 對應
-`UpdateSegmentText`、`PATCH …/speakers/{label}` 對應 `RenameSpeaker`、`PUT …/segments/{segmentId}/speaker` 對應 `AssignSegmentSpeaker`（改名、改講者也算編輯：`revision` +1、發出
-`transcript.edited`；文字沒變，ai-service 不會重算 embedding）。`UpdateSegmentText`（使用者**編輯**逐字稿：只能改片段文字，起訖時間與切分永遠不變；每次實際改動
-`revision` +1、以未清空片段重組 `fullText`，並發出 `transcript.edited` 讓 ai-service 更新問答用的 embedding，見 5.）。轉錄本身完全是 **MQ 驅動**（消費 `transcription.requested`），
-沒有另外開一支「觸發轉錄」的 API。
+兩個 GET 都是 Gateway 呼叫同一支 gRPC `GetTranscript` 後，視需要只回傳 `segments` 欄位。其餘三支都是使用者對逐字稿的
+**編輯**（定義見 `transcription-service/CONTEXT.md`），片段的起訖時間與切分永遠不變：
+
+- `PATCH …/segments/{segmentId}` → `UpdateSegmentText`：改片段文字，以未清空片段重組 `fullText`。
+- `PATCH …/speakers/{label}` → `RenameSpeaker`：替講者命名。
+- `PUT …/segments/{segmentId}/speaker` → `AssignSegmentSpeaker`：把片段改成另一位講者，或新增講者給它。
+
+每次實際改動都讓 `revision` +1，並發出 `transcript.edited`（見 5.）：ai-service 比對片段文字，只重算文字有變的
+embedding——改名、改講者不動文字，所以不用重算；摘要與章節則因為 `revision` 變大被標示為過時。轉錄本身完全是
+**MQ 驅動**（消費 `transcription.requested`），沒有另外開一支「觸發轉錄」的 API。
 
 逐字稿回傳格式範例（`language` 是轉錄時指定的語言代碼，例如 `zh-TW`；講者分離之前的舊 Job 存的是 Whisper
 回傳的語言全名，例如 `Chinese`。中文逐字稿在存檔前已轉成繁體，見 `transcription-service/README.md` Pipeline 一節）。
@@ -187,6 +192,8 @@ POST   /qa/{jobId}                      RAG 問答（含對話記憶），body {
 刻意**不用** `/export`：「匯出」這個詞已經指前端把既有內容（逐字稿、摘要、章節、問答、原始檔）轉成檔案下載，
 兩者不同（見 `frontend/CONTEXT.md`、`ai-service/CONTEXT.md`）。文字格式的匯出（TXT/SRT/VTT/Markdown、複製）
 在前端產生、沒有後端 API；唯一跟後端有關的是「下載原始檔」用的 media-url `download` 參數（見 3.2）。
+
+問答回答當下會同步呼叫 transcription-service 的 `GetTranscript`（2 秒逾時），拿講者**目前的**名字標在檢索到的片段前面（兩位以上講者時）；逾時或失敗就照樣回答、不帶名字。
 
 ### 3.5 Notification（WebSocket，Gateway 不經手，前端直連 notification-service）
 
