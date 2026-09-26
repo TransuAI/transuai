@@ -12,6 +12,7 @@ import type {
   MonthlyUsage,
   PresignResponse,
   ProviderKey,
+  Quiz,
   QaTurn,
   SegmentSpeakerUpdate,
   SegmentUpdate,
@@ -141,6 +142,15 @@ export const qaApi = {
       },
       handlers.signal,
     ),
+}
+
+// 測驗：在背景產生（每次多一份新的），產生中的輪詢列表直到不是 GENERATING。
+export const quizApi = {
+  list: (jobId: string) => apiFetch<Quiz[]>(`/jobs/${jobId}/quizzes`),
+  // questionCount 只能是 5、10、20
+  request: (jobId: string, questionCount: number) =>
+    apiFetch<Quiz>(`/jobs/${jobId}/quizzes`, { method: 'POST', body: { questionCount } }),
+  get: (jobId: string, quizId: string) => apiFetch<Quiz>(`/jobs/${jobId}/quizzes/${quizId}`),
 }
 
 export const usageApi = {

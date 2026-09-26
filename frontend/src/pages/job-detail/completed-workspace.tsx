@@ -12,7 +12,7 @@ import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
-import type { Chapter, Job, JobUsage, ModelChoice, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobUsage, ModelChoice, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
   job: Job
@@ -37,6 +37,9 @@ interface CompletedWorkspaceProps {
   isRegeneratingSummary: boolean
   isRequestingRegeneration: boolean
   usage: JobUsage | null
+  quizzes: Quiz[]
+  onRequestQuiz: (questionCount: number) => void
+  isRequestingQuiz: boolean
   modelChoices: ModelChoice[]
   selectedModel: ModelChoice | null
   onSelectModel: (model: ModelChoice) => void
@@ -89,6 +92,9 @@ export function CompletedWorkspace({
   isRegeneratingSummary,
   isRequestingRegeneration,
   usage,
+  quizzes,
+  onRequestQuiz,
+  isRequestingQuiz,
   modelChoices,
   selectedModel,
   onSelectModel,
@@ -136,6 +142,9 @@ export function CompletedWorkspace({
       isRegenerating={isRegeneratingSummary}
       isRequestingRegeneration={isRequestingRegeneration}
       usage={usage}
+      quizzes={quizzes}
+      onRequestQuiz={onRequestQuiz}
+      isRequestingQuiz={isRequestingQuiz}
     />
   )
   const currentSegment = currentSegmentIndex !== null ? transcript?.segments[currentSegmentIndex] : undefined

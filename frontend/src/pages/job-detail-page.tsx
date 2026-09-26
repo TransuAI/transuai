@@ -10,6 +10,7 @@ import { sameModel } from '@/lib/providers'
 import { useAutoFollow } from '@/hooks/use-auto-follow'
 import { useJobSocket } from '@/hooks/use-job-socket'
 import { usePlaybackContinuity } from '@/hooks/use-playback-continuity'
+import { useQuizzes } from '@/hooks/use-quizzes'
 import { useSummaryRegeneration } from '@/hooks/use-summary-regeneration'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Button } from '@/components/ui/button'
@@ -172,6 +173,7 @@ export function JobDetailPage() {
     [jobId, reloadUsage],
   )
   const regeneration = useSummaryRegeneration(jobId, summary, setSummary, reloadAfterRegeneration)
+  const quizzes = useQuizzes(jobId, jobStatus === 'COMPLETED', reloadUsage)
 
   const seekTo = (seconds: number) => {
     if (mediaElement) {
@@ -369,6 +371,9 @@ export function JobDetailPage() {
       onRegenerateSummary={regeneration.regenerate}
       isRegeneratingSummary={regeneration.isRegenerating}
       isRequestingRegeneration={regeneration.isRequesting}
+      quizzes={quizzes.quizzes}
+      onRequestQuiz={quizzes.requestQuiz}
+      isRequestingQuiz={quizzes.isRequesting}
       usage={usage}
       modelChoices={modelChoices}
       selectedModel={selectedModel}

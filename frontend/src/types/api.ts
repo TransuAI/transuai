@@ -154,7 +154,7 @@ export interface JobStatusEvent {
 /** One billed call (用量): an LLM call counts tokens, a transcription counts audio seconds. */
 export interface UsageRecord {
   kind: 'llm' | 'transcription'
-  /** What the call was for, e.g. summary, chapters, qa_answer, qa_rewrite, regenerated_summary, transcription. */
+  /** What the call was for, e.g. summary, chapters, qa_answer, qa_rewrite, regenerated_summary, quiz, transcription. */
   feature: string
   provider: string
   model: string
@@ -202,6 +202,38 @@ export interface MonthlyUsage {
   month: string
   llm: LlmUsageSum[]
   transcription: TranscriptionUsageSum[]
+}
+
+/** One question of a 測驗 (quiz). */
+export interface QuizQuestion {
+  /** multiple_choice has 4 options; true_false's are always 「是」「否」. */
+  kind: 'multiple_choice' | 'true_false'
+  prompt: string
+  options: string[]
+  /** Position of the right option in `options`, from 0. */
+  correctOption: number
+  explanation: string
+  /** Start times (seconds) of the segments the answer is based on; may be empty. */
+  sourceTimestamps: number[]
+}
+
+/** A 測驗 (quiz) generated in the background from a job's transcript. */
+export interface Quiz {
+  id: string
+  jobId: string
+  questionCount: number
+  /** A quiz stuck generating for over 5 minutes comes back FAILED. */
+  status: 'GENERATING' | 'COMPLETED' | 'FAILED'
+  /** Why it failed, for the user; null unless FAILED. */
+  failureReason: string | null
+  /** The transcript revision and model it was made from; 0 / null until it's done. */
+  sourceRevision: number
+  modelProvider: string | null
+  model: string | null
+  requestedAt: string
+  completedAt: string | null
+  /** Only when a single quiz is fetched; null in the list. */
+  questions: QuizQuestion[] | null
 }
 
 /** One of the user's own API keys (自有金鑰): only its last four characters ever come back. */

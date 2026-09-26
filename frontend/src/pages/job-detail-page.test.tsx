@@ -2,9 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
+import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, qaApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
-import type { Chapter, Job, JobUsage, QaTurn, Summary, Transcript } from '@/types/api'
+import { chapterApi, jobsApi, modelsApi, qaApi, quizApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
+import type { Chapter, Job, JobUsage, QaTurn, Quiz, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -19,6 +20,7 @@ vi.mock('@/lib/api', () => ({
   qaApi: { ask: vi.fn(), history: vi.fn() },
   usageApi: { getJobUsage: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
+  quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -40,6 +42,7 @@ beforeEach(() => {
   vi.mocked(usageApi.getJobUsage).mockResolvedValue(noUsage)
   vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false })
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platformModel)
+  vi.mocked(quizApi.list).mockResolvedValue([])
 })
 
 beforeAll(async () => {
@@ -1918,5 +1921,157 @@ describe('JobDetailPage regenerating the summary and chapters (COMPLETED, deskto
 
     expect(await screen.findByText('重新產生的摘要')).toBeInTheDocument()
     expect(screen.getByText('開場')).toBeInTheDocument()
+  })
+})
+
+describe('JobDetailPage quizzes (測驗)', () => {
+  const quiz = (overrides: Partial<Quiz> = {}): Quiz => ({
+    id: 'quiz-1',
+    jobId: 'job-1',
+    questionCount: 10,
+    status: 'COMPLETED',
+    failureReason: null,
+    sourceRevision: 0,
+    modelProvider: 'platform',
+    model: 'Qwen/Qwen3.5-9B',
+    requestedAt: '2026-09-26T06:00:00Z',
+    completedAt: '2026-09-26T06:00:40Z',
+    questions: null,
+    ...overrides,
+  })
+  const generating = quiz({ status: 'GENERATING', modelProvider: null, model: null, completedAt: null })
+  const quizCard = () => screen.getByRole('region', { name: '測驗' })
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function renderQuizzes() {
+    stubDesktopLayout()
+    await renderCompletedJob()
+    await screen.findByRole('region', { name: '測驗' })
+    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+  }
+
+  it("lists the job's quizzes with their question count and model", async () => {
+    vi.mocked(quizApi.list).mockResolvedValue([quiz({ id: 'quiz-2', questionCount: 20, model: 'gpt-5' }), quiz()])
+    await renderQuizzes()
+
+    const [newest, older] = await within(quizCard()).findAllByRole('listitem')
+    expect(newest).toHaveTextContent('20 題')
+    expect(newest).toHaveTextContent('由 gpt-5 產生')
+    expect(older).toHaveTextContent('10 題')
+  })
+
+  it('generates 10 questions unless another count is picked, and shows it once it is ready', async () => {
+    const user = await renderQuizzes()
+    expect(within(quizCard()).getByText('還沒有測驗')).toBeInTheDocument()
+    expect(within(quizCard()).getByRole('combobox', { name: '題數' })).toHaveValue('10')
+    vi.mocked(quizApi.request).mockResolvedValue(generating)
+
+    await user.click(within(quizCard()).getByRole('button', { name: '產生測驗' }))
+
+    expect(quizApi.request).toHaveBeenCalledWith('job-1', 10)
+    expect(await within(quizCard()).findByText('產生中…')).toBeInTheDocument()
+
+    vi.mocked(quizApi.list).mockResolvedValue([quiz()])
+    vi.mocked(usageApi.getJobUsage).mockClear()
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(await within(quizCard()).findByText('由 Qwen/Qwen3.5-9B 產生')).toBeInTheDocument()
+    expect(within(quizCard()).queryByText('產生中…')).not.toBeInTheDocument()
+    expect(usageApi.getJobUsage).toHaveBeenCalled() // generating it used the model
+  })
+
+  it('asks for the picked number of questions', async () => {
+    const user = await renderQuizzes()
+    vi.mocked(quizApi.request).mockResolvedValue({ ...generating, questionCount: 20 })
+
+    await user.selectOptions(within(quizCard()).getByRole('combobox', { name: '題數' }), '20')
+    await user.click(within(quizCard()).getByRole('button', { name: '產生測驗' }))
+
+    expect(quizApi.request).toHaveBeenCalledWith('job-1', 20)
+  })
+
+  it('keeps asking every 3 seconds while a quiz is still being generated when the page opens', async () => {
+    vi.mocked(quizApi.list).mockResolvedValue([generating])
+    await renderQuizzes()
+    await within(quizCard()).findByText('產生中…')
+    const listed = vi.mocked(quizApi.list).mock.calls.length
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(vi.mocked(quizApi.list).mock.calls.length).toBe(listed + 2)
+  })
+
+  it('does not lose a just-requested quiz to a list that was asked for before it', async () => {
+    vi.mocked(quizApi.list).mockResolvedValue([generating])
+    const user = await renderQuizzes()
+    await within(quizCard()).findByText('產生中…')
+    let answerOldPoll: (quizzes: Quiz[]) => void = () => {}
+    vi.mocked(quizApi.list).mockReturnValueOnce(new Promise((resolve) => (answerOldPoll = resolve)))
+    await vi.advanceTimersByTimeAsync(3000) // a poll goes out…
+    vi.mocked(quizApi.request).mockResolvedValue({ ...generating, id: 'quiz-new', questionCount: 20 })
+    await user.selectOptions(within(quizCard()).getByRole('combobox', { name: '題數' }), '20')
+    await user.click(within(quizCard()).getByRole('button', { name: '產生測驗' })) // …then a new quiz is requested
+
+    await act(async () => answerOldPoll([quiz()])) // the old poll answers without the new quiz
+
+    expect(within(quizCard()).getAllByRole('listitem')[0]).toHaveTextContent('20 題')
+    vi.mocked(quizApi.list).mockResolvedValue([{ ...generating, id: 'quiz-new', questionCount: 20 }, quiz()])
+    const listed = vi.mocked(quizApi.list).mock.calls.length
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(vi.mocked(quizApi.list).mock.calls.length).toBe(listed + 1) // still waiting for the new one
+  })
+
+  it('shows when a finished quiz was made', async () => {
+    vi.mocked(quizApi.list).mockResolvedValue([
+      quiz({ requestedAt: '2026-09-26T06:00:00Z', completedAt: '2026-09-26T06:07:00Z' }),
+    ])
+    await renderQuizzes()
+
+    const item = await within(quizCard()).findByRole('listitem')
+    const made = new Date('2026-09-26T06:07:00Z')
+    const pad = (value: number) => String(value).padStart(2, '0')
+    expect(item).toHaveTextContent(`${pad(made.getHours())}:${pad(made.getMinutes())}`)
+  })
+
+  it('shows why a quiz failed and tries again with the same number of questions', async () => {
+    vi.mocked(quizApi.list).mockResolvedValue([
+      quiz({ status: 'FAILED', questionCount: 5, failureReason: '模型回傳的測驗格式不正確（應該要有 5 題），請再產生一次', model: null }),
+    ])
+    const user = await renderQuizzes()
+    vi.mocked(quizApi.request).mockResolvedValue({ ...generating, id: 'quiz-3', questionCount: 5 })
+
+    expect(await within(quizCard()).findByText('模型回傳的測驗格式不正確（應該要有 5 題），請再產生一次')).toBeInTheDocument()
+    await user.click(within(quizCard()).getByRole('button', { name: '再試一次' }))
+
+    expect(quizApi.request).toHaveBeenCalledWith('job-1', 5)
+    expect(await within(quizCard()).findByText('產生中…')).toBeInTheDocument()
+  })
+
+  it('says why a quiz could not be requested', async () => {
+    const user = await renderQuizzes()
+    vi.mocked(quizApi.request).mockRejectedValue(new ApiError(503, { error: 'UNAVAILABLE', message: '暫時無法產生測驗，請稍後再試' }))
+
+    await user.click(within(quizCard()).getByRole('button', { name: '產生測驗' }))
+
+    expect(await screen.findByText('暫時無法產生測驗，請稍後再試')).toBeInTheDocument()
+  })
+
+  it('can be used on a phone, inside the Studio sheet', async () => {
+    vi.mocked(quizApi.list).mockResolvedValue([quiz()])
+    await renderCompletedJob()
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    await user.click(screen.getByRole('button', { name: 'Studio' }))
+
+    const card = await screen.findByRole('region', { name: '測驗' })
+    expect(await within(card).findByRole('listitem')).toHaveTextContent('由 Qwen/Qwen3.5-9B 產生')
   })
 })

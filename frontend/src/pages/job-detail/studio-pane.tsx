@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { QuizSection } from '@/pages/job-detail/quiz-section'
 import { UsageSection } from '@/pages/job-detail/usage-section'
-import type { Chapter, JobUsage, Summary } from '@/types/api'
+import type { Chapter, JobUsage, Quiz, Summary } from '@/types/api'
 
 interface StudioPaneProps {
   summary: Summary | null
@@ -19,6 +20,9 @@ interface StudioPaneProps {
   /** The regenerate request itself is still on its way. */
   isRequestingRegeneration: boolean
   usage: JobUsage | null
+  quizzes: Quiz[]
+  onRequestQuiz: (questionCount: number) => void
+  isRequestingQuiz: boolean
 }
 
 export function StudioPane({
@@ -31,6 +35,9 @@ export function StudioPane({
   isRegenerating,
   isRequestingRegeneration,
   usage,
+  quizzes,
+  onRequestQuiz,
+  isRequestingQuiz,
 }: StudioPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -113,6 +120,8 @@ export function StudioPane({
                 <p className="text-sm text-muted-foreground">尚無章節</p>
               )}
             </section>
+
+            <QuizSection quizzes={quizzes} onRequestQuiz={onRequestQuiz} isRequesting={isRequestingQuiz} />
 
             <UsageSection usage={usage} />
           </div>
