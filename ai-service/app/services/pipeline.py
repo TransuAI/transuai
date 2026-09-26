@@ -8,6 +8,7 @@ from app.repositories.chapter_repository import save_chapters
 from app.repositories.embedding_repository import save_embeddings
 from app.repositories.summary_repository import save_summary
 from app.services.chapter_generator import generate_chapters
+from app.services.default_models import resolve_chat_model
 from app.services.embedder import embed_documents
 from app.services.job_status_client import job_status_client
 from app.services.retry import (
@@ -58,13 +59,17 @@ def process_message(
         # Cleared segments (empty text, 已清空片段) aren't content: leave them out of every AI input.
         segments = spoken_segments(transcript)
         job_uuid = uuid.UUID(job_id)
-        summary_text = summarize(summary_input(transcript), meter=UsageMeter(user_id, job_uuid, LlmFeature.SUMMARY))
-        chapters = generate_chapters(chapter_input(transcript), meter=UsageMeter(user_id, job_uuid, LlmFeature.CHAPTERS))
+        model = resolve_chat_model(user_id)  # Job 擁有者的預設模型
+        summary_text = summarize(
+            summary_input(transcript), model=model, meter=UsageMeter(user_id, job_uuid, LlmFeature.SUMMARY))
+        chapters = generate_chapters(
+            chapter_input(transcript), model=model, meter=UsageMeter(user_id, job_uuid, LlmFeature.CHAPTERS))
         vectors = embed_documents([segment.text for segment in segments])
 
         session = new_session()
         try:
-            save_summary(session, uuid.UUID(job_id), summary_text, source_revision=transcript.revision)
+            save_summary(session, uuid.UUID(job_id), summary_text, source_revision=transcript.revision,
+                         model=(model.provider, model.model))
             save_chapters(session, uuid.UUID(job_id), chapters)
             save_embeddings(session, uuid.UUID(job_id), [
                 (segment.text, segment.start_time, segment.end_time, vector)

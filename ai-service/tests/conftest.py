@@ -59,7 +59,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, provider_keys"))
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, provider_keys, default_models"))
 
 
 @pytest.fixture(scope="session")
@@ -148,3 +148,28 @@ def fake_llm(monkeypatch):
     monkeypatch.setattr(llm_client, "_http_client", httpx2.Client(transport=httpx2.MockTransport(provider.handle)))
     monkeypatch.setattr(llm_client.settings, "hf_api_key", "hf-test-key")
     return provider
+
+
+@pytest.fixture
+def providers(monkeypatch):
+    """The AI providers' own APIs besides chat (see app/services/providers.py): the key-check APIs answer
+    `providers.status` (200 unless a test changes it) with `providers.body`; OpenRouter's public model list answers
+    `providers.openrouter_models`. Every request is recorded in `providers.requests`."""
+    from types import SimpleNamespace
+
+    from app.services import model_catalog, provider_keys
+
+    state = SimpleNamespace(requests=[], status=200, body={"data": []}, unreachable=False, openrouter_models=[])
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        state.requests.append(request)
+        if state.unreachable:
+            raise httpx2.ConnectError("connection refused", request=request)
+        if str(request.url) == "https://openrouter.ai/api/v1/models":
+            return httpx2.Response(200, json={"data": state.openrouter_models})
+        return httpx2.Response(state.status, json=state.body)
+
+    client = httpx2.Client(transport=httpx2.MockTransport(handle))
+    monkeypatch.setattr(provider_keys, "_http_client", client)
+    monkeypatch.setattr(model_catalog, "_http_client", client)
+    return state

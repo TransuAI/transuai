@@ -40,5 +40,8 @@ class Summary(Base):
     regeneration_status: Mapped[str] = mapped_column(
         String(10), nullable=False, default=RegenerationStatus.IDLE, server_default=RegenerationStatus.IDLE.value)
     regeneration_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 產生這份摘要（與同一次產生的章節）的模型；記錄模型之前產生的摘要是空的。
+    model_provider: Mapped[str | None] = mapped_column(String(32))
+    model: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(timezone.utc))

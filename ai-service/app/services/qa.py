@@ -9,7 +9,8 @@ from app.models import QaHistory
 from app.repositories.embedding_repository import find_similar
 from app.repositories.qa_repository import find_by_job_id
 from app.services.embedder import embed_query
-from app.services.llm_client import chat, platform_chat_model, stream_chat
+from app.services.default_models import resolve_chat_model
+from app.services.llm_client import ChatModel, chat, stream_chat
 from app.services.segment_times import time_key
 from app.services.speaker_context import speaker_names_by_segment_time, with_speaker_name
 from app.services.transcript_client import transcript_client
@@ -61,7 +62,7 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[:max_chars] + "（以下省略）"
 
 
-def _condense_question(question: str, history: list[QaHistory], meter: UsageMeter) -> str:
+def _condense_question(question: str, history: list[QaHistory], model: ChatModel, meter: UsageMeter) -> str:
     """有歷史時，用一次 LLM 呼叫同時做「要不要改寫」的語意判斷跟改寫本身：問題已經
     完整就原樣照抄，依賴前文才改寫成獨立問題。只影響檢索用的 query 向量，不影響存進
     qa_history 或顯示給使用者的原始問題文字，也不影響餵給 LLM 當作對話歷史的內容
@@ -76,7 +77,7 @@ def _condense_question(question: str, history: list[QaHistory], meter: UsageMete
     history_text = "\n".join(
         f"問：{turn.question}\n答：{_truncate(turn.answer, _MAX_HISTORY_ANSWER_CHARS)}" for turn in history
     )
-    result = chat(platform_chat_model(), [{
+    result = chat(model, [{
         "role": "user",
         "content": _CONDENSE_PROMPT_TEMPLATE.format(history=history_text, question=question),
     }], max_tokens=_CONDENSE_MAX_TOKENS, meter=meter)
@@ -98,7 +99,8 @@ def stream_answer(
     """
     history = find_by_job_id(session, job_id)[-_MEMORY_TURNS:]
 
-    condensed_question = _condense_question(question, history, UsageMeter(user_id, job_id, LlmFeature.QA_REWRITE))
+    model = resolve_chat_model(user_id)  # 提問者的預設模型
+    condensed_question = _condense_question(question, history, model, UsageMeter(user_id, job_id, LlmFeature.QA_REWRITE))
     query_vector = embed_query(condensed_question)
     chunks = find_similar(session, job_id, query_vector, limit=_TOP_K)
     if not chunks:
@@ -123,7 +125,6 @@ def stream_answer(
         messages.append({"role": "assistant", "content": _truncate(turn.answer, _MAX_HISTORY_ANSWER_CHARS)})
     messages.append({"role": "user", "content": question})
 
-    model = platform_chat_model()
     logger.info(
         "calling %s (%s) to stream-answer question for job %s, using %d chunks, %d history turns",
         model.provider, model.model, job_id, len(chunks), len(history),

@@ -14,6 +14,8 @@ from app.services.llm_client import LlmError, LlmErrorReason
 from app.services.job_status_client import job_status_client
 from app.services.retry import RetryableMessageError
 
+PLATFORM_MODEL = ("platform", "Qwen/Qwen3.5-9B")
+
 EDITED_TRANSCRIPT = SimpleNamespace(
     full_text="大家好\n今天開會討論預算",
     revision=3,
@@ -30,14 +32,14 @@ EDITED_TRANSCRIPT = SimpleNamespace(
 def job(db_session):
     """A job whose summary and chapters are 過時 and whose regeneration has been requested."""
     job_id = uuid.uuid4()
-    summary = save_summary(db_session, job_id, "舊摘要", source_revision=0)
+    summary = save_summary(db_session, job_id, "舊摘要", source_revision=0, model=PLATFORM_MODEL)
     summary.regeneration_status = "RUNNING"
     db_session.commit()
     save_chapters(db_session, job_id, [("舊章節", 0.0)])
     return job_id
 
 
-def run(job_id, summarize=lambda text, meter: "新摘要", retry_count=0):
+def run(job_id, summarize=lambda text, **_: "新摘要", retry_count=0):
     with (
         patch.object(regeneration, "transcript_client") as transcript_client,
         patch.object(regeneration, "summarize", side_effect=summarize) as summarize_mock,
@@ -63,7 +65,7 @@ def test_regenerating_replaces_summary_and_chapters_from_the_current_transcript(
     assert state(db_session, job) == ("新摘要", 3, "IDLE", ["開場", "預算"])
 
 
-def _overloaded(_text, meter):
+def _overloaded(_text, **_):
     raise LlmError("platform", "test-model", LlmErrorReason.TRANSIENT, "HTTP 503")
 
 

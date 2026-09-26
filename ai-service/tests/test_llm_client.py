@@ -22,7 +22,7 @@ from app.services.summarizer import summarize
 def test_summaries_go_to_the_platform_model_over_the_openai_compatible_router(fake_llm):
     fake_llm.reply("這是摘要")
 
-    assert summarize("今天開會討論預算", meter=None) == "這是摘要"
+    assert summarize("今天開會討論預算", model=platform_chat_model(), meter=None) == "這是摘要"
 
     [request] = fake_llm.requests
     assert str(request.url) == "https://router.huggingface.co/v1/chat/completions"
@@ -36,7 +36,7 @@ def test_summaries_go_to_the_platform_model_over_the_openai_compatible_router(fa
 def test_chapters_are_parsed_from_the_models_reply(fake_llm):
     fake_llm.reply('[{"title": "預算", "start_time": 12.0}, {"title": "開場", "start_time": 0}]')
 
-    assert generate_chapters([TimedLine(0.0, "大家好"), TimedLine(12.0, "來談預算")], meter=None) == [("開場", 0.0), ("預算", 12.0)]
+    assert generate_chapters([TimedLine(0.0, "大家好"), TimedLine(12.0, "來談預算")], model=platform_chat_model(), meter=None) == [("開場", 0.0), ("預算", 12.0)]
 
 
 def test_a_reply_reports_the_tokens_it_used(fake_llm):
@@ -95,7 +95,7 @@ def test_provider_errors_are_classified(fake_llm, status, error, reason):
     fake_llm.fail(status, error)
 
     with pytest.raises(LlmError) as raised:
-        summarize("逐字稿", meter=None)
+        summarize("逐字稿", model=platform_chat_model(), meter=None)
 
     assert raised.value.reason == reason
     assert raised.value.provider == "platform"
@@ -109,7 +109,7 @@ def test_an_unreachable_provider_is_a_transient_error(monkeypatch):
     monkeypatch.setattr(llm_client, "_http_client", httpx2.Client(transport=httpx2.MockTransport(refuse)))
 
     with pytest.raises(LlmError) as raised:
-        summarize("逐字稿", meter=None)
+        summarize("逐字稿", model=platform_chat_model(), meter=None)
 
     assert raised.value.reason == LlmErrorReason.TRANSIENT
     assert is_retryable_error(raised.value) is True
@@ -122,7 +122,7 @@ def test_a_provider_that_times_out_is_a_transient_error(monkeypatch):
     monkeypatch.setattr(llm_client, "_http_client", httpx2.Client(transport=httpx2.MockTransport(time_out)))
 
     with pytest.raises(LlmError) as raised:
-        summarize("逐字稿", meter=None)
+        summarize("逐字稿", model=platform_chat_model(), meter=None)
 
     assert raised.value.reason == LlmErrorReason.TRANSIENT
 
@@ -131,7 +131,7 @@ def test_the_error_keeps_the_providers_own_explanation(fake_llm):
     fake_llm.fail(401, {"message": "Incorrect API key provided"})
 
     with pytest.raises(LlmError) as raised:
-        summarize("逐字稿", meter=None)
+        summarize("逐字稿", model=platform_chat_model(), meter=None)
 
     assert "Incorrect API key provided" in str(raised.value)
     assert str(raised.value).startswith("平台模型（Qwen/Qwen3.5-9B）金鑰無效或沒有權限")
@@ -152,7 +152,7 @@ def test_the_client_does_not_retry_on_its_own(fake_llm):
     fake_llm.fail(503)
 
     with pytest.raises(LlmError):
-        summarize("逐字稿", meter=None)
+        summarize("逐字稿", model=platform_chat_model(), meter=None)
 
     assert len(fake_llm.requests) == 1
 

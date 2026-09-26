@@ -25,15 +25,15 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08\x61i.proto\x12\x0etransuai.ai.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"=\n\x1aRequestRegenerationRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\"(\n\x16ListJobLlmUsageRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"D\n\x17ListJobLlmUsageResponse\x12)\n\x07records\x18\x01 \x03(\x0b\x32\x18.transuai.ai.v1.LlmUsage\"\xed\x01\n\x08LlmUsage\x12\x0f\n\x07\x66\x65\x61ture\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\x12\r\n\x05model\x18\x03 \x01(\t\x12\x12\n\nkey_source\x18\x04 \x01(\t\x12\x19\n\x0cinput_tokens\x18\x05 \x01(\x05H\x00\x88\x01\x01\x12\x1a\n\routput_tokens\x18\x06 \x01(\x05H\x01\x88\x01\x01\x12\x11\n\tsucceeded\x18\x07 \x01(\x08\x12.\n\ncreated_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x0f\n\r_input_tokensB\x10\n\x0e_output_tokens\"\x89\x01\n\x07Summary\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x14\n\x0csummary_text\x18\x02 \x01(\t\x12\x17\n\x0fsource_revision\x18\x03 \x01(\x05\x12?\n\x13regeneration_status\x18\x04 \x01(\x0e\x32\".transuai.ai.v1.RegenerationStatus\"#\n\x11GetSummaryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"]\n\x07\x43hapter\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0e\n\x06job_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x12\n\nstart_time\x18\x04 \x01(\x01\x12\x13\n\x0bsequence_no\x18\x05 \x01(\x05\"%\n\x13ListChaptersRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"A\n\x14ListChaptersResponse\x12)\n\x08\x63hapters\x18\x01 \x03(\x0b\x32\x17.transuai.ai.v1.Chapter\"G\n\x12\x41skQuestionRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x10\n\x08question\x18\x03 \x01(\t\"t\n\x10\x41skQuestionChunk\x12\x33\n\x07sources\x18\x01 \x01(\x0b\x32 .transuai.ai.v1.SourceTimestampsH\x00\x12\x0f\n\x05\x64\x65lta\x18\x02 \x01(\tH\x00\x12\x0f\n\x05\x65rror\x18\x03 \x01(\tH\x00\x42\t\n\x07payload\"-\n\x10SourceTimestamps\x12\x19\n\x11source_timestamps\x18\x01 \x03(\x01\"&\n\x14ListQaHistoryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"u\n\x06QaTurn\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0e\n\x06\x61nswer\x18\x02 \x01(\t\x12\x19\n\x11source_timestamps\x18\x03 \x03(\x01\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\">\n\x15ListQaHistoryResponse\x12%\n\x05turns\x18\x01 \x03(\x0b\x32\x16.transuai.ai.v1.QaTurn\"H\n\x16SaveProviderKeyRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\x12\x0b\n\x03key\x18\x03 \x01(\t\"^\n\x0bProviderKey\x12\x10\n\x08provider\x18\x01 \x01(\t\x12\r\n\x05last4\x18\x02 \x01(\t\x12.\n\ncreated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"=\n\x18\x44\x65leteProviderKeyRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\",\n\x19\x44\x65leteProviderKeyResponse\x12\x0f\n\x07\x64\x65leted\x18\x01 \x01(\x08\"*\n\x17ListProviderKeysRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\"E\n\x18ListProviderKeysResponse\x12)\n\x04keys\x18\x01 \x03(\x0b\x32\x1b.transuai.ai.v1.ProviderKey*s\n\x12RegenerationStatus\x12\x1c\n\x18REGENERATION_STATUS_IDLE\x10\x00\x12\x1f\n\x1bREGENERATION_STATUS_RUNNING\x10\x01\x12\x1e\n\x1aREGENERATION_STATUS_FAILED\x10\x02\x32\xce\x06\n\tAiService\x12H\n\nGetSummary\x12!.transuai.ai.v1.GetSummaryRequest\x1a\x17.transuai.ai.v1.Summary\x12Y\n\x0cListChapters\x12#.transuai.ai.v1.ListChaptersRequest\x1a$.transuai.ai.v1.ListChaptersResponse\x12U\n\x0b\x41skQuestion\x12\".transuai.ai.v1.AskQuestionRequest\x1a .transuai.ai.v1.AskQuestionChunk0\x01\x12\\\n\rListQaHistory\x12$.transuai.ai.v1.ListQaHistoryRequest\x1a%.transuai.ai.v1.ListQaHistoryResponse\x12Z\n\x13RequestRegeneration\x12*.transuai.ai.v1.RequestRegenerationRequest\x1a\x17.transuai.ai.v1.Summary\x12\x62\n\x0fListJobLlmUsage\x12&.transuai.ai.v1.ListJobLlmUsageRequest\x1a\'.transuai.ai.v1.ListJobLlmUsageResponse\x12V\n\x0fSaveProviderKey\x12&.transuai.ai.v1.SaveProviderKeyRequest\x1a\x1b.transuai.ai.v1.ProviderKey\x12h\n\x11\x44\x65leteProviderKey\x12(.transuai.ai.v1.DeleteProviderKeyRequest\x1a).transuai.ai.v1.DeleteProviderKeyResponse\x12\x65\n\x10ListProviderKeys\x12\'.transuai.ai.v1.ListProviderKeysRequest\x1a(.transuai.ai.v1.ListProviderKeysResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08\x61i.proto\x12\x0etransuai.ai.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"=\n\x1aRequestRegenerationRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\"(\n\x16ListJobLlmUsageRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"D\n\x17ListJobLlmUsageResponse\x12)\n\x07records\x18\x01 \x03(\x0b\x32\x18.transuai.ai.v1.LlmUsage\"\xed\x01\n\x08LlmUsage\x12\x0f\n\x07\x66\x65\x61ture\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\x12\r\n\x05model\x18\x03 \x01(\t\x12\x12\n\nkey_source\x18\x04 \x01(\t\x12\x19\n\x0cinput_tokens\x18\x05 \x01(\x05H\x00\x88\x01\x01\x12\x1a\n\routput_tokens\x18\x06 \x01(\x05H\x01\x88\x01\x01\x12\x11\n\tsucceeded\x18\x07 \x01(\x08\x12.\n\ncreated_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x0f\n\r_input_tokensB\x10\n\x0e_output_tokens\"\xb0\x01\n\x07Summary\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x14\n\x0csummary_text\x18\x02 \x01(\t\x12\x17\n\x0fsource_revision\x18\x03 \x01(\x05\x12?\n\x13regeneration_status\x18\x04 \x01(\x0e\x32\".transuai.ai.v1.RegenerationStatus\x12\x16\n\x0emodel_provider\x18\x05 \x01(\t\x12\r\n\x05model\x18\x06 \x01(\t\"#\n\x11GetSummaryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"]\n\x07\x43hapter\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0e\n\x06job_id\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\x12\n\nstart_time\x18\x04 \x01(\x01\x12\x13\n\x0bsequence_no\x18\x05 \x01(\x05\"%\n\x13ListChaptersRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"A\n\x14ListChaptersResponse\x12)\n\x08\x63hapters\x18\x01 \x03(\x0b\x32\x17.transuai.ai.v1.Chapter\"G\n\x12\x41skQuestionRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x10\n\x08question\x18\x03 \x01(\t\"t\n\x10\x41skQuestionChunk\x12\x33\n\x07sources\x18\x01 \x01(\x0b\x32 .transuai.ai.v1.SourceTimestampsH\x00\x12\x0f\n\x05\x64\x65lta\x18\x02 \x01(\tH\x00\x12\x0f\n\x05\x65rror\x18\x03 \x01(\tH\x00\x42\t\n\x07payload\"-\n\x10SourceTimestamps\x12\x19\n\x11source_timestamps\x18\x01 \x03(\x01\"&\n\x14ListQaHistoryRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"u\n\x06QaTurn\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0e\n\x06\x61nswer\x18\x02 \x01(\t\x12\x19\n\x11source_timestamps\x18\x03 \x03(\x01\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\">\n\x15ListQaHistoryResponse\x12%\n\x05turns\x18\x01 \x03(\x0b\x32\x16.transuai.ai.v1.QaTurn\"H\n\x16SaveProviderKeyRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\x12\x0b\n\x03key\x18\x03 \x01(\t\"^\n\x0bProviderKey\x12\x10\n\x08provider\x18\x01 \x01(\t\x12\r\n\x05last4\x18\x02 \x01(\t\x12.\n\ncreated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"=\n\x18\x44\x65leteProviderKeyRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\"I\n\x19\x44\x65leteProviderKeyResponse\x12\x0f\n\x07\x64\x65leted\x18\x01 \x01(\x08\x12\x1b\n\x13\x64\x65\x66\x61ult_model_reset\x18\x02 \x01(\x08\"-\n\x1aListAvailableModelsRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\"e\n\x1bListAvailableModelsResponse\x12+\n\x06models\x18\x01 \x03(\x0b\x32\x1b.transuai.ai.v1.ModelChoice\x12\x19\n\x11openrouter_custom\x18\x02 \x01(\x08\"F\n\x0bModelChoice\x12\x10\n\x08provider\x18\x01 \x01(\t\x12\r\n\x05model\x18\x02 \x01(\t\x12\x16\n\x0esupports_tools\x18\x03 \x01(\x08\")\n\x16GetDefaultModelRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\"J\n\x16SetDefaultModelRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\x12\r\n\x05model\x18\x03 \x01(\t\"*\n\x17ListProviderKeysRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\"E\n\x18ListProviderKeysResponse\x12)\n\x04keys\x18\x01 \x03(\x0b\x32\x1b.transuai.ai.v1.ProviderKey*s\n\x12RegenerationStatus\x12\x1c\n\x18REGENERATION_STATUS_IDLE\x10\x00\x12\x1f\n\x1bREGENERATION_STATUS_RUNNING\x10\x01\x12\x1e\n\x1aREGENERATION_STATUS_FAILED\x10\x02\x32\xee\x08\n\tAiService\x12H\n\nGetSummary\x12!.transuai.ai.v1.GetSummaryRequest\x1a\x17.transuai.ai.v1.Summary\x12Y\n\x0cListChapters\x12#.transuai.ai.v1.ListChaptersRequest\x1a$.transuai.ai.v1.ListChaptersResponse\x12U\n\x0b\x41skQuestion\x12\".transuai.ai.v1.AskQuestionRequest\x1a .transuai.ai.v1.AskQuestionChunk0\x01\x12\\\n\rListQaHistory\x12$.transuai.ai.v1.ListQaHistoryRequest\x1a%.transuai.ai.v1.ListQaHistoryResponse\x12Z\n\x13RequestRegeneration\x12*.transuai.ai.v1.RequestRegenerationRequest\x1a\x17.transuai.ai.v1.Summary\x12\x62\n\x0fListJobLlmUsage\x12&.transuai.ai.v1.ListJobLlmUsageRequest\x1a\'.transuai.ai.v1.ListJobLlmUsageResponse\x12V\n\x0fSaveProviderKey\x12&.transuai.ai.v1.SaveProviderKeyRequest\x1a\x1b.transuai.ai.v1.ProviderKey\x12h\n\x11\x44\x65leteProviderKey\x12(.transuai.ai.v1.DeleteProviderKeyRequest\x1a).transuai.ai.v1.DeleteProviderKeyResponse\x12\x65\n\x10ListProviderKeys\x12\'.transuai.ai.v1.ListProviderKeysRequest\x1a(.transuai.ai.v1.ListProviderKeysResponse\x12n\n\x13ListAvailableModels\x12*.transuai.ai.v1.ListAvailableModelsRequest\x1a+.transuai.ai.v1.ListAvailableModelsResponse\x12V\n\x0fGetDefaultModel\x12&.transuai.ai.v1.GetDefaultModelRequest\x1a\x1b.transuai.ai.v1.ModelChoice\x12V\n\x0fSetDefaultModel\x12&.transuai.ai.v1.SetDefaultModelRequest\x1a\x1b.transuai.ai.v1.ModelChoiceb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'ai_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_REGENERATIONSTATUS']._serialized_start=1709
-  _globals['_REGENERATIONSTATUS']._serialized_end=1824
+  _globals['_REGENERATIONSTATUS']._serialized_start=2118
+  _globals['_REGENERATIONSTATUS']._serialized_end=2233
   _globals['_REQUESTREGENERATIONREQUEST']._serialized_start=61
   _globals['_REQUESTREGENERATIONREQUEST']._serialized_end=122
   _globals['_LISTJOBLLMUSAGEREQUEST']._serialized_start=124
@@ -43,39 +43,49 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LLMUSAGE']._serialized_start=237
   _globals['_LLMUSAGE']._serialized_end=474
   _globals['_SUMMARY']._serialized_start=477
-  _globals['_SUMMARY']._serialized_end=614
-  _globals['_GETSUMMARYREQUEST']._serialized_start=616
-  _globals['_GETSUMMARYREQUEST']._serialized_end=651
-  _globals['_CHAPTER']._serialized_start=653
-  _globals['_CHAPTER']._serialized_end=746
-  _globals['_LISTCHAPTERSREQUEST']._serialized_start=748
-  _globals['_LISTCHAPTERSREQUEST']._serialized_end=785
-  _globals['_LISTCHAPTERSRESPONSE']._serialized_start=787
-  _globals['_LISTCHAPTERSRESPONSE']._serialized_end=852
-  _globals['_ASKQUESTIONREQUEST']._serialized_start=854
-  _globals['_ASKQUESTIONREQUEST']._serialized_end=925
-  _globals['_ASKQUESTIONCHUNK']._serialized_start=927
-  _globals['_ASKQUESTIONCHUNK']._serialized_end=1043
-  _globals['_SOURCETIMESTAMPS']._serialized_start=1045
-  _globals['_SOURCETIMESTAMPS']._serialized_end=1090
-  _globals['_LISTQAHISTORYREQUEST']._serialized_start=1092
-  _globals['_LISTQAHISTORYREQUEST']._serialized_end=1130
-  _globals['_QATURN']._serialized_start=1132
-  _globals['_QATURN']._serialized_end=1249
-  _globals['_LISTQAHISTORYRESPONSE']._serialized_start=1251
-  _globals['_LISTQAHISTORYRESPONSE']._serialized_end=1313
-  _globals['_SAVEPROVIDERKEYREQUEST']._serialized_start=1315
-  _globals['_SAVEPROVIDERKEYREQUEST']._serialized_end=1387
-  _globals['_PROVIDERKEY']._serialized_start=1389
-  _globals['_PROVIDERKEY']._serialized_end=1483
-  _globals['_DELETEPROVIDERKEYREQUEST']._serialized_start=1485
-  _globals['_DELETEPROVIDERKEYREQUEST']._serialized_end=1546
-  _globals['_DELETEPROVIDERKEYRESPONSE']._serialized_start=1548
-  _globals['_DELETEPROVIDERKEYRESPONSE']._serialized_end=1592
-  _globals['_LISTPROVIDERKEYSREQUEST']._serialized_start=1594
-  _globals['_LISTPROVIDERKEYSREQUEST']._serialized_end=1636
-  _globals['_LISTPROVIDERKEYSRESPONSE']._serialized_start=1638
-  _globals['_LISTPROVIDERKEYSRESPONSE']._serialized_end=1707
-  _globals['_AISERVICE']._serialized_start=1827
-  _globals['_AISERVICE']._serialized_end=2673
+  _globals['_SUMMARY']._serialized_end=653
+  _globals['_GETSUMMARYREQUEST']._serialized_start=655
+  _globals['_GETSUMMARYREQUEST']._serialized_end=690
+  _globals['_CHAPTER']._serialized_start=692
+  _globals['_CHAPTER']._serialized_end=785
+  _globals['_LISTCHAPTERSREQUEST']._serialized_start=787
+  _globals['_LISTCHAPTERSREQUEST']._serialized_end=824
+  _globals['_LISTCHAPTERSRESPONSE']._serialized_start=826
+  _globals['_LISTCHAPTERSRESPONSE']._serialized_end=891
+  _globals['_ASKQUESTIONREQUEST']._serialized_start=893
+  _globals['_ASKQUESTIONREQUEST']._serialized_end=964
+  _globals['_ASKQUESTIONCHUNK']._serialized_start=966
+  _globals['_ASKQUESTIONCHUNK']._serialized_end=1082
+  _globals['_SOURCETIMESTAMPS']._serialized_start=1084
+  _globals['_SOURCETIMESTAMPS']._serialized_end=1129
+  _globals['_LISTQAHISTORYREQUEST']._serialized_start=1131
+  _globals['_LISTQAHISTORYREQUEST']._serialized_end=1169
+  _globals['_QATURN']._serialized_start=1171
+  _globals['_QATURN']._serialized_end=1288
+  _globals['_LISTQAHISTORYRESPONSE']._serialized_start=1290
+  _globals['_LISTQAHISTORYRESPONSE']._serialized_end=1352
+  _globals['_SAVEPROVIDERKEYREQUEST']._serialized_start=1354
+  _globals['_SAVEPROVIDERKEYREQUEST']._serialized_end=1426
+  _globals['_PROVIDERKEY']._serialized_start=1428
+  _globals['_PROVIDERKEY']._serialized_end=1522
+  _globals['_DELETEPROVIDERKEYREQUEST']._serialized_start=1524
+  _globals['_DELETEPROVIDERKEYREQUEST']._serialized_end=1585
+  _globals['_DELETEPROVIDERKEYRESPONSE']._serialized_start=1587
+  _globals['_DELETEPROVIDERKEYRESPONSE']._serialized_end=1660
+  _globals['_LISTAVAILABLEMODELSREQUEST']._serialized_start=1662
+  _globals['_LISTAVAILABLEMODELSREQUEST']._serialized_end=1707
+  _globals['_LISTAVAILABLEMODELSRESPONSE']._serialized_start=1709
+  _globals['_LISTAVAILABLEMODELSRESPONSE']._serialized_end=1810
+  _globals['_MODELCHOICE']._serialized_start=1812
+  _globals['_MODELCHOICE']._serialized_end=1882
+  _globals['_GETDEFAULTMODELREQUEST']._serialized_start=1884
+  _globals['_GETDEFAULTMODELREQUEST']._serialized_end=1925
+  _globals['_SETDEFAULTMODELREQUEST']._serialized_start=1927
+  _globals['_SETDEFAULTMODELREQUEST']._serialized_end=2001
+  _globals['_LISTPROVIDERKEYSREQUEST']._serialized_start=2003
+  _globals['_LISTPROVIDERKEYSREQUEST']._serialized_end=2045
+  _globals['_LISTPROVIDERKEYSRESPONSE']._serialized_start=2047
+  _globals['_LISTPROVIDERKEYSRESPONSE']._serialized_end=2116
+  _globals['_AISERVICE']._serialized_start=2236
+  _globals['_AISERVICE']._serialized_end=3370
 # @@protoc_insertion_point(module_scope)

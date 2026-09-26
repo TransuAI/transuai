@@ -2,7 +2,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from app.services.llm_client import UsageSink, chat, platform_chat_model
+from app.services.llm_client import ChatModel, UsageSink, chat
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def _parse_response(text: str) -> list[dict]:
     return json.loads(cleaned)
 
 
-def generate_chapters(lines: list[TimedLine], *, meter: UsageSink | None) -> list[tuple[str, float]]:
+def generate_chapters(lines: list[TimedLine], *, model: ChatModel, meter: UsageSink | None) -> list[tuple[str, float]]:
     """呼叫模型，依逐字稿片段的時間戳切出章節，回傳依 start_time 排序的
     (title, start_time) 清單。
 
@@ -50,7 +50,6 @@ def generate_chapters(lines: list[TimedLine], *, meter: UsageSink | None) -> lis
     if not lines:
         return []
 
-    model = platform_chat_model()
     logger.info("calling %s (%s) for chapters, segment count=%d", model.provider, model.model, len(lines))
     result = chat(model, [{"role": "user", "content": _PROMPT_TEMPLATE.format(segments=_format_lines(lines))}],
                   max_tokens=_MAX_TOKENS, meter=meter)

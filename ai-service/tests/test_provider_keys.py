@@ -2,10 +2,8 @@
 層用假的（httpx2.MockTransport）。"""
 
 import uuid
-from types import SimpleNamespace
 
 import grpc
-import httpx2
 import pytest
 from sqlalchemy import text
 
@@ -13,21 +11,6 @@ from app.proto_gen import ai_pb2
 from app.services import key_encryption, provider_keys
 
 USER = str(uuid.UUID("00000000-0000-0000-0000-0000000000b1"))
-
-
-@pytest.fixture
-def providers(monkeypatch):
-    """Every provider's key-check API: answers `providers.status` (200 unless a test changes it) and records requests."""
-    state = SimpleNamespace(requests=[], status=200, body={"data": []}, unreachable=False)
-
-    def handle(request: httpx2.Request) -> httpx2.Response:
-        state.requests.append(request)
-        if state.unreachable:
-            raise httpx2.ConnectError("connection refused", request=request)
-        return httpx2.Response(state.status, json=state.body)
-
-    monkeypatch.setattr(provider_keys, "_http_client", httpx2.Client(transport=httpx2.MockTransport(handle)))
-    return state
 
 
 def save(stub, provider, key, user=USER):

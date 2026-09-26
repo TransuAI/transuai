@@ -26,10 +26,15 @@ def upsert_provider_key(session: Session, user_id: uuid.UUID, provider: str, enc
 
 
 def delete_provider_key(session: Session, user_id: uuid.UUID, provider: str) -> bool:
+    """刪除（不 commit，由呼叫端跟其他變更放在同一個 transaction）。"""
     result = session.execute(
         delete(ProviderKey).where(ProviderKey.user_id == user_id, ProviderKey.provider == provider))
-    session.commit()
     return result.rowcount > 0  # type: ignore[attr-defined]
+
+
+def find_provider_key(session: Session, user_id: uuid.UUID, provider: str) -> ProviderKey | None:
+    return session.scalars(
+        select(ProviderKey).where(ProviderKey.user_id == user_id, ProviderKey.provider == provider)).one_or_none()
 
 
 def list_provider_keys(session: Session, user_id: uuid.UUID) -> list[ProviderKey]:

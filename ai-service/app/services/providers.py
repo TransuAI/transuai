@@ -23,11 +23,11 @@ PROVIDERS: dict[str, Provider] = {
     provider.id: provider for provider in (
         Provider("openai", "https://api.openai.com/v1", "https://api.openai.com/v1/models", _bearer),
         Provider(
-            "anthropic", "https://api.anthropic.com/v1/", "https://api.anthropic.com/v1/models",
+            "anthropic", "https://api.anthropic.com/v1", "https://api.anthropic.com/v1/models",
             lambda key: {"x-api-key": key, "anthropic-version": "2023-06-01"},
         ),
         Provider(
-            "gemini", "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "gemini", "https://generativelanguage.googleapis.com/v1beta/openai",
             "https://generativelanguage.googleapis.com/v1beta/models", lambda key: {"x-goog-api-key": key},
         ),
         # OpenRouter 的模型清單不需要金鑰，分不出金鑰對錯；查詢「目前這把金鑰」的 API 才需要。

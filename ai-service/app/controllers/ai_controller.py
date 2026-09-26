@@ -9,11 +9,20 @@ from app.db import new_session
 from app.proto_gen import ai_pb2, ai_pb2_grpc
 from app.repositories.chapter_repository import find_by_job_id as find_chapters_by_job_id
 from app.repositories.llm_usage_repository import list_job_llm_usage
-from app.repositories.provider_key_repository import delete_provider_key, list_provider_keys
+from app.repositories.provider_key_repository import list_provider_keys
 from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_job_id
 from app.repositories.qa_repository import save_qa
 from app.repositories.summary_repository import find_by_job_id as find_summary_by_job_id
+from app.services.default_models import (
+    NoProviderKey,
+    available_models,
+    get_default_model,
+    remove_provider_key,
+    set_default_model,
+)
 from app.services.key_encryption import EncryptionUnavailable
+from app.services.llm_client import LlmError
+from app.services.model_catalog import CatalogUnreachable, ModelChoice, UnknownModel
 from app.services.provider_keys import InvalidKey, ProviderUnreachable, UnknownProvider, save_provider_key
 from app.services.qa import NoEmbeddingsError, stream_answer
 from app.models import RegenerationStatus
@@ -27,6 +36,11 @@ from app.services.regeneration import (
 logger = logging.getLogger(__name__)
 
 _STREAM_ERROR_MESSAGE = "回答時發生錯誤，請稍後再試"
+
+
+def _stream_error_message(exc: Exception) -> str:
+    """模型呼叫失敗時告訴使用者是哪個廠商、什麼原因（例如自有金鑰額度不足），其他錯誤用通用訊息。"""
+    return str(exc) if isinstance(exc, LlmError) else _STREAM_ERROR_MESSAGE
 
 
 def _abort(context: grpc.ServicerContext, code: grpc.StatusCode, message: str) -> NoReturn:
@@ -47,6 +61,8 @@ def _summary_to_proto(summary) -> ai_pb2.Summary:
         summary_text=summary.summary_text or "",
         source_revision=summary.source_revision,
         regeneration_status=_REGENERATION_STATUSES[effective_regeneration_status(summary)],
+        model_provider=summary.model_provider or "",
+        model=summary.model or "",
     )
 
 
@@ -118,9 +134,9 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             except NoEmbeddingsError:
                 _abort(context, grpc.StatusCode.NOT_FOUND,
                        "no transcript content available for this job yet")
-            except Exception:
+            except Exception as exc:
                 logger.exception("failed to prepare answer for job %s", job_id)
-                yield ai_pb2.AskQuestionChunk(error=_STREAM_ERROR_MESSAGE)
+                yield ai_pb2.AskQuestionChunk(error=_stream_error_message(exc))
                 return
             assert kind == "sources"
             yield ai_pb2.AskQuestionChunk(
@@ -131,9 +147,9 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                 for _, delta in chunks:
                     answer_parts.append(delta)
                     yield ai_pb2.AskQuestionChunk(delta=delta)
-            except Exception:
+            except Exception as exc:
                 logger.exception("answer streaming failed mid-flight for job %s", job_id)
-                yield ai_pb2.AskQuestionChunk(error=_STREAM_ERROR_MESSAGE)
+                yield ai_pb2.AskQuestionChunk(error=_stream_error_message(exc))
                 return
 
             save_qa(session, job_id, user_id, question, "".join(answer_parts), source_timestamps)
@@ -211,11 +227,29 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
 
     def DeleteProviderKey(self, request, context):
         user_id = _parse_user_id(request.user_id, context)
-        session = new_session()
+        deleted, reset = remove_provider_key(user_id, request.provider)
+        return ai_pb2.DeleteProviderKeyResponse(deleted=deleted, default_model_reset=reset)
+
+    def ListAvailableModels(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        models, openrouter_custom = available_models(user_id)
+        return ai_pb2.ListAvailableModelsResponse(
+            models=[_model_choice_to_proto(model) for model in models], openrouter_custom=openrouter_custom)
+
+    def GetDefaultModel(self, request, context):
+        return _model_choice_to_proto(get_default_model(_parse_user_id(request.user_id, context)))
+
+    def SetDefaultModel(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
         try:
-            return ai_pb2.DeleteProviderKeyResponse(deleted=delete_provider_key(session, user_id, request.provider))
-        finally:
-            session.close()
+            choice = set_default_model(user_id, request.provider, request.model)
+        except NoProviderKey:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, f"還沒有存入 {request.provider} 的自有金鑰")
+        except UnknownModel as exc:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        except CatalogUnreachable as exc:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, str(exc))
+        return _model_choice_to_proto(choice)
 
     def ListProviderKeys(self, request, context):
         user_id = _parse_user_id(request.user_id, context)
@@ -225,6 +259,10 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                 keys=[_provider_key_to_proto(key) for key in list_provider_keys(session, user_id)])
         finally:
             session.close()
+
+
+def _model_choice_to_proto(choice: ModelChoice) -> ai_pb2.ModelChoice:
+    return ai_pb2.ModelChoice(provider=choice.provider, model=choice.model, supports_tools=choice.supports_tools)
 
 
 def _parse_user_id(value: str, context: grpc.ServicerContext) -> uuid.UUID:

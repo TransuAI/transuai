@@ -84,6 +84,21 @@ class AiServiceStub:
                 request_serializer=ai__pb2.ListProviderKeysRequest.SerializeToString,
                 response_deserializer=ai__pb2.ListProviderKeysResponse.FromString,
                 _registered_method=True)
+        self.ListAvailableModels = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListAvailableModels',
+                request_serializer=ai__pb2.ListAvailableModelsRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListAvailableModelsResponse.FromString,
+                _registered_method=True)
+        self.GetDefaultModel = channel.unary_unary(
+                '/transuai.ai.v1.AiService/GetDefaultModel',
+                request_serializer=ai__pb2.GetDefaultModelRequest.SerializeToString,
+                response_deserializer=ai__pb2.ModelChoice.FromString,
+                _registered_method=True)
+        self.SetDefaultModel = channel.unary_unary(
+                '/transuai.ai.v1.AiService/SetDefaultModel',
+                request_serializer=ai__pb2.SetDefaultModelRequest.SerializeToString,
+                response_deserializer=ai__pb2.ModelChoice.FromString,
+                _registered_method=True)
 
 
 class AiServiceServicer:
@@ -178,6 +193,32 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListAvailableModels(self, request, context):
+        """預設模型（見 ai-service/CONTEXT.md）：背景工作（上傳後的摘要與章節、重新產生）與問答都用它。
+
+        這位使用者可以選的模型：平台模型，加上他有自有金鑰的每個廠商整理好的模型清單；有 OpenRouter 金鑰時
+        openrouter_custom 為 true，代表可以自己輸入 OpenRouter 模型 ID。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetDefaultModel(self, request, context):
+        """目前的預設模型；沒有設定過就是平台模型。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetDefaultModel(self, request, context):
+        """設定預設模型：provider 是 "platform" 或有自有金鑰的廠商。整理好的清單裡沒有的模型回 INVALID_ARGUMENT；
+        OpenRouter 的模型 ID 用 OpenRouter 的模型清單確認存在（不存在回 INVALID_ARGUMENT，OpenRouter 連不上回 UNAVAILABLE）；
+        沒有那個廠商的自有金鑰回 FAILED_PRECONDITION。不會重新產生任何既有的內容。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AiServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -225,6 +266,21 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.ListProviderKeys,
                     request_deserializer=ai__pb2.ListProviderKeysRequest.FromString,
                     response_serializer=ai__pb2.ListProviderKeysResponse.SerializeToString,
+            ),
+            'ListAvailableModels': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListAvailableModels,
+                    request_deserializer=ai__pb2.ListAvailableModelsRequest.FromString,
+                    response_serializer=ai__pb2.ListAvailableModelsResponse.SerializeToString,
+            ),
+            'GetDefaultModel': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetDefaultModel,
+                    request_deserializer=ai__pb2.GetDefaultModelRequest.FromString,
+                    response_serializer=ai__pb2.ModelChoice.SerializeToString,
+            ),
+            'SetDefaultModel': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetDefaultModel,
+                    request_deserializer=ai__pb2.SetDefaultModelRequest.FromString,
+                    response_serializer=ai__pb2.ModelChoice.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -474,6 +530,87 @@ class AiService:
             '/transuai.ai.v1.AiService/ListProviderKeys',
             ai__pb2.ListProviderKeysRequest.SerializeToString,
             ai__pb2.ListProviderKeysResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListAvailableModels(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListAvailableModels',
+            ai__pb2.ListAvailableModelsRequest.SerializeToString,
+            ai__pb2.ListAvailableModelsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetDefaultModel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/GetDefaultModel',
+            ai__pb2.GetDefaultModelRequest.SerializeToString,
+            ai__pb2.ModelChoice.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetDefaultModel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/SetDefaultModel',
+            ai__pb2.SetDefaultModelRequest.SerializeToString,
+            ai__pb2.ModelChoice.FromString,
             options,
             channel_credentials,
             insecure,

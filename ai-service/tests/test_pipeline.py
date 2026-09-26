@@ -95,7 +95,8 @@ def test_process_message_happy_path_calls_everything_in_order_and_persists_resul
     assert mock_generate_chapters.call_args.args == ([TimedLine(0.0, "哈囉大家好"), TimedLine(5.0, "今天來聊聊逐字稿")],)
     mock_embed_documents.assert_called_once_with(["哈囉大家好", "今天來聊聊逐字稿"])
 
-    mock_save_summary.assert_called_once_with(mock_session, uuid.UUID(job_id), "這是摘要", source_revision=0)
+    mock_save_summary.assert_called_once_with(
+        mock_session, uuid.UUID(job_id), "這是摘要", source_revision=0, model=("platform", "Qwen/Qwen3.5-9B"))
     mock_save_chapters.assert_called_once_with(mock_session, uuid.UUID(job_id), [("開場", 0.0)])
     mock_save_embeddings.assert_called_once_with(
         mock_session,

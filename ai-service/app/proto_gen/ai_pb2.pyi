@@ -60,16 +60,20 @@ class LlmUsage(_message.Message):
     def __init__(self, feature: _Optional[str] = ..., provider: _Optional[str] = ..., model: _Optional[str] = ..., key_source: _Optional[str] = ..., input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., succeeded: _Optional[bool] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class Summary(_message.Message):
-    __slots__ = ("job_id", "summary_text", "source_revision", "regeneration_status")
+    __slots__ = ("job_id", "summary_text", "source_revision", "regeneration_status", "model_provider", "model")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     SUMMARY_TEXT_FIELD_NUMBER: _ClassVar[int]
     SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
     REGENERATION_STATUS_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     summary_text: str
     source_revision: int
     regeneration_status: RegenerationStatus
-    def __init__(self, job_id: _Optional[str] = ..., summary_text: _Optional[str] = ..., source_revision: _Optional[int] = ..., regeneration_status: _Optional[_Union[RegenerationStatus, str]] = ...) -> None: ...
+    model_provider: str
+    model: str
+    def __init__(self, job_id: _Optional[str] = ..., summary_text: _Optional[str] = ..., source_revision: _Optional[int] = ..., regeneration_status: _Optional[_Union[RegenerationStatus, str]] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ...) -> None: ...
 
 class GetSummaryRequest(_message.Message):
     __slots__ = ("job_id",)
@@ -182,10 +186,52 @@ class DeleteProviderKeyRequest(_message.Message):
     def __init__(self, user_id: _Optional[str] = ..., provider: _Optional[str] = ...) -> None: ...
 
 class DeleteProviderKeyResponse(_message.Message):
-    __slots__ = ("deleted",)
+    __slots__ = ("deleted", "default_model_reset")
     DELETED_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_MODEL_RESET_FIELD_NUMBER: _ClassVar[int]
     deleted: bool
-    def __init__(self, deleted: _Optional[bool] = ...) -> None: ...
+    default_model_reset: bool
+    def __init__(self, deleted: _Optional[bool] = ..., default_model_reset: _Optional[bool] = ...) -> None: ...
+
+class ListAvailableModelsRequest(_message.Message):
+    __slots__ = ("user_id",)
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    def __init__(self, user_id: _Optional[str] = ...) -> None: ...
+
+class ListAvailableModelsResponse(_message.Message):
+    __slots__ = ("models", "openrouter_custom")
+    MODELS_FIELD_NUMBER: _ClassVar[int]
+    OPENROUTER_CUSTOM_FIELD_NUMBER: _ClassVar[int]
+    models: _containers.RepeatedCompositeFieldContainer[ModelChoice]
+    openrouter_custom: bool
+    def __init__(self, models: _Optional[_Iterable[_Union[ModelChoice, _Mapping]]] = ..., openrouter_custom: _Optional[bool] = ...) -> None: ...
+
+class ModelChoice(_message.Message):
+    __slots__ = ("provider", "model", "supports_tools")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    SUPPORTS_TOOLS_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    model: str
+    supports_tools: bool
+    def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., supports_tools: _Optional[bool] = ...) -> None: ...
+
+class GetDefaultModelRequest(_message.Message):
+    __slots__ = ("user_id",)
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    def __init__(self, user_id: _Optional[str] = ...) -> None: ...
+
+class SetDefaultModelRequest(_message.Message):
+    __slots__ = ("user_id", "provider", "model")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    provider: str
+    model: str
+    def __init__(self, user_id: _Optional[str] = ..., provider: _Optional[str] = ..., model: _Optional[str] = ...) -> None: ...
 
 class ListProviderKeysRequest(_message.Message):
     __slots__ = ("user_id",)

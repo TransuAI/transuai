@@ -9,6 +9,7 @@ from app.db import new_session
 from app.models import RegenerationStatus, Summary
 from app.repositories.summary_repository import lock_summary, mark_regeneration_failed, replace_summary_and_chapters
 from app.services.chapter_generator import generate_chapters
+from app.services.default_models import resolve_chat_model
 from app.services.event_publisher import connection_params, publish_regeneration_requested
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
 from app.services.speaker_context import chapter_input, summary_input
@@ -97,14 +98,16 @@ def process_regeneration_requested(body: bytes, retry_count: int = 0) -> None:
     try:
         transcript = transcript_client.get_transcript(job_id)
         job_uuid = uuid.UUID(job_id)
-        summary_text = summarize(
-            summary_input(transcript), meter=UsageMeter(user_id, job_uuid, LlmFeature.REGENERATED_SUMMARY))
-        chapters = generate_chapters(
-            chapter_input(transcript), meter=UsageMeter(user_id, job_uuid, LlmFeature.REGENERATED_CHAPTERS))
+        model = resolve_chat_model(user_id)  # 要求重新產生的使用者的預設模型
+        summary_text = summarize(summary_input(transcript), model=model, meter=UsageMeter(
+            user_id, job_uuid, LlmFeature.REGENERATED_SUMMARY))
+        chapters = generate_chapters(chapter_input(transcript), model=model, meter=UsageMeter(
+            user_id, job_uuid, LlmFeature.REGENERATED_CHAPTERS))
         session = new_session()
         try:
             replace_summary_and_chapters(
-                session, uuid.UUID(job_id), summary_text, chapters, source_revision=transcript.revision)
+                session, uuid.UUID(job_id), summary_text, chapters, source_revision=transcript.revision,
+                model=(model.provider, model.model))
         finally:
             session.close()
         logger.info("regenerated summary and chapters for job %s from revision %s", job_id, transcript.revision)
