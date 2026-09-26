@@ -152,7 +152,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
         job = jobRepository.save(job);
 
         jobEventPublisher.publishTranscriptionRequested(new TranscriptionRequestedEvent(
-                job.getId().toString(), job.getStoragePath(), job.getFileType().name()));
+                job.getId().toString(), job.getUserId().toString(), job.getStoragePath(), job.getFileType().name()));
 
         responseObserver.onNext(JobMapper.toProto(job));
         responseObserver.onCompleted();

@@ -93,7 +93,8 @@ class UploadGrpcServiceIT {
 
     @Test
     void getPresignedUploadUrl_thenCompleteUpload_createsUploadedJobAndPublishesEvent() throws Exception {
-        UploadServiceGrpc.UploadServiceBlockingStub stub = stubFor(UUID.randomUUID());
+        UUID userId = UUID.randomUUID();
+        UploadServiceGrpc.UploadServiceBlockingStub stub = stubFor(userId);
 
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName("standup.mp3")
@@ -122,6 +123,8 @@ class UploadGrpcServiceIT {
         assertThat(payload.get("jobId").asText()).isEqualTo(job.getJobId());
         assertThat(payload.get("storagePath").asText()).isEqualTo(job.getStoragePath());
         assertThat(payload.get("fileType").asText()).isEqualTo("AUDIO");
+        // Carried down the pipeline so ai-service knows whose models to use and whose usage it is.
+        assertThat(payload.get("userId").asText()).isEqualTo(userId.toString());
     }
 
     @Test
