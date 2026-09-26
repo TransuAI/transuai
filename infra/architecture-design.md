@@ -26,7 +26,7 @@ Transcription Service 消費訊息
   → 發送訊息「轉錄完成」到 MQ
 
 AI Service 消費訊息
-  → 讀取逐字稿，呼叫 HF Inference Providers 產出摘要
+  → 讀取逐字稿，呼叫 HF Inference Providers 產出摘要（兩位以上講者時輸入帶講者名稱，章節也是）
   → 呼叫 HF Inference Providers 依片段時間戳切章節
   → 呼叫 HF Inference Providers 把逐字稿片段轉成向量，存進 embeddings（供之後 RAG 問答用）
   → 更新 Job status: summarizing → completed
@@ -426,7 +426,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
    沒有額外抽象一層 interface，各服務直接用 pika（Python）/ Spring AMQP（Java）。三個 Python
    consumer（ai-service/transcription-service/notification-service）連線斷線時有指數退避自動
    重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
-3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱；只有一位講者時全部隱藏；舊 Job 不回填。AI 使用講者資訊還沒做（見 8.5）
+3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
 4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown、複製、下載原始檔）混為一談
 5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
@@ -459,6 +459,5 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
 - **多格式輸出**（LLM 生成會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作，API 路徑待定（不使用 `/export`，見 3.4）
-- **講者分離的其餘部分**：自動講者分離、講者區塊、改名、改片段講者已實作（見 7. 第 3 點）；AI 摘要/章節/問答使用講者名稱還沒做
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
 - **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做
