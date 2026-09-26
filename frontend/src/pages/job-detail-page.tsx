@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { CompletedWorkspace } from '@/pages/job-detail/completed-workspace'
 import type { QaEntry } from '@/pages/job-detail/chat-pane'
-import type { Chapter, Job, JobStatusEvent, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobStatusEvent, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -182,6 +182,17 @@ export function JobDetailPage() {
     )
   }
 
+  // 改片段的講者也是一次編輯：用回應的片段、講者列表（可能多了新增的講者）跟版本號更新逐字稿。
+  const handleAssignSpeaker = async (segmentId: string, assignment: SpeakerAssignment) => {
+    if (!jobId) return
+    const { segment, speakers, revision } = await transcriptApi.assignSegmentSpeaker(jobId, segmentId, assignment)
+    setTranscript((prev) =>
+      prev
+        ? { ...prev, revision, speakers, segments: prev.segments.map((s) => (s.id === segment.id ? segment : s)) }
+        : prev,
+    )
+  }
+
   const handleAskQuestion = () => {
     const question = questionInput.trim()
     if (!jobId || !question || isAsking) return
@@ -308,6 +319,7 @@ export function JobDetailPage() {
       onSeek={seekTo}
       onSaveSegmentText={handleSaveSegmentText}
       onRenameSpeaker={handleRenameSpeaker}
+      onAssignSpeaker={handleAssignSpeaker}
       onRegenerateSummary={regeneration.regenerate}
       isRegeneratingSummary={regeneration.isRegenerating}
       isRequestingRegeneration={regeneration.isRequesting}

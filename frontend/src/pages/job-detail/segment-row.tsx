@@ -5,8 +5,9 @@ import { handleEditorKeys } from '@/lib/editor-keys'
 import { formatDuration } from '@/lib/media'
 import type { TranscriptMatch } from '@/lib/transcript-search'
 import { cn } from '@/lib/utils'
+import { NewSpeakerEditor, SegmentSpeakerMenu } from '@/pages/job-detail/segment-speaker-menu'
 import { SpeakerDot } from '@/pages/job-detail/speaker-dot'
-import type { Speaker, TranscriptSegment } from '@/types/api'
+import type { Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
 
 function HighlightedText({ text, matches, activeStart }: { text: string; matches: TranscriptMatch[]; activeStart: number | null }) {
   const parts = []
@@ -44,6 +45,9 @@ interface SegmentRowProps {
   onStartEdit: () => void
   onEndEdit: () => void
   onSave: (text: string) => Promise<void>
+  /** Who the segment can be handed to (改講者). */
+  speakerChoices: Speaker[]
+  onAssignSpeaker: (assignment: SpeakerAssignment) => Promise<void>
 }
 
 // One 片段 of the transcript: its timestamp (click to seek), its text (search matches
@@ -63,6 +67,8 @@ export function SegmentRow({
   onStartEdit,
   onEndEdit,
   onSave,
+  speakerChoices,
+  onAssignSpeaker,
 }: SegmentRowProps) {
   // When the editor closes, give keyboard focus back to this segment's edit button rather than
   // letting it fall to <body>.
@@ -97,6 +103,15 @@ export function SegmentRow({
       toast.error('還原失敗')
     } finally {
       setIsRestoring(false)
+    }
+  }
+  const [speakerMenuOpen, setSpeakerMenuOpen] = useState(false)
+  const [isAddingSpeaker, setIsAddingSpeaker] = useState(false)
+  const giveToSpeaker = async (label: string) => {
+    try {
+      await onAssignSpeaker({ speakerLabel: label })
+    } catch {
+      toast.error('改講者失敗')
     }
   }
   const hoverAction =
@@ -143,11 +158,23 @@ export function SegmentRow({
       ) : (
         <>
           <p className="min-w-0 flex-1 leading-relaxed">
-            {turnSpeaker && (
-              <span className="font-medium">
-                <SpeakerDot speaker={turnSpeaker} className="mr-1.5 align-middle" />
-                {turnSpeaker.displayName}：
-              </span>
+            {isAddingSpeaker ? (
+              <NewSpeakerEditor
+                onSave={(name) => onAssignSpeaker({ newSpeaker: { name } })}
+                onDone={() => setIsAddingSpeaker(false)}
+              />
+            ) : (
+              turnSpeaker && (
+                <button
+                  type="button"
+                  aria-label={`改講者：${turnSpeaker.displayName}`}
+                  onClick={() => setSpeakerMenuOpen(true)}
+                  className="rounded-sm font-medium underline-offset-2 hover:underline"
+                >
+                  <SpeakerDot speaker={turnSpeaker} className="mr-1.5 align-middle" />
+                  {turnSpeaker.displayName}：
+                </button>
+              )
             )}
             <HighlightedText text={segment.text} matches={matches} activeStart={activeMatchStart} />
             {isEdited && (
@@ -169,6 +196,15 @@ export function SegmentRow({
               <Undo2 className="size-3.5" />
             </button>
           )}
+          <SegmentSpeakerMenu
+            open={speakerMenuOpen}
+            onOpenChange={setSpeakerMenuOpen}
+            currentLabel={segment.speakerLabel}
+            choices={speakerChoices}
+            onChoose={(label) => void giveToSpeaker(label)}
+            onAddSpeaker={() => setIsAddingSpeaker(true)}
+            triggerClassName={cn(hoverAction, speakerMenuOpen && 'opacity-100')}
+          />
           <button
             ref={editButtonRef}
             type="button"

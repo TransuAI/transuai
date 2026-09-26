@@ -6,7 +6,7 @@ import { JobStatusBadge } from '@/components/job-status-badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SpeakerPanel } from '@/pages/job-detail/speaker-panel'
 import { TranscriptView } from '@/pages/job-detail/transcript-view'
-import type { Job, Transcript } from '@/types/api'
+import type { Job, SpeakerAssignment, Transcript } from '@/types/api'
 
 interface SourcePaneProps {
   job: Job
@@ -19,6 +19,7 @@ interface SourcePaneProps {
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onRenameSpeaker: (label: string, name: string) => Promise<void>
+  onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
 }
 
 export function SourcePane({
@@ -31,6 +32,7 @@ export function SourcePane({
   onSeek,
   onSaveSegmentText,
   onRenameSpeaker,
+  onAssignSpeaker,
 }: SourcePaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -56,6 +58,7 @@ export function SourcePane({
             mediaAvailable={mediaAvailable}
             onSeek={onSeek}
             onSaveSegmentText={onSaveSegmentText}
+            onAssignSpeaker={onAssignSpeaker}
           />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">

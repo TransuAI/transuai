@@ -12,7 +12,7 @@ import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
-import type { Chapter, Job, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
   job: Job
@@ -32,6 +32,7 @@ interface CompletedWorkspaceProps {
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onRenameSpeaker: (label: string, name: string) => Promise<void>
+  onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
   onRegenerateSummary: () => void
   isRegeneratingSummary: boolean
   isRequestingRegeneration: boolean
@@ -79,6 +80,7 @@ export function CompletedWorkspace({
   onSeek,
   onSaveSegmentText,
   onRenameSpeaker,
+  onAssignSpeaker,
   onRegenerateSummary,
   isRegeneratingSummary,
   isRequestingRegeneration,
@@ -106,6 +108,7 @@ export function CompletedWorkspace({
     onSeek,
     onSaveSegmentText,
     onRenameSpeaker,
+    onAssignSpeaker,
   }
   const desktopPlayer =
     mediaUrl &&

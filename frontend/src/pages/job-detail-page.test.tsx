@@ -13,7 +13,7 @@ vi.mock('@/lib/api', () => ({
       .fn()
       .mockResolvedValue({ downloadUrl: 'https://media.example.com/uploads/interview.mp3', expiresAt: '2026-01-01T01:00:00Z' }),
   },
-  transcriptApi: { get: vi.fn(), updateSegmentText: vi.fn(), renameSpeaker: vi.fn() },
+  transcriptApi: { get: vi.fn(), updateSegmentText: vi.fn(), renameSpeaker: vi.fn(), assignSegmentSpeaker: vi.fn() },
   summaryApi: { get: vi.fn(), regenerate: vi.fn() },
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
@@ -967,6 +967,112 @@ describe('JobDetailPage renaming a speaker (COMPLETED, desktop layout)', () => {
 
     expect(await screen.findByText('改名失敗')).toBeInTheDocument()
     expect(input).toHaveValue('王小明')
+  })
+})
+
+describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)", () => {
+  const segmentRow = (text: string) => screen.getByText(text).closest('[data-segment-index]') as HTMLElement
+  const speakerPanel = () => screen.queryByRole('list', { name: '講者' })
+
+  async function openSpeakerMenu(transcript: Transcript, segmentText: string) {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    await renderCompletedJob(transcript)
+    await user.click(within(segmentRow(segmentText)).getByRole('button', { name: '改講者' }))
+    return { user, menu: await screen.findByRole('menu') }
+  }
+
+  it('offers the speakers who have segments, marking the current one, and a way to add a speaker', async () => {
+    const { menu } = await openSpeakerMenu(diarizedTranscript, '今天請到來賓')
+
+    const choices = within(menu).getAllByRole('menuitemradio')
+    expect(choices.map((choice) => choice.textContent)).toEqual(['主持人', '講者 2'])
+    expect(choices[0]).toHaveAttribute('aria-checked', 'true')
+    expect(within(menu).getByRole('menuitem', { name: '新增講者…' })).toBeInTheDocument()
+  })
+
+  it('gives the segment to the chosen speaker and marks the summary as possibly 過時', async () => {
+    vi.mocked(transcriptApi.assignSegmentSpeaker).mockResolvedValue({
+      segment: { ...diarizedTranscript.segments[1], speakerLabel: 'S2' },
+      speakers: diarizedTranscript.speakers,
+      revision: 1,
+    })
+    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '今天請到來賓')
+
+    await user.click(within(menu).getByRole('menuitemradio', { name: '講者 2' }))
+
+    expect(transcriptApi.assignSegmentSpeaker).toHaveBeenCalledWith('job-1', 'seg-d2', { speakerLabel: 'S2' })
+    await waitFor(() => expect(segmentRow('今天請到來賓')).toHaveTextContent('講者 2：今天請到來賓'))
+    expect(screen.getByText('逐字稿已修改，摘要與章節可能過時')).toBeInTheDocument()
+  })
+
+  it("opens the same menu from the speaker's name at the start of a turn", async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    await renderCompletedJob(diarizedTranscript)
+
+    await user.click(within(segmentRow('大家好')).getByRole('button', { name: '改講者：講者 2' }))
+
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitemradio')).toHaveLength(2)
+  })
+
+  it('does not send anything when the current speaker is chosen', async () => {
+    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '今天請到來賓')
+
+    await user.click(within(menu).getByRole('menuitemradio', { name: '主持人' }))
+
+    expect(transcriptApi.assignSegmentSpeaker).not.toHaveBeenCalled()
+  })
+
+  it('adds a new speaker, with a name, for the segment', async () => {
+    vi.mocked(transcriptApi.assignSegmentSpeaker).mockResolvedValue({
+      segment: { ...diarizedTranscript.segments[3], speakerLabel: 'S4' },
+      speakers: [...diarizedTranscript.speakers, { label: 'S4', displayName: '李大華', displayOrder: 4 }],
+      revision: 1,
+    })
+    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '先聊聊近況')
+
+    await user.click(within(menu).getByRole('menuitem', { name: '新增講者…' }))
+    await user.type(within(segmentRow('先聊聊近況')).getByRole('textbox', { name: '新講者名稱' }), '李大華{Enter}')
+
+    expect(transcriptApi.assignSegmentSpeaker).toHaveBeenCalledWith('job-1', 'seg-d4', { newSpeaker: { name: '李大華' } })
+    expect(await within(speakerPanel()!).findByRole('button', { name: '改名：李大華' })).toBeInTheDocument()
+  })
+
+  it('shows the speakers as soon as a single-speaker recording gets a second one', async () => {
+    vi.mocked(transcriptApi.assignSegmentSpeaker).mockResolvedValue({
+      segment: { ...soloTranscript.segments[2], speakerLabel: 'S2' },
+      speakers: [...soloTranscript.speakers, { label: 'S2', displayName: '講者 2', displayOrder: 2 }],
+      revision: 1,
+    })
+    const { user, menu } = await openSpeakerMenu(soloTranscript, '大家好')
+    expect(speakerPanel()).not.toBeInTheDocument()
+
+    await user.click(within(menu).getByRole('menuitem', { name: '新增講者…' }))
+    await user.keyboard('{Enter}')
+
+    expect(transcriptApi.assignSegmentSpeaker).toHaveBeenCalledWith('job-1', 'seg-d3', { newSpeaker: { name: '' } })
+    expect(await screen.findByRole('list', { name: '講者' })).toBeInTheDocument()
+    expect(segmentRow('大家好')).toHaveTextContent('講者 2：大家好')
+  })
+
+  it('cancels adding a speaker on Escape', async () => {
+    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '先聊聊近況')
+
+    await user.click(within(menu).getByRole('menuitem', { name: '新增講者…' }))
+    await user.keyboard('王{Escape}')
+
+    expect(screen.queryByRole('textbox', { name: '新講者名稱' })).not.toBeInTheDocument()
+    expect(transcriptApi.assignSegmentSpeaker).not.toHaveBeenCalled()
+  })
+
+  it('says so when changing the speaker fails', async () => {
+    vi.mocked(transcriptApi.assignSegmentSpeaker).mockRejectedValue(new Error('network'))
+    const { user, menu } = await openSpeakerMenu(diarizedTranscript, '今天請到來賓')
+
+    await user.click(within(menu).getByRole('menuitemradio', { name: '講者 2' }))
+
+    expect(await screen.findByText('改講者失敗')).toBeInTheDocument()
   })
 })
 

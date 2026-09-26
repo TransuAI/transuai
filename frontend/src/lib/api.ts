@@ -7,7 +7,9 @@ import type {
   MediaUrlResponse,
   PresignResponse,
   QaTurn,
+  SegmentSpeakerUpdate,
   SegmentUpdate,
+  SpeakerAssignment,
   SpeakerUpdate,
   Summary,
   Transcript,
@@ -67,6 +69,13 @@ export const transcriptApi = {
     apiFetch<SpeakerUpdate>(`/transcripts/${jobId}/speakers/${encodeURIComponent(label)}`, {
       method: 'PATCH',
       body: { name },
+    }),
+
+  // 把片段改成另一位講者，或新增一位講者給它。
+  assignSegmentSpeaker: (jobId: string, segmentId: string, assignment: SpeakerAssignment) =>
+    apiFetch<SegmentSpeakerUpdate>(`/transcripts/${jobId}/segments/${segmentId}/speaker`, {
+      method: 'PUT',
+      body: assignment,
     }),
 }
 

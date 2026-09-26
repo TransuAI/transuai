@@ -96,6 +96,16 @@ export interface SpeakerUpdate {
   revision: number
 }
 
+/** Who a segment goes to: an existing speaker, or a new one (an empty name means 「講者 N」). */
+export type SpeakerAssignment = { speakerLabel: string } | { newSpeaker: { name: string } }
+
+export interface SegmentSpeakerUpdate {
+  segment: TranscriptSegment
+  /** All of the job's speakers, including one that was just added. */
+  speakers: Speaker[]
+  revision: number
+}
+
 export interface Summary {
   jobId: string
   summaryText: string
