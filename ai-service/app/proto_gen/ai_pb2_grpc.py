@@ -69,6 +69,21 @@ class AiServiceStub:
                 request_serializer=ai__pb2.ListJobLlmUsageRequest.SerializeToString,
                 response_deserializer=ai__pb2.ListJobLlmUsageResponse.FromString,
                 _registered_method=True)
+        self.SaveProviderKey = channel.unary_unary(
+                '/transuai.ai.v1.AiService/SaveProviderKey',
+                request_serializer=ai__pb2.SaveProviderKeyRequest.SerializeToString,
+                response_deserializer=ai__pb2.ProviderKey.FromString,
+                _registered_method=True)
+        self.DeleteProviderKey = channel.unary_unary(
+                '/transuai.ai.v1.AiService/DeleteProviderKey',
+                request_serializer=ai__pb2.DeleteProviderKeyRequest.SerializeToString,
+                response_deserializer=ai__pb2.DeleteProviderKeyResponse.FromString,
+                _registered_method=True)
+        self.ListProviderKeys = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListProviderKeys',
+                request_serializer=ai__pb2.ListProviderKeysRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListProviderKeysResponse.FromString,
+                _registered_method=True)
 
 
 class AiServiceServicer:
@@ -137,6 +152,32 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SaveProviderKey(self, request, context):
+        """自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
+        取得的使用者，不另外驗證。
+
+        存入或替換一把自有金鑰：先向廠商驗證（呼叫不收費的查詢 API），通過才加密存下，回傳末四碼。provider 不在清單、金鑰
+        是空的、或廠商說金鑰無效回 INVALID_ARGUMENT（訊息說明原因）；廠商暫時連不上回 UNAVAILABLE；伺服器沒有設定加密主金鑰
+        回 FAILED_PRECONDITION。驗證沒通過時什麼都不存。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteProviderKey(self, request, context):
+        """刪除一把自有金鑰；沒有這把金鑰時 deleted 是 false，不算錯誤。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListProviderKeys(self, request, context):
+        """這位使用者存了哪些自有金鑰（只有末四碼，永遠不回傳金鑰本身）。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AiServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -169,6 +210,21 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.ListJobLlmUsage,
                     request_deserializer=ai__pb2.ListJobLlmUsageRequest.FromString,
                     response_serializer=ai__pb2.ListJobLlmUsageResponse.SerializeToString,
+            ),
+            'SaveProviderKey': grpc.unary_unary_rpc_method_handler(
+                    servicer.SaveProviderKey,
+                    request_deserializer=ai__pb2.SaveProviderKeyRequest.FromString,
+                    response_serializer=ai__pb2.ProviderKey.SerializeToString,
+            ),
+            'DeleteProviderKey': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteProviderKey,
+                    request_deserializer=ai__pb2.DeleteProviderKeyRequest.FromString,
+                    response_serializer=ai__pb2.DeleteProviderKeyResponse.SerializeToString,
+            ),
+            'ListProviderKeys': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListProviderKeys,
+                    request_deserializer=ai__pb2.ListProviderKeysRequest.FromString,
+                    response_serializer=ai__pb2.ListProviderKeysResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -337,6 +393,87 @@ class AiService:
             '/transuai.ai.v1.AiService/ListJobLlmUsage',
             ai__pb2.ListJobLlmUsageRequest.SerializeToString,
             ai__pb2.ListJobLlmUsageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SaveProviderKey(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/SaveProviderKey',
+            ai__pb2.SaveProviderKeyRequest.SerializeToString,
+            ai__pb2.ProviderKey.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteProviderKey(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/DeleteProviderKey',
+            ai__pb2.DeleteProviderKeyRequest.SerializeToString,
+            ai__pb2.DeleteProviderKeyResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListProviderKeys(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListProviderKeys',
+            ai__pb2.ListProviderKeysRequest.SerializeToString,
+            ai__pb2.ListProviderKeysResponse.FromString,
             options,
             channel_credentials,
             insecure,

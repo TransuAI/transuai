@@ -11,6 +11,8 @@ from sqlalchemy import create_engine, text
 # imported.
 TEST_DB_NAME = "ai_test_db"
 os.environ["DB_NAME"] = TEST_DB_NAME
+# A fixed master key for encrypting own API keys (自有金鑰) in tests: 32 bytes, base64.
+os.environ["KEY_ENCRYPTION_KEY"] = "dGVzdC1tYXN0ZXIta2V5LWZvci1hZXMtZ2NtLTMyYiE="
 
 from app.core.config import settings  # noqa: E402
 from app.db import engine, init_db, new_session  # noqa: E402
@@ -57,7 +59,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage"))
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, provider_keys"))
 
 
 @pytest.fixture(scope="session")

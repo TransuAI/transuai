@@ -9,9 +9,12 @@ from app.db import new_session
 from app.proto_gen import ai_pb2, ai_pb2_grpc
 from app.repositories.chapter_repository import find_by_job_id as find_chapters_by_job_id
 from app.repositories.llm_usage_repository import list_job_llm_usage
+from app.repositories.provider_key_repository import delete_provider_key, list_provider_keys
 from app.repositories.qa_repository import find_by_job_id as find_qa_history_by_job_id
 from app.repositories.qa_repository import save_qa
 from app.repositories.summary_repository import find_by_job_id as find_summary_by_job_id
+from app.services.key_encryption import EncryptionUnavailable
+from app.services.provider_keys import InvalidKey, ProviderUnreachable, UnknownProvider, save_provider_key
 from app.services.qa import NoEmbeddingsError, stream_answer
 from app.models import RegenerationStatus
 from app.services.regeneration import (
@@ -189,6 +192,52 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                 records=[_llm_usage_to_proto(usage) for usage in list_job_llm_usage(session, job_id)])
         finally:
             session.close()
+
+
+    def SaveProviderKey(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            key = save_provider_key(user_id, request.provider, request.key)
+        except UnknownProvider:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, f"不支援的廠商：{request.provider}")
+        except InvalidKey as exc:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        except ProviderUnreachable as exc:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, str(exc))
+        except EncryptionUnavailable:
+            logger.error("cannot save provider keys: KEY_ENCRYPTION_KEY is missing or invalid")
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "伺服器沒有設定加密金鑰，暫時不能存入自有金鑰")
+        return _provider_key_to_proto(key)
+
+    def DeleteProviderKey(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        session = new_session()
+        try:
+            return ai_pb2.DeleteProviderKeyResponse(deleted=delete_provider_key(session, user_id, request.provider))
+        finally:
+            session.close()
+
+    def ListProviderKeys(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        session = new_session()
+        try:
+            return ai_pb2.ListProviderKeysResponse(
+                keys=[_provider_key_to_proto(key) for key in list_provider_keys(session, user_id)])
+        finally:
+            session.close()
+
+
+def _parse_user_id(value: str, context: grpc.ServicerContext) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "user_id must be a valid UUID")
+
+
+def _provider_key_to_proto(key) -> ai_pb2.ProviderKey:
+    created_at = timestamp_pb2.Timestamp()
+    created_at.FromDatetime(key.created_at)
+    return ai_pb2.ProviderKey(provider=key.provider, last4=key.last4, created_at=created_at)
 
 
 def _llm_usage_to_proto(usage) -> ai_pb2.LlmUsage:

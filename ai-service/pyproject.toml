@@ -5,6 +5,7 @@ description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
+    "cryptography>=43",
     "grpcio>=1.83.0",
     "grpcio-health-checking>=1.83.0",
     "grpcio-reflection>=1.83.0",

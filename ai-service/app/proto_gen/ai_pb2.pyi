@@ -152,3 +152,49 @@ class ListQaHistoryResponse(_message.Message):
     TURNS_FIELD_NUMBER: _ClassVar[int]
     turns: _containers.RepeatedCompositeFieldContainer[QaTurn]
     def __init__(self, turns: _Optional[_Iterable[_Union[QaTurn, _Mapping]]] = ...) -> None: ...
+
+class SaveProviderKeyRequest(_message.Message):
+    __slots__ = ("user_id", "provider", "key")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    provider: str
+    key: str
+    def __init__(self, user_id: _Optional[str] = ..., provider: _Optional[str] = ..., key: _Optional[str] = ...) -> None: ...
+
+class ProviderKey(_message.Message):
+    __slots__ = ("provider", "last4", "created_at")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    LAST4_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    last4: str
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, provider: _Optional[str] = ..., last4: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class DeleteProviderKeyRequest(_message.Message):
+    __slots__ = ("user_id", "provider")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    provider: str
+    def __init__(self, user_id: _Optional[str] = ..., provider: _Optional[str] = ...) -> None: ...
+
+class DeleteProviderKeyResponse(_message.Message):
+    __slots__ = ("deleted",)
+    DELETED_FIELD_NUMBER: _ClassVar[int]
+    deleted: bool
+    def __init__(self, deleted: _Optional[bool] = ...) -> None: ...
+
+class ListProviderKeysRequest(_message.Message):
+    __slots__ = ("user_id",)
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    def __init__(self, user_id: _Optional[str] = ...) -> None: ...
+
+class ListProviderKeysResponse(_message.Message):
+    __slots__ = ("keys",)
+    KEYS_FIELD_NUMBER: _ClassVar[int]
+    keys: _containers.RepeatedCompositeFieldContainer[ProviderKey]
+    def __init__(self, keys: _Optional[_Iterable[_Union[ProviderKey, _Mapping]]] = ...) -> None: ...

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # 生成類呼叫走 HF 的 OpenAI 相容路由（見 app/services/llm_client.py）。
     hf_router_base_url: str = "https://router.huggingface.co/v1"
 
+    # 加密自有金鑰用的主金鑰（AES-256-GCM，base64 編碼的 32 bytes）。沒設定時不能存入自有金鑰，其他功能照常。
+    key_encryption_key: str = ""
+
     grpc_port: int = 8084
 
     @property

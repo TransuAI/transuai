@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage` 五張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys` 六張表。
 
 原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)；embedding 仍用 `hf_client.py`。
 
@@ -87,6 +87,14 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 檢索到的片段對回逐字稿、換上講者目前的名字，prompt 要求用這些名字稱呼講者——改名後下一次提問就是新名字，什麼都不用重算。
 拿不到逐字稿（失敗或超過 2 秒）時照樣回答，只是不帶名字。只有一位講者或講者分離之前的舊逐字稿，輸入維持原樣、不帶名字。
 
+### 自有金鑰
+
+使用者可以存入 OpenAI、Anthropic、Google Gemini、OpenRouter 的金鑰（每家一把，再存一次就是替換）。存入前先呼叫該廠商不收費、
+需要金鑰的查詢 API 驗證（OpenRouter 的模型清單是公開的，所以改查「目前這把金鑰」）；只有 2xx 算通過，401／403 與其他 4xx 就拒絕並
+說明原因（附上廠商自己的說明，例如 Gemini 對無效金鑰回 400），廠商暫時連不上也不存。密文綁定「使用者:廠商」，搬到別列就解不開。通過後用 AES-256-GCM 加密存進 `provider_keys`，主金鑰是環境變數 `KEY_ENCRYPTION_KEY`（`openssl rand -base64 32` 產生，
+沒設定時不能存入自有金鑰，其他功能照常），之後只回傳末四碼。取捨見 [ADR 0005](docs/adr/0005-own-api-keys-encrypted-in-ai-service.md)。
+用哪把金鑰呼叫模型（預設模型）還沒做。
+
 ### 用量
 
 每一次 LLM 呼叫（摘要、章節、問答的回答與問題改寫、重新產生摘要與章節）結束時，記一筆**用量**到 `llm_usage`：使用者、Job、
@@ -137,6 +145,7 @@ source_revision 是讀到的 R，前端照樣會顯示過時。
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`）。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，只用來記錄 `qa_history`，不重新驗證 |
 | `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
+| `SaveProviderKey` / `DeleteProviderKey` / `ListProviderKeys` | 自有金鑰（見上方「自有金鑰」）：存入或替換（先向廠商驗證，通過才加密存下，回傳末四碼；廠商不在清單、金鑰是空的或無效回 `INVALID_ARGUMENT` 附原因，廠商暫時連不上回 `UNAVAILABLE`，沒設定主金鑰回 `FAILED_PRECONDITION`）、刪除（沒有這把回 `deleted=false`）、列出（只有末四碼） |
 | `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService`、transcription-service 的 `TranscriptionService` 一樣只信任內部網路呼叫。
@@ -221,6 +230,9 @@ app/
     chapter_generator.py                 章節分段（呼叫 llm_client）
     embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
     qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（多位講者時帶講者目前的名稱）+ 對話歷史 → streaming 生成回答
+    providers.py                         自有金鑰支援的廠商（固定清單）：OpenAI 相容網址、驗證金鑰用的查詢 API
+    key_encryption.py                    自有金鑰的 AES-256-GCM 加密；主金鑰來自 KEY_ENCRYPTION_KEY
+    provider_keys.py                     存入自有金鑰：驗證 → 加密 → 存下
     usage_meter.py                       用量記錄：UsageMeter（使用者、Job、功能）交給 llm_client，每次呼叫結束時記一筆；存檔失敗只記 log，不讓流程失敗
     speaker_context.py                   讓 AI 知道講者是誰：兩位以上講者時把片段組成「名稱：文字」（摘要）、`[時間] 名稱：文字`（章節），以及問答用的「片段起訖時間 → 講者目前的名字」；只有一位講者或舊逐字稿時維持原樣
     segment_times.py                     片段起訖時間的對應鍵（embedding 對回逐字稿片段用，重算 embedding 與問答共用）
@@ -233,6 +245,7 @@ app/
     embedding_repository.py                ai_db 存取（embeddings，含向量相似度搜尋）
     qa_repository.py                       ai_db 存取（qa_history）
     llm_usage_repository.py                ai_db 存取（llm_usage）：每筆用量用自己的 session 立即寫入
+    provider_key_repository.py             ai_db 存取（provider_keys）：存入或替換（upsert）、刪除、列出
   db/
     session.py                              engine / session / init_db（Alembic upgrade）
     migrations/                             Alembic migration（`versions/0001_baseline.py` 是導入前 create_all 建出的 schema，只補建缺少的表）
