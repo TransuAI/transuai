@@ -32,6 +32,25 @@ service AiService {
   // INVALID_ARGUMENT。沒有問答紀錄回空列表，不算錯誤。不分頁——跟 ListChapters 一樣，MVP
   // 資料量小。user_id 驗證邏輯跟 AskQuestion 一致，Gateway 已經做過 ownership 檢查。
   rpc ListQaHistory(ListQaHistoryRequest) returns (ListQaHistoryResponse);
+
+  // 逐字稿被編輯、摘要與章節過時之後，在背景依最新的逐字稿重新產生兩者（見 transcript-editing spec）。
+  // 把狀態設成 RUNNING 並排入 ai-service 自己的 queue 後立即回傳目前的摘要；完成後狀態回到 IDLE、
+  // source_revision 更新，失敗則是 FAILED 且舊內容保留。Job 狀態完全不變。已經 RUNNING 且請求在 5 分鐘
+  // 內時不重複排入（直接回傳目前狀態）；超過 5 分鐘視為上一次卡住，允許再排一次。這個 job 還沒有摘要
+  // 回 NOT_FOUND，job_id 不合法回 INVALID_ARGUMENT，排入 queue 失敗回 UNAVAILABLE（狀態不變）。
+  rpc RequestRegeneration(RequestRegenerationRequest) returns (Summary);
+}
+
+enum RegenerationStatus {
+  // 沒有正在進行的重新產生（包含從沒重新產生過）。
+  REGENERATION_STATUS_IDLE = 0;
+  REGENERATION_STATUS_RUNNING = 1;
+  // 上一次重新產生失敗了；摘要與章節仍是舊的。
+  REGENERATION_STATUS_FAILED = 2;
+}
+
+message RequestRegenerationRequest {
+  string job_id = 1;
 }
 
 message Summary {
@@ -39,6 +58,8 @@ message Summary {
   string summary_text = 2;
   // 這份摘要（跟同一次產生的章節）依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時。
   int32 source_revision = 3;
+  // RUNNING 超過 5 分鐘視為卡住，回報成 FAILED（可以再要求一次）。
+  RegenerationStatus regeneration_status = 4;
 }
 
 message GetSummaryRequest {

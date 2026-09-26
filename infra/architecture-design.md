@@ -155,14 +155,17 @@ PATCH  /transcripts/{jobId}/segments/{segmentId}   編輯片段文字，body { "
 ### 3.4 AI Service
 
 ```
-GET    /summary/{jobId}                 取得摘要（含 sourceRevision：依據的逐字稿 revision，前端比對判斷過時）
+GET    /summary/{jobId}                 取得摘要（含 sourceRevision：依據的逐字稿 revision，前端比對判斷過時；
+                                         regenerationStatus：IDLE / RUNNING / FAILED）
+POST   /summary/{jobId}/regenerate      摘要與章節過時後，在背景依最新逐字稿重新產生兩者，回 202（Job 狀態不變，
+                                         前端每 3 秒輪詢 GET /summary 直到不是 RUNNING）
 GET    /chapters/{jobId}                取得章節列表
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string }，
                                          回傳 text/event-stream（SSE，逐字串流），不是一次性 JSON
 ```
 
-四支都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`，
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`，
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -272,6 +275,8 @@ CREATE TABLE summaries (
     job_id UUID NOT NULL,
     summary_text TEXT,
     source_revision INT NOT NULL DEFAULT 0,  -- 依據的逐字稿 revision；小於逐字稿目前的 revision＝過時（章節共用）
+    regeneration_status VARCHAR(10) NOT NULL DEFAULT 'IDLE',  -- 使用者要求的重新產生：IDLE / RUNNING / FAILED
+    regeneration_requested_at TIMESTAMPTZ,   -- RUNNING 超過 5 分鐘視為卡住，允許再要求一次
     created_at TIMESTAMP NOT NULL
 );
 CREATE UNIQUE INDEX ix_summaries_job_id ON summaries(job_id);
@@ -332,6 +337,7 @@ CREATE TABLE export_outputs (
 | `transcription.completed` | Transcription Service | AI Service | `{ jobId }` |
 | `ai.completed` | AI Service | Notification Service | `{ jobId, status }` |
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
+| `summary.regeneration.requested` | AI Service | AI Service | `{ jobId }`——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
 | `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
 
 **實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
