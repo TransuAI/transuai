@@ -85,7 +85,7 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 兩層限制，各自對應不同的目的（見 [`docs/adr/0001-upload-size-limit-is-file-type-aware.md`](docs/adr/0001-upload-size-limit-is-file-type-aware.md)）：
 
 - **一般濫用防護上限**（`app.upload.max-file-size-bytes`，預設 1GB）：不分檔案類型，套用在所有上傳。
-- **AUDIO 專用上限**（`app.upload.max-audio-file-size-bytes`，預設 20MB）：只套用在 `file_type == AUDIO`，對齊 Groq Whisper 免費層的檔案大小限制，因為只有 AUDIO 上傳的原始檔案大小才等於最終送進 Groq 的音軌大小。VIDEO 上傳不套用這條——時長限制（前端 `upload-page.tsx` 的 30 分鐘）才是 VIDEO 對應 Groq 限制的把關。
+- **AUDIO 專用上限**（`app.upload.max-audio-file-size-bytes`，預設 20MB）：只套用在 `file_type == AUDIO`。當初是為了對齊 Groq Whisper 免費層的檔案大小限制（只有 AUDIO 上傳的原始檔案大小才等於最終送進 Groq 的音軌大小，VIDEO 則靠前端 `upload-page.tsx` 的 30 分鐘時長限制）；語音辨識已從 Groq 換成 Deepgram（沒有這個上限，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`），這條要不要放寬待另外評估。
 
 `GetPresignedUploadUrl` 用呼叫端回報的 `file_size_bytes` 做早期擋檢查；`CompleteUpload` 改問物件儲存實際存了多大，不信任呼叫端回報的數字——這關沒過，物件會被立即刪除。
 
@@ -106,7 +106,7 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 | `STORAGE_PRESIGN_EXPIRY_MINUTES` | `15` | 上傳用 presigned **PUT** URL 有效期限（分鐘） |
 | `STORAGE_PRESIGN_DOWNLOAD_EXPIRY_MINUTES` | `360` | 播放用 presigned **GET** URL 有效期限（分鐘），跟上傳分開設定，見 `docs/adr/0002-presigned-get-url-for-media-playback.md` |
 | `MAX_UPLOAD_FILE_SIZE_BYTES` | `1073741824`（1GB） | 一般濫用防護上限，不分檔案類型，見「上傳大小限制」一節 |
-| `MAX_AUDIO_UPLOAD_FILE_SIZE_BYTES` | `20971520`（20MB） | AUDIO 專用上限，對齊 Groq Whisper 免費層限制，見「上傳大小限制」一節 |
+| `MAX_AUDIO_UPLOAD_FILE_SIZE_BYTES` | `20971520`（20MB） | AUDIO 專用上限（當初對齊 Groq Whisper 免費層，前提已不存在、待評估），見「上傳大小限制」一節 |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `admin` / `0000` | RabbitMQ 帳密 |
 
