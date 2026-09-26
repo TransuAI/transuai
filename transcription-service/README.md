@@ -42,7 +42,7 @@ uv run python -m app.main
 ## Pipeline
 
 ```
-消費 transcription.requested { jobId, storagePath, fileType }
+消費 transcription.requested { jobId, userId, storagePath, fileType }
   → UpdateJobStatus(TRANSCRIBING)
   → 從物件儲存下載檔案
   → file_type == VIDEO 才用 moviepy 抽音軌，AUDIO 直接用原始檔案
@@ -53,7 +53,7 @@ uv run python -m app.main
   → 語言是中文才轉成繁體（OpenCC s2tw，只換字形不換詞；其他語言原樣）
   → 逐字稿存進 transcripts / transcript_segments / speakers
   → UpdateJobStatus(TRANSCRIBED)
-  → 發送 transcription.completed { jobId }
+  → 發送 transcription.completed { jobId, userId }（userId 原樣往下傳，ai-service 把用量記在他名下）
 
 Deepgram 呼叫遇到暫時性錯誤（429、5xx、逾時或連不上）且訊息還有重試預算 → 送進 TTL retry queue，過一段
 時間後自動送回原 queue 重新處理整個 pipeline（訊息層級 requeue，最多 2 次、共 3 次嘗試，見下方

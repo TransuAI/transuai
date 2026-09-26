@@ -81,5 +81,16 @@ def test_happy_path_still_works_with_default_retry_count(mocks):
     pipeline.process_message(body, publish_completed, publish_failed)
 
     mocks.job_status_client.update_status.assert_any_call(job_id, "TRANSCRIBED")
-    publish_completed.assert_called_once_with(job_id)
+    publish_completed.assert_called_once_with(job_id, None)
     publish_failed.assert_not_called()
+
+
+def test_the_completed_event_carries_the_jobs_owner(mocks):
+    # ai-service needs the owner to know whose models to use and whose usage it is.
+    job_id, user_id = str(uuid.uuid4()), str(uuid.uuid4())
+    body = json.dumps({"jobId": job_id, "userId": user_id, "storagePath": "uploads/foo.mp3", "fileType": "AUDIO"}).encode()
+    publish_completed = MagicMock()
+
+    pipeline.process_message(body, publish_completed, MagicMock())
+
+    publish_completed.assert_called_once_with(job_id, user_id)

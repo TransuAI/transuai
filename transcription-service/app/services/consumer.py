@@ -58,7 +58,7 @@ def _consume_once() -> None:
             try:
                 process_message(
                     body,
-                    lambda job_id: publish_transcription_completed(ch, job_id),
+                    lambda job_id, user_id: publish_transcription_completed(ch, job_id, user_id),
                     lambda job_id, stage, error_reason: publish_job_failed(
                         ch, job_id, stage, error_reason),
                     retry_count=retry_count,

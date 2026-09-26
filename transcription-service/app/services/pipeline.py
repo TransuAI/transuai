@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def process_message(
     body: bytes,
-    publish_completed: Callable[[str], None],
+    publish_completed: Callable[[str, str | None], None],
     publish_failed: Callable[[str, str, str], None],
     retry_count: int = 0,
 ) -> None:
@@ -39,6 +39,8 @@ def process_message(
     job_id: str = payload["jobId"]
     storage_path: str = payload["storagePath"]
     file_type: str = payload["fileType"]
+    # Job 擁有者，原樣往下傳給 ai-service（用量記在他名下）；升級當下還在佇列裡的舊訊息沒有。
+    user_id: str | None = payload.get("userId")
 
     logger.info("processing job %s (%s) storage_path=%s",
                 job_id, file_type, storage_path)
@@ -61,7 +63,7 @@ def process_message(
             session.close()
 
         job_status_client.update_status(job_id, "TRANSCRIBED")
-        publish_completed(job_id)
+        publish_completed(job_id, user_id)
         logger.info("job %s transcribed successfully", job_id)
     except Exception as exc:
         if is_transient_recognition_error(exc) and retry_queue_for(retry_count) is not None:

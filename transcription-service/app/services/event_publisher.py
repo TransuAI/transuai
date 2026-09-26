@@ -19,11 +19,12 @@ def connection_params(**overrides) -> pika.ConnectionParameters:
     )
 
 
-def publish_transcription_completed(channel: BlockingChannel, job_id: str) -> None:
-    """對應 ../architecture-design.md 5. MQ Topics/Queues：transcription.completed -> {jobId}。"""
+def publish_transcription_completed(channel: BlockingChannel, job_id: str, user_id: str | None) -> None:
+    """對應 ../architecture-design.md 5. MQ Topics/Queues：transcription.completed -> {jobId, userId}。
+    userId 是從 transcription.requested 原樣帶過來的 Job 擁有者（舊訊息沒有時就不帶）。"""
     channel.queue_declare(
         queue=settings.transcription_completed_queue, durable=True)
-    body = json.dumps({"jobId": job_id}).encode("utf-8")
+    body = json.dumps({"jobId": job_id} | ({"userId": user_id} if user_id else {})).encode("utf-8")
     channel.basic_publish(
         exchange="",
         routing_key=settings.transcription_completed_queue,
