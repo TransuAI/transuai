@@ -64,6 +64,8 @@ from app.services.usage_meter import LlmFeature, UsageMeter
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_CALLS = 15
+# 最多問模型幾輪（每一輪一次 LLM 呼叫；參數格式錯誤時的重問也算）：控制一次會後處理的費用與額度。
+MAX_MODEL_CALLS = 10
 TIME_LIMIT = timedelta(minutes=2)
 _MAX_MALFORMED_TURNS = 2
 _MAX_TOKENS = 4096
@@ -387,7 +389,7 @@ def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[s
 - 只提會議裡真的談到、有根據，而且是這位使用者或團隊要做的事；不要自己編日期或內容。
 - 相對日期（明天、下週三、兩週後）依錄音上傳時間換算：上傳時間是 {uploaded.isoformat()}（星期{_WEEKDAYS[uploaded.weekday()]}），使用者時區是 {run.timezone}。
 - 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。{extra_rules}
-- 你總共最多只能呼叫 {MAX_TOOL_CALLS} 次工具（讀取加寫入），到了就會被停下。先讀摘要與章節，真的需要細節才搜尋逐字稿，要留足夠的次數給提案。可以一次呼叫多個工具。
+- 你總共最多只能呼叫 {MAX_TOOL_CALLS} 次工具（讀取加寫入）、最多 {MAX_MODEL_CALLS} 輪，到了就會被停下。每一輪可以一次呼叫多個工具：同一輪就把要讀的一起讀、要提的案一起提。先讀摘要與章節，真的需要細節才搜尋逐字稿，要留足夠的次數給提案。
 - 做完就直接回覆一段簡短的說明，不要再呼叫工具。"""
 
 
@@ -420,7 +422,8 @@ def _service_token(user_id: uuid.UUID, service: str, name: str) -> str:
 
 def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_id: uuid.UUID) -> PostMeetingStatus:
     """模型每一輪可以呼叫工具：讀取類真的執行、結果回給模型；寫入類驗證參數後記成提案。模型說結束就完成；工具呼叫到
-    MAX_TOOL_CALLS 次（同一輪平行呼叫超過的部分不執行）或超過 TIME_LIMIT 就停下，已經產生的提案保留。"""
+    MAX_TOOL_CALLS 次（同一輪平行呼叫超過的部分不執行）、問了模型 MAX_MODEL_CALLS 輪或超過 TIME_LIMIT 就停下，已經產生的提案
+    保留（最後一輪提的案也保留，只是不再問模型）。"""
     setup = _service_setup(user_id)
     service_tools = _connected_service_tools(user_id, setup, frozenset({setup.todo_destination}))
     tools = {tool.name: tool for tool in job_tools(content) + service_tools}
@@ -431,10 +434,11 @@ def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_
                             {"role": "user", "content": "請幫我處理這場會議的會後事項。"}]
     meter = UsageMeter(user_id, run.job_id, LlmFeature.POST_MEETING)
     deadline = time.monotonic() + TIME_LIMIT.total_seconds()
-    calls = malformed = 0
+    calls = malformed = model_calls = 0
     while True:
-        if messages[-1]["role"] != "user" and time.monotonic() >= deadline:
+        if model_calls >= MAX_MODEL_CALLS or (messages[-1]["role"] != "user" and time.monotonic() >= deadline):
             return PostMeetingStatus.LIMIT_REACHED
+        model_calls += 1
         _progress(run.id, "正在思考下一步…")
         try:
             turn = chat_with_tools(model, messages, schemas, max_tokens=_MAX_TOKENS, meter=meter)

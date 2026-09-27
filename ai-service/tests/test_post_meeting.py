@@ -418,6 +418,7 @@ def test_the_system_prompt_sets_the_ground_rules(queued, fake_llm, calendar):
     assert "2026-11-11T18:00:00+08:00" in system and "Asia/Taipei" in system  # upload time, in the user's zone
     assert "王經理" in system and "金萊" in system
     assert "15" in system  # the tool-call budget
+    assert "10 輪" in system  # the model-call budget
 
 
 def test_the_run_shows_what_it_is_doing(ai_stub, queued, fake_llm, calendar):
@@ -471,6 +472,31 @@ def test_it_stops_at_15_tool_calls_and_keeps_its_proposals(ai_stub, queued, fake
     assert run.status == ai_pb2.POST_MEETING_STATUS_LIMIT_REACHED
     assert len(run.proposals) == 1
     assert len(fake_llm.requests) == 2  # stopped without asking the model again
+
+
+def test_it_asks_the_model_at_most_10_times_and_keeps_the_last_turns_proposals(ai_stub, queued, fake_llm, calendar):
+    for _ in range(9):
+        fake_llm.reply_tool_calls([("list_speakers", {})])
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])  # the 10th turn still proposes
+
+    work(queued)
+
+    run = latest(ai_stub, queued)
+    assert run.status == ai_pb2.POST_MEETING_STATUS_LIMIT_REACHED
+    assert len(run.proposals) == 1
+    assert len(fake_llm.requests) == 10  # no 11th call
+
+
+def test_asking_again_after_unparseable_tool_calls_counts_as_a_model_call(ai_stub, queued, fake_llm, calendar):
+    for _ in range(8):
+        fake_llm.reply_tool_calls([("list_speakers", {})])
+    fake_llm.fail(400, {"message": "Failed to parse tool call arguments as JSON", "code": "tool_use_failed"})
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])
+
+    work(queued)
+
+    assert len(fake_llm.requests) == 10
+    assert latest(ai_stub, queued).status == ai_pb2.POST_MEETING_STATUS_LIMIT_REACHED
 
 
 def test_it_stops_when_time_runs_out(ai_stub, queued, fake_llm, calendar, monkeypatch):
