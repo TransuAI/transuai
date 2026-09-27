@@ -26,3 +26,26 @@ def list_events(access_token: str, time_min: str, time_max: str) -> list[dict]:
              "start": item.get("start", {}).get("dateTime") or item.get("start", {}).get("date"),
              "end": item.get("end", {}).get("dateTime") or item.get("end", {}).get("date")}
             for item in response.json().get("items", [])]
+
+
+def create_event(access_token: str, summary: str, start: str, end: str, description: str | None) -> str:
+    """在使用者的主要日曆建立一個活動，回傳它的網址。"""
+    body = {"summary": summary, "start": {"dateTime": start}, "end": {"dateTime": end},
+            **({"description": description} if description else {})}
+    try:
+        response = _http_client.post(f"{_API}/calendars/primary/events", json=body,
+                                     headers={"Authorization": f"Bearer {access_token}"})
+    except httpx2.HTTPError as exc:
+        raise CalendarError("暫時連不上 Google 日曆，請稍後重試") from exc
+    if not response.is_success:
+        raise CalendarError(f"Google 日曆沒有建立這個活動（HTTP {response.status_code}）{_google_message(response)}")
+    return response.json().get("htmlLink", "")
+
+
+def _google_message(response: httpx2.Response) -> str:
+    """Google 自己的說明（例如「Calendar usage limits exceeded.」），使用者才知道發生什麼事。"""
+    try:
+        message = response.json().get("error", {}).get("message")
+    except ValueError:
+        return ""
+    return f"：{message}" if message else ""

@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from app.services.google_calendar import CalendarError, list_events
+from app.services.google_calendar import CalendarError, create_event, list_events
 
 
 class ToolKind(StrEnum):
@@ -36,6 +36,8 @@ class AgentTool:
     handle: Callable[[dict[str, Any]], Any]
     service: str | None = None  # 寫入類：哪個外部服務
     proposal_kind: str | None = None  # 寫入類：哪一種提案（決定前端的表單）
+    # 寫入類：使用者確認後，用（已經過 handle 驗證的）最終參數真的執行，回傳建立好的項目的網址；失敗 raise ToolFailed。
+    execute: Callable[[dict[str, Any]], str] | None = None
 
     def schema(self) -> dict[str, Any]:
         return {"type": "function", "function": {"name": self.name, "description": self.description,
@@ -152,6 +154,12 @@ def calendar_tools(access_token: Callable[[], str]) -> list[AgentTool]:
         return {"summary": summary, "start": args["start"], "end": args["end"],
                 **({"description": description} if description else {})}
 
+    def create(args: dict[str, Any]) -> str:
+        try:
+            return create_event(access_token(), args["summary"], args["start"], args["end"], args.get("description"))
+        except CalendarError as exc:
+            raise ToolFailed(str(exc)) from exc
+
     return [
         AgentTool("calendar_list_events", "（Google 日曆，讀取）列出使用者某段時間內的行程，用來找空檔。", _object({
             "time_min": {"type": "string", "description": _ISO}, "time_max": {"type": "string", "description": _ISO}},
@@ -161,7 +169,7 @@ def calendar_tools(access_token: Callable[[], str]) -> list[AgentTool]:
                            "end": {"type": "string", "description": _ISO}, "description": {"type": "string"}},
                           ["summary", "start", "end"]),
                   ToolKind.WRITE, "正在整理行動提案…", event_proposal, service="google_calendar",
-                  proposal_kind="calendar_event"),
+                  proposal_kind="calendar_event", execute=create),
     ]
 
 

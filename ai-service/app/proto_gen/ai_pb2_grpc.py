@@ -124,6 +124,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.RequestPostMeetingRequest.SerializeToString,
                 response_deserializer=ai__pb2.PostMeeting.FromString,
                 _registered_method=True)
+        self.ExecuteProposals = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ExecuteProposals',
+                request_serializer=ai__pb2.ExecuteProposalsRequest.SerializeToString,
+                response_deserializer=ai__pb2.PostMeetingRun.FromString,
+                _registered_method=True)
+        self.RetryProposal = channel.unary_unary(
+                '/transuai.ai.v1.AiService/RetryProposal',
+                request_serializer=ai__pb2.RetryProposalRequest.SerializeToString,
+                response_deserializer=ai__pb2.PostMeetingRun.FromString,
+                _registered_method=True)
         self.SaveProviderKey = channel.unary_unary(
                 '/transuai.ai.v1.AiService/SaveProviderKey',
                 request_serializer=ai__pb2.SaveProviderKeyRequest.SerializeToString,
@@ -317,6 +327,22 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ExecuteProposals(self, request, context):
+        """執行使用者勾選的行動提案（arguments_json 是使用者確認、可能改過的最終參數），逐項呼叫對應的外部服務，每項記錄成功（附
+        連結）或失敗（附原因）；沒勾選的不動，已經建立過的不再執行。參數不對或對方拒絕只讓那一項失敗。紀錄不屬於這個 job 回
+        NOT_FOUND；還在跑回 FAILED_PRECONDITION；提案不屬於這份紀錄回 INVALID_ARGUMENT。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RetryProposal(self, request, context):
+        """用上一次的最終參數重試一個失敗的提案；只有失敗的能重試（其他回 FAILED_PRECONDITION）。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SaveProviderKey(self, request, context):
         """自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
         取得的使用者，不另外驗證。
@@ -456,6 +482,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.RequestPostMeeting,
                     request_deserializer=ai__pb2.RequestPostMeetingRequest.FromString,
                     response_serializer=ai__pb2.PostMeeting.SerializeToString,
+            ),
+            'ExecuteProposals': grpc.unary_unary_rpc_method_handler(
+                    servicer.ExecuteProposals,
+                    request_deserializer=ai__pb2.ExecuteProposalsRequest.FromString,
+                    response_serializer=ai__pb2.PostMeetingRun.SerializeToString,
+            ),
+            'RetryProposal': grpc.unary_unary_rpc_method_handler(
+                    servicer.RetryProposal,
+                    request_deserializer=ai__pb2.RetryProposalRequest.FromString,
+                    response_serializer=ai__pb2.PostMeetingRun.SerializeToString,
             ),
             'SaveProviderKey': grpc.unary_unary_rpc_method_handler(
                     servicer.SaveProviderKey,
@@ -951,6 +987,60 @@ class AiService:
             '/transuai.ai.v1.AiService/RequestPostMeeting',
             ai__pb2.RequestPostMeetingRequest.SerializeToString,
             ai__pb2.PostMeeting.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ExecuteProposals(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ExecuteProposals',
+            ai__pb2.ExecuteProposalsRequest.SerializeToString,
+            ai__pb2.PostMeetingRun.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RetryProposal(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/RetryProposal',
+            ai__pb2.RetryProposalRequest.SerializeToString,
+            ai__pb2.PostMeetingRun.FromString,
             options,
             channel_credentials,
             insecure,

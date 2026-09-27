@@ -51,13 +51,24 @@ class FakeCalendar:
         self.events = [{"summary": "部門週會", "start": {"dateTime": "2026-11-12T10:00:00+08:00"},
                         "end": {"dateTime": "2026-11-12T11:00:00+08:00"}}]
         self.on_request = None
+        # Answers to event creations, in order; a created event by default.
+        self.create_replies: list[httpx2.Response] = []
+
+    def created(self) -> list[dict]:
+        return [json.loads(r.content) for r in self.requests if r.method == "POST"]
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
+        request.read()
         self.requests.append(request)
         if self.on_request:
             self.on_request(request)
-        if request.method == "GET" and request.url.path == "/calendar/v3/calendars/primary/events":
-            return httpx2.Response(200, json={"items": self.events})
+        if request.url.path == "/calendar/v3/calendars/primary/events":
+            if request.method == "GET":
+                return httpx2.Response(200, json={"items": self.events})
+            if request.method == "POST":
+                if self.create_replies:
+                    return self.create_replies.pop(0)
+                return httpx2.Response(200, json={"id": "evt-1", "htmlLink": "https://www.google.com/calendar/event?eid=evt-1"})
         return httpx2.Response(404)
 
 
@@ -437,3 +448,139 @@ def test_a_message_for_a_run_that_is_no_longer_going_is_dropped(ai_stub, queued,
     work(queued)  # delivered again
 
     assert len(fake_llm.requests) == 1
+
+
+
+# --- 執行行動提案（gRPC） ---
+
+OTHER_EVENT = {"summary": "搬家公司看場地", "start": "2026-11-13T10:00:00+08:00", "end": "2026-11-13T11:00:00+08:00"}
+
+
+@pytest.fixture
+def proposed(ai_stub, queued, fake_llm, calendar):
+    """A finished run with two calendar-event proposals."""
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING), ("calendar_create_event", OTHER_EVENT)])
+    fake_llm.reply("好。")
+    work(queued)
+    return queued, [p.id for p in latest(ai_stub, queued).proposals]
+
+
+def execute(stub, queued, items):
+    return stub.ExecuteProposals(ai_pb2.ExecuteProposalsRequest(
+        job_id=str(queued.job_id), user_id=str(USER), run_id=queued.run_id,
+        proposals=[ai_pb2.ProposalToExecute(proposal_id=pid, arguments_json=json.dumps(args, ensure_ascii=False))
+                   for pid, args in items]))
+
+
+def retry(stub, queued, proposal_id):
+    return stub.RetryProposal(ai_pb2.RetryProposalRequest(
+        job_id=str(queued.job_id), user_id=str(USER), run_id=queued.run_id, proposal_id=proposal_id))
+
+
+def test_checked_proposals_are_carried_out_with_the_confirmed_values(ai_stub, proposed, calendar):
+    queued, (first, second) = proposed
+    edited = {**NEXT_MEETING, "summary": "搬家確認會議（改到 3 點）", "start": "2026-11-18T15:00:00+08:00",
+              "end": "2026-11-18T16:00:00+08:00"}
+
+    run = execute(ai_stub, queued, [(first, edited)])
+
+    [created] = calendar.created()
+    assert created == {"summary": "搬家確認會議（改到 3 點）", "start": {"dateTime": "2026-11-18T15:00:00+08:00"},
+                       "end": {"dateTime": "2026-11-18T16:00:00+08:00"}, "description": "確認搬家分工"}
+    assert calendar.requests[-1].headers["Authorization"] == "Bearer google-access-token"
+    done, untouched = run.proposals
+    assert (done.status, done.result_url, json.loads(done.arguments_json)) == (
+        ai_pb2.PROPOSAL_STATUS_DONE, "https://www.google.com/calendar/event?eid=evt-1", edited)
+    assert untouched.status == ai_pb2.PROPOSAL_STATUS_PROPOSED  # not checked: nothing sent for it
+
+
+def test_a_proposal_the_service_refuses_fails_with_the_reason_and_can_be_retried(ai_stub, proposed, calendar):
+    queued, (first, _) = proposed
+    calendar.create_replies.append(httpx2.Response(403, json={"error": {"message": "Calendar usage limits exceeded."}}))
+
+    [failed, _] = execute(ai_stub, queued, [(first, NEXT_MEETING)]).proposals
+
+    assert failed.status == ai_pb2.PROPOSAL_STATUS_FAILED
+    assert "Calendar usage limits exceeded." in failed.failure_reason
+
+    [retried, _] = retry(ai_stub, queued, first).proposals
+
+    assert retried.status == ai_pb2.PROPOSAL_STATUS_DONE
+    assert len(calendar.created()) == 2  # the retry used the same confirmed values
+    assert calendar.created()[1]["summary"] == "搬家確認會議"
+
+
+def test_values_that_do_not_make_sense_fail_that_proposal_without_calling_the_service(ai_stub, proposed, calendar):
+    queued, (first, second) = proposed
+
+    bad, good = execute(ai_stub, queued, [(first, {**NEXT_MEETING, "end": "2026-11-18T13:00:00+08:00"}),
+                                          (second, OTHER_EVENT)]).proposals
+
+    assert bad.status == ai_pb2.PROPOSAL_STATUS_FAILED and "end" in bad.failure_reason
+    assert good.status == ai_pb2.PROPOSAL_STATUS_DONE
+    assert [c["summary"] for c in calendar.created()] == ["搬家公司看場地"]
+
+
+def test_a_proposal_already_carried_out_is_not_done_twice(ai_stub, proposed, calendar):
+    queued, (first, _) = proposed
+    execute(ai_stub, queued, [(first, NEXT_MEETING)])
+
+    execute(ai_stub, queued, [(first, NEXT_MEETING)])
+
+    assert len(calendar.created()) == 1
+    with pytest.raises(grpc.RpcError) as error:
+        retry(ai_stub, queued, first)
+    assert error.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_an_invalid_google_link_fails_the_proposal_and_says_so(ai_stub, proposed, calendar, db_session):
+    queued, (first, _) = proposed
+    connection = db_session.get(OAuthConnection, (USER, "google"))
+    connection.status = ConnectionStatus.INVALID
+    db_session.commit()
+
+    [failed, _] = execute(ai_stub, queued, [(first, NEXT_MEETING)]).proposals
+
+    assert failed.status == ai_pb2.PROPOSAL_STATUS_FAILED
+    assert "重新連結" in failed.failure_reason
+    assert calendar.created() == []
+
+
+def test_proposals_of_another_run_or_job_are_refused(ai_stub, proposed, calendar):
+    queued, (first, _) = proposed
+
+    with pytest.raises(grpc.RpcError) as error:
+        ai_stub.ExecuteProposals(ai_pb2.ExecuteProposalsRequest(
+            job_id=str(uuid.uuid4()), user_id=str(USER), run_id=queued.run_id,
+            proposals=[ai_pb2.ProposalToExecute(proposal_id=first, arguments_json=json.dumps(NEXT_MEETING))]))
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND
+
+    with pytest.raises(grpc.RpcError) as error:
+        execute(ai_stub, queued, [(str(uuid.uuid4()), NEXT_MEETING)])
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+    assert calendar.created() == []
+
+
+def test_a_run_still_going_cannot_be_carried_out(ai_stub, queued, calendar):
+    with pytest.raises(grpc.RpcError) as error:
+        execute(ai_stub, queued, [])
+
+    assert error.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_a_proposal_listed_twice_in_one_request_is_carried_out_once(ai_stub, proposed, calendar):
+    queued, (first, _) = proposed
+
+    execute(ai_stub, queued, [(first, NEXT_MEETING), (first, NEXT_MEETING)])
+
+    assert len(calendar.created()) == 1
+
+
+def test_a_failed_proposal_can_be_fixed_and_carried_out_again(ai_stub, proposed, calendar):
+    queued, (first, _) = proposed
+    execute(ai_stub, queued, [(first, {**NEXT_MEETING, "end": "2026-11-18T13:00:00+08:00"})])  # end before start
+
+    [done, _] = execute(ai_stub, queued, [(first, NEXT_MEETING)]).proposals
+
+    assert done.status == ai_pb2.PROPOSAL_STATUS_DONE
+    assert [c["summary"] for c in calendar.created()] == ["搬家確認會議"]

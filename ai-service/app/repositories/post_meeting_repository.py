@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.models import ActionProposal, PostMeetingRun, PostMeetingStatus
+from app.models import ActionProposal, PostMeetingRun, PostMeetingStatus, ProposalStatus
 
 
 def latest_run(session: Session, job_id: uuid.UUID) -> PostMeetingRun | None:
@@ -58,4 +58,23 @@ def finish_run(session: Session, run_id: uuid.UUID, status: PostMeetingStatus, *
     run.failure_reason = failure_reason
     run.progress = ""
     run.finished_at = finished_at
+    session.commit()
+
+
+def find_run(session: Session, job_id: uuid.UUID, run_id: uuid.UUID) -> PostMeetingRun | None:
+    return session.scalar(select(PostMeetingRun).where(PostMeetingRun.id == run_id, PostMeetingRun.job_id == job_id))
+
+
+def lock_proposal(session: Session, proposal_id: uuid.UUID) -> ActionProposal | None:
+    """讀取並鎖住一個提案直到這個 transaction 結束：同時來的第二次執行會等第一次寫完結果，看到已建立就不再做。"""
+    return session.get(ActionProposal, proposal_id, with_for_update=True)
+
+
+def record_execution(session: Session, proposal: ActionProposal, status: ProposalStatus, *, arguments: dict,
+                     executed_at: datetime, result_url: str | None = None, failure_reason: str | None = None) -> None:
+    proposal.status = status
+    proposal.arguments = arguments
+    proposal.result_url = result_url
+    proposal.failure_reason = failure_reason
+    proposal.executed_at = executed_at
     session.commit()

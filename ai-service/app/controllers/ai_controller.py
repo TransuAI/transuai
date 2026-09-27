@@ -44,9 +44,15 @@ from app.services.provider_keys import InvalidKey, ProviderUnreachable, UnknownP
 from app.services.post_meeting import (
     InvalidTimezone,
     NotAvailable,
+    NotRetryable,
     PostMeetingNotQueued,
+    RunNotFound,
+    RunStillGoing,
+    UnknownProposal,
+    execute_proposals,
     post_meeting_state,
     request_post_meeting,
+    retry_proposal,
 )
 from app.services.post_meeting import effective_status as post_meeting_effective_status
 from app.services.qa import NoEmbeddingsError, stream_answer
@@ -65,6 +71,7 @@ from app.models import (
     ConnectionStatus,
     PostMeetingRun,
     PostMeetingStatus,
+    ProposalStatus,
     Quiz,
     QuizQuestion,
     QuizStatus,
@@ -455,6 +462,34 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         return ai_pb2.PostMeeting(available=True, latest_run=_post_meeting_run_to_proto(run, []))
 
 
+    def ExecuteProposals(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        run_id = _parse_uuid(request.run_id, "run_id", context)
+        confirmed = [(_parse_uuid(p.proposal_id, "proposal_id", context), p.arguments_json) for p in request.proposals]
+        return self._run_after_proposals(context, lambda: execute_proposals(job_id, user_id, run_id, confirmed))
+
+    def RetryProposal(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        run_id = _parse_uuid(request.run_id, "run_id", context)
+        proposal_id = _parse_uuid(request.proposal_id, "proposal_id", context)
+        return self._run_after_proposals(context, lambda: retry_proposal(job_id, user_id, run_id, proposal_id))
+
+    def _run_after_proposals(self, context, work):
+        try:
+            run, proposals = work()
+        except RunNotFound:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "post-meeting run not found")
+        except RunStillGoing:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "會後處理還在進行中，等它完成再執行提案")
+        except UnknownProposal:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "有提案不屬於這次會後處理")
+        except NotRetryable:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "只有失敗的提案可以重試")
+        return _post_meeting_run_to_proto(run, proposals)
+
+
 _CONNECTION_STATUS = {
     None: ai_pb2.CONNECTION_STATUS_NOT_CONNECTED,
     ConnectionStatus.CONNECTED: ai_pb2.CONNECTION_STATUS_CONNECTED,
@@ -476,6 +511,12 @@ _QUIZ_STATUS = {
 }
 
 
+_PROPOSAL_STATUS = {
+    ProposalStatus.PROPOSED: ai_pb2.PROPOSAL_STATUS_PROPOSED,
+    ProposalStatus.DONE: ai_pb2.PROPOSAL_STATUS_DONE,
+    ProposalStatus.FAILED: ai_pb2.PROPOSAL_STATUS_FAILED,
+}
+
 _POST_MEETING_STATUS = {
     PostMeetingStatus.RUNNING: ai_pb2.POST_MEETING_STATUS_RUNNING,
     PostMeetingStatus.COMPLETED: ai_pb2.POST_MEETING_STATUS_COMPLETED,
@@ -490,7 +531,9 @@ def _post_meeting_run_to_proto(run: PostMeetingRun, proposals: Sequence[ActionPr
         id=str(run.id), status=_POST_MEETING_STATUS[status], progress=run.progress if status == PostMeetingStatus.RUNNING else "",
         failure_reason=failure_reason or "", model_provider=run.model_provider or "", model=run.model or "",
         proposals=[ai_pb2.ActionProposal(id=str(p.id), service=p.service, tool=p.tool, kind=p.kind,
-                                         arguments_json=json.dumps(p.arguments, ensure_ascii=False)) for p in proposals])
+                                         arguments_json=json.dumps(p.arguments, ensure_ascii=False),
+                                         status=_PROPOSAL_STATUS[ProposalStatus(p.status)], result_url=p.result_url or "",
+                                         failure_reason=p.failure_reason or "") for p in proposals])
     message.requested_at.FromDatetime(run.requested_at)
     if run.finished_at is not None:
         message.finished_at.FromDatetime(run.finished_at)

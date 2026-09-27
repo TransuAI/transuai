@@ -18,6 +18,12 @@ class PostMeetingStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class ProposalStatus(StrEnum):
+    PROPOSED = "PROPOSED"  # 等使用者確認
+    DONE = "DONE"
+    FAILED = "FAILED"
+
+
 class PostMeetingRun(Base):
     """一次會後處理（使用者對一個 Job 手動啟動的 agent）。"""
 
@@ -54,4 +60,9 @@ class ActionProposal(Base):
     service: Mapped[str] = mapped_column(String(32), nullable=False)  # 例如 google_calendar
     tool: Mapped[str] = mapped_column(String(64), nullable=False)  # 確認後要呼叫的工具，例如 calendar_create_event
     kind: Mapped[str] = mapped_column(String(32), nullable=False)  # 例如 calendar_event，決定前端的表單
+    # 要送出的參數；執行時換成使用者確認的最終參數。
     arguments: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default=ProposalStatus.PROPOSED)
+    result_url: Mapped[str | None] = mapped_column(Text)  # 執行成功時，建立好的項目的網址
+    failure_reason: Mapped[str | None] = mapped_column(Text)  # 執行失敗時給使用者看的原因
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

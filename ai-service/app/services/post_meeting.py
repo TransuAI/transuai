@@ -16,14 +16,17 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from app.db import new_session
-from app.models import ActionProposal, ConnectionStatus, PostMeetingRun, PostMeetingStatus
+from app.models import ActionProposal, ConnectionStatus, PostMeetingRun, PostMeetingStatus, ProposalStatus
 from app.repositories.chapter_repository import find_by_job_id as find_chapters
 from app.repositories.connection_repository import find_connection
 from app.repositories.post_meeting_repository import (
     add_proposal,
+    find_run,
     finish_run,
     latest_run,
     list_proposals,
+    lock_proposal,
+    record_execution,
     record_model,
     restart_run,
     set_progress,
@@ -70,6 +73,22 @@ class InvalidTimezone(Exception):
 
 class PostMeetingNotQueued(Exception):
     """The request couldn't be put on the queue; no run was created."""
+
+
+class RunNotFound(Exception):
+    """No such run under this job."""
+
+
+class RunStillGoing(Exception):
+    """The run is still going: its proposals aren't final yet."""
+
+
+class UnknownProposal(Exception):
+    """A proposal that isn't part of this run."""
+
+
+class NotRetryable(Exception):
+    """Only a proposal that failed can be retried."""
 
 
 def unavailable_reason(user_id: uuid.UUID) -> str | None:
@@ -267,20 +286,19 @@ def _system_prompt(run: PostMeetingRun, content: JobContent) -> str:
 - 做完就直接回覆一段簡短的說明，不要再呼叫工具。"""
 
 
-def _available_tools(content: JobContent, user_id: uuid.UUID) -> list[AgentTool]:
-    """沒連結（或已失效）的服務不提供它的工具。"""
-    tools = job_tools(content)
+def _connected_service_tools(user_id: uuid.UUID) -> list[AgentTool]:
+    """使用者已連結的外部服務的工具；沒連結（或已失效）的服務不提供。"""
     google = _in_session(lambda s: find_connection(s, user_id, "google"))
     if google is not None and google.status == ConnectionStatus.CONNECTED:
-        tools += calendar_tools(lambda: _google_token(user_id))
-    return tools
+        return calendar_tools(lambda: _google_token(user_id))
+    return []
 
 
 def _google_token(user_id: uuid.UUID) -> str:
     try:
         return connections.access_token(user_id, "google")
     except connections.ConnectionInvalid as exc:
-        raise ToolFailed("Google 連結已失效，無法讀取行事曆") from exc
+        raise ToolFailed("Google 連結已失效，請到設定頁重新連結") from exc
     except connections.ServiceUnreachable as exc:
         raise ToolFailed("暫時連不上 Google") from exc
 
@@ -288,7 +306,7 @@ def _google_token(user_id: uuid.UUID) -> str:
 def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_id: uuid.UUID) -> PostMeetingStatus:
     """模型每一輪可以呼叫工具：讀取類真的執行、結果回給模型；寫入類驗證參數後記成提案。模型說結束就完成；工具呼叫到
     MAX_TOOL_CALLS 次（同一輪平行呼叫超過的部分不執行）或超過 TIME_LIMIT 就停下，已經產生的提案保留。"""
-    tools = {tool.name: tool for tool in _available_tools(content, user_id)}
+    tools = {tool.name: tool for tool in job_tools(content) + _connected_service_tools(user_id)}
     schemas = [tool.schema() for tool in tools.values()]
     messages: list[dict] = [{"role": "system", "content": _system_prompt(run, content)},
                             {"role": "user", "content": "請幫我處理這場會議的會後事項。"}]
@@ -317,13 +335,13 @@ def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_
                 result = "未執行：已達工具呼叫次數或時間的上限"
             else:
                 calls += 1
-                result = _carry_out(run.id, tools.get(call.name), call.name, call.arguments)
+                result = _call_tool(run.id, tools.get(call.name), call.name, call.arguments)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
         if calls >= MAX_TOOL_CALLS or time.monotonic() >= deadline:
             return PostMeetingStatus.LIMIT_REACHED
 
 
-def _carry_out(run_id: uuid.UUID, tool: AgentTool | None, name: str, arguments: str) -> str:
+def _call_tool(run_id: uuid.UUID, tool: AgentTool | None, name: str, arguments: str) -> str:
     """執行一次工具呼叫，回傳要給模型看的結果；參數不對或執行失敗時是「錯誤：…」，讓模型改正。"""
     if tool is None:
         return f"錯誤：沒有 {name} 這個工具"
@@ -344,3 +362,101 @@ def _carry_out(run_id: uuid.UUID, tool: AgentTool | None, name: str, arguments: 
     assert service is not None and kind is not None
     _in_session(lambda s: add_proposal(s, run_id, service, tool.name, kind, proposal))
     return PROPOSED
+
+
+# --- 執行行動提案（使用者確認之後） ---
+
+
+def execute_proposals(job_id: uuid.UUID, user_id: uuid.UUID, run_id: uuid.UUID,
+                      confirmed: list[tuple[uuid.UUID, str]]) -> tuple[PostMeetingRun, list[ActionProposal]]:
+    """用使用者確認的最終參數（proposal id, JSON）逐項執行勾選的提案，每項記錄成功（附網址）或失敗（附原因）；沒勾選的
+    不動，已經建立過的不再執行。回傳紀錄與它所有的提案。"""
+    proposals = _executable_proposals(job_id, run_id)
+    unknown = [pid for pid, _ in confirmed if pid not in proposals]
+    if unknown:
+        raise UnknownProposal(unknown)
+    tools = _write_tools(user_id)
+    for proposal_id, arguments_json in confirmed:
+        _execute(proposal_id, arguments_json, tools)
+    return _run_with_proposals(job_id, run_id)
+
+
+def retry_proposal(job_id: uuid.UUID, user_id: uuid.UUID, run_id: uuid.UUID,
+                   proposal_id: uuid.UUID) -> tuple[PostMeetingRun, list[ActionProposal]]:
+    """用上一次的最終參數重試一個失敗的提案。"""
+    proposals = _executable_proposals(job_id, run_id)
+    proposal = proposals.get(proposal_id)
+    if proposal is None:
+        raise UnknownProposal([proposal_id])
+    if proposal.status != ProposalStatus.FAILED:
+        raise NotRetryable()
+    _execute(proposal.id, json.dumps(proposal.arguments, ensure_ascii=False), _write_tools(user_id))
+    return _run_with_proposals(job_id, run_id)
+
+
+def _executable_proposals(job_id: uuid.UUID, run_id: uuid.UUID) -> dict[uuid.UUID, ActionProposal]:
+    session = new_session()
+    try:
+        run = find_run(session, job_id, run_id)
+        if run is None:
+            raise RunNotFound()
+        if effective_status(run)[0] == PostMeetingStatus.RUNNING:
+            raise RunStillGoing()
+        proposals = list_proposals(session, run_id)
+        for proposal in proposals:
+            session.expunge(proposal)
+        return {proposal.id: proposal for proposal in proposals}
+    finally:
+        session.close()
+
+
+def _write_tools(user_id: uuid.UUID) -> dict[str, AgentTool]:
+    """執行時用得到的寫入類工具：跟 agent 同一份設定（同樣的參數檢查）。服務沒連結的就不在裡面。"""
+    return {tool.name: tool for tool in _connected_service_tools(user_id) if tool.kind == ToolKind.WRITE}
+
+
+def _execute(proposal_id: uuid.UUID, arguments_json: str, tools: dict[str, AgentTool]) -> None:
+    """執行一個提案。整個過程鎖住它：同一個請求列了兩次、或兩個請求同時來，第二次都會看到已建立而不再做。"""
+    session = new_session()
+    try:
+        proposal = lock_proposal(session, proposal_id)
+        if proposal is None or proposal.status == ProposalStatus.DONE:
+            session.rollback()
+            return
+        status, arguments, url, reason = _call_service(proposal, arguments_json, tools)
+        record_execution(session, proposal, status, arguments=arguments, executed_at=datetime.now(timezone.utc),
+                         result_url=url, failure_reason=reason)
+        logger.info("proposal %s (%s): %s", proposal_id, proposal.tool, status)
+    finally:
+        session.close()
+
+
+def _call_service(proposal: ActionProposal, arguments_json: str,
+                  tools: dict[str, AgentTool]) -> tuple[ProposalStatus, dict, str | None, str | None]:
+    """用最終參數呼叫對應的外部服務：(狀態, 要存下的參數, 網址, 失敗原因)。"""
+    try:
+        arguments = json.loads(arguments_json or "{}")
+    except json.JSONDecodeError:
+        arguments = None
+    if not isinstance(arguments, dict):
+        return ProposalStatus.FAILED, proposal.arguments, None, "參數不是合法的 JSON 物件"
+    tool = tools.get(proposal.tool)
+    try:
+        if tool is None or tool.execute is None:
+            raise ToolFailed("這個服務沒有連結或已失效，請到設定頁重新連結")
+        final = tool.handle(arguments)
+        return ProposalStatus.DONE, final, tool.execute(final), None
+    except ToolArgumentError as exc:
+        return ProposalStatus.FAILED, arguments, None, f"內容不正確：{exc}"
+    except ToolFailed as exc:
+        return ProposalStatus.FAILED, arguments, None, str(exc)
+
+
+def _run_with_proposals(job_id: uuid.UUID, run_id: uuid.UUID) -> tuple[PostMeetingRun, list[ActionProposal]]:
+    session = new_session()
+    try:
+        run = find_run(session, job_id, run_id)
+        assert run is not None
+        return run, list_proposals(session, run_id)
+    finally:
+        session.close()
