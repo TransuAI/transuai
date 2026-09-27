@@ -288,6 +288,21 @@ export interface PostMeeting {
   available: boolean
   unavailableReason: string | null
   latestRun: PostMeetingRun | null
+  /** Things it can't do yet, for the user (e.g. no Notion places chosen). */
+  hints: string[]
+}
+
+/** A place in Notion: a page, or a database (its id is then the data source, collection://…). */
+export interface NotionLocation {
+  id: string
+  title: string
+  url: string | null
+}
+
+/** Where 會後處理 writes in Notion; null when not chosen. */
+export interface PostMeetingSettings {
+  notionMeetingsPage: NotionLocation | null
+  notionTodoDatabase: NotionLocation | null
 }
 
 /** A linked account (已連結的帳號): an outside service the user lets the platform use on their behalf. */

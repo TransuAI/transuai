@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/sonner'
-import { connectionsApi, modelsApi, providerKeysApi, usageApi } from '@/lib/api'
+import { connectionsApi, modelsApi, postMeetingSettingsApi, providerKeysApi, usageApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { leaveTo } from '@/lib/navigation'
 import { SettingsPage } from './settings-page'
@@ -13,6 +13,7 @@ vi.mock('@/lib/api', () => ({
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
   usageApi: { getMonthly: vi.fn() },
   connectionsApi: { list: vi.fn(), authorize: vi.fn(), remove: vi.fn() },
+  postMeetingSettingsApi: { get: vi.fn(), update: vi.fn() },
 }))
 
 vi.mock('@/lib/navigation', () => ({ leaveTo: vi.fn() }))
@@ -38,6 +39,7 @@ beforeEach(() => {
     { service: 'google', status: 'NOT_CONNECTED', connectedAt: null },
     { service: 'notion', status: 'NOT_CONNECTED', connectedAt: null },
   ])
+  vi.mocked(postMeetingSettingsApi.get).mockResolvedValue({ notionMeetingsPage: null, notionTodoDatabase: null })
 })
 
 async function renderSettings(url = '/settings') {
@@ -379,5 +381,56 @@ describe('SettingsPage linked accounts (已連結的帳號)', () => {
     await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '中斷連結' }))
 
     expect(await screen.findByText('已中斷連結，但沒能通知 Notion 撤銷授權，請到 Notion 的設定移除 TransuAI')).toBeInTheDocument()
+  })
+})
+
+describe('SettingsPage post-meeting settings (會後處理)', () => {
+  const PAGE_URL = 'https://www.notion.so/Team/Meeting-notes-1f2e3d4c5b6a47889900aabbccddeeff'
+  const DB_URL = 'https://www.notion.so/Team/Todos-aabbccddeeff00112233445566778899'
+
+  async function renderPostMeeting() {
+    await renderSettings()
+    return screen.findByRole('region', { name: '會後處理' })
+  }
+
+  it('shows where Notion meeting notes and todos go', async () => {
+    vi.mocked(postMeetingSettingsApi.get).mockResolvedValue({
+      notionMeetingsPage: { id: 'page-1', title: 'Meeting notes', url: PAGE_URL },
+      notionTodoDatabase: null,
+    })
+    const section = await renderPostMeeting()
+
+    expect(await within(section).findByLabelText('Notion 會議紀錄頁面')).toHaveValue(PAGE_URL)
+    expect(within(section).getByText('目前：Meeting notes')).toBeInTheDocument()
+    expect(within(section).getByLabelText('Notion 待辦資料庫')).toHaveValue('')
+  })
+
+  it('saves the places after Notion confirms them', async () => {
+    const user = userEvent.setup()
+    vi.mocked(postMeetingSettingsApi.update).mockResolvedValue({
+      notionMeetingsPage: { id: 'page-1', title: 'Meeting notes', url: PAGE_URL },
+      notionTodoDatabase: { id: 'collection://x', title: '團隊待辦', url: DB_URL },
+    })
+    const section = await renderPostMeeting()
+
+    await user.type(await within(section).findByLabelText('Notion 會議紀錄頁面'), PAGE_URL)
+    await user.type(within(section).getByLabelText('Notion 待辦資料庫'), DB_URL)
+    await user.click(within(section).getByRole('button', { name: '儲存' }))
+
+    expect(postMeetingSettingsApi.update).toHaveBeenCalledWith(PAGE_URL, DB_URL)
+    expect(await within(section).findByText('目前：團隊待辦')).toBeInTheDocument()
+  })
+
+  it('says why Notion would not take a place', async () => {
+    const user = userEvent.setup()
+    vi.mocked(postMeetingSettingsApi.update).mockRejectedValue(
+      new ApiError(400, { error: 'INVALID_ARGUMENT', message: '這不是 Notion 資料庫，待辦要寫進資料庫' }),
+    )
+    const section = await renderPostMeeting()
+
+    await user.type(await within(section).findByLabelText('Notion 待辦資料庫'), PAGE_URL)
+    await user.click(within(section).getByRole('button', { name: '儲存' }))
+
+    expect(await within(section).findByText('這不是 Notion 資料庫，待辦要寫進資料庫')).toBeInTheDocument()
   })
 })

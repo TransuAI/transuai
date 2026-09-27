@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ConnectedAccountsSection } from '@/pages/settings/connected-accounts-section'
 import { DefaultModelSection } from '@/pages/settings/default-model-section'
 import { MonthlyUsageSection } from '@/pages/settings/monthly-usage-section'
+import { PostMeetingSettingsSection } from '@/pages/settings/post-meeting-settings-section'
 import { ProviderKeysSection } from '@/pages/settings/provider-keys-section'
 
 export function SettingsPage() {
@@ -13,6 +14,7 @@ export function SettingsPage() {
       <DefaultModelSection keysVersion={keysVersion} />
       <ProviderKeysSection onKeysChanged={() => setKeysVersion((version) => version + 1)} />
       <ConnectedAccountsSection />
+      <PostMeetingSettingsSection />
       <MonthlyUsageSection />
     </div>
   )

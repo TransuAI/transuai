@@ -1,5 +1,5 @@
 import { useState, type ReactElement, type ReactNode } from 'react'
-import { CalendarPlus, CheckCircle2, ClipboardList, ExternalLink, Loader2Icon, Mail, RotateCcw } from 'lucide-react'
+import { CalendarPlus, CheckCircle2, ClipboardList, ExternalLink, FileText, ListTodo, Loader2Icon, Mail, RotateCcw } from 'lucide-react'
 import { fromLocalInput, toLocalInput } from '@/lib/local-time'
 import { formatShortDateTime } from '@/lib/media'
 import { Button } from '@/components/ui/button'
@@ -101,6 +101,56 @@ function EmailDraftFields({ id, draft, set }: { id: string; draft: Draft; set: S
   )
 }
 
+function NotionPageFields({ id, draft, set }: { id: string; draft: Draft; set: SetField }) {
+  return (
+    <>
+      <Field id={`${id}-title`} label="標題">
+        <Input id={`${id}-title`} value={text(draft.title)} onChange={(e) => set('title', e.target.value)} />
+      </Field>
+      <Field id={`${id}-content`} label="內容">
+        <textarea
+          id={`${id}-content`}
+          value={text(draft.content)}
+          onChange={(e) => set('content', e.target.value)}
+          rows={6}
+          className={textareaClass}
+        />
+      </Field>
+    </>
+  )
+}
+
+const propertiesOf = (draft: Draft) =>
+  draft.properties && typeof draft.properties === 'object' ? (draft.properties as Record<string, unknown>) : {}
+
+// A row for the user's todo database: one field per property the agent filled in, named as in the database, and the
+// row's body (the source timestamp, notes).
+function NotionDatabaseItemFields({ id, draft, set }: { id: string; draft: Draft; set: SetField }) {
+  const properties = propertiesOf(draft)
+  return (
+    <>
+      {Object.entries(properties).map(([name, value], i) => (
+        <Field key={name} id={`${id}-property-${i}`} label={name}>
+          <Input
+            id={`${id}-property-${i}`}
+            value={value === null || value === undefined ? '' : String(value)}
+            onChange={(e) => set('properties', { ...properties, [name]: e.target.value })}
+          />
+        </Field>
+      ))}
+      <Field id={`${id}-body`} label="內文">
+        <textarea
+          id={`${id}-body`}
+          value={text(draft.content)}
+          onChange={(e) => set('content', e.target.value)}
+          rows={3}
+          className={textareaClass}
+        />
+      </Field>
+    </>
+  )
+}
+
 interface ProposalKind {
   label: string
   icon: typeof CalendarPlus
@@ -149,6 +199,25 @@ const KINDS: Record<string, ProposalKind> = {
       return { ...args, to: recipients(draft) }
     },
     linkText: '在 Gmail 開啟',
+  },
+  notion_page: {
+    label: 'Notion 頁面',
+    icon: FileText,
+    title: (args) => text(args.title),
+    Fields: NotionPageFields,
+    problem: (draft) => (!text(draft.title).trim() || !text(draft.content).trim() ? '請填標題與內容' : null),
+    confirmed: (draft) => draft,
+    linkText: '在 Notion 開啟',
+  },
+  notion_database_item: {
+    label: 'Notion 待辦',
+    icon: ListTodo,
+    // The first property the agent filled in is usually the todo's title.
+    title: (args) => String(Object.values(propertiesOf(args))[0] ?? ''),
+    Fields: NotionDatabaseItemFields,
+    problem: (draft) => (Object.keys(propertiesOf(draft)).length === 0 ? '沒有任何欄位' : null),
+    confirmed: (draft) => draft,
+    linkText: '在 Notion 開啟',
   },
 }
 
@@ -343,6 +412,11 @@ export function PostMeetingSection({ postMeeting, onStart, isStarting, onExecute
       {postMeeting && !postMeeting.available && postMeeting.unavailableReason && (
         <p className="text-xs text-muted-foreground">{postMeeting.unavailableReason}</p>
       )}
+      {postMeeting?.hints.map((hint) => (
+        <p key={hint} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
+      ))}
       {isRunning && (
         <p className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
           <Loader2Icon className="size-3.5 animate-spin" />

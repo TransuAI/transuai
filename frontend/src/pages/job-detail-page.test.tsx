@@ -44,7 +44,7 @@ beforeEach(() => {
   vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false })
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platformModel)
   vi.mocked(quizApi.list).mockResolvedValue([])
-  vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: null })
+  vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: null })
 })
 
 beforeAll(async () => {
@@ -2341,6 +2341,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: false,
       unavailableReason: '請先到設定頁連結 Google 帳號，會後處理才能查詢你的行事曆',
+      hints: [],
       latestRun: null,
     })
     await renderCard()
@@ -2354,6 +2355,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.start).mockResolvedValue({
       available: true,
       unavailableReason: null,
+      hints: [],
       latestRun: run({ status: 'RUNNING', progress: '排隊中…', finishedAt: null }),
     })
 
@@ -2366,12 +2368,13 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,
       unavailableReason: null,
+      hints: [],
       latestRun: run({ status: 'RUNNING', progress: '正在查詢你的行事曆…', finishedAt: null }),
     })
     await vi.advanceTimersByTimeAsync(3000)
     expect(await within(card()).findByText('正在查詢你的行事曆…')).toBeInTheDocument()
 
-    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: run({ proposals: [nextMeeting] }) })
     vi.mocked(usageApi.getJobUsage).mockClear()
     await vi.advanceTimersByTimeAsync(3000)
 
@@ -2388,6 +2391,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,
       unavailableReason: null,
+      hints: [],
       latestRun: run({ status: 'RUNNING', progress: '正在閱讀摘要…', finishedAt: null }),
     })
     await renderCard()
@@ -2395,12 +2399,12 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     let answerOldPoll: (value: Awaited<ReturnType<typeof postMeetingApi.get>>) => void = () => {}
     vi.mocked(postMeetingApi.get).mockReturnValueOnce(new Promise((resolve) => (answerOldPoll = resolve)))
     await vi.advanceTimersByTimeAsync(3000) // a slow poll goes out…
-    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: run({ proposals: [nextMeeting] }) })
     await vi.advanceTimersByTimeAsync(3000) // …a later one says it's done
 
     expect(await within(card()).findByDisplayValue('搬家確認會議')).toBeInTheDocument()
     await act(async () =>
-      answerOldPoll({ available: true, unavailableReason: null, latestRun: run({ status: 'RUNNING', progress: '正在閱讀摘要…', finishedAt: null }) }),
+      answerOldPoll({ available: true, unavailableReason: null, hints: [], latestRun: run({ status: 'RUNNING', progress: '正在閱讀摘要…', finishedAt: null }) }),
     )
 
     expect(within(card()).getByDisplayValue('搬家確認會議')).toBeInTheDocument()
@@ -2411,6 +2415,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,
       unavailableReason: null,
+      hints: [],
       latestRun: run({ proposals: [nextMeeting, movers] }),
     })
     const user = await renderCard()
@@ -2450,6 +2455,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,
       unavailableReason: null,
+      hints: [],
       latestRun: run({
         proposals: [{ ...nextMeeting, status: 'FAILED', failureReason: 'Google 日曆沒有建立這個活動（HTTP 403）' }],
       }),
@@ -2471,6 +2477,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,
       unavailableReason: null,
+      hints: [],
       latestRun: run({ proposals: [{ ...nextMeeting, status: 'FAILED', failureReason: '內容不正確：end 要晚於 start' }] }),
     })
     const user = await renderCard()
@@ -2487,7 +2494,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
   })
 
   it('checks the form before anything is sent', async () => {
-    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: run({ proposals: [nextMeeting] }) })
     await renderCard()
     const meeting = await within(card()).findByRole('group', { name: '行事曆活動：搬家確認會議' })
 
@@ -2501,7 +2508,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
   })
 
   it('cannot carry out nothing', async () => {
-    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: run({ proposals: [nextMeeting] }) })
     const user = await renderCard()
     const meeting = await within(card()).findByRole('group', { name: '行事曆活動：搬家確認會議' })
 
@@ -2519,7 +2526,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
       kind: 'email_draft',
       arguments: { to: [], subject: '搬家會議紀錄', body: '各位好，今天確認了搬家分工。' },
     }
-    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [minutes] }) })
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: run({ proposals: [minutes] }) })
     const user = await renderCard()
     const draft = await within(card()).findByRole('group', { name: 'email 草稿：搬家會議紀錄' })
     expect(within(draft).getByLabelText('收件人')).toHaveValue('')
@@ -2549,7 +2556,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
       kind: 'email_draft',
       arguments: { to: [], subject: '搬家會議紀錄', body: '內文' },
     }
-    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [minutes] }) })
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: run({ proposals: [minutes] }) })
     const user = await renderCard()
     await within(card()).findByRole('group', { name: 'email 草稿：搬家會議紀錄' })
     vi.mocked(postMeetingApi.execute).mockResolvedValue(run({ proposals: [{ ...minutes, status: 'DONE', resultUrl: 'https://x' }] }))
@@ -2569,7 +2576,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
       kind: 'email_draft',
       arguments: { to: [], subject: '搬家會議紀錄', body: '內文' },
     }
-    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [minutes] }) })
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: run({ proposals: [minutes] }) })
     const user = await renderCard()
     const draft = await within(card()).findByRole('group', { name: 'email 草稿：搬家會議紀錄' })
 
@@ -2579,8 +2586,68 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     expect(within(card()).getByRole('button', { name: '執行勾選的項目' })).toBeDisabled()
   })
 
+  it('writes meeting notes and a todo into the Notion places the user chose', async () => {
+    const notesPage = {
+      ...nextMeeting,
+      id: 'p-4',
+      service: 'notion',
+      tool: 'notion_create_meeting_page',
+      kind: 'notion_page',
+      arguments: { title: '搬家會議紀錄', content: '## 決議\n- 下週三再開會' },
+    }
+    const todo = {
+      ...nextMeeting,
+      id: 'p-5',
+      service: 'notion',
+      tool: 'notion_create_todo',
+      kind: 'notion_database_item',
+      arguments: { properties: { 名稱: '聯繫搬家公司', 負責人: '金萊', 期限: '2026-11-20' }, content: '依據：12:34' },
+    }
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      hints: [],
+      latestRun: run({ proposals: [notesPage, todo] }),
+    })
+    const user = await renderCard()
+    const page = await within(card()).findByRole('group', { name: 'Notion 頁面：搬家會議紀錄' })
+    expect(within(page).getByLabelText('內容')).toHaveValue('## 決議\n- 下週三再開會')
+    const item = within(card()).getByRole('group', { name: 'Notion 待辦：聯繫搬家公司' })
+    expect(within(item).getByLabelText('期限')).toHaveValue('2026-11-20')
+    expect(within(item).getByLabelText('內文')).toHaveValue('依據：12:34')
+    vi.mocked(postMeetingApi.execute).mockResolvedValue(
+      run({ proposals: [{ ...notesPage, status: 'DONE', resultUrl: 'https://www.notion.so/new-1' }, { ...todo, status: 'DONE' }] }),
+    )
+
+    await user.clear(within(item).getByLabelText('負責人'))
+    await user.type(within(item).getByLabelText('負責人'), '王經理')
+    await user.click(within(card()).getByRole('button', { name: '執行勾選的項目' }))
+
+    const [[, , items]] = vi.mocked(postMeetingApi.execute).mock.calls
+    expect(items).toEqual([
+      { proposalId: 'p-4', arguments: { title: '搬家會議紀錄', content: '## 決議\n- 下週三再開會' } },
+      {
+        proposalId: 'p-5',
+        arguments: { properties: { 名稱: '聯繫搬家公司', 負責人: '王經理', 期限: '2026-11-20' }, content: '依據：12:34' },
+      },
+    ])
+    expect(await within(card()).findByRole('link', { name: '在 Notion 開啟' })).toHaveAttribute('href', 'https://www.notion.so/new-1')
+  })
+
+  it('passes on hints about what it cannot do yet', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      hints: ['想讓會後處理寫進 Notion，請到設定頁指定會議紀錄頁面與待辦資料庫'],
+      latestRun: null,
+    })
+    await renderCard()
+
+    expect(await within(card()).findByText('想讓會後處理寫進 Notion，請到設定頁指定會議紀錄頁面與待辦資料庫')).toBeInTheDocument()
+  })
+
   it('says when there was nothing to do', async () => {
-    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run() })
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], latestRun: run() })
     await renderCard()
 
     expect(await within(card()).findByText('這場會議沒有需要處理的事項')).toBeInTheDocument()
@@ -2590,6 +2657,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,
       unavailableReason: null,
+      hints: [],
       latestRun: run({ status: 'LIMIT_REACHED', proposals: [nextMeeting] }),
     })
     await renderCard()
@@ -2602,6 +2670,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,
       unavailableReason: null,
+      hints: [],
       latestRun: run({ status: 'FAILED', failureReason: 'openai（gpt-5）額度不足：HTTP 402' }),
     })
     await renderCard()
