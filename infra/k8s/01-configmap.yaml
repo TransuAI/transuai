@@ -48,6 +48,9 @@ data:
   DEEPGRAM_MODEL: "nova-3"
   DEEPGRAM_LANGUAGE: "zh-TW"
   AI_HF_CHAT_MODEL: "Qwen/Qwen3.5-9B"
+  # 會後處理的平台模型（ai-service/docs/adr/0008）：有設定時，預設模型是平台模型的使用者也能跑會後處理，費用算在
+  # HF_API_KEY 上；空字串就是不提供。本機開發設成 Qwen3.8-27B，指定支援工具呼叫、最便宜的 deepinfra。
+  AI_POST_MEETING_PLATFORM_MODEL: "Qwen/Qwen3.8-27B:deepinfra"
   HF_EMBEDDING_MODEL: "BAAI/bge-m3"
 
   # 已連結的帳號（Google / Notion OAuth，gateway）：對方回呼 {OAUTH_CALLBACK_BASE_URL}/oauth/{service}/callback，這個網址要
