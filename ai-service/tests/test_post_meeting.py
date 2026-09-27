@@ -187,6 +187,59 @@ def test_the_platform_model_cannot_run_post_meeting_processing(ai_stub, db_sessi
     assert not state.HasField("latest_run")
 
 
+POST_MEETING_PLATFORM_MODEL = "Qwen/Qwen3.8-27B:deepinfra"
+
+
+@pytest.fixture
+def post_meeting_platform_model(monkeypatch):
+    """The deployment offers a platform model for post-meeting processing."""
+    monkeypatch.setattr(post_meeting.settings, "ai_post_meeting_platform_model", POST_MEETING_PLATFORM_MODEL)
+
+
+def test_with_a_post_meeting_platform_model_the_platform_model_can_run_it(ai_stub, db_session, providers, calendar,
+                                                                           post_meeting_platform_model):
+    link_google()
+
+    state = get(ai_stub, uuid.uuid4())
+
+    assert state.available and not state.unavailable_reason
+
+
+def test_the_post_meeting_platform_model_runs_on_the_platforms_hf_key(ai_stub, db_session, providers, calendar,
+                                                                     rabbitmq, fake_llm, post_meeting_platform_model):
+    link_google()
+    job_id = uuid.uuid4()
+    run = request(ai_stub, job_id).latest_run
+    [(_, message)] = published(rabbitmq.channel)
+    queued = Queued(job_id, run.id, json.dumps(message).encode())
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)], usage=(900, 40))
+    fake_llm.reply("好。", usage=(1200, 30))
+
+    with patch.object(usage_meter, "save_llm_usage") as save_llm_usage:
+        work(queued)
+
+    first = fake_llm.requests[0]
+    assert (first.url.host, first.headers["Authorization"]) == ("router.huggingface.co", "Bearer hf-test-key")
+    body = fake_llm.bodies()[0]
+    assert body["model"] == POST_MEETING_PLATFORM_MODEL
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+    finished = latest(ai_stub, queued)
+    assert (finished.model_provider, finished.model) == ("platform", POST_MEETING_PLATFORM_MODEL)
+    assert [p.kind for p in finished.proposals] == ["calendar_event"]
+    records = [c.args[0] for c in save_llm_usage.call_args_list]
+    assert {(r.feature, r.user_id, r.provider, r.model) for r in records} == {
+        ("post_meeting", USER, "platform", POST_MEETING_PLATFORM_MODEL)}
+
+
+def test_an_own_key_default_model_is_still_used_when_a_platform_model_is_offered(queued, fake_llm, calendar,
+                                                                                post_meeting_platform_model):
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    assert fake_llm.bodies()[0]["model"] == "gpt-5"
+
+
 def test_a_default_model_that_cannot_call_tools_cannot_run_it(ai_stub, db_session, providers, calendar):
     providers.openrouter_models = [{"id": "some/chat-only", "supported_parameters": []}]
     choose_default(ai_stub, provider="openrouter", model="some/chat-only")

@@ -44,11 +44,12 @@ class ChatModel:
     extra_body: dict[str, Any] | None = None
 
 
-def platform_chat_model() -> ChatModel:
-    """平台模型：HF Inference Providers 上的聊天模型，關閉 thinking mode。"""
+def platform_chat_model(model: str | None = None) -> ChatModel:
+    """平台模型：HF Inference Providers 上的聊天模型，關閉 thinking mode。model 是某個用途專屬的平台模型（例如會後處理的），
+    沒給就是一般生成（摘要、章節、問答）用的。"""
     return ChatModel(
         provider=PLATFORM,
-        model=settings.ai_hf_chat_model,
+        model=model or settings.ai_hf_chat_model,
         base_url=settings.hf_router_base_url,
         api_key=settings.hf_api_key,
         extra_body=DISABLE_THINKING,

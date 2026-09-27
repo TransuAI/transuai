@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     ai_hf_chat_model: str = "Qwen/Qwen3.5-9B"
     # 生成類呼叫走 HF 的 OpenAI 相容路由（見 app/services/llm_client.py）。
     hf_router_base_url: str = "https://router.huggingface.co/v1"
+    # 會後處理的平台模型（見 docs/adr/0008）：HF 路由的模型 ID，可以帶「:供應商」後綴，例如 Qwen/Qwen3.8-27B:deepinfra。
+    # 空的就是不提供：預設模型是平台模型的使用者不能跑會後處理，要用自有金鑰、支援工具呼叫的模型。
+    ai_post_meeting_platform_model: str = ""
 
     # 加密自有金鑰用的主金鑰（AES-256-GCM，base64 編碼的 32 bytes）。沒設定時不能存入自有金鑰，其他功能照常。
     key_encryption_key: str = ""

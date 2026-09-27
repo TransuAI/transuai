@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from collections.abc import Callable
 from typing import TypeVar
 
+from app.core.config import settings
 from app.db import new_session
 from app.models import ActionProposal, ConnectionStatus, PostMeetingRun, PostMeetingStatus, ProposalStatus, TodoDestination
 from app.repositories.chapter_repository import find_by_job_id as find_chapters
@@ -53,7 +54,7 @@ from app.services.default_models import get_default_model, resolve_chat_model
 from app.services.event_publisher import connection_params, publish_post_meeting_requested
 from app.services.post_meeting_settings import Settings, get_settings
 from app.services.proposal_identity import describe, fingerprint
-from app.services.llm_client import PLATFORM, ChatModel, LlmError, LlmErrorReason, chat_with_tools
+from app.services.llm_client import PLATFORM, ChatModel, LlmError, LlmErrorReason, chat_with_tools, platform_chat_model
 from app.services.regeneration import STUCK_AFTER
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
 from app.services.speaker_context import speaker_names, spoken_segments
@@ -102,9 +103,9 @@ class NotRetryable(Exception):
 def unavailable_reason(user_id: uuid.UUID) -> str | None:
     """不能跑的原因（給使用者看）；能跑就是 None。只看存下來的狀態，不打外部服務——前端每 3 秒就會問一次。"""
     choice = get_default_model(user_id)
-    if choice.provider == PLATFORM:
+    if choice.provider == PLATFORM and not settings.ai_post_meeting_platform_model:
         return "會後處理需要你自己的 AI 金鑰：請到設定頁存入自有金鑰，並把預設模型換成支援工具呼叫的模型"
-    if not choice.supports_tools:
+    if choice.provider != PLATFORM and not choice.supports_tools:
         return f"你的預設模型（{choice.model}）不支援工具呼叫，請到設定頁換一個支援工具呼叫的模型"
     google, notion = _connection_status(user_id, "google"), _connection_status(user_id, "notion")
     if ConnectionStatus.CONNECTED in (google, notion):
@@ -263,7 +264,7 @@ def process_post_meeting_requested(body: bytes, retry_count: int = 0) -> None:
         if reason:
             _finish(run_id, PostMeetingStatus.FAILED, reason)
             return
-        model = resolve_chat_model(user_id)
+        model = _post_meeting_model(user_id)
         _in_session(lambda s: record_model(s, run_id, model.provider, model.model))
         status = _run_agent(run, model, _job_content(job_id), user_id)
         _finish(run_id, status)
@@ -274,6 +275,13 @@ def process_post_meeting_requested(body: bytes, retry_count: int = 0) -> None:
             raise RetryableMessageError(f"post-meeting run {run_id}: transient failure, retry_count={retry_count}") from exc
         logger.exception("post-meeting run %s of job %s failed", run_id, job_id)
         _finish(run_id, PostMeetingStatus.FAILED, _failure_reason(exc))
+
+
+def _post_meeting_model(user_id: uuid.UUID) -> ChatModel:
+    """預設模型是平台模型時用會後處理的平台模型（unavailable_reason 已經確認有設定），否則用使用者的預設模型與自有金鑰。"""
+    if get_default_model(user_id).provider == PLATFORM:
+        return platform_chat_model(settings.ai_post_meeting_platform_model)
+    return resolve_chat_model(user_id)
 
 
 def _failure_reason(exc: Exception) -> str:
