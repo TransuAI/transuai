@@ -261,7 +261,7 @@ message PostMeeting {
   string unavailable_reason = 2;
   // 最新一份紀錄；還沒跑過就不設定。
   PostMeetingRun latest_run = 3;
-  // 給使用者的提示（能跑，但有些事做不到），例如 Notion 已連結但還沒指定會議紀錄頁面與待辦資料庫。
+  // 給使用者的提示（能跑，但有些事做不到），例如 Notion 已連結但還沒指定會議紀錄頁面，或待辦要建在 Google Tasks 但還沒連結 Google。
   repeated string hints = 4;
 }
 
@@ -275,6 +275,8 @@ message UpdatePostMeetingSettingsRequest {
   string notion_meetings_page_url = 2;
   // Notion 資料庫的網址（或 ID）；空字串是不指定。
   string notion_todo_database_url = 3;
+  // 待辦要建在哪裡；UNSPECIFIED 是維持原本的設定。
+  TodoDestination todo_destination = 4;
 }
 
 message PostMeetingSettings {
@@ -282,6 +284,15 @@ message PostMeetingSettings {
   NotionLocation notion_meetings_page = 1;
   // 待辦寫進這個 Notion 資料庫；沒指定就不設定。
   NotionLocation notion_todo_database = 2;
+  // 待辦要建在哪裡（還沒選過是 Google Tasks）；會後處理只提供這個去處的建立待辦工具。
+  TodoDestination todo_destination = 3;
+}
+
+enum TodoDestination {
+  TODO_DESTINATION_UNSPECIFIED = 0;
+  TODO_DESTINATION_GOOGLE_TASKS = 1;
+  // 寫進 notion_todo_database；沒指定資料庫就不提待辦。
+  TODO_DESTINATION_NOTION = 2;
 }
 
 message NotionLocation {
