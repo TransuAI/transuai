@@ -13,5 +13,7 @@ public record JobDto(
         String status,
         String errorReason,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        // zh-TW（中文）、en（英文）、auto（自動偵測）
+        String transcriptionLanguage) {
 }

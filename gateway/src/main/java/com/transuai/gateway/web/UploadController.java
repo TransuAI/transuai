@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcTimestamps;
+import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.UploadMapper;
 import com.transuai.gateway.web.dto.CompleteUploadRequestDto;
 import com.transuai.gateway.web.dto.JobDto;
@@ -64,6 +65,8 @@ public class UploadController {
                                                 .setFileType(FileType.valueOf(request.fileType()))
                                                 .setFileSizeBytes(request.fileSizeBytes())
                                                 .setDurationSeconds(request.durationSeconds())
+                                                .setTranscriptionLanguage(
+                                                                GrpcStrings.nullToEmpty(request.transcriptionLanguage()))
                                                 .build());
                 return UploadMapper.toDto(job);
         }
