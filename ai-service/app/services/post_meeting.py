@@ -22,10 +22,12 @@ from app.repositories.chapter_repository import find_by_job_id as find_chapters
 from app.repositories.connection_repository import find_connection
 from app.repositories.post_meeting_repository import (
     add_proposal,
+    created_proposals,
     find_run,
     finish_run,
     latest_run,
     list_proposals,
+    list_runs,
     lock_proposal,
     record_execution,
     record_model,
@@ -50,6 +52,7 @@ from app.services.agent_tools import (
 from app.services.default_models import get_default_model, resolve_chat_model
 from app.services.event_publisher import connection_params, publish_post_meeting_requested
 from app.services.post_meeting_settings import Settings, get_settings
+from app.services.proposal_identity import describe, fingerprint
 from app.services.llm_client import PLATFORM, ChatModel, LlmError, LlmErrorReason, chat_with_tools
 from app.services.regeneration import STUCK_AFTER
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
@@ -164,15 +167,38 @@ def effective_status(run: PostMeetingRun, now: datetime | None = None) -> tuple[
     return PostMeetingStatus(run.status), run.failure_reason
 
 
-def post_meeting_state(job_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str | None, PostMeetingRun | None, list[ActionProposal]]:
-    """這個 Job 的會後處理：不能跑的原因（能跑是 None）、最新一份紀錄與它的提案。提示另外用 hints() 取得。"""
-    reason = unavailable_reason(user_id)
+@dataclass(frozen=True)
+class RunView:
+    """一份紀錄與它的提案；previously_created 是其中還沒執行、而且跟這個 Job 其他次已經建立過的事項相同（指紋一樣）的提案。"""
+
+    run: PostMeetingRun
+    proposals: list[ActionProposal]
+    previously_created: frozenset[uuid.UUID]
+
+
+def _run_view(session: Session, run: PostMeetingRun, created: list[ActionProposal]) -> RunView:
+    """一份紀錄，標出上次已建立的提案。created 是這個 Job 所有執行成功的提案（created_proposals）；指紋是 migration 0015 之前
+    執行的（欄位是空的）就從參數算。"""
+    elsewhere = {p.fingerprint or fingerprint(p.service, p.kind, p.arguments) for p in created if p.run_id != run.id}
+    proposals = list_proposals(session, run.id)
+    return RunView(run, proposals, frozenset(
+        p.id for p in proposals
+        if p.status == ProposalStatus.PROPOSED and (fp := fingerprint(p.service, p.kind, p.arguments)) and fp in elsewhere))
+
+
+def run_views(job_id: uuid.UUID) -> list[RunView]:
+    """這個 Job 所有的會後處理紀錄，新的在前。"""
     session = new_session()
     try:
-        run = latest_run(session, job_id)
-        return reason, run, list_proposals(session, run.id) if run else []
+        created = created_proposals(session, job_id)
+        return [_run_view(session, run, created) for run in list_runs(session, job_id)]
     finally:
         session.close()
+
+
+def post_meeting_state(job_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str | None, list[RunView]]:
+    """這個 Job 的會後處理：不能跑的原因（能跑是 None）與所有的紀錄（新的在前）。提示另外用 hints() 取得。"""
+    return unavailable_reason(user_id), run_views(job_id)
 
 
 def _queue(run_id: str, job_id: str, user_id: str) -> None:
@@ -333,7 +359,16 @@ def _service_rules(setup: _ServiceSetup) -> str:
     return "\n" + "\n".join(lines)
 
 
-def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str], service_rules: str) -> str:
+def _already_created(job_id: uuid.UUID) -> str:
+    """系統提示裡這個 Job 之前的會後處理已經建立過的事項；沒有就是空的。"""
+    created = _in_session(lambda s: [describe(p.kind, p.arguments) for p in created_proposals(s, job_id)])
+    if not created:
+        return ""
+    return "\n- 這個 Job 之前的會後處理已經建立過這些事項，不要再提一次：" + "".join(f"\n  - {line}" for line in created)
+
+
+def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str], extra_rules: str) -> str:
+    """extra_rules：外部服務的規則與這個 Job 已經建立過的事項，每條一行、開頭換行。"""
     uploaded = run.uploaded_at.astimezone(ZoneInfo(run.timezone))
     speakers = "、".join(content.speakers) if len(content.speakers) >= 2 else "（只有一位講者，或沒有講者資訊）"
     return f"""你是會後處理助手：讀這場會議（一段錄音的逐字稿、摘要、章節），查使用者連結的服務（例如行事曆），把會後該做的事整理成「行動提案」，交給使用者確認。
@@ -343,7 +378,7 @@ def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[s
 - 寫入類工具（{"、".join(write_tools) or "目前沒有"}）不會真的執行，只會記成提案，等使用者確認；同一件事只提一次。
 - 只提會議裡真的談到、有根據，而且是這位使用者或團隊要做的事；不要自己編日期或內容。
 - 相對日期（明天、下週三、兩週後）依錄音上傳時間換算：上傳時間是 {uploaded.isoformat()}（星期{_WEEKDAYS[uploaded.weekday()]}），使用者時區是 {run.timezone}。
-- 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。{service_rules}
+- 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。{extra_rules}
 - 你總共最多只能呼叫 {MAX_TOOL_CALLS} 次工具（讀取加寫入），到了就會被停下。先讀摘要與章節，真的需要細節才搜尋逐字稿，要留足夠的次數給提案。可以一次呼叫多個工具。
 - 做完就直接回覆一段簡短的說明，不要再呼叫工具。"""
 
@@ -383,7 +418,8 @@ def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_
     tools = {tool.name: tool for tool in job_tools(content) + service_tools}
     schemas = [tool.schema() for tool in tools.values()]
     writes = [tool.name for tool in tools.values() if tool.kind == ToolKind.WRITE]
-    messages: list[dict] = [{"role": "system", "content": _system_prompt(run, content, writes, _service_rules(setup))},
+    extra_rules = _service_rules(setup) + _already_created(run.job_id)
+    messages: list[dict] = [{"role": "system", "content": _system_prompt(run, content, writes, extra_rules)},
                             {"role": "user", "content": "請幫我處理這場會議的會後事項。"}]
     meter = UsageMeter(user_id, run.job_id, LlmFeature.POST_MEETING)
     deadline = time.monotonic() + TIME_LIMIT.total_seconds()
@@ -443,7 +479,7 @@ def _call_tool(run_id: uuid.UUID, tool: AgentTool | None, name: str, arguments: 
 
 
 def execute_proposals(job_id: uuid.UUID, user_id: uuid.UUID, run_id: uuid.UUID,
-                      confirmed: list[tuple[uuid.UUID, str]]) -> tuple[PostMeetingRun, list[ActionProposal]]:
+                      confirmed: list[tuple[uuid.UUID, str]]) -> RunView:
     """用使用者確認的最終參數（proposal id, JSON）逐項執行勾選的提案，每項記錄成功（附網址）或失敗（附原因）；沒勾選的
     不動，已經建立過的不再執行。回傳紀錄與它所有的提案。"""
     proposals = _executable_proposals(job_id, run_id)
@@ -457,7 +493,7 @@ def execute_proposals(job_id: uuid.UUID, user_id: uuid.UUID, run_id: uuid.UUID,
 
 
 def retry_proposal(job_id: uuid.UUID, user_id: uuid.UUID, run_id: uuid.UUID,
-                   proposal_id: uuid.UUID) -> tuple[PostMeetingRun, list[ActionProposal]]:
+                   proposal_id: uuid.UUID) -> RunView:
     """用上一次的最終參數重試一個失敗的提案。"""
     proposals = _executable_proposals(job_id, run_id)
     proposal = proposals.get(proposal_id)
@@ -501,7 +537,9 @@ def _execute(proposal_id: uuid.UUID, arguments_json: str, tools: dict[str, Agent
             return
         status, arguments, url, reason = _call_service(proposal, arguments_json, tools)
         record_execution(session, proposal, status, arguments=arguments, executed_at=datetime.now(timezone.utc),
-                         result_url=url, failure_reason=reason)
+                         result_url=url, failure_reason=reason,
+                         fingerprint=fingerprint(proposal.service, proposal.kind, arguments)
+                         if status == ProposalStatus.DONE else None)
         logger.info("proposal %s (%s): %s", proposal_id, proposal.tool, status)
     finally:
         session.close()
@@ -528,11 +566,11 @@ def _call_service(proposal: ActionProposal, arguments_json: str,
         return ProposalStatus.FAILED, arguments, None, str(exc)
 
 
-def _run_with_proposals(job_id: uuid.UUID, run_id: uuid.UUID) -> tuple[PostMeetingRun, list[ActionProposal]]:
+def _run_with_proposals(job_id: uuid.UUID, run_id: uuid.UUID) -> RunView:
     session = new_session()
     try:
         run = find_run(session, job_id, run_id)
         assert run is not None
-        return run, list_proposals(session, run_id)
+        return _run_view(session, run, created_proposals(session, job_id))
     finally:
         session.close()

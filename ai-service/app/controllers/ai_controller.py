@@ -48,12 +48,14 @@ from app.services.post_meeting import (
     PostMeetingNotQueued,
     RunNotFound,
     RunStillGoing,
+    RunView,
     UnknownProposal,
     execute_proposals,
     hints,
     post_meeting_state,
     request_post_meeting,
     retry_proposal,
+    run_views,
 )
 from app.services.post_meeting import effective_status as post_meeting_effective_status
 from app.services.post_meeting_settings import (
@@ -77,9 +79,7 @@ from app.services.quizzes import (
     submit_attempt,
 )
 from app.models import (
-    ActionProposal,
     ConnectionStatus,
-    PostMeetingRun,
     PostMeetingStatus,
     ProposalStatus,
     Quiz,
@@ -451,12 +451,9 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
     def GetPostMeeting(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
-        reason, run, proposals = post_meeting_state(job_id, user_id)
-        response = ai_pb2.PostMeeting(available=reason is None, unavailable_reason=reason or "",
+        reason, views = post_meeting_state(job_id, user_id)
+        return _post_meeting_to_proto(views, available=reason is None, unavailable_reason=reason or "",
                                       hints=hints(user_id) if reason is None else [])
-        if run is not None:
-            response.latest_run.CopyFrom(_post_meeting_run_to_proto(run, proposals))
-        return response
 
     def RequestPostMeeting(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
@@ -464,14 +461,14 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         if not request.HasField("uploaded_at"):
             _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "uploaded_at is required")
         try:
-            run = request_post_meeting(job_id, user_id, request.timezone, request.uploaded_at.ToDatetime(timezone.utc))
+            request_post_meeting(job_id, user_id, request.timezone, request.uploaded_at.ToDatetime(timezone.utc))
         except InvalidTimezone:
             _abort(context, grpc.StatusCode.INVALID_ARGUMENT, f"不認得的時區：{request.timezone}")
         except NotAvailable as exc:
             _abort(context, grpc.StatusCode.FAILED_PRECONDITION, str(exc))
         except PostMeetingNotQueued:
             _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法開始會後處理，請稍後再試")
-        return ai_pb2.PostMeeting(available=True, latest_run=_post_meeting_run_to_proto(run, []))
+        return _post_meeting_to_proto(run_views(job_id), available=True)
 
 
     def ExecuteProposals(self, request, context):
@@ -490,7 +487,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
 
     def _run_after_proposals(self, context, work):
         try:
-            run, proposals = work()
+            view = work()
         except RunNotFound:
             _abort(context, grpc.StatusCode.NOT_FOUND, "post-meeting run not found")
         except RunStillGoing:
@@ -499,7 +496,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "有提案不屬於這次會後處理")
         except NotRetryable:
             _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "只有失敗的提案可以重試")
-        return _post_meeting_run_to_proto(run, proposals)
+        return _post_meeting_run_to_proto(view)
 
 
     def GetPostMeetingSettings(self, request, context):
@@ -554,7 +551,16 @@ _POST_MEETING_STATUS = {
 }
 
 
-def _post_meeting_run_to_proto(run: PostMeetingRun, proposals: Sequence[ActionProposal]) -> ai_pb2.PostMeetingRun:
+def _post_meeting_to_proto(views: Sequence[RunView], *, available: bool, unavailable_reason: str = "",
+                           hints: Sequence[str] = ()) -> ai_pb2.PostMeeting:
+    """views 是這個 Job 所有的紀錄，新的在前：第一份是 latest_run，其他是 earlier_runs。"""
+    return ai_pb2.PostMeeting(available=available, unavailable_reason=unavailable_reason, hints=hints,
+                              latest_run=_post_meeting_run_to_proto(views[0]) if views else None,
+                              earlier_runs=[_post_meeting_run_to_proto(view) for view in views[1:]])
+
+
+def _post_meeting_run_to_proto(view: RunView) -> ai_pb2.PostMeetingRun:
+    run, proposals = view.run, view.proposals
     status, failure_reason = post_meeting_effective_status(run)
     message = ai_pb2.PostMeetingRun(
         id=str(run.id), status=_POST_MEETING_STATUS[status], progress=run.progress if status == PostMeetingStatus.RUNNING else "",
@@ -562,7 +568,8 @@ def _post_meeting_run_to_proto(run: PostMeetingRun, proposals: Sequence[ActionPr
         proposals=[ai_pb2.ActionProposal(id=str(p.id), service=p.service, tool=p.tool, kind=p.kind,
                                          arguments_json=json.dumps(p.arguments, ensure_ascii=False),
                                          status=_PROPOSAL_STATUS[ProposalStatus(p.status)], result_url=p.result_url or "",
-                                         failure_reason=p.failure_reason or "") for p in proposals])
+                                         failure_reason=p.failure_reason or "",
+                                         previously_created=p.id in view.previously_created) for p in proposals])
     message.requested_at.FromDatetime(run.requested_at)
     if run.finished_at is not None:
         message.finished_at.FromDatetime(run.finished_at)

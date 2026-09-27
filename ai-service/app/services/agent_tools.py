@@ -98,7 +98,7 @@ def _clock(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def _normalize(text: str) -> str:
+def normalize_text(text: str) -> str:
     """比對用：全形轉半形、小寫、去掉空白與標點。"""
     folded = unicodedata.normalize("NFKC", text).lower()
     return "".join(ch for ch in folded if not (ch.isspace() or unicodedata.category(ch)[0] in "PS"))
@@ -111,12 +111,12 @@ def _bigrams(text: str) -> set[str]:
 def search_lines(lines: list[tuple[float, str | None, str]], query: str, *, limit: int = 8) -> list[str]:
     """關鍵字（空白分隔）出現在片段裡的片段；語音辨識常把字拆開或寫法不同（「3月24日」寫成「3月24上午」），找不到完全
     相同的就改用雙字重疊的比例（至少 3/4）。"""
-    terms = [_normalize(term) for term in query.split() if _normalize(term)]
+    terms = [normalize_text(term) for term in query.split() if normalize_text(term)]
     if not terms:
         raise ToolArgumentError("query 要有關鍵字")
     scored = []
     for start, speaker, text in lines:
-        normalized = _normalize(text)
+        normalized = normalize_text(text)
         score = max(1.0 if term in normalized else
                     len(_bigrams(term) & _bigrams(normalized)) / len(_bigrams(term)) for term in terms)
         if score >= 0.75:
@@ -323,16 +323,29 @@ def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation 
                 "parent": {"page_id": meetings_page.id},
                 "pages": [{"properties": {"title": args["title"]}, "content": args["content"]}]}))))
     if todo_database is not None:
-        def todo_proposal(args: dict[str, Any]) -> dict[str, Any]:
+        def confirmed_todo(args: dict[str, Any]) -> dict[str, Any]:
+            """使用者確認的值：title_property 可以沒有（加上 title_property 之前提的待辦），有的話要是其中一欄。"""
             properties = args.get("properties")
             if not isinstance(properties, dict) or not properties:
                 raise ToolArgumentError("properties 要是物件：欄位名稱對到值")
             if not all(isinstance(value, (str, int, float, bool)) or value is None for value in properties.values()):
                 raise ToolArgumentError("properties 的值要是文字、數字、true/false 或 null")
+            title_property = args.get("title_property")
+            if title_property is not None and title_property not in properties:
+                raise ToolArgumentError("title_property 要是 properties 裡、資料庫的標題（title）欄位的名稱")
             content = args.get("content", "")
             if not isinstance(content, str):
                 raise ToolArgumentError("content 要是文字")
-            return {"properties": properties, "content": content}
+            return {**({"title_property": title_property} if title_property is not None else {}),
+                    "properties": properties, "content": content}
+
+        def todo_proposal(args: dict[str, Any]) -> dict[str, Any]:
+            """模型提的：一定要說哪一欄是標題，而且標題要有內容（認出同一件待辦靠它）。"""
+            todo = confirmed_todo(args)
+            title = todo["properties"].get(todo.get("title_property"))
+            if not isinstance(title, str) or not title.strip():
+                raise ToolArgumentError("title_property 要是 properties 裡、資料庫的標題（title）欄位的名稱，而且要填上待辦的標題")
+            return todo
 
         def create_todo(args: dict[str, Any]) -> str:
             page: dict[str, Any] = {"properties": args["properties"]}
@@ -347,10 +360,11 @@ def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation 
             "人員（person）類型的欄位填不了講者名字，負責人沒有文字欄位可填時寫進 content。依據的時間戳寫進 content。"
             "只會記成提案，等使用者確認。",
             _object({"properties": {"type": "object", "description": "欄位名稱對到值"},
+                     "title_property": {"type": "string", "description": "資料庫的標題（title 類型）欄位的名稱"},
                      "content": {"type": "string", "description": "這筆待辦的內文（Markdown）：依據的時間戳、補充說明"}},
-                    ["properties"]),
+                    ["properties", "title_property"]),
             ToolKind.WRITE, "正在整理行動提案…", todo_proposal, service="notion", proposal_kind="notion_database_item",
-            execute=create_todo))
+            execute=create_todo, check_confirmed=confirmed_todo))
     return tools
 
 

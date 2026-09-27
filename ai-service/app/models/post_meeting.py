@@ -71,6 +71,9 @@ class ActionProposal(Base):
     result_url: Mapped[str | None] = mapped_column(Text)  # 執行成功時，建立好的項目的網址
     failure_reason: Mapped[str | None] = mapped_column(Text)  # 執行失敗時給使用者看的原因
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 執行成功時，建立的是哪一件事（服務、種類、正規化後的標題與時間，見 app/services/proposal_identity.py）：之後的會後處理
+    # 用它認出同一件事被提第二次。
+    fingerprint: Mapped[str | None] = mapped_column(Text)
 
 
 class PostMeetingSettings(Base):

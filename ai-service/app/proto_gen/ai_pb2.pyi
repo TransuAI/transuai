@@ -227,16 +227,18 @@ class RequestPostMeetingRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., timezone: _Optional[str] = ..., uploaded_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class PostMeeting(_message.Message):
-    __slots__ = ("available", "unavailable_reason", "latest_run", "hints")
+    __slots__ = ("available", "unavailable_reason", "latest_run", "hints", "earlier_runs")
     AVAILABLE_FIELD_NUMBER: _ClassVar[int]
     UNAVAILABLE_REASON_FIELD_NUMBER: _ClassVar[int]
     LATEST_RUN_FIELD_NUMBER: _ClassVar[int]
     HINTS_FIELD_NUMBER: _ClassVar[int]
+    EARLIER_RUNS_FIELD_NUMBER: _ClassVar[int]
     available: bool
     unavailable_reason: str
     latest_run: PostMeetingRun
     hints: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, available: _Optional[bool] = ..., unavailable_reason: _Optional[str] = ..., latest_run: _Optional[_Union[PostMeetingRun, _Mapping]] = ..., hints: _Optional[_Iterable[str]] = ...) -> None: ...
+    earlier_runs: _containers.RepeatedCompositeFieldContainer[PostMeetingRun]
+    def __init__(self, available: _Optional[bool] = ..., unavailable_reason: _Optional[str] = ..., latest_run: _Optional[_Union[PostMeetingRun, _Mapping]] = ..., hints: _Optional[_Iterable[str]] = ..., earlier_runs: _Optional[_Iterable[_Union[PostMeetingRun, _Mapping]]] = ...) -> None: ...
 
 class GetPostMeetingSettingsRequest(_message.Message):
     __slots__ = ("user_id",)
@@ -331,7 +333,7 @@ class RetryProposalRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., run_id: _Optional[str] = ..., proposal_id: _Optional[str] = ...) -> None: ...
 
 class ActionProposal(_message.Message):
-    __slots__ = ("id", "service", "kind", "arguments_json", "tool", "status", "result_url", "failure_reason")
+    __slots__ = ("id", "service", "kind", "arguments_json", "tool", "status", "result_url", "failure_reason", "previously_created")
     ID_FIELD_NUMBER: _ClassVar[int]
     SERVICE_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
@@ -340,6 +342,7 @@ class ActionProposal(_message.Message):
     STATUS_FIELD_NUMBER: _ClassVar[int]
     RESULT_URL_FIELD_NUMBER: _ClassVar[int]
     FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
+    PREVIOUSLY_CREATED_FIELD_NUMBER: _ClassVar[int]
     id: str
     service: str
     kind: str
@@ -348,7 +351,8 @@ class ActionProposal(_message.Message):
     status: ProposalStatus
     result_url: str
     failure_reason: str
-    def __init__(self, id: _Optional[str] = ..., service: _Optional[str] = ..., kind: _Optional[str] = ..., arguments_json: _Optional[str] = ..., tool: _Optional[str] = ..., status: _Optional[_Union[ProposalStatus, str]] = ..., result_url: _Optional[str] = ..., failure_reason: _Optional[str] = ...) -> None: ...
+    previously_created: bool
+    def __init__(self, id: _Optional[str] = ..., service: _Optional[str] = ..., kind: _Optional[str] = ..., arguments_json: _Optional[str] = ..., tool: _Optional[str] = ..., status: _Optional[_Union[ProposalStatus, str]] = ..., result_url: _Optional[str] = ..., failure_reason: _Optional[str] = ..., previously_created: _Optional[bool] = ...) -> None: ...
 
 class SubmitQuizAttemptRequest(_message.Message):
     __slots__ = ("job_id", "quiz_id", "user_id", "answers")

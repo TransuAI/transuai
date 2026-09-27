@@ -15,10 +15,10 @@ from unittest.mock import MagicMock, patch
 import grpc
 import httpx2
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db import new_session
-from app.models import ConnectionStatus, OAuthConnection, PostMeetingRun
+from app.models import ActionProposal, ConnectionStatus, OAuthConnection, PostMeetingRun
 from mcp.server.mcpserver import MCPServer
 
 from app.proto_gen import ai_pb2, transcription_pb2
@@ -917,7 +917,7 @@ def test_with_notion_locations_the_agent_can_propose_meeting_notes_and_todos(ai_
     fake_llm.reply_tool_calls([("notion_fetch", {"id": TODO_SOURCE})])
     fake_llm.reply_tool_calls([
         ("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "## 決議\n- 下週三再開會"}),
-        ("notion_create_todo", {"properties": todo, "content": "依據：12:34 金萊說會聯繫搬家公司"}),
+        ("notion_create_todo", {"title_property": "名稱", "properties": todo, "content": "依據：12:34 金萊說會聯繫搬家公司"}),
     ])
     fake_llm.reply("好。")
 
@@ -931,7 +931,7 @@ def test_with_notion_locations_the_agent_can_propose_meeting_notes_and_todos(ai_
     assert (page.service, page.kind, json.loads(page.arguments_json)) == (
         "notion", "notion_page", {"title": "搬家會議紀錄", "content": "## 決議\n- 下週三再開會"})
     assert (item.kind, json.loads(item.arguments_json)) == (
-        "notion_database_item", {"properties": todo, "content": "依據：12:34 金萊說會聯繫搬家公司"})
+        "notion_database_item", {"title_property": "名稱", "properties": todo, "content": "依據：12:34 金萊說會聯繫搬家公司"})
     assert notion_mcp.created() == []  # nothing written yet
 
 
@@ -940,7 +940,7 @@ def test_confirmed_notion_proposals_are_written_where_the_user_said(ai_stub, que
     save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
     fake_llm.reply_tool_calls([
         ("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "內容"}),
-        ("notion_create_todo", {"properties": {"名稱": "聯繫搬家公司"}}),
+        ("notion_create_todo", {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司"}}),
     ])
     fake_llm.reply("好。")
     work(queued)
@@ -948,7 +948,7 @@ def test_confirmed_notion_proposals_are_written_where_the_user_said(ai_stub, que
 
     done_page, done_item = execute(ai_stub, queued, [
         (page.id, {"title": "搬家會議紀錄（定稿）", "content": "內容"}),
-        (item.id, {"properties": {"名稱": "聯繫搬家公司", "負責人": "金萊"}, "content": "依據：12:34"}),
+        (item.id, {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司", "負責人": "金萊"}, "content": "依據：12:34"}),
     ]).proposals
 
     page_call, item_call = notion_mcp.created()
@@ -1119,7 +1119,7 @@ def test_a_todo_proposed_before_the_destination_changed_can_still_be_carried_out
                                                                                  notion_mcp):
     link_notion()
     save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
-    fake_llm.reply_tool_calls([("notion_create_todo", {"properties": {"名稱": "聯繫搬家公司"}})])
+    fake_llm.reply_tool_calls([("notion_create_todo", {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司"}})])
     fake_llm.reply("好。")
     work(queued)
     [proposal] = latest(ai_stub, queued).proposals
@@ -1129,3 +1129,170 @@ def test_a_todo_proposed_before_the_destination_changed_can_still_be_carried_out
 
     assert done.status == ai_pb2.PROPOSAL_STATUS_DONE
     assert len(notion_mcp.created()) == 1
+
+
+
+# --- 歷次紀錄與避免重複 ---
+
+
+def run_again(stub, queued, rabbitmq):
+    """Start another post-meeting run for the same job, once the last one has finished."""
+    run = request(stub, queued.job_id).latest_run
+    (_, message) = published(rabbitmq.channel)[-1]
+    assert message["runId"] == run.id
+    return Queued(queued.job_id, run.id, json.dumps(message).encode())
+
+
+def test_a_second_run_marks_what_the_first_already_created(ai_stub, queued, fake_llm, calendar, rabbitmq):
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING), ("gmail_create_draft", MINUTES)])
+    fake_llm.reply("好。")
+    work(queued)
+    meeting, _draft = latest(ai_stub, queued).proposals
+    execute(ai_stub, queued, [(meeting.id, NEXT_MEETING)])  # only the meeting is carried out
+    second = run_again(ai_stub, queued, rabbitmq)
+    same_meeting = {**NEXT_MEETING, "summary": " 搬家確認會議！", "start": "2026-11-18T06:00:00Z",
+                    "end": "2026-11-18T07:00:00Z"}  # the same event, written differently
+    fake_llm.reply_tool_calls([("calendar_create_event", same_meeting), ("gmail_create_draft", MINUTES),
+                               ("calendar_create_event", {**NEXT_MEETING, "start": "2026-11-25T14:00:00+08:00",
+                                                          "end": "2026-11-25T15:00:00+08:00"})])
+    fake_llm.reply("好。")
+
+    work(second)
+
+    state = get(ai_stub, queued.job_id)
+    assert state.latest_run.id == second.run_id
+    assert [p.previously_created for p in state.latest_run.proposals] == [True, False, False]  # the draft was never made
+
+
+def test_the_fingerprint_is_of_what_was_actually_created(ai_stub, queued, fake_llm, calendar, rabbitmq):
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])
+    fake_llm.reply("好。")
+    work(queued)
+    [meeting] = latest(ai_stub, queued).proposals
+    execute(ai_stub, queued, [(meeting.id, {**NEXT_MEETING, "summary": "搬家分工確認"})])  # renamed before creating
+    second = run_again(ai_stub, queued, rabbitmq)
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING),
+                               ("calendar_create_event", {**NEXT_MEETING, "summary": "搬家分工確認"})])
+    fake_llm.reply("好。")
+
+    work(second)
+
+    assert [p.previously_created for p in latest(ai_stub, queued).proposals] == [False, True]
+
+
+def test_a_failed_proposal_is_not_counted_as_created(ai_stub, queued, fake_llm, calendar, rabbitmq):
+    calendar.create_replies.append(httpx2.Response(403, json={"error": {"message": "Forbidden"}}))
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])
+    fake_llm.reply("好。")
+    work(queued)
+    [meeting] = latest(ai_stub, queued).proposals
+    execute(ai_stub, queued, [(meeting.id, NEXT_MEETING)])
+    second = run_again(ai_stub, queued, rabbitmq)
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])
+    fake_llm.reply("好。")
+
+    work(second)
+
+    [again] = latest(ai_stub, queued).proposals
+    assert not again.previously_created
+
+
+def test_the_agent_is_told_what_this_job_already_created(ai_stub, queued, fake_llm, calendar, tasks, rabbitmq):
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING), ("tasks_create_task", TODO)])
+    fake_llm.reply("好。")
+    work(queued)
+    meeting, todo = latest(ai_stub, queued).proposals
+    execute(ai_stub, queued, [(meeting.id, NEXT_MEETING), (todo.id, TODO)])
+    second = run_again(ai_stub, queued, rabbitmq)
+    fake_llm.reply("好。")
+
+    work(second)
+
+    system = fake_llm.bodies()[-1]["messages"][0]["content"]
+    assert "已經建立過" in system
+    assert "搬家確認會議" in system and "聯繫搬家公司" in system
+
+
+def test_earlier_runs_are_listed_newest_first_with_what_was_carried_out(ai_stub, queued, fake_llm, calendar,
+                                                                         rabbitmq):
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING), ("gmail_create_draft", MINUTES)])
+    fake_llm.reply("好。")
+    work(queued)
+    meeting, draft = latest(ai_stub, queued).proposals
+    execute(ai_stub, queued, [(meeting.id, NEXT_MEETING)])
+    second = run_again(ai_stub, queued, rabbitmq)
+    fake_llm.reply("好。")
+    work(second)
+    third = run_again(ai_stub, queued, rabbitmq)
+    fake_llm.reply("好。")
+    work(third)
+
+    state = get(ai_stub, queued.job_id)
+
+    assert state.latest_run.id == third.run_id
+    assert [run.id for run in state.earlier_runs] == [second.run_id, queued.run_id]
+    first = state.earlier_runs[1]
+    assert [(p.id, p.status) for p in first.proposals] == [
+        (meeting.id, ai_pb2.PROPOSAL_STATUS_DONE), (draft.id, ai_pb2.PROPOSAL_STATUS_PROPOSED)]
+    assert first.proposals[0].result_url == "https://www.google.com/calendar/event?eid=evt-1"
+
+
+def test_a_notion_todo_names_its_title_property(ai_stub, queued, fake_llm, calendar, notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_todo", {"title_property": "標題", "properties": {"名稱": "聯繫搬家公司"}})])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    assert list(latest(ai_stub, queued).proposals) == []
+    [result] = tool_results(fake_llm.bodies()[1])
+    assert result.startswith("錯誤") and "title_property" in result
+
+
+def test_a_notion_todo_needs_a_value_in_its_title_property(ai_stub, queued, fake_llm, calendar, notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_todo", {"title_property": "名稱", "properties": {"名稱": "", "負責人": "金萊"}})])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    assert list(latest(ai_stub, queued).proposals) == []
+
+
+def test_a_notion_todo_proposed_before_title_property_existed_can_still_be_carried_out(ai_stub, queued, fake_llm,
+                                                                                       calendar, notion_mcp,
+                                                                                       db_session):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_todo", {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司"}})])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+    legacy = {"properties": {"名稱": "聯繫搬家公司"}, "content": ""}
+    db_session.execute(update(ActionProposal).where(ActionProposal.id == uuid.UUID(proposal.id)).values(arguments=legacy))
+    db_session.commit()
+
+    [done] = execute(ai_stub, queued, [(proposal.id, legacy)]).proposals
+
+    assert done.status == ai_pb2.PROPOSAL_STATUS_DONE
+
+
+def test_what_was_created_before_fingerprints_were_recorded_is_still_recognised(ai_stub, queued, fake_llm, calendar,
+                                                                               rabbitmq, db_session):
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])
+    fake_llm.reply("好。")
+    work(queued)
+    [meeting] = latest(ai_stub, queued).proposals
+    execute(ai_stub, queued, [(meeting.id, NEXT_MEETING)])
+    db_session.execute(update(ActionProposal).values(fingerprint=None))  # as if carried out before migration 0015
+    db_session.commit()
+    second = run_again(ai_stub, queued, rabbitmq)
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])
+    fake_llm.reply("好。")
+
+    work(second)
+
+    [again] = latest(ai_stub, queued).proposals
+    assert again.previously_created

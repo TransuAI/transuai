@@ -12,6 +12,20 @@ def latest_run(session: Session, job_id: uuid.UUID) -> PostMeetingRun | None:
                           .order_by(PostMeetingRun.requested_at.desc(), PostMeetingRun.id).limit(1))
 
 
+def list_runs(session: Session, job_id: uuid.UUID) -> list[PostMeetingRun]:
+    """這個 Job 所有的會後處理紀錄，新的在前。"""
+    return list(session.scalars(select(PostMeetingRun).where(PostMeetingRun.job_id == job_id)
+                                .order_by(PostMeetingRun.requested_at.desc(), PostMeetingRun.id)))
+
+
+def created_proposals(session: Session, job_id: uuid.UUID) -> list[ActionProposal]:
+    """這個 Job 所有執行成功的提案（依執行時間）。"""
+    return list(session.scalars(
+        select(ActionProposal).join(PostMeetingRun, ActionProposal.run_id == PostMeetingRun.id)
+        .where(PostMeetingRun.job_id == job_id, ActionProposal.status == ProposalStatus.DONE)
+        .order_by(ActionProposal.executed_at)))
+
+
 def list_proposals(session: Session, run_id: uuid.UUID) -> list[ActionProposal]:
     return list(session.scalars(select(ActionProposal).where(ActionProposal.run_id == run_id)
                                 .order_by(ActionProposal.position)))
@@ -71,8 +85,10 @@ def lock_proposal(session: Session, proposal_id: uuid.UUID) -> ActionProposal | 
 
 
 def record_execution(session: Session, proposal: ActionProposal, status: ProposalStatus, *, arguments: dict,
-                     executed_at: datetime, result_url: str | None = None, failure_reason: str | None = None) -> None:
+                     executed_at: datetime, result_url: str | None = None, failure_reason: str | None = None,
+                     fingerprint: str | None = None) -> None:
     proposal.status = status
+    proposal.fingerprint = fingerprint
     proposal.arguments = arguments
     proposal.result_url = result_url
     proposal.failure_reason = failure_reason
