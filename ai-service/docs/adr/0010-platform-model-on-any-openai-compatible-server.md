@@ -24,7 +24,7 @@ HF 免費帳號每月只有 US$0.10：開發時跑幾次會後處理就用完（
 - **本機開發**：用 Docker 跑 Ollama（`--gpus all`，`infra/scripts/ollama.sh`），模型存在 Docker volume；上下文長度 32K
   （1 小時的逐字稿約 2.5 萬 token），KV cache 用 q8 省顯示記憶體。k8s 裡的 pod 經由 Docker Desktop 的
   `host.docker.internal:11434` 連到它（實測連得到）。一般生成用 `qwen3.5:9b`，會後處理先用 `qwen3:14b`（實測兩個都會正確
-  呼叫工具、換算相對日期），之後由實測決定（見 `.scratch/local-platform-model/issues/03`）。
+  呼叫工具、換算相對日期）；實測後確定用 `qwen3:14b`（ADR 0011）。
 - **上雲**：程式不改，只換設定——起步用託管 API（依用量付費，不用管 GPU），使用量大而穩定、或資料不能離開自己環境時，
   再在 k8s 開 GPU 節點自架 vLLM，把 `PLATFORM_LLM_BASE_URL` 指向叢集內的服務。
 
