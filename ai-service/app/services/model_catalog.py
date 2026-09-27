@@ -24,9 +24,11 @@ CURATED_MODELS: dict[str, list[ModelChoice]] = {
         ModelChoice("anthropic", "claude-sonnet-5", True),
         ModelChoice("anthropic", "claude-haiku-4-5-20251001", True),
     ],
+    # 2.5 系列只給以前用過的帳號（新帳號回 404「no longer available to new users」），改列 3.x（2026-09 查 Google 的模型頁）。
     "gemini": [
-        ModelChoice("gemini", "gemini-2.5-pro", True),
-        ModelChoice("gemini", "gemini-2.5-flash", True),
+        ModelChoice("gemini", "gemini-3.1-pro-preview", True),
+        ModelChoice("gemini", "gemini-3.8-flash", True),
+        ModelChoice("gemini", "gemini-3.5-flash-lite", True),
     ],
 }
 
