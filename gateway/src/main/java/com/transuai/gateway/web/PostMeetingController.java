@@ -149,7 +149,8 @@ public class PostMeetingController {
 
     private PostMeetingDto toDto(PostMeeting postMeeting) {
         return new PostMeetingDto(postMeeting.getAvailable(), GrpcStrings.emptyToNull(postMeeting.getUnavailableReason()),
-                postMeeting.hasLatestRun() ? toDto(postMeeting.getLatestRun()) : null, postMeeting.getHintsList());
+                postMeeting.hasLatestRun() ? toDto(postMeeting.getLatestRun()) : null, postMeeting.getHintsList(),
+                postMeeting.getEarlierRunsList().stream().map(this::toDto).toList());
     }
 
     private PostMeetingRunDto toDto(PostMeetingRun run) {
@@ -166,7 +167,8 @@ public class PostMeetingController {
             return new ActionProposalDto(proposal.getId(), proposal.getService(), proposal.getTool(), proposal.getKind(),
                     objectMapper.readTree(proposal.getArgumentsJson()),
                     proposal.getStatus().name().replace("PROPOSAL_STATUS_", ""),
-                    GrpcStrings.emptyToNull(proposal.getResultUrl()), GrpcStrings.emptyToNull(proposal.getFailureReason()));
+                    GrpcStrings.emptyToNull(proposal.getResultUrl()), GrpcStrings.emptyToNull(proposal.getFailureReason()),
+                    proposal.getPreviouslyCreated());
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("ai-service sent proposal arguments that are not JSON", e);
         }
