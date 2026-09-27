@@ -72,6 +72,8 @@ message Job {
   string error_reason = 9;
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
+  // 轉錄語言：zh-TW（中文）、en（英文）、auto（自動偵測中文或英文）。這個欄位之前建立的 Job 是空字串，當成中文。
+  string transcription_language = 12;
 }
 
 message GetPresignedUploadUrlRequest {
@@ -92,6 +94,8 @@ message CompleteUploadRequest {
   FileType file_type = 3;
   int64 file_size_bytes = 4;
   int32 duration_seconds = 5;
+  // 轉錄語言：zh-TW（中文）、en（英文）、auto（自動偵測中文或英文）；空字串是中文。其他值回 INVALID_ARGUMENT。
+  string transcription_language = 6;
 }
 
 message GetJobRequest {
