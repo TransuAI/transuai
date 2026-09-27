@@ -11,8 +11,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
@@ -26,6 +24,8 @@ import com.transuai.gateway.web.dto.UpdatePostMeetingSettingsDto;
 import com.transuai.upload.grpc.v1.Job;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 import transuai.ai.v1.Ai.ActionProposal;
 import transuai.ai.v1.Ai.ExecuteProposalsRequest;
 import transuai.ai.v1.Ai.GetPostMeetingRequest;
@@ -48,7 +48,9 @@ public class PostMeetingController {
 
     private final AiServiceGrpc.AiServiceBlockingStub aiServiceStub;
     private final JobOwnershipGuard jobOwnershipGuard;
-    private final ObjectMapper objectMapper;
+    // Spring MVC 用的是 Jackson 3（tools.jackson），DTO 裡的 JsonNode 也要是 Jackson 3 的，才會照 JSON 讀寫。
+    // 自己建一個、不注入，理由跟 AiController / JwtAuthenticationFilter 一樣（注入 ObjectMapper 會讓 context 起不來）。
+    private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
     @GetMapping("/jobs/{jobId}/post-meeting")
     public PostMeetingDto getPostMeeting(@CurrentUserId UUID userId, @PathVariable String jobId) {
@@ -165,11 +167,11 @@ public class PostMeetingController {
     private ActionProposalDto toDto(ActionProposal proposal) {
         try {
             return new ActionProposalDto(proposal.getId(), proposal.getService(), proposal.getTool(), proposal.getKind(),
-                    objectMapper.readTree(proposal.getArgumentsJson()),
+                    jsonMapper.readTree(proposal.getArgumentsJson()),
                     proposal.getStatus().name().replace("PROPOSAL_STATUS_", ""),
                     GrpcStrings.emptyToNull(proposal.getResultUrl()), GrpcStrings.emptyToNull(proposal.getFailureReason()),
                     proposal.getPreviouslyCreated());
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("ai-service sent proposal arguments that are not JSON", e);
         }
     }
