@@ -516,7 +516,7 @@ export function PostMeetingSection({ postMeeting, onStart, isStarting, onExecute
       {(run?.status === 'COMPLETED' || run?.status === 'LIMIT_REACHED') && (
         <>
           {run.status === 'LIMIT_REACHED' && (
-            <p className="text-xs text-muted-foreground">已達上限（工具呼叫次數或時間），以下是已經整理好的提案。</p>
+            <p className="text-xs text-muted-foreground">已達上限（模型呼叫次數、工具呼叫次數或時間），以下是已經整理好的提案。</p>
           )}
           <ProposalList
             key={run.id}
