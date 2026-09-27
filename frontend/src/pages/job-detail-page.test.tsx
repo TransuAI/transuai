@@ -2588,60 +2588,87 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     expect(within(card()).getByRole('button', { name: '執行勾選的項目' })).toBeDisabled()
   })
 
-  it('writes meeting notes and a todo into the Notion places the user chose', async () => {
+  it('writes one Notion page per meeting with its notes and an editable todo list', async () => {
     const notesPage = {
       ...nextMeeting,
       id: 'p-4',
       service: 'notion',
       tool: 'notion_create_meeting_page',
       kind: 'notion_page',
-      arguments: { title: '搬家會議紀錄', content: '## 決議\n- 下週三再開會' },
-    }
-    const todo = {
-      ...nextMeeting,
-      id: 'p-5',
-      service: 'notion',
-      tool: 'notion_create_todo',
-      kind: 'notion_database_item',
       arguments: {
-        title_property: '名稱',
-        properties: { 名稱: '聯繫搬家公司', 負責人: '金萊', 期限: '2026-11-20' },
-        content: '依據：12:34',
+        title: '搬家會議紀錄',
+        content: '## 決議\n- 下週三再開會',
+        todos: [
+          { title: '聯繫搬家公司', assignee: '金萊', due: '2026-11-20', timestamp: '12:34' },
+          { title: '整理停車位調查' },
+        ],
       },
     }
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,
       unavailableReason: null,
       hints: [], earlierRuns: [],
-      latestRun: run({ proposals: [notesPage, todo] }),
+      latestRun: run({ proposals: [notesPage] }),
     })
     const user = await renderCard()
-    const page = await within(card()).findByRole('group', { name: 'Notion 頁面：搬家會議紀錄' })
-    expect(within(page).getByLabelText('內容')).toHaveValue('## 決議\n- 下週三再開會')
-    const item = within(card()).getByRole('group', { name: 'Notion 待辦：聯繫搬家公司' })
-    expect(within(item).getByLabelText('期限')).toHaveValue('2026-11-20')
-    expect(within(item).getByLabelText('內文')).toHaveValue('依據：12:34')
+    const page = await within(card()).findByRole('group', { name: 'Notion 會議紀錄：搬家會議紀錄' })
+    expect(within(page).getByLabelText('會議紀錄')).toHaveValue('## 決議\n- 下週三再開會')
+    expect(within(page).getByLabelText('待辦 1')).toHaveValue('聯繫搬家公司')
+    expect(within(page).getByLabelText('待辦 1 期限')).toHaveValue('2026-11-20')
     vi.mocked(postMeetingApi.execute).mockResolvedValue(
-      run({ proposals: [{ ...notesPage, status: 'DONE', resultUrl: 'https://www.notion.so/new-1' }, { ...todo, status: 'DONE' }] }),
+      run({ proposals: [{ ...notesPage, status: 'DONE', resultUrl: 'https://app.notion.com/p/new1' }] }),
     )
 
-    await user.clear(within(item).getByLabelText('負責人'))
-    await user.type(within(item).getByLabelText('負責人'), '王經理')
+    await user.clear(within(page).getByLabelText('待辦 1 負責人'))
+    await user.type(within(page).getByLabelText('待辦 1 負責人'), '王經理')
+    await user.click(within(page).getByRole('button', { name: '刪除待辦 2' }))
+    await user.click(within(page).getByRole('button', { name: '新增待辦' }))
+    await user.type(within(page).getByLabelText('待辦 2'), '訂餐廳')
     await user.click(within(card()).getByRole('button', { name: '執行勾選的項目' }))
 
     const [[, , items]] = vi.mocked(postMeetingApi.execute).mock.calls
     expect(items).toEqual([
-      { proposalId: 'p-4', arguments: { title: '搬家會議紀錄', content: '## 決議\n- 下週三再開會' } },
       {
-        proposalId: 'p-5',
+        proposalId: 'p-4',
         arguments: {
-          title_property: '名稱',
-          properties: { 名稱: '聯繫搬家公司', 負責人: '王經理', 期限: '2026-11-20' },
-          content: '依據：12:34',
+          title: '搬家會議紀錄',
+          content: '## 決議\n- 下週三再開會',
+          todos: [
+            { title: '聯繫搬家公司', assignee: '王經理', due: '2026-11-20', timestamp: '12:34' },
+            { title: '訂餐廳', assignee: '', due: '', timestamp: '' },
+          ],
         },
       },
     ])
-    expect(await within(card()).findByRole('link', { name: '在 Notion 開啟' })).toHaveAttribute('href', 'https://www.notion.so/new-1')
+    expect(await within(card()).findByRole('link', { name: '在 Notion 開啟' })).toHaveAttribute(
+      'href',
+      'https://app.notion.com/p/new1',
+    )
+  })
+
+  it('will not send a Notion page with a todo left blank', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      hints: [], earlierRuns: [],
+      latestRun: run({
+        proposals: [{
+          ...nextMeeting,
+          id: 'p-4',
+          service: 'notion',
+          tool: 'notion_create_meeting_page',
+          kind: 'notion_page',
+          arguments: { title: '搬家會議紀錄', content: '內容', todos: [] },
+        }],
+      }),
+    })
+    const user = await renderCard()
+    const page = await within(card()).findByRole('group', { name: 'Notion 會議紀錄：搬家會議紀錄' })
+
+    await user.click(within(page).getByRole('button', { name: '新增待辦' }))
+
+    expect(within(page).getByText('每條待辦都要填內容')).toBeInTheDocument()
+    expect(within(card()).getByRole('button', { name: '執行勾選的項目' })).toBeDisabled()
   })
 
   it('creates a todo in Google Tasks with the owner and due date the user confirmed', async () => {

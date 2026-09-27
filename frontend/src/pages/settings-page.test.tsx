@@ -41,7 +41,6 @@ beforeEach(() => {
   ])
   vi.mocked(postMeetingSettingsApi.get).mockResolvedValue({
     notionMeetingsPage: null,
-    notionTodoDatabase: null,
     todoDestination: 'GOOGLE_TASKS',
   })
 })
@@ -390,60 +389,64 @@ describe('SettingsPage linked accounts (已連結的帳號)', () => {
 
 describe('SettingsPage post-meeting settings (會後處理)', () => {
   const PAGE_URL = 'https://www.notion.so/Team/Meeting-notes-1f2e3d4c5b6a47889900aabbccddeeff'
-  const DB_URL = 'https://www.notion.so/Team/Todos-aabbccddeeff00112233445566778899'
 
   async function renderPostMeeting() {
     await renderSettings()
     return screen.findByRole('region', { name: '會後處理' })
   }
 
-  it('shows where Notion meeting notes and todos go', async () => {
+  it('says plainly what the Notion page is for and where to copy its link, without asking to share anything', async () => {
     vi.mocked(postMeetingSettingsApi.get).mockResolvedValue({
       notionMeetingsPage: { id: 'page-1', title: 'Meeting notes', url: PAGE_URL },
-      notionTodoDatabase: null,
       todoDestination: 'GOOGLE_TASKS',
     })
     const section = await renderPostMeeting()
 
-    expect(await within(section).findByLabelText('Notion 會議紀錄頁面')).toHaveValue(PAGE_URL)
+    expect(await within(section).findByLabelText('Notion 會議紀錄位置')).toHaveValue(PAGE_URL)
     expect(within(section).getByText('目前：Meeting notes')).toBeInTheDocument()
-    expect(within(section).getByLabelText('Notion 待辦資料庫')).toHaveValue('')
+    expect(within(section).getByText(/每場會議會在這個頁面底下新增一頁/)).toBeInTheDocument()
+    expect(within(section).getByText(/複製連結/)).toBeInTheDocument()
+    expect(within(section).queryByText(/分享給/)).not.toBeInTheDocument()
+    expect(within(section).queryByLabelText(/待辦資料庫/)).not.toBeInTheDocument()
     expect(within(section).getByRole('radio', { name: 'Google Tasks' })).toBeChecked()
   })
 
-  it('saves the places after Notion confirms them', async () => {
+  it('saves the Notion page and where todos go', async () => {
     const user = userEvent.setup()
     vi.mocked(postMeetingSettingsApi.update).mockResolvedValue({
       notionMeetingsPage: { id: 'page-1', title: 'Meeting notes', url: PAGE_URL },
-      notionTodoDatabase: { id: 'collection://x', title: '團隊待辦', url: DB_URL },
       todoDestination: 'NOTION',
     })
     const section = await renderPostMeeting()
 
-    await user.type(await within(section).findByLabelText('Notion 會議紀錄頁面'), PAGE_URL)
-    await user.type(within(section).getByLabelText('Notion 待辦資料庫'), DB_URL)
-    await user.click(within(section).getByRole('radio', { name: 'Notion' }))
+    await user.type(await within(section).findByLabelText('Notion 會議紀錄位置'), PAGE_URL)
+    await user.click(within(section).getByRole('radio', { name: 'Notion 會議紀錄裡（打勾清單）' }))
     await user.click(within(section).getByRole('button', { name: '儲存' }))
 
-    expect(postMeetingSettingsApi.update).toHaveBeenCalledWith({
-      notionMeetingsPageUrl: PAGE_URL,
-      notionTodoDatabaseUrl: DB_URL,
-      todoDestination: 'NOTION',
-    })
-    expect(await within(section).findByText('目前：團隊待辦')).toBeInTheDocument()
-    expect(within(section).getByRole('radio', { name: 'Notion' })).toBeChecked()
+    expect(postMeetingSettingsApi.update).toHaveBeenCalledWith({ notionMeetingsPageUrl: PAGE_URL, todoDestination: 'NOTION' })
+    expect(await within(section).findByText('目前：Meeting notes')).toBeInTheDocument()
+    expect(within(section).getByRole('radio', { name: 'Notion 會議紀錄裡（打勾清單）' })).toBeChecked()
   })
 
-  it('says why Notion would not take a place', async () => {
+  it('asks for the Notion page when todos are to go into it', async () => {
+    const user = userEvent.setup()
+    const section = await renderPostMeeting()
+
+    await user.click(await within(section).findByRole('radio', { name: 'Notion 會議紀錄裡（打勾清單）' }))
+
+    expect(within(section).getByText(/請先填上 Notion 會議紀錄位置/)).toBeInTheDocument()
+  })
+
+  it('says why Notion would not take a page', async () => {
     const user = userEvent.setup()
     vi.mocked(postMeetingSettingsApi.update).mockRejectedValue(
-      new ApiError(400, { error: 'INVALID_ARGUMENT', message: '這不是 Notion 資料庫，待辦要寫進資料庫' }),
+      new ApiError(400, { error: 'INVALID_ARGUMENT', message: '這是 Notion 資料庫，請改貼一個一般頁面的連結' }),
     )
     const section = await renderPostMeeting()
 
-    await user.type(await within(section).findByLabelText('Notion 待辦資料庫'), PAGE_URL)
+    await user.type(await within(section).findByLabelText('Notion 會議紀錄位置'), PAGE_URL)
     await user.click(within(section).getByRole('button', { name: '儲存' }))
 
-    expect(await within(section).findByText('這不是 Notion 資料庫，待辦要寫進資料庫')).toBeInTheDocument()
+    expect(await within(section).findByText('這是 Notion 資料庫，請改貼一個一般頁面的連結')).toBeInTheDocument()
   })
 })

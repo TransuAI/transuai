@@ -300,27 +300,25 @@ export interface PostMeeting {
   earlierRuns: PostMeetingRun[]
 }
 
-/** A place in Notion: a page, or a database (its id is then the data source, collection://…). */
+/** A Notion page. */
 export interface NotionLocation {
   id: string
   title: string
   url: string | null
 }
 
-/** Where 會後處理 puts todos: the user's Google Tasks, or their Notion todo database. */
+/** Where 會後處理 puts todos: the user's Google Tasks, or a checklist in each meeting's Notion page. */
 export type TodoDestination = 'GOOGLE_TASKS' | 'NOTION'
 
-/** Where 會後處理 writes in Notion (null when not chosen), and where todos go. */
+/** Where each meeting's Notion page goes, as a sub-page (null when not chosen), and where todos go. */
 export interface PostMeetingSettings {
   notionMeetingsPage: NotionLocation | null
-  notionTodoDatabase: NotionLocation | null
   todoDestination: TodoDestination
 }
 
-/** Saving 會後處理's settings: empty URLs mean not chosen. */
+/** Saving 會後處理's settings: an empty URL means not chosen. */
 export interface PostMeetingSettingsUpdate {
   notionMeetingsPageUrl: string
-  notionTodoDatabaseUrl: string
   todoDestination: TodoDestination
 }
 

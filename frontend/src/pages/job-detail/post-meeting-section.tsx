@@ -101,13 +101,32 @@ function EmailDraftFields({ id, draft, set }: { id: string; draft: Draft; set: S
   )
 }
 
+// One todo in a meeting's Notion page (ai-service docs/adr/0009); blank fields are sent as "" and dropped there.
+interface MeetingTodo {
+  title: string
+  assignee: string
+  due: string
+  timestamp: string
+}
+
+const todosOf = (draft: Draft): MeetingTodo[] =>
+  (Array.isArray(draft.todos) ? draft.todos : []).map((todo) => {
+    const t = (todo ?? {}) as Record<string, unknown>
+    return { title: text(t.title), assignee: text(t.assignee), due: text(t.due), timestamp: text(t.timestamp) }
+  })
+
+// A meeting's Notion page: its notes, and the meeting's todos, one row each (edit, remove, add).
 function NotionPageFields({ id, draft, set }: { id: string; draft: Draft; set: SetField }) {
+  const todos = todosOf(draft)
+  const setTodos = (next: MeetingTodo[]) => set('todos', next)
+  const setTodo = (index: number, field: keyof MeetingTodo, value: string) =>
+    setTodos(todos.map((todo, i) => (i === index ? { ...todo, [field]: value } : todo)))
   return (
     <>
       <Field id={`${id}-title`} label="標題">
         <Input id={`${id}-title`} value={text(draft.title)} onChange={(e) => set('title', e.target.value)} />
       </Field>
-      <Field id={`${id}-content`} label="內容">
+      <Field id={`${id}-content`} label="會議紀錄">
         <textarea
           id={`${id}-content`}
           value={text(draft.content)}
@@ -116,6 +135,53 @@ function NotionPageFields({ id, draft, set }: { id: string; draft: Draft; set: S
           className={textareaClass}
         />
       </Field>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs text-muted-foreground">待辦(會寫在這一頁裡)</span>
+        {todos.map((todo, i) => {
+          const n = i + 1
+          return (
+            <div key={i} className="grid grid-cols-[1fr_auto] gap-1.5 rounded-md border p-2 sm:grid-cols-[2fr_1fr_auto_5rem_auto]">
+              <Input aria-label={`待辦 ${n}`} placeholder="要做什麼" value={todo.title} onChange={(e) => setTodo(i, 'title', e.target.value)} />
+              <Input
+                aria-label={`待辦 ${n} 負責人`}
+                placeholder="負責人"
+                value={todo.assignee}
+                onChange={(e) => setTodo(i, 'assignee', e.target.value)}
+              />
+              <Input
+                aria-label={`待辦 ${n} 期限`}
+                type="date"
+                value={todo.due}
+                onChange={(e) => setTodo(i, 'due', e.target.value)}
+              />
+              <Input
+                aria-label={`待辦 ${n} 依據的錄音時間`}
+                placeholder="12:34"
+                value={todo.timestamp}
+                onChange={(e) => setTodo(i, 'timestamp', e.target.value)}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                aria-label={`刪除待辦 ${n}`}
+                onClick={() => setTodos(todos.filter((_, j) => j !== i))}
+              >
+                刪除
+              </Button>
+            </div>
+          )
+        })}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="w-fit"
+          onClick={() => setTodos([...todos, { title: '', assignee: '', due: '', timestamp: '' }])}
+        >
+          新增待辦
+        </Button>
+      </div>
     </>
   )
 }
@@ -246,12 +312,17 @@ const KINDS: Record<string, ProposalKind> = {
     linkText: '在 Google Tasks 開啟',
   },
   notion_page: {
-    label: 'Notion 頁面',
+    label: 'Notion 會議紀錄',
     icon: FileText,
     title: (args) => text(args.title),
     Fields: NotionPageFields,
-    problem: (draft) => (!text(draft.title).trim() || !text(draft.content).trim() ? '請填標題與內容' : null),
-    confirmed: (draft) => draft,
+    problem: (draft) => {
+      if (!text(draft.title).trim() || !text(draft.content).trim()) return '請填標題與會議紀錄'
+      if (todosOf(draft).some((todo) => !todo.title.trim())) return '每條待辦都要填內容'
+      return null
+    },
+    confirmed: (draft) => ({ ...draft, todos: todosOf(draft) }),
+    when: (args) => (todosOf(args).length ? `${todosOf(args).length} 條待辦` : null),
     linkText: '在 Notion 開啟',
   },
   notion_database_item: {

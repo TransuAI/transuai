@@ -184,8 +184,8 @@ export const postMeetingApi = {
     apiFetch<PostMeetingRun>(`/jobs/${jobId}/post-meeting/${runId}/proposals/${proposalId}/retry`, { method: 'POST' }),
 }
 
-// 會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫（貼網址，儲存時後端先向 Notion 確認改過的；空字串是不指定），
-// 以及待辦要建在 Google Tasks 還是 Notion。
+// 會後處理的設定：Notion 的會議紀錄位置（每場會議建成它底下的子頁面；貼網址，改過時後端先向 Notion 確認；空字串是不指定），
+// 以及待辦放在 Notion 會議紀錄裡還是 Google Tasks。
 export const postMeetingSettingsApi = {
   get: () => apiFetch<PostMeetingSettings>('/me/post-meeting-settings'),
   update: (settings: PostMeetingSettingsUpdate) =>
