@@ -37,13 +37,13 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`/`post_meeting_settings`）。只剩多格式輸出還沒做。見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 >
 > **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
-> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿）只存成
+> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆與 Notion，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿、在指定的 Notion 位置建立會議紀錄頁與待辦）只存成
 > 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案 → 使用者檢查、修改、勾選後按執行，ai-service 才用最終參數呼叫 Google
-> 日曆或 Gmail（草稿不寄出），每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
+> 日曆、Gmail（草稿不寄出）或 Notion，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
 > 只能用自有金鑰、支援工具呼叫的模型（`0006`）。
 
 ---
@@ -72,7 +72,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` 十五張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` 十六張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -186,6 +186,10 @@ POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCou
                                          輪詢列表直到不是 GENERATING）
 GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型、最佳成績
 GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
+GET    /me/post-meeting-settings        會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫（沒指定是 null）
+PUT    /me/post-meeting-settings        儲存設定，body { notionMeetingsPageUrl, notionTodoDatabaseUrl }（空的就是不指定）；
+                                         改過的位置先向 Notion 確認（沒改的沿用），沒連結 Notion 回 409、找不到或種類不對
+                                         （會議紀錄要是頁面、待辦要是資料庫）回 400、連不上回 503
 GET    /jobs/{jobId}/post-meeting       會後處理：能不能跑（不能的話附原因）與最新一份紀錄（狀態、進度文字、行動提案）
 POST   /jobs/{jobId}/post-meeting       開始會後處理，body { "timezone" }，回 202（背景跑 agent，前端每 3 秒輪詢 GET）；
                                          不能跑回 409 並附原因
@@ -218,7 +222,7 @@ GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省�
                                          Gateway 把月份換成時間範圍，向兩個服務分別查詢
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`GetPostMeeting`/`RequestPostMeeting`/`ExecuteProposals`/`RetryProposal`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`GetPostMeeting`/`RequestPostMeeting`/`ExecuteProposals`/`RetryProposal`/`GetPostMeetingSettings`/`UpdatePostMeetingSettings`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -343,7 +347,7 @@ CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
 
 ### 4.4 ai_db
 
-**現況（已建立，十五張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，十六張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -541,6 +545,18 @@ CREATE TABLE action_proposals (
     executed_at TIMESTAMPTZ
 );
 CREATE INDEX ix_action_proposals_run_id ON action_proposals (run_id);
+
+-- 會後處理的設定：會議紀錄與待辦寫進 Notion 的哪裡（沒指定就不提 Notion 的寫入動作）；儲存前用 Notion MCP 確認
+CREATE TABLE post_meeting_settings (
+    user_id UUID PRIMARY KEY,
+    notion_meetings_page_id VARCHAR(64),       -- 會議紀錄建在這個頁面底下
+    notion_meetings_page_title TEXT,
+    notion_meetings_page_url TEXT,
+    notion_todo_data_source_id VARCHAR(64),    -- 待辦新增到這個資料庫（data source ID，collection://…）
+    notion_todo_database_title TEXT,
+    notion_todo_database_url TEXT,
+    updated_at TIMESTAMPTZ NOT NULL
+);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
@@ -658,7 +674,8 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
       `ai-service/app/services/chapter_generator.py`
 - [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
 - [ ] Google 的權限審查——連結 Google 帳號已實作，但 `gmail.compose`（建立草稿）是 Google 的受限權限，通過 Google 的
-      應用程式審查之前只有同意畫面登記的測試使用者能連結，還沒申請；Google 與 Notion 的連結也還沒用真的帳號走過
+      應用程式審查之前只有同意畫面登記的測試使用者能連結，還沒申請；Google 與 Notion 的連結也還沒用真的帳號走過，
+      Notion MCP 回應的格式沒有正式文件（標題、data source ID、建立好的網址是寬鬆地從回應裡找出來的）
       （見 `ai-service/README.md` 已知限制）。Google 日曆與 Gmail 不用官方的遠端 MCP（預覽計畫 GA 前不能開放給網域外的
       使用者），會後處理改用自己寫的 REST API 工具（見 `ai-service/docs/adr/0006-post-meeting-agent-model-and-google-tools.md`）
 - [x] 會後處理的平台模型——**已決定**：不提供。實測最好的免費選擇 Groq `openai/gpt-oss-120b` 在免費層額度不夠（一次要等
