@@ -90,7 +90,7 @@ src/
     transcript-search.ts 逐字稿搜尋比對:只比對片段文字、英文不分大小寫、不跨片段;依片段分組
   pages/
     login-page.tsx / register-page.tsx
-    upload-page.tsx        presign → PUT 上傳(含進度條)→ complete
+    upload-page.tsx        presign → PUT 上傳(含進度條)→ complete;檔案長度限制 60 分鐘(前端檢查),音訊 120MB、影片 1GB 以內(後端檢查)
     jobs-page.tsx           Job 列表、分頁、刪除
     settings-page.tsx       設定頁(側邊欄「設定」):預設模型、自有金鑰、已連結的帳號、會後處理(Notion 位置、待辦去處)、本月用量;存入或刪除金鑰後重新載入可選的模型
     settings/

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 
-const MAX_DURATION_SECONDS = 30 * 60
+const MAX_DURATION_SECONDS = 60 * 60
 
 type Stage = 'idle' | 'reading' | 'presigning' | 'uploading' | 'finalizing'
 
@@ -34,7 +34,7 @@ export function UploadPage() {
     try {
       const seconds = await readMediaDuration(candidate)
       if (seconds > MAX_DURATION_SECONDS) {
-        toast.error('MVP 階段限制檔案長度在 30 分鐘以內')
+        toast.error('檔案長度限制在 60 分鐘以內')
         setFile(null)
         setStage('idle')
         return
@@ -101,7 +101,7 @@ export function UploadPage() {
       <Card>
         <CardHeader>
           <CardTitle>上傳音訊 / 影片</CardTitle>
-          <CardDescription>MVP 階段限制檔案長度 30 分鐘以內,上傳後會自動產出逐字稿與摘要</CardDescription>
+          <CardDescription>檔案長度限制 60 分鐘以內(音訊檔 120MB、影片檔 1GB 以內),上傳後會自動產出逐字稿與摘要</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div
