@@ -259,6 +259,8 @@ export interface ActionProposal {
   status: 'PROPOSED' | 'DONE' | 'FAILED'
   resultUrl: string | null
   failureReason: string | null
+  /** Not carried out yet, and the same thing an earlier run of this job already created: shown as 上次已建立, unchecked. */
+  previouslyCreated: boolean
 }
 
 /** A proposal the user checked, with the values they confirmed (maybe edited), to be carried out. */
@@ -290,6 +292,8 @@ export interface PostMeeting {
   latestRun: PostMeetingRun | null
   /** Things it can't do yet, for the user (e.g. no Notion places chosen). */
   hints: string[]
+  /** This job's runs before latestRun, newest first. */
+  earlierRuns: PostMeetingRun[]
 }
 
 /** A place in Notion: a page, or a database (its id is then the data source, collection://…). */

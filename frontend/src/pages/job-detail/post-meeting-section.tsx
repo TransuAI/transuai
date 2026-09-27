@@ -257,8 +257,8 @@ const KINDS: Record<string, ProposalKind> = {
   notion_database_item: {
     label: 'Notion 待辦',
     icon: ListTodo,
-    // The first property the agent filled in is usually the todo's title.
-    title: (args) => String(Object.values(propertiesOf(args))[0] ?? ''),
+    // The database's title column, as the agent named it (todos proposed before it did: the first column).
+    title: (args) => String(propertiesOf(args)[text(args.title_property)] ?? Object.values(propertiesOf(args))[0] ?? ''),
     Fields: NotionDatabaseItemFields,
     problem: (draft) => (Object.keys(propertiesOf(draft)).length === 0 ? '沒有任何欄位' : null),
     confirmed: (draft) => draft,
@@ -301,6 +301,9 @@ function ProposalForm({
         <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.target.checked)} aria-label="執行這一項" />
         <Icon className="size-3.5" />
         {kind.label}
+        {proposal.previouslyCreated && (
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-foreground">上次已建立</span>
+        )}
       </label>
       <kind.Fields id={`proposal-${proposal.id}`} draft={draft} set={(name, value) => onChange({ ...draft, [name]: value })} />
       {problem && <p className="text-xs text-destructive">{problem}</p>}
@@ -317,7 +320,8 @@ function ProposalForm({
   )
 }
 
-// A proposal carried out (with a link to what was made), or one of a kind this card can't edit yet.
+// A proposal carried out (with a link to what was made), or one of a kind this card can't edit yet, or one in an earlier
+// run's record (where a waiting proposal was never carried out).
 function ProposalResult({ proposal }: { proposal: ActionProposal }) {
   const kind = Object.hasOwn(KINDS, proposal.kind) ? KINDS[proposal.kind] : undefined
   const Icon = kind?.icon
@@ -345,7 +349,46 @@ function ProposalResult({ proposal }: { proposal: ActionProposal }) {
         </span>
       )}
       {proposal.status === 'FAILED' && <p className="text-xs text-destructive">{proposal.failureReason ?? '執行失敗'}</p>}
+      {proposal.status === 'PROPOSED' && <span className="text-xs text-muted-foreground">沒有執行</span>}
     </li>
+  )
+}
+
+const RUN_STATUS: Record<PostMeetingRun['status'], string> = {
+  RUNNING: '執行中',
+  COMPLETED: '完成',
+  LIMIT_REACHED: '已達上限',
+  FAILED: '失敗',
+}
+
+// This job's earlier runs, as a record: what each proposed, what was carried out (with links) and what was left.
+function EarlierRuns({ runs }: { runs: PostMeetingRun[] }) {
+  return (
+    <details role="group" aria-label="之前的會後處理" className="text-sm">
+      <summary className="cursor-pointer text-xs text-muted-foreground">之前的會後處理（{runs.length}）</summary>
+      <ol className="mt-2 flex flex-col gap-3">
+        {runs.map((run) => (
+          <li key={run.id} className="flex flex-col gap-1.5">
+            <span className="text-xs text-muted-foreground">
+              {formatShortDateTime(run.requestedAt)} · {RUN_STATUS[run.status]}
+              {run.model && ` · ${run.model}`}
+            </span>
+            {run.status === 'FAILED' && run.failureReason && (
+              <p className="text-xs text-destructive">{run.failureReason}</p>
+            )}
+            {run.proposals.length > 0 ? (
+              <ul className="flex flex-col gap-1.5">
+                {run.proposals.map((proposal) => (
+                  <ProposalResult key={proposal.id} proposal={proposal} />
+                ))}
+              </ul>
+            ) : (
+              run.status !== 'FAILED' && <p className="text-xs text-muted-foreground">沒有提案</p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </details>
   )
 }
 
@@ -362,9 +405,10 @@ function ProposalList({
   isExecuting: boolean
 }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
-  // Waiting proposals start checked; failed ones start unchecked (each has its own 重試).
+  // Waiting proposals start checked, except what an earlier run already created; failed ones start unchecked (each
+  // has its own 重試).
   const [checked, setChecked] = useState<Set<string>>(
-    () => new Set(run.proposals.filter((p) => p.status === 'PROPOSED').map((p) => p.id)),
+    () => new Set(run.proposals.filter((p) => p.status === 'PROPOSED' && !p.previouslyCreated).map((p) => p.id)),
   )
   const draftOf = (proposal: ActionProposal) => drafts[proposal.id] ?? proposal.arguments
   const editable = run.proposals.filter(isEditable)
@@ -443,7 +487,7 @@ export function PostMeetingSection({ postMeeting, onStart, isStarting, onExecute
         會後處理
       </h3>
       <p className="text-xs text-muted-foreground">
-        讀這場會議、查你的行事曆，把會後該做的事（排下次會議、會議紀錄的 email 草稿）整理成提案；任何改動都要你確認後才會執行。
+        讀這場會議、查你連結的服務，把會後該做的事（排下次會議、待辦、會議紀錄）整理成提案；任何改動都要你確認後才會執行。
       </p>
       <Button
         size="sm"
@@ -483,6 +527,7 @@ export function PostMeetingSection({ postMeeting, onStart, isStarting, onExecute
           />
         </>
       )}
+      {postMeeting && postMeeting.earlierRuns.length > 0 && <EarlierRuns runs={postMeeting.earlierRuns} />}
     </section>
   )
 }
