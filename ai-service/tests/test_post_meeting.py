@@ -499,6 +499,22 @@ def test_asking_again_after_unparseable_tool_calls_counts_as_a_model_call(ai_stu
     assert latest(ai_stub, queued).status == ai_pb2.POST_MEETING_STATUS_LIMIT_REACHED
 
 
+def test_every_tool_call_is_logged_with_how_it_went(queued, fake_llm, calendar, caplog):
+    fake_llm.reply_tool_calls([("get_summary", {}), ("search_transcript", {"query": "不存在的關鍵字"}),
+                               ("calendar_create_event", {"summary": "少了時間"}), ("calendar_create_event", NEXT_MEETING)])
+    fake_llm.reply("好。")
+
+    with caplog.at_level("INFO", logger="app.services.post_meeting"):
+        work(queued)
+
+    logged = [r.getMessage() for r in caplog.records if "tool " in r.getMessage()]
+    assert len(logged) == 4
+    assert "get_summary" in logged[0] and "ok" in logged[0]
+    assert "search_transcript" in logged[1] and "沒有找到" in logged[1]
+    assert "calendar_create_event" in logged[2] and "錯誤" in logged[2]
+    assert "calendar_create_event" in logged[3] and "proposal" in logged[3]
+
+
 def test_it_stops_when_time_runs_out(ai_stub, queued, fake_llm, calendar, monkeypatch):
     monkeypatch.setattr(post_meeting, "TIME_LIMIT", timedelta(0))
     fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])

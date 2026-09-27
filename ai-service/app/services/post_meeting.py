@@ -465,7 +465,20 @@ def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_
 
 
 def _call_tool(run_id: uuid.UUID, tool: AgentTool | None, name: str, arguments: str) -> str:
-    """執行一次工具呼叫，回傳要給模型看的結果；參數不對或執行失敗時是「錯誤：…」，讓模型改正。"""
+    """執行一次工具呼叫，回傳要給模型看的結果；參數不對或執行失敗時是「錯誤：…」，讓模型改正。每次都記一行 log（工具與
+    結果的種類，不記內容）：跑到上限卻沒有提案時，要看得出次數花在哪裡。"""
+    result = _run_tool(run_id, tool, name, arguments)
+    if result == PROPOSED:
+        outcome = "proposal"
+    elif result.startswith("錯誤") or result.startswith("沒有找到"):
+        outcome = result[:160]
+    else:
+        outcome = f"ok ({len(result)} chars)"
+    logger.info("post-meeting run %s: tool %s -> %s", run_id, name, outcome)
+    return result
+
+
+def _run_tool(run_id: uuid.UUID, tool: AgentTool | None, name: str, arguments: str) -> str:
     if tool is None:
         return f"錯誤：沒有 {name} 這個工具"
     try:

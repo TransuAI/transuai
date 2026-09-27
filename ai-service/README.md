@@ -111,7 +111,7 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
   → 清掉上一次留下的提案、記下這一次開始的時間（重試從頭來）→ GetTranscript、讀摘要與章節 → agent 迴圈：
       讀取類工具（讀摘要、讀章節、搜尋逐字稿、列出講者、查行事曆、看 Google Tasks 未完成的待辦、搜尋與讀取 Notion）真的執行，結果回給模型；
       寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立待辦（Google Tasks 或 Notion）、建立 Notion 會議紀錄頁）檢查參數後存成 action_proposals（服務、工具、種類、參數），回給模型「已記錄為提案」；
-      每一步把進度文字寫進紀錄；模型說結束就 COMPLETED
+      每一步把進度文字寫進紀錄，每次工具呼叫記一行 log（工具與結果的種類：ok／沒有找到／錯誤／proposal，不記內容）；模型說結束就 COMPLETED
   → 工具呼叫到 15 次、問了模型 10 輪（每輪一次 LLM 呼叫，參數格式錯誤的重問也算）或超過 2 分鐘 → LIMIT_REACHED，保留已經
     產生的提案（第 10 輪提的案也保留，只是不再問模型）；每次呼叫模型前與每個工具呼叫前都檢查，超過的工具呼叫不執行、回給模型
     「未執行」（對話保持完整）。單一次模型呼叫本身沒有另外限時。系統提示告訴模型這兩個上限，並要它同一輪一次呼叫多個工具
