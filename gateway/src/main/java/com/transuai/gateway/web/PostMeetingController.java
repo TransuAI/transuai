@@ -113,15 +113,14 @@ public class PostMeetingController {
                 GetPostMeetingSettingsRequest.newBuilder().setUserId(userId.toString()).build()));
     }
 
-    // 有指定的位置會先向 Notion 確認：沒連結 Notion 回 409，找不到、沒有權限或不是資料庫回 400（附原因），連不上 Notion 回 503。
+    // 網址改過時先向 Notion 確認：沒連結 Notion 回 409，找不到或不是一般頁面回 400（附原因），連不上 Notion 回 503。
     @PutMapping("/me/post-meeting-settings")
     public PostMeetingSettingsDto updateSettings(@CurrentUserId UUID userId,
             @RequestBody UpdatePostMeetingSettingsDto request) {
-        UpdatePostMeetingSettingsDto body = request == null ? new UpdatePostMeetingSettingsDto(null, null, null) : request;
+        UpdatePostMeetingSettingsDto body = request == null ? new UpdatePostMeetingSettingsDto(null, null) : request;
         return toDto(aiServiceStub.updatePostMeetingSettings(UpdatePostMeetingSettingsRequest.newBuilder()
                 .setUserId(userId.toString())
                 .setNotionMeetingsPageUrl(GrpcStrings.nullToEmpty(body.notionMeetingsPageUrl()))
-                .setNotionTodoDatabaseUrl(GrpcStrings.nullToEmpty(body.notionTodoDatabaseUrl()))
                 .setTodoDestination(todoDestination(body.todoDestination()))
                 .build()));
     }
@@ -140,7 +139,6 @@ public class PostMeetingController {
     private static PostMeetingSettingsDto toDto(PostMeetingSettings settings) {
         return new PostMeetingSettingsDto(
                 settings.hasNotionMeetingsPage() ? toDto(settings.getNotionMeetingsPage()) : null,
-                settings.hasNotionTodoDatabase() ? toDto(settings.getNotionTodoDatabase()) : null,
                 settings.getTodoDestination().name().replace("TODO_DESTINATION_", ""));
     }
 
