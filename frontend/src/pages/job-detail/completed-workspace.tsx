@@ -12,7 +12,7 @@ import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
-import type { Chapter, Job, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { Chapter, ConfirmedProposal, Job, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
   job: Job
@@ -44,6 +44,9 @@ interface CompletedWorkspaceProps {
   postMeeting: PostMeeting | null
   onStartPostMeeting: () => void
   isStartingPostMeeting: boolean
+  onExecuteProposals: (runId: string, proposals: ConfirmedProposal[]) => void
+  onRetryProposal: (runId: string, proposalId: string) => void
+  isExecutingProposals: boolean
   modelChoices: ModelChoice[]
   selectedModel: ModelChoice | null
   onSelectModel: (model: ModelChoice) => void
@@ -103,6 +106,9 @@ export function CompletedWorkspace({
   postMeeting,
   onStartPostMeeting,
   isStartingPostMeeting,
+  onExecuteProposals,
+  onRetryProposal,
+  isExecutingProposals,
   modelChoices,
   selectedModel,
   onSelectModel,
@@ -158,6 +164,9 @@ export function CompletedWorkspace({
       postMeeting={postMeeting}
       onStartPostMeeting={onStartPostMeeting}
       isStartingPostMeeting={isStartingPostMeeting}
+      onExecuteProposals={onExecuteProposals}
+      onRetryProposal={onRetryProposal}
+      isExecutingProposals={isExecutingProposals}
       jobId={job.jobId}
     />
   )

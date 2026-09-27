@@ -4,6 +4,7 @@ import type {
   AuthResponse,
   AvailableModels,
   Chapter,
+  ConfirmedProposal,
   Connection,
   Job,
   JobListResponse,
@@ -11,6 +12,7 @@ import type {
   MediaUrlResponse,
   ModelChoice,
   PostMeeting,
+  PostMeetingRun,
   MonthlyUsage,
   PresignResponse,
   ProviderKey,
@@ -171,6 +173,11 @@ export const postMeetingApi = {
   get: (jobId: string) => apiFetch<PostMeeting>(`/jobs/${jobId}/post-meeting`),
   start: (jobId: string, timezone: string) =>
     apiFetch<PostMeeting>(`/jobs/${jobId}/post-meeting`, { method: 'POST', body: { timezone } }),
+  // 用確認（可能改過）的最終參數執行勾選的提案；沒列出的不執行
+  execute: (jobId: string, runId: string, proposals: ConfirmedProposal[]) =>
+    apiFetch<PostMeetingRun>(`/jobs/${jobId}/post-meeting/${runId}/execute`, { method: 'POST', body: { proposals } }),
+  retry: (jobId: string, runId: string, proposalId: string) =>
+    apiFetch<PostMeetingRun>(`/jobs/${jobId}/post-meeting/${runId}/proposals/${proposalId}/retry`, { method: 'POST' }),
 }
 
 // 已連結的帳號（Google、Notion）：權杖只在後端，這裡只看得到狀態。連結時後端給授權網址，由前端把使用者轉過去。

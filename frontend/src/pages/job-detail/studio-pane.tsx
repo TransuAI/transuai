@@ -6,7 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { PostMeetingSection } from '@/pages/job-detail/post-meeting-section'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
 import { UsageSection } from '@/pages/job-detail/usage-section'
-import type { Chapter, JobUsage, PostMeeting, Quiz, Summary, Transcript } from '@/types/api'
+import type { Chapter, ConfirmedProposal, JobUsage, PostMeeting, Quiz, Summary, Transcript } from '@/types/api'
 
 interface StudioPaneProps {
   jobId: string
@@ -30,6 +30,9 @@ interface StudioPaneProps {
   postMeeting: PostMeeting | null
   onStartPostMeeting: () => void
   isStartingPostMeeting: boolean
+  onExecuteProposals: (runId: string, proposals: ConfirmedProposal[]) => void
+  onRetryProposal: (runId: string, proposalId: string) => void
+  isExecutingProposals: boolean
 }
 
 export function StudioPane({
@@ -51,6 +54,9 @@ export function StudioPane({
   postMeeting,
   onStartPostMeeting,
   isStartingPostMeeting,
+  onExecuteProposals,
+  onRetryProposal,
+  isExecutingProposals,
 }: StudioPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -149,6 +155,9 @@ export function StudioPane({
               postMeeting={postMeeting}
               onStart={onStartPostMeeting}
               isStarting={isStartingPostMeeting}
+              onExecute={onExecuteProposals}
+              onRetry={onRetryProposal}
+              isExecuting={isExecutingProposals}
             />
 
             <UsageSection usage={usage} />

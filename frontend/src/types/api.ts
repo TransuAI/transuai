@@ -255,6 +255,16 @@ export interface ActionProposal {
   /** Which form it needs, e.g. calendar_event (arguments: summary, start, end, description). */
   kind: string
   arguments: Record<string, unknown>
+  /** PROPOSED: waiting for the user; DONE: carried out (resultUrl is what was made); FAILED: failureReason says why. */
+  status: 'PROPOSED' | 'DONE' | 'FAILED'
+  resultUrl: string | null
+  failureReason: string | null
+}
+
+/** A proposal the user checked, with the values they confirmed (maybe edited), to be carried out. */
+export interface ConfirmedProposal {
+  proposalId: string
+  arguments: Record<string, unknown>
 }
 
 /** One run of 會後處理 (post-meeting processing) on a job. */

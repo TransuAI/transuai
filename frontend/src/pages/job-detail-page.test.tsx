@@ -21,7 +21,7 @@ vi.mock('@/lib/api', () => ({
   usageApi: { getJobUsage: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
   quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), submitAttempt: vi.fn() },
-  postMeetingApi: { get: vi.fn(), start: vi.fn() },
+  postMeetingApi: { get: vi.fn(), start: vi.fn(), execute: vi.fn(), retry: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -2304,7 +2304,22 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     tool: 'calendar_create_event',
     kind: 'calendar_event',
     arguments: { summary: '搬家確認會議', start: '2026-11-18T14:00:00+08:00', end: '2026-11-18T15:00:00+08:00', description: '確認搬家分工' },
+    status: 'PROPOSED' as const,
+    resultUrl: null,
+    failureReason: null,
   }
+  const movers = {
+    ...nextMeeting,
+    id: 'p-2',
+    arguments: { summary: '搬家公司看場地', start: '2026-11-13T10:00:00+08:00', end: '2026-11-13T11:00:00+08:00' },
+  }
+  // The form shows times in the browser's own zone, as <input type="datetime-local"> values.
+  const localInput = (iso: string) => {
+    const d = new Date(iso)
+    const pad = (value: number) => String(value).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+  const proposalForm = (title: string) => within(card()).getByRole('group', { name: title })
   const card = () => screen.getByRole('region', { name: '會後處理' })
 
   beforeEach(() => {
@@ -2360,13 +2375,11 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(usageApi.getJobUsage).mockClear()
     await vi.advanceTimersByTimeAsync(3000)
 
-    const [proposal] = await within(card()).findAllByRole('listitem')
-    expect(proposal).toHaveTextContent('行事曆活動')
-    expect(proposal).toHaveTextContent('搬家確認會議')
-    expect(proposal).toHaveTextContent('確認搬家分工')
-    const start = new Date('2026-11-18T14:00:00+08:00')
-    const pad = (value: number) => String(value).padStart(2, '0')
-    expect(proposal).toHaveTextContent(`${start.getMonth() + 1}/${start.getDate()} ${pad(start.getHours())}:${pad(start.getMinutes())}`)
+    const proposal = await within(card()).findByRole('group', { name: '行事曆活動：搬家確認會議' })
+    expect(within(proposal).getByLabelText('標題')).toHaveValue('搬家確認會議')
+    expect(within(proposal).getByLabelText('描述')).toHaveValue('確認搬家分工')
+    expect(within(proposal).getByLabelText('開始')).toHaveValue(localInput('2026-11-18T14:00:00+08:00'))
+    expect(within(proposal).getByLabelText('結束')).toHaveValue(localInput('2026-11-18T15:00:00+08:00'))
     expect(within(card()).queryByText('正在查詢你的行事曆…')).not.toBeInTheDocument()
     expect(usageApi.getJobUsage).toHaveBeenCalled() // the run used the model
   })
@@ -2385,13 +2398,116 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
     await vi.advanceTimersByTimeAsync(3000) // …a later one says it's done
 
-    expect(await within(card()).findByText('搬家確認會議')).toBeInTheDocument()
+    expect(await within(card()).findByDisplayValue('搬家確認會議')).toBeInTheDocument()
     await act(async () =>
       answerOldPoll({ available: true, unavailableReason: null, latestRun: run({ status: 'RUNNING', progress: '正在閱讀摘要…', finishedAt: null }) }),
     )
 
-    expect(within(card()).getByText('搬家確認會議')).toBeInTheDocument()
+    expect(within(card()).getByDisplayValue('搬家確認會議')).toBeInTheDocument()
     expect(within(card()).queryByText('正在閱讀摘要…')).not.toBeInTheDocument()
+  })
+
+  it('carries out the checked proposals with the edited values and shows each result', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      latestRun: run({ proposals: [nextMeeting, movers] }),
+    })
+    const user = await renderCard()
+    const meeting = await within(card()).findByRole('group', { name: '行事曆活動：搬家確認會議' })
+    const title = within(meeting).getByLabelText('標題')
+    await user.clear(title)
+    await user.type(title, '搬家確認會議（改到 3 點）')
+    fireEvent.change(within(meeting).getByLabelText('開始'), { target: { value: '2026-11-18T15:00' } })
+    fireEvent.change(within(meeting).getByLabelText('結束'), { target: { value: '2026-11-18T16:00' } })
+    await user.click(within(proposalForm('行事曆活動：搬家公司看場地')).getByRole('checkbox', { name: '執行這一項' }))
+    vi.mocked(postMeetingApi.execute).mockResolvedValue(
+      run({
+        proposals: [
+          { ...nextMeeting, status: 'DONE', resultUrl: 'https://www.google.com/calendar/event?eid=evt-1' },
+          movers,
+        ],
+      }),
+    )
+
+    await user.click(within(card()).getByRole('button', { name: '執行勾選的項目' }))
+
+    const [[jobId, runId, items]] = vi.mocked(postMeetingApi.execute).mock.calls
+    expect([jobId, runId]).toEqual(['job-1', 'run-1'])
+    expect(items).toHaveLength(1) // the unchecked one isn't sent
+    expect(items[0].proposalId).toBe('p-1')
+    expect(items[0].arguments.summary).toBe('搬家確認會議（改到 3 點）')
+    expect(items[0].arguments.description).toBe('確認搬家分工')
+    expect(new Date(items[0].arguments.start as string).getTime()).toBe(new Date('2026-11-18T15:00').getTime())
+    expect(new Date(items[0].arguments.end as string).getTime()).toBe(new Date('2026-11-18T16:00').getTime())
+    expect(await within(card()).findByRole('link', { name: '在 Google 日曆開啟' })).toHaveAttribute(
+      'href',
+      'https://www.google.com/calendar/event?eid=evt-1',
+    )
+  })
+
+  it('shows why a proposal failed and retries it on its own', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      latestRun: run({
+        proposals: [{ ...nextMeeting, status: 'FAILED', failureReason: 'Google 日曆沒有建立這個活動（HTTP 403）' }],
+      }),
+    })
+    const user = await renderCard()
+    vi.mocked(postMeetingApi.retry).mockResolvedValue(
+      run({ proposals: [{ ...nextMeeting, status: 'DONE', resultUrl: 'https://www.google.com/calendar/event?eid=evt-1' }] }),
+    )
+
+    expect(await within(card()).findByText('Google 日曆沒有建立這個活動（HTTP 403）')).toBeInTheDocument()
+    await user.click(within(card()).getByRole('button', { name: '重試' }))
+
+    expect(postMeetingApi.retry).toHaveBeenCalledWith('job-1', 'run-1', 'p-1')
+    expect(postMeetingApi.execute).not.toHaveBeenCalled()
+    expect(await within(card()).findByRole('link', { name: '在 Google 日曆開啟' })).toBeInTheDocument()
+  })
+
+  it('lets a failed proposal be fixed before trying again', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      latestRun: run({ proposals: [{ ...nextMeeting, status: 'FAILED', failureReason: '內容不正確：end 要晚於 start' }] }),
+    })
+    const user = await renderCard()
+    vi.mocked(postMeetingApi.execute).mockResolvedValue(run({ proposals: [{ ...nextMeeting, status: 'DONE', resultUrl: 'https://x' }] }))
+    const failed = await within(card()).findByRole('group', { name: '行事曆活動：搬家確認會議' })
+    expect(within(failed).getByText('內容不正確：end 要晚於 start')).toBeInTheDocument()
+
+    await user.type(within(failed).getByLabelText('標題'), '（改）')
+    await user.click(within(failed).getByRole('button', { name: '重試' }))
+
+    expect(postMeetingApi.retry).not.toHaveBeenCalled()
+    const [[, , items]] = vi.mocked(postMeetingApi.execute).mock.calls
+    expect(items.map((item) => [item.proposalId, item.arguments.summary])).toEqual([['p-1', '搬家確認會議（改）']])
+  })
+
+  it('checks the form before anything is sent', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
+    await renderCard()
+    const meeting = await within(card()).findByRole('group', { name: '行事曆活動：搬家確認會議' })
+
+    fireEvent.change(within(meeting).getByLabelText('結束'), { target: { value: '2026-11-18T13:00' } })
+
+    expect(within(meeting).getByText('結束時間要晚於開始時間')).toBeInTheDocument()
+    expect(within(card()).getByRole('button', { name: '執行勾選的項目' })).toBeDisabled()
+
+    fireEvent.change(within(meeting).getByLabelText('結束'), { target: { value: '' } })
+    expect(within(meeting).getByText('請填開始與結束時間')).toBeInTheDocument()
+  })
+
+  it('cannot carry out nothing', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
+    const user = await renderCard()
+    const meeting = await within(card()).findByRole('group', { name: '行事曆活動：搬家確認會議' })
+
+    await user.click(within(meeting).getByRole('checkbox', { name: '執行這一項' }))
+
+    expect(within(card()).getByRole('button', { name: '執行勾選的項目' })).toBeDisabled()
   })
 
   it('says when there was nothing to do', async () => {
@@ -2410,7 +2526,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     await renderCard()
 
     expect(await within(card()).findByText(/已達上限/)).toBeInTheDocument()
-    expect(within(card()).getByText('搬家確認會議')).toBeInTheDocument()
+    expect(within(card()).getByDisplayValue('搬家確認會議')).toBeInTheDocument()
   })
 
   it('shows why a run failed and lets it run again', async () => {

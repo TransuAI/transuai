@@ -380,6 +380,9 @@ export function JobDetailPage() {
       postMeeting={postMeeting.postMeeting}
       onStartPostMeeting={postMeeting.start}
       isStartingPostMeeting={postMeeting.isStarting}
+      onExecuteProposals={postMeeting.execute}
+      onRetryProposal={postMeeting.retry}
+      isExecutingProposals={postMeeting.isExecuting}
       usage={usage}
       modelChoices={modelChoices}
       selectedModel={selectedModel}

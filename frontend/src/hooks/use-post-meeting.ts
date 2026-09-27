@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { postMeetingApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
-import type { PostMeeting } from '@/types/api'
+import type { ConfirmedProposal, PostMeeting, PostMeetingRun } from '@/types/api'
 
 const POLL_INTERVAL_MS = 3000
 
@@ -61,5 +61,35 @@ export function usePostMeeting(jobId: string | undefined, isCompleted: boolean, 
       .finally(() => setIsStarting(false))
   }, [jobId, isStarting, ask])
 
-  return { postMeeting, start, isStarting }
+  // Carrying out proposals (or retrying one) answers with the run and each proposal's result.
+  const [isExecuting, setIsExecuting] = useState(false)
+  // One execution at a time, whatever the buttons say: carrying a proposal out twice would make it twice.
+  const executing = useRef(false)
+  const runProposals = useCallback((request: () => Promise<PostMeetingRun>) => {
+    if (executing.current) return
+    executing.current = true
+    setIsExecuting(true)
+    request()
+      .then((updated) => setPostMeeting((prev) => (prev ? { ...prev, latestRun: updated } : prev)))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : '執行失敗'))
+      .finally(() => {
+        executing.current = false
+        setIsExecuting(false)
+      })
+  }, [])
+
+  const execute = useCallback(
+    (runId: string, proposals: ConfirmedProposal[]) => {
+      if (jobId) runProposals(() => postMeetingApi.execute(jobId, runId, proposals))
+    },
+    [jobId, runProposals],
+  )
+  const retry = useCallback(
+    (runId: string, proposalId: string) => {
+      if (jobId) runProposals(() => postMeetingApi.retry(jobId, runId, proposalId))
+    },
+    [jobId, runProposals],
+  )
+
+  return { postMeeting, start, isStarting, execute, retry, isExecuting }
 }
