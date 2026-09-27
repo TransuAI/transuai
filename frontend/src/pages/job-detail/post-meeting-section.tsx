@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { CalendarPlus, CheckCircle2, ClipboardList, ExternalLink, Loader2Icon, RotateCcw } from 'lucide-react'
+import { useState, type ReactElement, type ReactNode } from 'react'
+import { CalendarPlus, CheckCircle2, ClipboardList, ExternalLink, Loader2Icon, Mail, RotateCcw } from 'lucide-react'
 import { fromLocalInput, toLocalInput } from '@/lib/local-time'
 import { formatShortDateTime } from '@/lib/media'
 import { Button } from '@/components/ui/button'
@@ -14,23 +14,150 @@ function clockTime(isoTimestamp: string) {
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
 type Draft = Record<string, unknown>
+type SetField = (name: string, value: unknown) => void
 
-// A calendar event proposal that isn't done yet: waiting, or failed and fixable.
-const isEditable = (proposal: ActionProposal) => proposal.kind === 'calendar_event' && proposal.status !== 'DONE'
-
-// What's wrong with the values in the form, before anything is sent; null when they're fine.
-function problemWith(draft: Draft): string | null {
-  if (!text(draft.summary).trim()) return '請填標題'
-  const start = new Date(text(draft.start)).getTime()
-  const end = new Date(text(draft.end)).getTime()
-  if (Number.isNaN(start) || Number.isNaN(end)) return '請填開始與結束時間'
-  if (end <= start) return '結束時間要晚於開始時間'
-  return null
+function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-xs text-muted-foreground">
+        {label}
+      </label>
+      {children}
+    </div>
+  )
 }
 
-// A calendar-event proposal (行動提案) not carried out yet: a form to check and edit first. A failed one also says why
-// and can be tried again on its own.
-function CalendarEventForm({
+const textareaClass = 'rounded-md border bg-background px-3 py-2 text-sm'
+
+function CalendarEventFields({ id, draft, set }: { id: string; draft: Draft; set: SetField }) {
+  return (
+    <>
+      <Field id={`${id}-summary`} label="標題">
+        <Input id={`${id}-summary`} value={text(draft.summary)} onChange={(e) => set('summary', e.target.value)} />
+      </Field>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Field id={`${id}-start`} label="開始">
+          <Input
+            id={`${id}-start`}
+            type="datetime-local"
+            value={toLocalInput(text(draft.start))}
+            onChange={(e) => set('start', fromLocalInput(e.target.value))}
+          />
+        </Field>
+        <Field id={`${id}-end`} label="結束">
+          <Input
+            id={`${id}-end`}
+            type="datetime-local"
+            value={toLocalInput(text(draft.end))}
+            onChange={(e) => set('end', fromLocalInput(e.target.value))}
+          />
+        </Field>
+      </div>
+      <Field id={`${id}-description`} label="描述">
+        <textarea
+          id={`${id}-description`}
+          value={text(draft.description)}
+          onChange={(e) => set('description', e.target.value)}
+          rows={2}
+          className={textareaClass}
+        />
+      </Field>
+    </>
+  )
+}
+
+// Recipients are typed as free text ("a@x.com, b@y.com"); it's kept as typed and only split when the proposal is sent.
+const RECIPIENTS_TEXT = 'recipientsText'
+const recipientsText = (draft: Draft) =>
+  typeof draft[RECIPIENTS_TEXT] === 'string' ? (draft[RECIPIENTS_TEXT] as string) : (Array.isArray(draft.to) ? draft.to.join(', ') : '')
+const recipients = (draft: Draft) => recipientsText(draft).split(/[,，;；\s]+/).filter(Boolean)
+// A plain address, as ai-service accepts it: no display names, quotes, brackets or commas.
+const EMAIL = /^[^@\s,;:<>()[\]"]+@[^@\s,;:<>()[\]"]+\.[^@\s,;:<>()[\]"]+$/
+
+function EmailDraftFields({ id, draft, set }: { id: string; draft: Draft; set: SetField }) {
+  return (
+    <>
+      <Field id={`${id}-to`} label="收件人">
+        <Input
+          id={`${id}-to`}
+          placeholder="用逗號分隔多個地址，可以留空"
+          value={recipientsText(draft)}
+          onChange={(e) => set(RECIPIENTS_TEXT, e.target.value)}
+        />
+      </Field>
+      <Field id={`${id}-subject`} label="主旨">
+        <Input id={`${id}-subject`} value={text(draft.subject)} onChange={(e) => set('subject', e.target.value)} />
+      </Field>
+      <Field id={`${id}-body`} label="內文">
+        <textarea
+          id={`${id}-body`}
+          value={text(draft.body)}
+          onChange={(e) => set('body', e.target.value)}
+          rows={5}
+          className={textareaClass}
+        />
+      </Field>
+    </>
+  )
+}
+
+interface ProposalKind {
+  label: string
+  icon: typeof CalendarPlus
+  title: (args: Draft) => string
+  Fields: (props: { id: string; draft: Draft; set: SetField }) => ReactElement
+  // What's wrong with the values in the form, before anything is sent; null when they're fine.
+  problem: (draft: Draft) => string | null
+  // The arguments to send, from the form.
+  confirmed: (draft: Draft) => Draft
+  when?: (args: Draft) => string | null
+  linkText: string
+}
+
+const KINDS: Record<string, ProposalKind> = {
+  calendar_event: {
+    label: '行事曆活動',
+    icon: CalendarPlus,
+    title: (args) => text(args.summary),
+    Fields: CalendarEventFields,
+    problem: (draft) => {
+      if (!text(draft.summary).trim()) return '請填標題'
+      const start = new Date(text(draft.start)).getTime()
+      const end = new Date(text(draft.end)).getTime()
+      if (Number.isNaN(start) || Number.isNaN(end)) return '請填開始與結束時間'
+      if (end <= start) return '結束時間要晚於開始時間'
+      return null
+    },
+    confirmed: (draft) => draft,
+    when: (args) =>
+      text(args.start) && text(args.end) ? `${formatShortDateTime(text(args.start))}–${clockTime(text(args.end))}` : null,
+    linkText: '在 Google 日曆開啟',
+  },
+  email_draft: {
+    label: 'email 草稿',
+    icon: Mail,
+    title: (args) => text(args.subject),
+    Fields: EmailDraftFields,
+    problem: (draft) => {
+      const invalid = recipients(draft).filter((address) => !EMAIL.test(address))
+      if (invalid.length) return `這些不是 email 地址：${invalid.join('、')}`
+      if (!text(draft.subject).trim() || !text(draft.body).trim()) return '請填主旨與內文'
+      return null
+    },
+    confirmed: (draft) => {
+      const { [RECIPIENTS_TEXT]: _typed, ...args } = draft
+      return { ...args, to: recipients(draft) }
+    },
+    linkText: '在 Gmail 開啟',
+  },
+}
+
+// A proposal this card can edit, not carried out yet: waiting, or failed and fixable.
+const isEditable = (proposal: ActionProposal) => Object.hasOwn(KINDS, proposal.kind) && proposal.status !== 'DONE'
+
+// A proposal (行動提案) not carried out yet: a form to check and edit first. A failed one also says why and can be
+// tried again on its own.
+function ProposalForm({
   proposal,
   draft,
   checked,
@@ -47,58 +174,21 @@ function CalendarEventForm({
   onRetry: () => void
   isExecuting: boolean
 }) {
-  const problem = problemWith(draft)
-  const field = (name: string) => `proposal-${proposal.id}-${name}`
-  const set = (name: string, value: string) => onChange({ ...draft, [name]: value })
+  const kind = KINDS[proposal.kind]
+  const problem = kind.problem(draft)
+  const Icon = kind.icon
   return (
     <li
       role="group"
-      aria-label={`行事曆活動：${text(proposal.arguments.summary)}`}
+      aria-label={`${kind.label}：${kind.title(proposal.arguments)}`}
       className="flex flex-col gap-2 rounded-md border px-3 py-2 text-sm"
     >
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.target.checked)} aria-label="執行這一項" />
-        <CalendarPlus className="size-3.5" />
-        行事曆活動
+        <Icon className="size-3.5" />
+        {kind.label}
       </label>
-      <label htmlFor={field('summary')} className="text-xs text-muted-foreground">
-        標題
-      </label>
-      <Input id={field('summary')} value={text(draft.summary)} onChange={(e) => set('summary', e.target.value)} />
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className="flex flex-col gap-1">
-          <label htmlFor={field('start')} className="text-xs text-muted-foreground">
-            開始
-          </label>
-          <Input
-            id={field('start')}
-            type="datetime-local"
-            value={toLocalInput(text(draft.start))}
-            onChange={(e) => set('start', fromLocalInput(e.target.value))}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={field('end')} className="text-xs text-muted-foreground">
-            結束
-          </label>
-          <Input
-            id={field('end')}
-            type="datetime-local"
-            value={toLocalInput(text(draft.end))}
-            onChange={(e) => set('end', fromLocalInput(e.target.value))}
-          />
-        </div>
-      </div>
-      <label htmlFor={field('description')} className="text-xs text-muted-foreground">
-        描述
-      </label>
-      <textarea
-        id={field('description')}
-        value={text(draft.description)}
-        onChange={(e) => set('description', e.target.value)}
-        rows={2}
-        className="rounded-md border bg-background px-3 py-2 text-sm"
-      />
+      <kind.Fields id={`proposal-${proposal.id}`} draft={draft} set={(name, value) => onChange({ ...draft, [name]: value })} />
       {problem && <p className="text-xs text-destructive">{problem}</p>}
       {proposal.status === 'FAILED' && (
         <div className="flex flex-col gap-1.5">
@@ -115,28 +205,26 @@ function CalendarEventForm({
 
 // A proposal carried out (with a link to what was made), or one of a kind this card can't edit yet.
 function ProposalResult({ proposal }: { proposal: ActionProposal }) {
-  const { summary, start, end } = proposal.arguments
+  const kind = Object.hasOwn(KINDS, proposal.kind) ? KINDS[proposal.kind] : undefined
+  const Icon = kind?.icon
+  const when = kind?.when?.(proposal.arguments)
   return (
     <li className="flex flex-col gap-1 rounded-md border px-3 py-2 text-sm">
-      {proposal.kind === 'calendar_event' && (
+      {kind && Icon && (
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <CalendarPlus className="size-3.5" />
-          行事曆活動
+          <Icon className="size-3.5" />
+          {kind.label}
         </span>
       )}
-      <span className="font-medium">{text(summary)}</span>
-      {text(start) && text(end) && (
-        <span className="text-xs text-muted-foreground">
-          {formatShortDateTime(text(start))}–{clockTime(text(end))}
-        </span>
-      )}
+      <span className="font-medium">{kind ? kind.title(proposal.arguments) : proposal.kind}</span>
+      {when && <span className="text-xs text-muted-foreground">{when}</span>}
       {proposal.status === 'DONE' && (
         <span className="flex flex-wrap items-center gap-2 text-xs">
           <CheckCircle2 className="size-3.5 text-green-600" aria-hidden />
           已建立
           {proposal.resultUrl && (
             <a href={proposal.resultUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">
-              在 Google 日曆開啟
+              {kind?.linkText ?? '開啟'}
               <ExternalLink className="size-3" aria-hidden />
             </a>
           )}
@@ -167,7 +255,10 @@ function ProposalList({
   const draftOf = (proposal: ActionProposal) => drafts[proposal.id] ?? proposal.arguments
   const editable = run.proposals.filter(isEditable)
   const chosen = editable.filter((p) => checked.has(p.id))
-  const confirm = (proposal: ActionProposal): ConfirmedProposal => ({ proposalId: proposal.id, arguments: draftOf(proposal) })
+  const confirm = (proposal: ActionProposal): ConfirmedProposal => ({
+    proposalId: proposal.id,
+    arguments: KINDS[proposal.kind].confirmed(draftOf(proposal)),
+  })
 
   if (run.proposals.length === 0) {
     return <p className="text-sm text-muted-foreground">這場會議沒有需要處理的事項</p>
@@ -177,7 +268,7 @@ function ProposalList({
       <ul className="flex flex-col gap-2">
         {run.proposals.map((proposal) =>
           isEditable(proposal) ? (
-            <CalendarEventForm
+            <ProposalForm
               key={proposal.id}
               proposal={proposal}
               draft={draftOf(proposal)}
@@ -204,7 +295,7 @@ function ProposalList({
         <Button
           size="sm"
           className="w-fit"
-          disabled={chosen.length === 0 || chosen.some((p) => problemWith(draftOf(p))) || isExecuting}
+          disabled={chosen.length === 0 || chosen.some((p) => KINDS[p.kind].problem(draftOf(p))) || isExecuting}
           onClick={() => onExecute(chosen.map(confirm))}
         >
           {isExecuting && <Loader2Icon className="size-3.5 animate-spin" />}
@@ -238,7 +329,7 @@ export function PostMeetingSection({ postMeeting, onStart, isStarting, onExecute
         會後處理
       </h3>
       <p className="text-xs text-muted-foreground">
-        讀這場會議、查你的行事曆，把會後該做的事整理成提案；任何改動都要你確認後才會執行。
+        讀這場會議、查你的行事曆，把會後該做的事（排下次會議、會議紀錄的 email 草稿）整理成提案；任何改動都要你確認後才會執行。
       </p>
       <Button
         size="sm"

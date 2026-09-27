@@ -2510,6 +2510,75 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     expect(within(card()).getByRole('button', { name: '執行勾選的項目' })).toBeDisabled()
   })
 
+  it('drafts the minutes email with the recipients the user fills in, and links to the draft', async () => {
+    const minutes = {
+      ...nextMeeting,
+      id: 'p-3',
+      service: 'gmail',
+      tool: 'gmail_create_draft',
+      kind: 'email_draft',
+      arguments: { to: [], subject: '搬家會議紀錄', body: '各位好，今天確認了搬家分工。' },
+    }
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [minutes] }) })
+    const user = await renderCard()
+    const draft = await within(card()).findByRole('group', { name: 'email 草稿：搬家會議紀錄' })
+    expect(within(draft).getByLabelText('收件人')).toHaveValue('')
+    expect(within(draft).getByLabelText('主旨')).toHaveValue('搬家會議紀錄')
+    expect(within(draft).getByLabelText('內文')).toHaveValue('各位好，今天確認了搬家分工。')
+    vi.mocked(postMeetingApi.execute).mockResolvedValue(
+      run({ proposals: [{ ...minutes, status: 'DONE', resultUrl: 'https://mail.google.com/mail/u/0/#drafts?compose=msg-1' }] }),
+    )
+
+    await user.type(within(draft).getByLabelText('收件人'), 'a@example.com, b@example.com')
+    await user.click(within(card()).getByRole('button', { name: '執行勾選的項目' }))
+
+    const [[, , items]] = vi.mocked(postMeetingApi.execute).mock.calls
+    expect(items[0].arguments.to).toEqual(['a@example.com', 'b@example.com'])
+    expect(await within(card()).findByRole('link', { name: '在 Gmail 開啟' })).toHaveAttribute(
+      'href',
+      'https://mail.google.com/mail/u/0/#drafts?compose=msg-1',
+    )
+  })
+
+  it('can draft the email with no recipients yet', async () => {
+    const minutes = {
+      ...nextMeeting,
+      id: 'p-3',
+      service: 'gmail',
+      tool: 'gmail_create_draft',
+      kind: 'email_draft',
+      arguments: { to: [], subject: '搬家會議紀錄', body: '內文' },
+    }
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [minutes] }) })
+    const user = await renderCard()
+    await within(card()).findByRole('group', { name: 'email 草稿：搬家會議紀錄' })
+    vi.mocked(postMeetingApi.execute).mockResolvedValue(run({ proposals: [{ ...minutes, status: 'DONE', resultUrl: 'https://x' }] }))
+
+    await user.click(within(card()).getByRole('button', { name: '執行勾選的項目' }))
+
+    const [[, , items]] = vi.mocked(postMeetingApi.execute).mock.calls
+    expect(items[0].arguments).toEqual({ to: [], subject: '搬家會議紀錄', body: '內文' })
+  })
+
+  it('points out a recipient that is not an email address', async () => {
+    const minutes = {
+      ...nextMeeting,
+      id: 'p-3',
+      service: 'gmail',
+      tool: 'gmail_create_draft',
+      kind: 'email_draft',
+      arguments: { to: [], subject: '搬家會議紀錄', body: '內文' },
+    }
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [minutes] }) })
+    const user = await renderCard()
+    const draft = await within(card()).findByRole('group', { name: 'email 草稿：搬家會議紀錄' })
+
+    await user.type(within(draft).getByLabelText('收件人'), '王小明')
+
+    expect(within(draft).getByText('這些不是 email 地址：王小明')).toBeInTheDocument()
+    expect(within(card()).getByRole('button', { name: '執行勾選的項目' })).toBeDisabled()
+  })
+
   it('says when there was nothing to do', async () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run() })
     await renderCard()
