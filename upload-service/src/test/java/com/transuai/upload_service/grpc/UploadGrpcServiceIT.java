@@ -125,6 +125,32 @@ class UploadGrpcServiceIT {
         assertThat(payload.get("fileType").asText()).isEqualTo("AUDIO");
         // Carried down the pipeline so ai-service knows whose models to use and whose usage it is.
         assertThat(payload.get("userId").asText()).isEqualTo(userId.toString());
+        // No language asked for: Chinese, as before.
+        assertThat(job.getTranscriptionLanguage()).isEqualTo("zh-TW");
+        assertThat(payload.get("transcriptionLanguage").asText()).isEqualTo("zh-TW");
+    }
+
+    @Test
+    void completeUpload_keepsTheChosenTranscriptionLanguageAndPassesItOn() throws Exception {
+        for (String language : List.of("en", "auto")) {
+            Job job = uploadedJob(stubFor(UUID.randomUUID()), "meeting-" + language + ".m4a", language);
+
+            assertThat(job.getTranscriptionLanguage()).isEqualTo(language);
+            Message message = rabbitTemplate.receive(mqProperties.transcriptionRequestedQueue(), 2000);
+            assertThat(message).isNotNull();
+            assertThat(objectMapper.readTree(message.getBody()).get("transcriptionLanguage").asText()).isEqualTo(language);
+            assertThat(stubFor(UUID.fromString(job.getUserId())).getJob(
+                    GetJobRequest.newBuilder().setJobId(job.getJobId()).build()).getTranscriptionLanguage())
+                    .isEqualTo(language);
+        }
+    }
+
+    @Test
+    void completeUpload_rejectsAnUnknownTranscriptionLanguage() throws Exception {
+        assertThatThrownBy(() -> uploadedJob(stubFor(UUID.randomUUID()), "meeting.m4a", "fr"))
+                .isInstanceOfSatisfying(StatusRuntimeException.class,
+                        e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT));
+        assertThat(rabbitTemplate.receive(mqProperties.transcriptionRequestedQueue(), 500)).isNull();
     }
 
     @Test
@@ -221,7 +247,12 @@ class UploadGrpcServiceIT {
     }
 
     private Job createJob(UUID userId, String fileName) throws Exception {
-        UploadServiceGrpc.UploadServiceBlockingStub stub = stubFor(userId);
+        return uploadedJob(stubFor(userId), fileName, "");
+    }
+
+    // Uploads a small audio file and completes the upload, asking for the given transcription language ("" = none).
+    private Job uploadedJob(UploadServiceGrpc.UploadServiceBlockingStub stub, String fileName, String language)
+            throws Exception {
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName(fileName)
                 .setFileType(FileType.AUDIO)
@@ -234,6 +265,7 @@ class UploadGrpcServiceIT {
                 .setFileName(fileName)
                 .setFileType(FileType.AUDIO)
                 .setFileSizeBytes(1024L)
+                .setTranscriptionLanguage(language)
                 .build());
         createdJobIds.add(UUID.fromString(job.getJobId()));
         return job;

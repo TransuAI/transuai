@@ -60,6 +60,10 @@ public class JobEntity {
     @Column(name = "duration_seconds")
     private Integer durationSeconds;
 
+    // 轉錄語言（TranscriptionLanguage）；這個欄位之前建立的 Job 是 null，當成中文。
+    @Column(name = "transcription_language", length = 10)
+    private String transcriptionLanguage;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default

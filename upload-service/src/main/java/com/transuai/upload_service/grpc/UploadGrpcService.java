@@ -17,6 +17,7 @@ import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 import com.transuai.upload_service.config.UploadLimitsProperties;
 import com.transuai.upload_service.domain.JobEntity;
+import com.transuai.upload_service.domain.TranscriptionLanguage;
 import com.transuai.upload_service.event.JobEventPublisher;
 import com.transuai.upload_service.event.TranscriptionRequestedEvent;
 import com.transuai.upload_service.grpc.auth.GrpcAuthContext;
@@ -107,6 +108,12 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
                     Status.INVALID_ARGUMENT.withDescription("file_size_bytes must be positive").asRuntimeException());
             return;
         }
+        Optional<String> transcriptionLanguage = TranscriptionLanguage.parse(request.getTranscriptionLanguage());
+        if (transcriptionLanguage.isEmpty()) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("transcription_language must be zh-TW, en or auto").asRuntimeException());
+            return;
+        }
 
         UUID userId = GrpcAuthContext.currentUserId();
         String expectedPrefix = "uploads/" + userId + "/";
@@ -147,12 +154,14 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
                 .fileSizeBytes(actualFileSizeBytes.get())
                 .storagePath(request.getStoragePath())
                 .durationSeconds(request.getDurationSeconds() > 0 ? request.getDurationSeconds() : null)
+                .transcriptionLanguage(transcriptionLanguage.get())
                 .status(JobEntity.Status.UPLOADED)
                 .build();
         job = jobRepository.save(job);
 
         jobEventPublisher.publishTranscriptionRequested(new TranscriptionRequestedEvent(
-                job.getId().toString(), job.getUserId().toString(), job.getStoragePath(), job.getFileType().name()));
+                job.getId().toString(), job.getUserId().toString(), job.getStoragePath(), job.getFileType().name(),
+                job.getTranscriptionLanguage()));
 
         responseObserver.onNext(JobMapper.toProto(job));
         responseObserver.onCompleted();
