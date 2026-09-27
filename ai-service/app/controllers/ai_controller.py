@@ -50,11 +50,21 @@ from app.services.post_meeting import (
     RunStillGoing,
     UnknownProposal,
     execute_proposals,
+    hints,
     post_meeting_state,
     request_post_meeting,
     retry_proposal,
 )
 from app.services.post_meeting import effective_status as post_meeting_effective_status
+from app.services.post_meeting_settings import (
+    InvalidLocation,
+    NotionLocation,
+    NotionNotLinked,
+    Settings,
+    get_settings,
+    save_settings,
+)
+from app.services.notion import NotionUnreachable
 from app.services.qa import NoEmbeddingsError, stream_answer
 from app.services.quizzes import (
     InvalidAnswers,
@@ -441,7 +451,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
         reason, run, proposals = post_meeting_state(job_id, user_id)
-        response = ai_pb2.PostMeeting(available=reason is None, unavailable_reason=reason or "")
+        response = ai_pb2.PostMeeting(available=reason is None, unavailable_reason=reason or "",
+                                      hints=hints(user_id) if reason is None else [])
         if run is not None:
             response.latest_run.CopyFrom(_post_meeting_run_to_proto(run, proposals))
         return response
@@ -488,6 +499,22 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         except NotRetryable:
             _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "只有失敗的提案可以重試")
         return _post_meeting_run_to_proto(run, proposals)
+
+
+    def GetPostMeetingSettings(self, request, context):
+        return _settings_to_proto(get_settings(_parse_user_id(request.user_id, context)))
+
+    def UpdatePostMeetingSettings(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            settings = save_settings(user_id, request.notion_meetings_page_url, request.notion_todo_database_url)
+        except NotionNotLinked:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "請先到設定頁連結 Notion 帳號")
+        except InvalidLocation as exc:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        except NotionUnreachable as exc:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, str(exc))
+        return _settings_to_proto(settings)
 
 
 _CONNECTION_STATUS = {
@@ -538,6 +565,14 @@ def _post_meeting_run_to_proto(run: PostMeetingRun, proposals: Sequence[ActionPr
     if run.finished_at is not None:
         message.finished_at.FromDatetime(run.finished_at)
     return message
+
+
+def _settings_to_proto(settings: Settings) -> ai_pb2.PostMeetingSettings:
+    def location(place: NotionLocation | None) -> ai_pb2.NotionLocation | None:
+        return ai_pb2.NotionLocation(id=place.id, title=place.title, url=place.url) if place else None
+
+    return ai_pb2.PostMeetingSettings(notion_meetings_page=location(settings.meetings_page),
+                                      notion_todo_database=location(settings.todo_database))
 
 
 def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = (), *, best: int | None = None) -> ai_pb2.Quiz:

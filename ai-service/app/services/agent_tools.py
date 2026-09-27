@@ -11,6 +11,8 @@ from enum import StrEnum
 from typing import Any
 
 from app.services.gmail import GmailError, create_draft
+from app.services.notion import NotionError, call_tool, url_of
+from app.services.post_meeting_settings import NotionLocation
 from app.services.google_calendar import CalendarError, create_event, list_events
 
 
@@ -215,6 +217,73 @@ def gmail_tools(access_token: Callable[[], str]) -> list[AgentTool]:
                   ToolKind.WRITE, "正在整理行動提案…", lambda args: draft_proposal({**args, "to": []}),
                   service="gmail", proposal_kind="email_draft", execute=create, check_confirmed=draft_proposal),
     ]
+
+
+# --- Notion（官方遠端 MCP） ---
+
+
+def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation | None,
+                 todo_database: NotionLocation | None) -> list[AgentTool]:
+    """讀取類：搜尋、讀頁面或資料庫（含欄位結構）。寫入類只有在使用者指定了位置時才提供，而且一律寫到指定的位置——模型不能
+    自己挑地方寫。"""
+
+    def mcp(name: str, arguments: dict[str, Any]) -> str:
+        try:
+            return call_tool(access_token(), name, arguments)
+        except NotionError as exc:
+            raise ToolFailed(str(exc)) from exc
+
+    tools = [
+        AgentTool("notion_search", "（Notion，讀取）搜尋使用者的 Notion。", _object({"query": {"type": "string"}}, ["query"]),
+                  ToolKind.READ, "正在搜尋 Notion…",
+                  lambda args: mcp("notion-search", {"query": text_argument(args, "query")})),
+        AgentTool("notion_fetch", "（Notion，讀取）讀一個頁面或資料庫；資料庫會回傳欄位結構。",
+                  _object({"id": {"type": "string", "description": "網址或 ID"}}, ["id"]),
+                  ToolKind.READ, "正在讀取 Notion…", lambda args: mcp("notion-fetch", {"id": text_argument(args, "id")})),
+    ]
+    if meetings_page is not None:
+        def page_proposal(args: dict[str, Any]) -> dict[str, Any]:
+            return {"title": text_argument(args, "title"), "content": text_argument(args, "content")}
+
+        tools.append(AgentTool(
+            "notion_create_meeting_page",
+            f"（Notion，寫入）在使用者指定的會議紀錄頁面「{meetings_page.title}」底下建立一頁會議紀錄。只會記成提案，等使用者確認。",
+            _object({"title": {"type": "string"}, "content": {"type": "string", "description": "Markdown"}},
+                    ["title", "content"]),
+            ToolKind.WRITE, "正在整理行動提案…", page_proposal, service="notion", proposal_kind="notion_page",
+            execute=lambda args: url_of(mcp("notion-create-pages", {
+                "parent": {"page_id": meetings_page.id},
+                "pages": [{"properties": {"title": args["title"]}, "content": args["content"]}]}))))
+    if todo_database is not None:
+        def todo_proposal(args: dict[str, Any]) -> dict[str, Any]:
+            properties = args.get("properties")
+            if not isinstance(properties, dict) or not properties:
+                raise ToolArgumentError("properties 要是物件：欄位名稱對到值")
+            if not all(isinstance(value, (str, int, float, bool)) or value is None for value in properties.values()):
+                raise ToolArgumentError("properties 的值要是文字、數字、true/false 或 null")
+            content = args.get("content", "")
+            if not isinstance(content, str):
+                raise ToolArgumentError("content 要是文字")
+            return {"properties": properties, "content": content}
+
+        def create_todo(args: dict[str, Any]) -> str:
+            page: dict[str, Any] = {"properties": args["properties"]}
+            if args["content"].strip():
+                page["content"] = args["content"]
+            return url_of(mcp("notion-create-pages", {"parent": {"data_source_id": todo_database.id}, "pages": [page]}))
+
+        tools.append(AgentTool(
+            "notion_create_todo",
+            f"（Notion，寫入）在使用者指定的待辦資料庫「{todo_database.title}」（{todo_database.id}）新增一筆待辦。"
+            "寫之前先用 notion_fetch 讀這個資料庫的欄位結構，properties 的欄位名稱要跟資料庫一樣（例如負責人、期限）；"
+            "人員（person）類型的欄位填不了講者名字，負責人沒有文字欄位可填時寫進 content。依據的時間戳寫進 content。"
+            "只會記成提案，等使用者確認。",
+            _object({"properties": {"type": "object", "description": "欄位名稱對到值"},
+                     "content": {"type": "string", "description": "這筆待辦的內文（Markdown）：依據的時間戳、補充說明"}},
+                    ["properties"]),
+            ToolKind.WRITE, "正在整理行動提案…", todo_proposal, service="notion", proposal_kind="notion_database_item",
+            execute=create_todo))
+    return tools
 
 
 def result_text(result: Any) -> str:

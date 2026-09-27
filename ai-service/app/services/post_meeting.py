@@ -42,10 +42,12 @@ from app.services.agent_tools import (
     calendar_tools,
     gmail_tools,
     job_tools,
+    notion_tools,
     result_text,
 )
 from app.services.default_models import get_default_model, resolve_chat_model
 from app.services.event_publisher import connection_params, publish_post_meeting_requested
+from app.services.post_meeting_settings import Settings, get_settings
 from app.services.llm_client import PLATFORM, ChatModel, LlmError, LlmErrorReason, chat_with_tools
 from app.services.regeneration import STUCK_AFTER
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
@@ -99,16 +101,35 @@ def unavailable_reason(user_id: uuid.UUID) -> str | None:
         return "會後處理需要你自己的 AI 金鑰：請到設定頁存入自有金鑰，並把預設模型換成支援工具呼叫的模型"
     if not choice.supports_tools:
         return f"你的預設模型（{choice.model}）不支援工具呼叫，請到設定頁換一個支援工具呼叫的模型"
-    session = new_session()
-    try:
-        google = find_connection(session, user_id, "google")
-    finally:
-        session.close()
-    if google is None:
-        return "請先到設定頁連結 Google 帳號，會後處理才能查詢你的行事曆"
-    if google.status == ConnectionStatus.INVALID:
+    google, notion = _connection_status(user_id, "google"), _connection_status(user_id, "notion")
+    if ConnectionStatus.CONNECTED in (google, notion):
+        return None
+    if google == ConnectionStatus.INVALID:
         return "Google 連結已失效，請到設定頁重新連結"
-    return None
+    if notion == ConnectionStatus.INVALID:
+        return "Notion 連結已失效，請到設定頁重新連結"
+    return "請先到設定頁連結 Google 或 Notion 帳號，會後處理才能查詢你的行事曆、寫進你的 Notion"
+
+
+def _connection_status(user_id: uuid.UUID, service: str) -> ConnectionStatus | None:
+    """這個服務存下來的連結狀態；沒連結是 None。"""
+    connection = _in_session(lambda s: find_connection(s, user_id, service))
+    return ConnectionStatus(connection.status) if connection else None
+
+
+def _notion_settings(user_id: uuid.UUID) -> Settings | None:
+    """Notion 已連結時，使用者指定的 Notion 位置；沒連結（或已失效）是 None。"""
+    return get_settings(user_id) if _connection_status(user_id, "notion") == ConnectionStatus.CONNECTED else None
+
+
+def hints(user_id: uuid.UUID) -> list[str]:
+    """能跑但有些事做不到時給使用者的提示。"""
+    settings = _notion_settings(user_id)
+    if settings is None:
+        return []
+    missing = [name for name, location in (("會議紀錄頁面", settings.meetings_page), ("待辦資料庫", settings.todo_database))
+               if location is None]
+    return [f"想讓會後處理寫進 Notion，請到設定頁指定{'與'.join(missing)}"] if missing else []
 
 
 def effective_status(run: PostMeetingRun, now: datetime | None = None) -> tuple[PostMeetingStatus, str | None]:
@@ -121,7 +142,7 @@ def effective_status(run: PostMeetingRun, now: datetime | None = None) -> tuple[
 
 
 def post_meeting_state(job_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str | None, PostMeetingRun | None, list[ActionProposal]]:
-    """這個 Job 的會後處理：不能跑的原因（能跑是 None）、最新一份紀錄與它的提案。"""
+    """這個 Job 的會後處理：不能跑的原因（能跑是 None）、最新一份紀錄與它的提案。提示另外用 hints() 取得。"""
     reason = unavailable_reason(user_id)
     session = new_session()
     try:
@@ -272,7 +293,22 @@ def _job_content(job_id: uuid.UUID) -> JobContent:
     )
 
 
-def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str]) -> str:
+def _notion_rules(settings: Settings | None) -> str:
+    """系統提示裡關於 Notion 的規則：指定的位置，或沒指定時不要提 Notion 動作。沒連結 Notion（None）就沒有這一段。"""
+    if settings is None:
+        return ""
+    lines = []
+    if settings.meetings_page:
+        lines.append(f"- Notion 的會議紀錄放在使用者指定的頁面「{settings.meetings_page.title}」底下（用 notion_create_meeting_page）。")
+    if settings.todo_database:
+        lines.append(f"- 待辦寫進使用者指定的 Notion 資料庫「{settings.todo_database.title}」（{settings.todo_database.id}，用 "
+                     "notion_create_todo）：寫之前先用 notion_fetch 讀它的欄位結構，負責人填講者的名字、期限填日期，依據的時間戳寫進 content。")
+    if not lines:
+        lines.append("- 使用者沒有指定 Notion 的會議紀錄頁面或待辦資料庫：不要提任何寫進 Notion 的動作。")
+    return "\n" + "\n".join(lines)
+
+
+def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str], notion_rules: str) -> str:
     uploaded = run.uploaded_at.astimezone(ZoneInfo(run.timezone))
     speakers = "、".join(content.speakers) if len(content.speakers) >= 2 else "（只有一位講者，或沒有講者資訊）"
     return f"""你是會後處理助手：讀這場會議（一段錄音的逐字稿、摘要、章節），查使用者連結的服務（例如行事曆），把會後該做的事整理成「行動提案」，交給使用者確認。
@@ -282,38 +318,41 @@ def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[s
 - 寫入類工具（{"、".join(write_tools) or "目前沒有"}）不會真的執行，只會記成提案，等使用者確認；同一件事只提一次。
 - 只提會議裡真的談到、有根據，而且是這位使用者或團隊要做的事；不要自己編日期或內容。
 - 相對日期（明天、下週三、兩週後）依錄音上傳時間換算：上傳時間是 {uploaded.isoformat()}（星期{_WEEKDAYS[uploaded.weekday()]}），使用者時區是 {run.timezone}。
-- 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。
+- 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。{notion_rules}
 - 你總共最多只能呼叫 {MAX_TOOL_CALLS} 次工具（讀取加寫入），到了就會被停下。先讀摘要與章節，真的需要細節才搜尋逐字稿，要留足夠的次數給提案。可以一次呼叫多個工具。
 - 做完就直接回覆一段簡短的說明，不要再呼叫工具。"""
 
 
-def _connected_service_tools(user_id: uuid.UUID) -> list[AgentTool]:
-    """使用者已連結的外部服務的工具；沒連結（或已失效）的服務不提供。"""
-    google = _in_session(lambda s: find_connection(s, user_id, "google"))
-    if google is not None and google.status == ConnectionStatus.CONNECTED:
-        def token() -> str:
-            return _google_token(user_id)
+def _connected_service_tools(user_id: uuid.UUID, notion: Settings | None) -> list[AgentTool]:
+    """使用者已連結的外部服務的工具；沒連結（或已失效）的服務不提供。notion 是 _notion_settings() 的結果。"""
+    tools: list[AgentTool] = []
+    if _connection_status(user_id, "google") == ConnectionStatus.CONNECTED:
+        def google_token() -> str:
+            return _service_token(user_id, "google", "Google")
 
-        return calendar_tools(token) + gmail_tools(token)
-    return []
+        tools += calendar_tools(google_token) + gmail_tools(google_token)
+    if notion is not None:
+        tools += notion_tools(lambda: _service_token(user_id, "notion", "Notion"), notion.meetings_page, notion.todo_database)
+    return tools
 
 
-def _google_token(user_id: uuid.UUID) -> str:
+def _service_token(user_id: uuid.UUID, service: str, name: str) -> str:
     try:
-        return connections.access_token(user_id, "google")
-    except connections.ConnectionInvalid as exc:
-        raise ToolFailed("Google 連結已失效，請到設定頁重新連結") from exc
+        return connections.access_token(user_id, service)
+    except (connections.ConnectionInvalid, connections.NotConnected) as exc:
+        raise ToolFailed(f"{name} 連結已失效，請到設定頁重新連結") from exc
     except connections.ServiceUnreachable as exc:
-        raise ToolFailed("暫時連不上 Google，請稍後重試") from exc
+        raise ToolFailed(f"暫時連不上 {name}，請稍後重試") from exc
 
 
 def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_id: uuid.UUID) -> PostMeetingStatus:
     """模型每一輪可以呼叫工具：讀取類真的執行、結果回給模型；寫入類驗證參數後記成提案。模型說結束就完成；工具呼叫到
     MAX_TOOL_CALLS 次（同一輪平行呼叫超過的部分不執行）或超過 TIME_LIMIT 就停下，已經產生的提案保留。"""
-    tools = {tool.name: tool for tool in job_tools(content) + _connected_service_tools(user_id)}
+    notion = _notion_settings(user_id)
+    tools = {tool.name: tool for tool in job_tools(content) + _connected_service_tools(user_id, notion)}
     schemas = [tool.schema() for tool in tools.values()]
     writes = [tool.name for tool in tools.values() if tool.kind == ToolKind.WRITE]
-    messages: list[dict] = [{"role": "system", "content": _system_prompt(run, content, writes)},
+    messages: list[dict] = [{"role": "system", "content": _system_prompt(run, content, writes, _notion_rules(notion))},
                             {"role": "user", "content": "請幫我處理這場會議的會後事項。"}]
     meter = UsageMeter(user_id, run.job_id, LlmFeature.POST_MEETING)
     deadline = time.monotonic() + TIME_LIMIT.total_seconds()
@@ -417,7 +456,8 @@ def _executable_proposals(job_id: uuid.UUID, run_id: uuid.UUID) -> dict[uuid.UUI
 
 def _write_tools(user_id: uuid.UUID) -> dict[str, AgentTool]:
     """執行時用得到的寫入類工具：跟 agent 同一份設定（同樣的參數檢查）。服務沒連結的就不在裡面。"""
-    return {tool.name: tool for tool in _connected_service_tools(user_id) if tool.kind == ToolKind.WRITE}
+    tools = _connected_service_tools(user_id, _notion_settings(user_id))
+    return {tool.name: tool for tool in tools if tool.kind == ToolKind.WRITE}
 
 
 def _execute(proposal_id: uuid.UUID, arguments_json: str, tools: dict[str, AgentTool]) -> None:

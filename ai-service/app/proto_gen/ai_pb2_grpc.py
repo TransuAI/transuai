@@ -134,6 +134,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.RetryProposalRequest.SerializeToString,
                 response_deserializer=ai__pb2.PostMeetingRun.FromString,
                 _registered_method=True)
+        self.GetPostMeetingSettings = channel.unary_unary(
+                '/transuai.ai.v1.AiService/GetPostMeetingSettings',
+                request_serializer=ai__pb2.GetPostMeetingSettingsRequest.SerializeToString,
+                response_deserializer=ai__pb2.PostMeetingSettings.FromString,
+                _registered_method=True)
+        self.UpdatePostMeetingSettings = channel.unary_unary(
+                '/transuai.ai.v1.AiService/UpdatePostMeetingSettings',
+                request_serializer=ai__pb2.UpdatePostMeetingSettingsRequest.SerializeToString,
+                response_deserializer=ai__pb2.PostMeetingSettings.FromString,
+                _registered_method=True)
         self.SaveProviderKey = channel.unary_unary(
                 '/transuai.ai.v1.AiService/SaveProviderKey',
                 request_serializer=ai__pb2.SaveProviderKeyRequest.SerializeToString,
@@ -343,6 +353,21 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetPostMeetingSettings(self, request, context):
+        """會後處理的設定：Notion 的會議紀錄父頁面與待辦資料庫（沒指定的不設定）。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdatePostMeetingSettings(self, request, context):
+        """儲存設定（整份換掉）：網址是空字串就是不指定。有指定的會先用 Notion 確認存在而且讀得到；沒連結 Notion 回
+        FAILED_PRECONDITION，找不到、沒有權限或不是資料庫回 INVALID_ARGUMENT（附原因），連不上 Notion 回 UNAVAILABLE。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SaveProviderKey(self, request, context):
         """自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
         取得的使用者，不另外驗證。
@@ -492,6 +517,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.RetryProposal,
                     request_deserializer=ai__pb2.RetryProposalRequest.FromString,
                     response_serializer=ai__pb2.PostMeetingRun.SerializeToString,
+            ),
+            'GetPostMeetingSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetPostMeetingSettings,
+                    request_deserializer=ai__pb2.GetPostMeetingSettingsRequest.FromString,
+                    response_serializer=ai__pb2.PostMeetingSettings.SerializeToString,
+            ),
+            'UpdatePostMeetingSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdatePostMeetingSettings,
+                    request_deserializer=ai__pb2.UpdatePostMeetingSettingsRequest.FromString,
+                    response_serializer=ai__pb2.PostMeetingSettings.SerializeToString,
             ),
             'SaveProviderKey': grpc.unary_unary_rpc_method_handler(
                     servicer.SaveProviderKey,
@@ -1041,6 +1076,60 @@ class AiService:
             '/transuai.ai.v1.AiService/RetryProposal',
             ai__pb2.RetryProposalRequest.SerializeToString,
             ai__pb2.PostMeetingRun.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetPostMeetingSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/GetPostMeetingSettings',
+            ai__pb2.GetPostMeetingSettingsRequest.SerializeToString,
+            ai__pb2.PostMeetingSettings.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdatePostMeetingSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/UpdatePostMeetingSettings',
+            ai__pb2.UpdatePostMeetingSettingsRequest.SerializeToString,
+            ai__pb2.PostMeetingSettings.FromString,
             options,
             channel_credentials,
             insecure,

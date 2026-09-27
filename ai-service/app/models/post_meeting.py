@@ -66,3 +66,20 @@ class ActionProposal(Base):
     result_url: Mapped[str | None] = mapped_column(Text)  # 執行成功時，建立好的項目的網址
     failure_reason: Mapped[str | None] = mapped_column(Text)  # 執行失敗時給使用者看的原因
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PostMeetingSettings(Base):
+    """一位使用者的會後處理設定：Notion 的會議紀錄父頁面、待辦資料庫（沒指定是空的）。"""
+
+    __tablename__ = "post_meeting_settings"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    notion_meetings_page_id: Mapped[str | None] = mapped_column(String(64))
+    notion_meetings_page_title: Mapped[str | None] = mapped_column(Text)
+    notion_meetings_page_url: Mapped[str | None] = mapped_column(Text)
+    # 資料庫的 data source ID（collection://…），新增一筆時當 parent。
+    notion_todo_data_source_id: Mapped[str | None] = mapped_column(String(64))
+    notion_todo_database_title: Mapped[str | None] = mapped_column(Text)
+    notion_todo_database_url: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))

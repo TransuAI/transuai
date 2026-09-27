@@ -218,14 +218,50 @@ class RequestPostMeetingRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., timezone: _Optional[str] = ..., uploaded_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class PostMeeting(_message.Message):
-    __slots__ = ("available", "unavailable_reason", "latest_run")
+    __slots__ = ("available", "unavailable_reason", "latest_run", "hints")
     AVAILABLE_FIELD_NUMBER: _ClassVar[int]
     UNAVAILABLE_REASON_FIELD_NUMBER: _ClassVar[int]
     LATEST_RUN_FIELD_NUMBER: _ClassVar[int]
+    HINTS_FIELD_NUMBER: _ClassVar[int]
     available: bool
     unavailable_reason: str
     latest_run: PostMeetingRun
-    def __init__(self, available: _Optional[bool] = ..., unavailable_reason: _Optional[str] = ..., latest_run: _Optional[_Union[PostMeetingRun, _Mapping]] = ...) -> None: ...
+    hints: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, available: _Optional[bool] = ..., unavailable_reason: _Optional[str] = ..., latest_run: _Optional[_Union[PostMeetingRun, _Mapping]] = ..., hints: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class GetPostMeetingSettingsRequest(_message.Message):
+    __slots__ = ("user_id",)
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    def __init__(self, user_id: _Optional[str] = ...) -> None: ...
+
+class UpdatePostMeetingSettingsRequest(_message.Message):
+    __slots__ = ("user_id", "notion_meetings_page_url", "notion_todo_database_url")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    NOTION_MEETINGS_PAGE_URL_FIELD_NUMBER: _ClassVar[int]
+    NOTION_TODO_DATABASE_URL_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    notion_meetings_page_url: str
+    notion_todo_database_url: str
+    def __init__(self, user_id: _Optional[str] = ..., notion_meetings_page_url: _Optional[str] = ..., notion_todo_database_url: _Optional[str] = ...) -> None: ...
+
+class PostMeetingSettings(_message.Message):
+    __slots__ = ("notion_meetings_page", "notion_todo_database")
+    NOTION_MEETINGS_PAGE_FIELD_NUMBER: _ClassVar[int]
+    NOTION_TODO_DATABASE_FIELD_NUMBER: _ClassVar[int]
+    notion_meetings_page: NotionLocation
+    notion_todo_database: NotionLocation
+    def __init__(self, notion_meetings_page: _Optional[_Union[NotionLocation, _Mapping]] = ..., notion_todo_database: _Optional[_Union[NotionLocation, _Mapping]] = ...) -> None: ...
+
+class NotionLocation(_message.Message):
+    __slots__ = ("id", "title", "url")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    URL_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    title: str
+    url: str
+    def __init__(self, id: _Optional[str] = ..., title: _Optional[str] = ..., url: _Optional[str] = ...) -> None: ...
 
 class PostMeetingRun(_message.Message):
     __slots__ = ("id", "status", "progress", "failure_reason", "model_provider", "model", "requested_at", "finished_at", "proposals")
