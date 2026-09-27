@@ -9,7 +9,7 @@
 | 框架          | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework                                                                                |
 | API           | gRPC（`TranscriptionService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed` / `job.failed`；使用者編輯逐字稿後發送 `transcript.edited`     |
-| 轉錄 + 講者分離 | Deepgram Nova-3（`zh-TW`，`httpx` 直接打 REST API），每個字的 timestamp 與講者；為什麼不是 Groq Whisper 見 [ADR 0001](docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md) |
+| 轉錄 + 講者分離 | Deepgram Nova-3（語言依上傳時的選擇：中文 `zh-TW`（預設）、英文 `en` 或自動偵測中英文，見 [ADR 0002](docs/adr/0002-transcription-language-chosen-at-upload.md)；`httpx` 直接打 REST API），每個字的 timestamp 與講者；為什麼不是 Groq Whisper 見 [ADR 0001](docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md) |
 | 影片抽音軌    | moviepy（底層用 ffmpeg，經 `imageio-ffmpeg` 首次執行時自動下載 binary，本機不需另外安裝系統 ffmpeg）                                             |
 | 繁體轉換      | OpenCC（`opencc`，`s2tw` 逐字轉台灣標準字形，離線執行、預編譯 wheel），只套用在中文逐字稿                                                         |
 | 資料庫        | PostgreSQL（`transcription_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級                        |
@@ -42,7 +42,7 @@ uv run python -m app.main
 ## Pipeline
 
 ```
-消費 transcription.requested { jobId, userId, storagePath, fileType }
+消費 transcription.requested { jobId, userId, storagePath, fileType, transcriptionLanguage }（語言：zh-TW / en / auto；舊訊息沒有，當成中文）
   → UpdateJobStatus(TRANSCRIBING)
   → 從物件儲存下載檔案
   → file_type == VIDEO 才用 moviepy 抽音軌，AUDIO 直接用原始檔案
@@ -187,7 +187,7 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - `recognize()` 呼叫 Deepgram 遇到暫時性錯誤（429、5xx、逾時、連不上）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、認證失敗、額度用完的 402 等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——`ai-service` 已經幫這一段補上獨立的 in-process 重試 + 高嚴重度 log marker，這裡還沒跟進，是目前真實存在的已知限制
 - 講者分離只在新轉錄的 Job 上做，舊 Job 不回填（沒有講者，當成只有一位講者）。自動分離不完美：很短的插話（「對」「真的」）常被併進前一位講者，三人以上的對話偶爾只分出兩位（見 ADR 0001 的實測）
-- 語言固定指定 `zh-TW`（`DEEPGRAM_LANGUAGE`），不自動偵測：自動偵測的中文輸出簡體、錯字也明顯較多。代價是非中文的錄音辨識結果會很差，要換語言得改設定
+- 語言由上傳時選（ADR 0002）：中文（`zh-TW`，預設，也是沒帶語言時的 `DEEPGRAM_LANGUAGE`）、英文（`en`）、自動偵測（`detect_language=zh&detect_language=en`）。自動偵測判斷成中文時走通用中文模型，錯字明顯較多（ADR 0001 的實測），所以不是預設；整個檔案只判斷一種語言，中英夾雜的錄音仍然辨識不好。語言選錯要重新上傳
 - Deepgram 的 $200 是一次性額度，用完就要付費（$0.0043/分鐘），不像 Groq 每天重置；額度監控與告警仍然沒有（`architecture-design.md` 第 7 節第 7 點）
 - 中文轉錄幾乎沒有標點，片段主要靠停頓切開；`smart_format` 偶爾把中文裡的數字和英文切碎（例如「200 3年」），照原樣保留
 - 繁體轉換只套用在新轉錄的 Job，這個功能上線前存進去的簡體逐字稿不回填

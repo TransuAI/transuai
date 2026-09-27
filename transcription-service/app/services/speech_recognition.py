@@ -36,6 +36,10 @@ class Recognition:
 
 _DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"
 PROVIDER = "deepgram"
+# 上傳時選「自動偵測」（見 docs/adr/0002）：請 Deepgram 在這幾種語言之間判斷整個檔案是哪一種。Deepgram 的中文偵測只有 zh，
+# 沒有 zh-TW。
+AUTO = "auto"
+_DETECTABLE_LANGUAGES = ("zh", "en")
 
 
 def model_name() -> str:
@@ -47,19 +51,23 @@ def model_name() -> str:
 _client = httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0))
 
 
-def recognize(audio_path: Path) -> Recognition:
-    """轉錄並做講者分離。HTTP 錯誤一律 raise（暫時性與否由 is_transient_recognition_error() 判斷）。"""
-    logger.info("calling Deepgram (%s, %s) for %s", settings.deepgram_model, settings.deepgram_language, audio_path)
+def recognize(audio_path: Path, language: str | None = None) -> Recognition:
+    """轉錄並做講者分離。language 是上傳時選的語言（zh-TW、en，或 AUTO 自動偵測）；沒有（升級前的舊訊息）就用設定的預設。
+    HTTP 錯誤一律 raise（暫時性與否由 is_transient_recognition_error() 判斷）。"""
+    chosen = language or settings.deepgram_language
+    logger.info("calling Deepgram (%s, %s) for %s", settings.deepgram_model, chosen, audio_path)
+    language_params = ([("detect_language", code) for code in _DETECTABLE_LANGUAGES] if chosen == AUTO
+                       else [("language", chosen)])
     with audio_path.open("rb") as audio:
         response = _client.post(
             _DEEPGRAM_URL,
-            params={
-                "model": settings.deepgram_model,
-                "language": settings.deepgram_language,
-                "diarize": "true",
-                "smart_format": "true",
-                "punctuate": "true",
-            },
+            params=[
+                ("model", settings.deepgram_model),
+                *language_params,
+                ("diarize", "true"),
+                ("smart_format", "true"),
+                ("punctuate", "true"),
+            ],
             headers={
                 "Authorization": f"Token {settings.deepgram_api_key}",
                 # Deepgram 自己從內容判斷音訊格式，AUDIO 上傳的原始檔跟 VIDEO 抽出來的音軌格式不一定相同。
@@ -68,10 +76,10 @@ def recognize(audio_path: Path) -> Recognition:
             content=audio,
         )
     response.raise_for_status()
-    return _parse(response.json())
+    return _parse(response.json(), chosen)
 
 
-def _parse(body: dict[str, Any]) -> Recognition:
+def _parse(body: dict[str, Any], chosen: str) -> Recognition:
     channel = body["results"]["channels"][0]
     words = [
         RecognizedWord(
@@ -82,10 +90,10 @@ def _parse(body: dict[str, Any]) -> Recognition:
         )
         for word in channel["alternatives"][0]["words"]
     ]
-    # 指定語言時 Deepgram 不回 detected_language，這時就是指定的語言。
+    # 指定語言時 Deepgram 不回 detected_language，這時就是指定的語言；自動偵測卻沒回結果時是「無法判定」（und）。
     duration = body.get("metadata", {}).get("duration")
     return Recognition(
-        language=channel.get("detected_language") or settings.deepgram_language,
+        language=channel.get("detected_language") or ("und" if chosen == AUTO else chosen),
         words=words,
         audio_seconds=float(duration) if duration is not None else None,
     )

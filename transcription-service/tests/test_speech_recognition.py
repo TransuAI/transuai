@@ -53,6 +53,35 @@ def test_uploads_the_audio_itself_asking_for_diarized_traditional_chinese(deepgr
     }
 
 
+def test_asks_for_english_when_the_upload_chose_english(deepgram, audio):
+    recognize(audio, "en")
+
+    [request] = deepgram.requests
+    assert request.url.params["language"] == "en"
+    assert "detect_language" not in request.url.params
+
+
+def test_auto_asks_deepgram_to_detect_chinese_or_english(deepgram, audio):
+    recognize(audio, "auto")
+
+    [request] = deepgram.requests
+    assert request.url.params.get_list("detect_language") == ["zh", "en"]
+    assert "language" not in request.url.params
+    assert request.url.params["model"] == "nova-3" and request.url.params["diarize"] == "true"
+
+
+def test_the_detected_language_becomes_the_transcripts_language(deepgram, audio):
+    body = json.loads(FIXTURE.read_text())
+    body["results"]["channels"][0]["detected_language"] = "en"
+    deepgram.response = httpx.Response(200, json=body)
+
+    assert recognize(audio, "auto").language == "en"
+
+
+def test_a_chosen_language_is_the_transcripts_language(deepgram, audio):
+    assert recognize(audio, "en").language == "en"
+
+
 def test_parses_every_word_with_its_times_and_speaker(deepgram, audio):
     recognition = recognize(audio)
 

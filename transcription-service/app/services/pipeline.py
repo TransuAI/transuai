@@ -51,6 +51,8 @@ def process_message(
     file_type: str = payload["fileType"]
     # Job 擁有者：轉錄用量記在他名下，也往下傳給 ai-service；升級當下還在佇列裡的舊訊息沒有。
     owner = _job_owner(payload)
+    # 上傳時選的轉錄語言（見 docs/adr/0002）；舊訊息沒有，recognize() 用設定的預設（中文）。
+    language: str | None = payload.get("transcriptionLanguage")
 
     logger.info("processing job %s (%s) storage_path=%s",
                 job_id, file_type, storage_path)
@@ -65,7 +67,7 @@ def process_message(
             downloaded) if file_type == "VIDEO" else downloaded
 
         try:
-            recognition = recognize(audio_path)
+            recognition = recognize(audio_path, language)
         except Exception:
             record_transcription_usage(owner, uuid.UUID(job_id), None, succeeded=False)
             raise
