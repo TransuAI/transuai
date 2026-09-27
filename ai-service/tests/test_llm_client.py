@@ -34,6 +34,36 @@ def test_summaries_go_to_the_platform_model_over_the_openai_compatible_router(fa
     assert "今天開會討論預算" in body["messages"][0]["content"]
 
 
+def test_the_platform_model_can_run_on_any_openai_compatible_server(fake_llm, monkeypatch):
+    # e.g. Ollama on the developer's own GPU, or a self-hosted vLLM in the cloud: only settings change.
+    monkeypatch.setattr(llm_client.settings, "platform_llm_base_url", "http://host.docker.internal:11434/v1")
+    monkeypatch.setattr(llm_client.settings, "platform_llm_api_key", "ollama")
+    monkeypatch.setattr(llm_client.settings, "ai_hf_chat_model", "qwen3.5:9b")
+    fake_llm.reply("這是摘要")
+
+    summarize("今天開會討論預算", model=platform_chat_model(), meter=None)
+
+    [request] = fake_llm.requests
+    assert str(request.url) == "http://host.docker.internal:11434/v1/chat/completions"
+    assert request.headers["Authorization"] == "Bearer ollama"
+    assert fake_llm.bodies()[0]["model"] == "qwen3.5:9b"
+
+
+def test_the_platform_model_turns_thinking_off_the_way_its_server_understands(fake_llm, monkeypatch):
+    fake_llm.reply("預設")
+    summarize("逐字稿", model=platform_chat_model(), meter=None)
+    # HF's router (and vLLM) take the chat template's switch…
+    assert fake_llm.bodies()[0]["chat_template_kwargs"] == {"enable_thinking": False}
+
+    # …Ollama ignores it and wants reasoning_effort instead: the body extras are a setting.
+    monkeypatch.setattr(llm_client.settings, "platform_llm_extra_body", '{"reasoning_effort": "none"}')
+    fake_llm.reply("Ollama")
+    summarize("逐字稿", model=platform_chat_model(), meter=None)
+    ollama_body = fake_llm.bodies()[1]
+    assert ollama_body["reasoning_effort"] == "none"
+    assert "chat_template_kwargs" not in ollama_body
+
+
 def test_chapters_are_parsed_from_the_models_reply(fake_llm):
     fake_llm.reply('[{"title": "預算", "start_time": 12.0}, {"title": "開場", "start_time": 0}]')
 

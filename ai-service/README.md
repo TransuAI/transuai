@@ -15,7 +15,7 @@
 | 框架 | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework |
 | API | gRPC（`AiService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費 | RabbitMQ（`pika`），消費 `transcription.completed`，發送 `ai.completed` / `job.failed` |
-| 生成類呼叫 | 摘要、章節、問答都透過 OpenAI 相容介面（`openai` SDK，見 [ADR 0004](docs/adr/0004-generation-calls-through-openai-compatible-interface.md)）；平台模型走 HF Inference Providers 的 OpenAI 相容路由（`https://router.huggingface.co/v1`），回傳文字與 token 用量，錯誤分成暫時性與永久性 |
+| 生成類呼叫 | 摘要、章節、問答都透過 OpenAI 相容介面（`openai` SDK，見 [ADR 0004](docs/adr/0004-generation-calls-through-openai-compatible-interface.md)）；平台模型走 `PLATFORM_LLM_BASE_URL` 指的 OpenAI 相容伺服器（預設是 HF Inference Providers 的路由 `https://router.huggingface.co/v1`，金鑰 `PLATFORM_LLM_API_KEY`，空的用 `HF_API_KEY`；關 thinking 要多帶的參數 `PLATFORM_LLM_EXTRA_BODY`，每種伺服器寫法不同；本機 k8s 指向 Docker 跑的 Ollama，見 [ADR 0010](docs/adr/0010-platform-model-on-any-openai-compatible-server.md) 與 `../infra/README.md`），回傳文字與 token 用量，錯誤分成暫時性與永久性 |
 | 摘要 | 平台模型（預設 `Qwen/Qwen3.5-9B`，可用 `AI_HF_CHAT_MODEL` 換模型），把逐字稿全文丟給模型產生摘要；兩位以上講者時改成每行「名稱：文字」（見下方「講者」） |
 | 章節分段 | 同一個平台模型，把逐字稿片段（含時間戳，兩位以上講者時每行 `[開始時間] 名稱：文字`）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
 | Embedding | HF Inference Providers 的 `BAAI/bge-m3`（1024 維，query/document 對稱，不用加任何 instruction 前綴）：pipeline 內把逐字稿分段轉成向量存進 `embeddings` |

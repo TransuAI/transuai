@@ -45,7 +45,7 @@ _MEMORY_TURNS = 5
 # 撐得很大，所以每輪歷史塞進 prompt 前都先截斷，跟 _MEMORY_TURNS（要塞幾輪）是兩個獨立的
 # 控制，不能只靠調輪數解決。
 _MAX_HISTORY_ANSWER_CHARS = 300
-# 平台模型關掉了 thinking mode（見 llm_client.DISABLE_THINKING），模型不會把
+# 平台模型關掉了 thinking mode（見 llm_client.platform_chat_model 與 PLATFORM_LLM_EXTRA_BODY），模型不會把
 # 大量 token 燒在思考過程上，這裡的值只需要夠放「使用者真正會看到的答案」，不用像開著
 # thinking mode 時那樣另外預留一大段給 chain-of-thought。
 _ANSWER_MAX_TOKENS = 1024

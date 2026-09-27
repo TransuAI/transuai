@@ -30,8 +30,14 @@ class Settings(BaseSettings):
     # 摘要/章節分段/RAG 問答共用同一個 HF Inference Providers 聊天模型，見
     # docs/adr/0003-hf-inference-providers-for-generation.md。
     ai_hf_chat_model: str = "Qwen/Qwen3.5-9B"
-    # 生成類呼叫走 HF 的 OpenAI 相容路由（見 app/services/llm_client.py）。
-    hf_router_base_url: str = "https://router.huggingface.co/v1"
+    # 平台模型（摘要、章節、問答、會後處理）走哪個 OpenAI 相容的伺服器（見 app/services/llm_client.py）：預設是 HF 的路由；
+    # 本機可以指向 Ollama（例如 http://host.docker.internal:11434/v1），上雲可以指向自架的 vLLM 或其他託管 API。
+    platform_llm_base_url: str = "https://router.huggingface.co/v1"
+    # 那個伺服器的金鑰；空的就用 HF_API_KEY（預設的 HF 路由用它）。Ollama 不檢查金鑰，隨便填一個即可。
+    platform_llm_api_key: str = ""
+    # 平台模型每次呼叫多帶的參數（JSON），用來關掉 thinking mode——每種伺服器的寫法不同：HF 的路由與 vLLM 吃 chat template 的
+    # 開關（預設值）；Ollama 不吃，要改成 {"reasoning_effort": "none"}。空字串就是不帶。
+    platform_llm_extra_body: str = '{"chat_template_kwargs": {"enable_thinking": false}}'
     # 會後處理的平台模型（見 docs/adr/0008）：HF 路由的模型 ID，可以帶「:供應商」後綴，例如 Qwen/Qwen3.8-27B:deepinfra。
     # 空的就是不提供：預設模型是平台模型的使用者不能跑會後處理，要用自有金鑰、支援工具呼叫的模型。
     ai_post_meeting_platform_model: str = ""

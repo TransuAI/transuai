@@ -5,6 +5,7 @@
 暫時性錯誤（429、5xx、逾時、連不上）交給既有的訊息層級重試（見 retry.py 與 docs/adr/0001），client 自己不重試。
 """
 
+import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -29,8 +30,9 @@ _THINK_CLOSE = "</think>"
 # （finish_reason="length"），而且拉高 max_tokens 治標不治本：實測 531 段逐字稿的章節分段
 # 呼叫，就算給到 32768 還是在思考階段被 HF gateway 504 timeout 打斷。這裡直接透過 chat
 # template 的 enable_thinking 關掉 thinking mode，讓模型直接輸出答案——平台模型的每次呼叫都帶上
-# 這個（見 platform_chat_model()）。HF 的 OpenAI 相容路由會把它原樣轉給模型（2026-09-26 實測）。
-DISABLE_THINKING = {"chat_template_kwargs": {"enable_thinking": False}}
+# 這個（見 platform_chat_model()）。HF 的 OpenAI 相容路由會把它原樣轉給模型（2026-09-26 實測）。每種伺服器關 thinking
+# 的寫法不同，所以要帶的參數是設定（PLATFORM_LLM_EXTRA_BODY）：Ollama 不吃 chat_template_kwargs，照樣先思考、把 token
+# 燒光（2026-09-28 實測，qwen3.5:9b 回覆是空的），要改帶 {"reasoning_effort": "none"}。
 
 
 @dataclass(frozen=True)
@@ -45,14 +47,14 @@ class ChatModel:
 
 
 def platform_chat_model(model: str | None = None) -> ChatModel:
-    """平台模型：HF Inference Providers 上的聊天模型，關閉 thinking mode。model 是某個用途專屬的平台模型（例如會後處理的），
-    沒給就是一般生成（摘要、章節、問答）用的。"""
+    """平台模型：設定的 OpenAI 相容伺服器（PLATFORM_LLM_BASE_URL，預設是 HF Inference Providers）上的聊天模型，關閉 thinking
+    mode。model 是某個用途專屬的平台模型（例如會後處理的），沒給就是一般生成（摘要、章節、問答）用的。"""
     return ChatModel(
         provider=PLATFORM,
         model=model or settings.ai_hf_chat_model,
-        base_url=settings.hf_router_base_url,
-        api_key=settings.hf_api_key,
-        extra_body=DISABLE_THINKING,
+        base_url=settings.platform_llm_base_url,
+        api_key=settings.platform_llm_api_key or settings.hf_api_key,
+        extra_body=json.loads(settings.platform_llm_extra_body) if settings.platform_llm_extra_body else None,
     )
 
 
@@ -255,7 +257,7 @@ def stream_chat(
 def strip_thinking(text: str) -> str:
     """去掉輸出裡混進 content 的 <think>...</think> chain-of-thought，防禦性用途。
 
-    目前用的 Qwen/Qwen3.5-9B 搭配 DISABLE_THINKING 之後，reasoning 是獨立欄位、不會混進
+    目前用的 Qwen/Qwen3.5-9B 關掉 thinking（PLATFORM_LLM_EXTRA_BODY）之後，reasoning 是獨立欄位、不會混進
     content（這點跟原本 Groq qwen3.6-27b 的行為不同，那時候 content 裡真的會混著完整的
     <think> 區塊），所以正常情況下這裡是 no-op；保留是為了防之後換到其他模型/provider
     又變回混在一起的行為。
