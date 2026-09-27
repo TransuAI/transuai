@@ -118,7 +118,8 @@ auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user
 
 ```
 POST   /uploads/presign         取得物件儲存的 presigned upload URL（尚未建立 Job）
-POST   /uploads/complete        前端上傳完成後呼叫，建立 Job record 並發送 transcription.requested 事件
+POST   /uploads/complete        前端上傳完成後呼叫，建立 Job record 並發送 transcription.requested 事件；
+                                 body 的 transcriptionLanguage 是轉錄語言（zh-TW 預設 / en / auto）
 GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊
 GET    /jobs/{jobId}/media-url  取得該 Job 媒體檔案的 presigned 播放 URL（見 docs/adr/0002-presigned-get-url-for-media-playback.md）；
                                   query download=true 時改給「以附件方式下載、存成原始檔名」的 URL（前端匯出 → 下載原始檔）
@@ -292,6 +293,7 @@ CREATE TABLE jobs (
     file_size_bytes BIGINT NOT NULL,
     storage_path VARCHAR(500) NOT NULL,     -- MinIO/S3 路徑
     duration_seconds INT,
+    transcription_language VARCHAR(10),     -- zh-TW / en / auto（上傳時選的轉錄語言；之前的 Job 是 NULL，當成中文）
     status VARCHAR(30) NOT NULL DEFAULT 'pending',
     error_reason TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
@@ -586,7 +588,7 @@ CREATE TABLE export_outputs (
 
 | Queue/Topic | Producer | Consumer | Payload |
 |---|---|---|---|
-| `transcription.requested` | Upload Service | Transcription Service | `{ jobId, userId, storagePath, fileType }`——`userId` 是 Job 擁有者，一路帶到 ai-service，用量記在他名下 |
+| `transcription.requested` | Upload Service | Transcription Service | `{ jobId, userId, storagePath, fileType, transcriptionLanguage }`——`userId` 是 Job 擁有者，一路帶到 ai-service，用量記在他名下；`transcriptionLanguage` 是上傳時選的轉錄語言（`zh-TW` / `en` / `auto`，舊訊息沒有當成中文，見 `transcription-service/docs/adr/0002-transcription-language-chosen-at-upload.md`） |
 | `transcription.completed` | Transcription Service | AI Service | `{ jobId, userId }`（`userId` 原樣從 `transcription.requested` 帶過來；升級前排入的舊訊息沒有，照常處理，用量不記使用者） |
 | `ai.completed` | AI Service | Notification Service | `{ jobId, status }` |
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
