@@ -93,11 +93,10 @@ service AiService {
   rpc ExecuteProposals(ExecuteProposalsRequest) returns (PostMeetingRun);
   // 用上一次的最終參數重試一個失敗的提案；只有失敗的能重試（其他回 FAILED_PRECONDITION）。
   rpc RetryProposal(RetryProposalRequest) returns (PostMeetingRun);
-  // 會後處理的設定：Notion 的會議紀錄父頁面與待辦資料庫（沒指定的不設定）。
+  // 會後處理的設定：Notion 的會議紀錄位置（沒指定就不設定）與待辦去處。
   rpc GetPostMeetingSettings(GetPostMeetingSettingsRequest) returns (PostMeetingSettings);
-  // 儲存設定（整份換掉）：網址是空字串就是不指定。改過的位置會先用 Notion 確認存在、讀得到而且種類對（會議紀錄是頁面、待辦是
-  // 資料庫），沒改的沿用；沒連結 Notion 回 FAILED_PRECONDITION，找不到、沒有權限或種類不對回 INVALID_ARGUMENT（附原因），連不上
-  // Notion 回 UNAVAILABLE。
+  // 儲存設定（整份換掉）：網址是空字串就是不指定。網址改過時先用 Notion 確認是一個讀得到的頁面（不是資料庫），沒改的沿用；
+  // 沒連結 Notion 回 FAILED_PRECONDITION，找不到或不是頁面回 INVALID_ARGUMENT（附原因），連不上 Notion 回 UNAVAILABLE。
   rpc UpdatePostMeetingSettings(UpdatePostMeetingSettingsRequest) returns (PostMeetingSettings);
 
   // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
@@ -273,32 +272,33 @@ message GetPostMeetingSettingsRequest {
 
 message UpdatePostMeetingSettingsRequest {
   string user_id = 1;
-  // Notion 頁面的網址（或 ID）；空字串是不指定。
+  // Notion 頁面的網址（或 ID）：每場會議的會議紀錄（含待辦清單）會建成它底下的子頁面；空字串是不指定。
   string notion_meetings_page_url = 2;
-  // Notion 資料庫的網址（或 ID）；空字串是不指定。
-  string notion_todo_database_url = 3;
+  // 原本的待辦資料庫（已拿掉：待辦改放在每場會議的 Notion 子頁面裡）。
+  reserved 3;
+  reserved "notion_todo_database_url";
   // 待辦要建在哪裡；UNSPECIFIED 是維持原本的設定。
   TodoDestination todo_destination = 4;
 }
 
 message PostMeetingSettings {
-  // 會議紀錄放在這個 Notion 頁面底下；沒指定就不設定。
+  // 每場會議的會議紀錄（含待辦清單）建成這個 Notion 頁面底下的子頁面；沒指定就不設定。
   NotionLocation notion_meetings_page = 1;
-  // 待辦寫進這個 Notion 資料庫；沒指定就不設定。
-  NotionLocation notion_todo_database = 2;
-  // 待辦要建在哪裡（還沒選過是 Google Tasks）；會後處理只提供這個去處的建立待辦工具。
+  reserved 2;
+  reserved "notion_todo_database";
+  // 待辦要建在哪裡（還沒選過是 Google Tasks）。
   TodoDestination todo_destination = 3;
 }
 
 enum TodoDestination {
   TODO_DESTINATION_UNSPECIFIED = 0;
   TODO_DESTINATION_GOOGLE_TASKS = 1;
-  // 寫進 notion_todo_database；沒指定資料庫就不提待辦。
+  // 寫成 Notion 會議紀錄子頁面裡的打勾清單；沒指定 notion_meetings_page 就不提待辦。
   TODO_DESTINATION_NOTION = 2;
 }
 
 message NotionLocation {
-  // 頁面 ID，或資料庫的 data source ID（collection://…）。
+  // 頁面 ID。
   string id = 1;
   string title = 2;
   string url = 3;
