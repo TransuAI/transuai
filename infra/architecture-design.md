@@ -41,9 +41,9 @@ Notification Service 消費訊息
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 >
 > **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
-> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆，讀取類工具真的執行、寫入類工具只存成
+> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿）只存成
 > 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案 → 使用者檢查、修改、勾選後按執行，ai-service 才用最終參數呼叫 Google
-> 日曆，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
+> 日曆或 Gmail（草稿不寄出），每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
 > 只能用自有金鑰、支援工具呼叫的模型（`0006`）。
 
 ---
