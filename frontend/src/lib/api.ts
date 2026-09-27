@@ -14,6 +14,7 @@ import type {
   PostMeeting,
   PostMeetingRun,
   PostMeetingSettings,
+  PostMeetingSettingsUpdate,
   MonthlyUsage,
   PresignResponse,
   ProviderKey,
@@ -181,14 +182,12 @@ export const postMeetingApi = {
     apiFetch<PostMeetingRun>(`/jobs/${jobId}/post-meeting/${runId}/proposals/${proposalId}/retry`, { method: 'POST' }),
 }
 
-// 會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫（貼網址，儲存時後端先向 Notion 確認）；空字串是不指定。
+// 會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫（貼網址，儲存時後端先向 Notion 確認改過的；空字串是不指定），
+// 以及待辦要建在 Google Tasks 還是 Notion。
 export const postMeetingSettingsApi = {
   get: () => apiFetch<PostMeetingSettings>('/me/post-meeting-settings'),
-  update: (notionMeetingsPageUrl: string, notionTodoDatabaseUrl: string) =>
-    apiFetch<PostMeetingSettings>('/me/post-meeting-settings', {
-      method: 'PUT',
-      body: { notionMeetingsPageUrl, notionTodoDatabaseUrl },
-    }),
+  update: (settings: PostMeetingSettingsUpdate) =>
+    apiFetch<PostMeetingSettings>('/me/post-meeting-settings', { method: 'PUT', body: settings }),
 }
 
 // 已連結的帳號（Google、Notion）：權杖只在後端，這裡只看得到狀態。連結時後端給授權網址，由前端把使用者轉過去。

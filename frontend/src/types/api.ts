@@ -299,10 +299,21 @@ export interface NotionLocation {
   url: string | null
 }
 
-/** Where 會後處理 writes in Notion; null when not chosen. */
+/** Where 會後處理 puts todos: the user's Google Tasks, or their Notion todo database. */
+export type TodoDestination = 'GOOGLE_TASKS' | 'NOTION'
+
+/** Where 會後處理 writes in Notion (null when not chosen), and where todos go. */
 export interface PostMeetingSettings {
   notionMeetingsPage: NotionLocation | null
   notionTodoDatabase: NotionLocation | null
+  todoDestination: TodoDestination
+}
+
+/** Saving 會後處理's settings: empty URLs mean not chosen. */
+export interface PostMeetingSettingsUpdate {
+  notionMeetingsPageUrl: string
+  notionTodoDatabaseUrl: string
+  todoDestination: TodoDestination
 }
 
 /** A linked account (已連結的帳號): an outside service the user lets the platform use on their behalf. */

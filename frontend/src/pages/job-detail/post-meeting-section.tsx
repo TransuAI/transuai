@@ -151,6 +151,41 @@ function NotionDatabaseItemFields({ id, draft, set }: { id: string; draft: Draft
   )
 }
 
+function GoogleTaskFields({ id, draft, set }: { id: string; draft: Draft; set: SetField }) {
+  return (
+    <>
+      <Field id={`${id}-title`} label="標題">
+        <Input id={`${id}-title`} value={text(draft.title)} onChange={(e) => set('title', e.target.value)} />
+      </Field>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <Field id={`${id}-assignee`} label="負責人">
+          <Input id={`${id}-assignee`} value={text(draft.assignee)} onChange={(e) => set('assignee', e.target.value)} />
+        </Field>
+        <Field id={`${id}-due`} label="期限">
+          <Input id={`${id}-due`} type="date" value={text(draft.due)} onChange={(e) => set('due', e.target.value)} />
+        </Field>
+        <Field id={`${id}-timestamp`} label="依據的錄音時間">
+          <Input
+            id={`${id}-timestamp`}
+            placeholder="例如 12:34"
+            value={text(draft.timestamp)}
+            onChange={(e) => set('timestamp', e.target.value)}
+          />
+        </Field>
+      </div>
+      <Field id={`${id}-notes`} label="內容">
+        <textarea
+          id={`${id}-notes`}
+          value={text(draft.notes)}
+          onChange={(e) => set('notes', e.target.value)}
+          rows={2}
+          className={textareaClass}
+        />
+      </Field>
+    </>
+  )
+}
+
 interface ProposalKind {
   label: string
   icon: typeof CalendarPlus
@@ -199,6 +234,16 @@ const KINDS: Record<string, ProposalKind> = {
       return { ...args, to: recipients(draft) }
     },
     linkText: '在 Gmail 開啟',
+  },
+  google_task: {
+    label: 'Google Tasks 待辦',
+    icon: ListTodo,
+    title: (args) => text(args.title),
+    Fields: GoogleTaskFields,
+    problem: (draft) => (!text(draft.title).trim() ? '請填標題' : null),
+    confirmed: (draft) => draft,
+    when: (args) => (text(args.due) ? `期限 ${text(args.due)}` : null),
+    linkText: '在 Google Tasks 開啟',
   },
   notion_page: {
     label: 'Notion 頁面',

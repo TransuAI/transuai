@@ -2634,6 +2634,47 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     expect(await within(card()).findByRole('link', { name: '在 Notion 開啟' })).toHaveAttribute('href', 'https://www.notion.so/new-1')
   })
 
+  it('creates a todo in Google Tasks with the owner and due date the user confirmed', async () => {
+    const todo = {
+      ...nextMeeting,
+      id: 'p-6',
+      service: 'google_tasks',
+      tool: 'tasks_create_task',
+      kind: 'google_task',
+      arguments: { title: '聯繫搬家公司', notes: '問三家的報價', assignee: '金萊', due: '2026-11-20', timestamp: '12:34' },
+    }
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      hints: [],
+      latestRun: run({ proposals: [todo] }),
+    })
+    const user = await renderCard()
+    const item = await within(card()).findByRole('group', { name: 'Google Tasks 待辦：聯繫搬家公司' })
+    expect(within(item).getByLabelText('期限')).toHaveValue('2026-11-20')
+    expect(within(item).getByLabelText('依據的錄音時間')).toHaveValue('12:34')
+    vi.mocked(postMeetingApi.execute).mockResolvedValue(
+      run({ proposals: [{ ...todo, status: 'DONE', resultUrl: 'https://tasks.google.com/task/t-1' }] }),
+    )
+
+    await user.clear(within(item).getByLabelText('負責人'))
+    await user.type(within(item).getByLabelText('負責人'), '王經理')
+    await user.clear(within(item).getByLabelText('期限'))
+    await user.click(within(card()).getByRole('button', { name: '執行勾選的項目' }))
+
+    const [[, , items]] = vi.mocked(postMeetingApi.execute).mock.calls
+    expect(items).toEqual([
+      {
+        proposalId: 'p-6',
+        arguments: { title: '聯繫搬家公司', notes: '問三家的報價', assignee: '王經理', due: '', timestamp: '12:34' },
+      },
+    ])
+    expect(await within(card()).findByRole('link', { name: '在 Google Tasks 開啟' })).toHaveAttribute(
+      'href',
+      'https://tasks.google.com/task/t-1',
+    )
+  })
+
   it('passes on hints about what it cannot do yet', async () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,

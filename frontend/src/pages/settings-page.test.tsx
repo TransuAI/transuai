@@ -39,7 +39,11 @@ beforeEach(() => {
     { service: 'google', status: 'NOT_CONNECTED', connectedAt: null },
     { service: 'notion', status: 'NOT_CONNECTED', connectedAt: null },
   ])
-  vi.mocked(postMeetingSettingsApi.get).mockResolvedValue({ notionMeetingsPage: null, notionTodoDatabase: null })
+  vi.mocked(postMeetingSettingsApi.get).mockResolvedValue({
+    notionMeetingsPage: null,
+    notionTodoDatabase: null,
+    todoDestination: 'GOOGLE_TASKS',
+  })
 })
 
 async function renderSettings(url = '/settings') {
@@ -397,12 +401,14 @@ describe('SettingsPage post-meeting settings (會後處理)', () => {
     vi.mocked(postMeetingSettingsApi.get).mockResolvedValue({
       notionMeetingsPage: { id: 'page-1', title: 'Meeting notes', url: PAGE_URL },
       notionTodoDatabase: null,
+      todoDestination: 'GOOGLE_TASKS',
     })
     const section = await renderPostMeeting()
 
     expect(await within(section).findByLabelText('Notion 會議紀錄頁面')).toHaveValue(PAGE_URL)
     expect(within(section).getByText('目前：Meeting notes')).toBeInTheDocument()
     expect(within(section).getByLabelText('Notion 待辦資料庫')).toHaveValue('')
+    expect(within(section).getByRole('radio', { name: 'Google Tasks' })).toBeChecked()
   })
 
   it('saves the places after Notion confirms them', async () => {
@@ -410,15 +416,22 @@ describe('SettingsPage post-meeting settings (會後處理)', () => {
     vi.mocked(postMeetingSettingsApi.update).mockResolvedValue({
       notionMeetingsPage: { id: 'page-1', title: 'Meeting notes', url: PAGE_URL },
       notionTodoDatabase: { id: 'collection://x', title: '團隊待辦', url: DB_URL },
+      todoDestination: 'NOTION',
     })
     const section = await renderPostMeeting()
 
     await user.type(await within(section).findByLabelText('Notion 會議紀錄頁面'), PAGE_URL)
     await user.type(within(section).getByLabelText('Notion 待辦資料庫'), DB_URL)
+    await user.click(within(section).getByRole('radio', { name: 'Notion' }))
     await user.click(within(section).getByRole('button', { name: '儲存' }))
 
-    expect(postMeetingSettingsApi.update).toHaveBeenCalledWith(PAGE_URL, DB_URL)
+    expect(postMeetingSettingsApi.update).toHaveBeenCalledWith({
+      notionMeetingsPageUrl: PAGE_URL,
+      notionTodoDatabaseUrl: DB_URL,
+      todoDestination: 'NOTION',
+    })
     expect(await within(section).findByText('目前：團隊待辦')).toBeInTheDocument()
+    expect(within(section).getByRole('radio', { name: 'Notion' })).toBeChecked()
   })
 
   it('says why Notion would not take a place', async () => {
