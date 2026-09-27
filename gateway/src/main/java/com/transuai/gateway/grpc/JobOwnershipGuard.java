@@ -5,6 +5,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 import com.transuai.upload.grpc.v1.GetJobRequest;
+import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import lombok.RequiredArgsConstructor;
@@ -23,7 +24,12 @@ public class JobOwnershipGuard {
     private final UploadServiceGrpc.UploadServiceBlockingStub uploadServiceStub;
 
     public void check(UUID userId, String jobId) {
-        GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
+        fetch(userId, jobId);
+    }
+
+    // 同樣的檢查，順便把 Job 本身交給需要它的呼叫端（例如會後處理要知道上傳時間）。
+    public Job fetch(UUID userId, String jobId) {
+        return GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                 .getJob(GetJobRequest.newBuilder().setJobId(jobId).build());
     }
 }
