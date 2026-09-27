@@ -6,6 +6,7 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -16,7 +17,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from app.db import new_session
-from app.models import ActionProposal, ConnectionStatus, PostMeetingRun, PostMeetingStatus, ProposalStatus
+from app.models import ActionProposal, ConnectionStatus, PostMeetingRun, PostMeetingStatus, ProposalStatus, TodoDestination
 from app.repositories.chapter_repository import find_by_job_id as find_chapters
 from app.repositories.connection_repository import find_connection
 from app.repositories.post_meeting_repository import (
@@ -44,6 +45,7 @@ from app.services.agent_tools import (
     job_tools,
     notion_tools,
     result_text,
+    tasks_tools,
 )
 from app.services.default_models import get_default_model, resolve_chat_model
 from app.services.event_publisher import connection_params, publish_post_meeting_requested
@@ -117,19 +119,40 @@ def _connection_status(user_id: uuid.UUID, service: str) -> ConnectionStatus | N
     return ConnectionStatus(connection.status) if connection else None
 
 
-def _notion_settings(user_id: uuid.UUID) -> Settings | None:
-    """Notion 已連結時，使用者指定的 Notion 位置；沒連結（或已失效）是 None。"""
-    return get_settings(user_id) if _connection_status(user_id, "notion") == ConnectionStatus.CONNECTED else None
+@dataclass(frozen=True)
+class _ServiceSetup:
+    """會後處理能用到的外部服務：哪些已連結（沒失效），以及會後處理的設定（Notion 位置、待辦去處）。"""
+
+    google: bool
+    notion: bool
+    settings: Settings
+
+    @property
+    def todo_destination(self) -> TodoDestination:
+        return self.settings.todo_destination
+
+    def todo_blocker(self) -> str | None:
+        """為什麼現在建不了待辦（給使用者看）；建得了是 None。"""
+        if self.todo_destination == TodoDestination.GOOGLE_TASKS:
+            return None if self.google else "待辦設定建在 Google Tasks，請先到設定頁連結 Google（或把待辦改成寫進 Notion）"
+        if not self.notion:
+            return "待辦設定寫進 Notion，請先到設定頁連結 Notion 並指定待辦資料庫"
+        if self.settings.todo_database is None:
+            return "待辦設定寫進 Notion，請到設定頁指定待辦資料庫"
+        return None
+
+
+def _service_setup(user_id: uuid.UUID) -> _ServiceSetup:
+    return _ServiceSetup(_connection_status(user_id, "google") == ConnectionStatus.CONNECTED,
+                         _connection_status(user_id, "notion") == ConnectionStatus.CONNECTED, get_settings(user_id))
 
 
 def hints(user_id: uuid.UUID) -> list[str]:
     """能跑但有些事做不到時給使用者的提示。"""
-    settings = _notion_settings(user_id)
-    if settings is None:
-        return []
-    missing = [name for name, location in (("會議紀錄頁面", settings.meetings_page), ("待辦資料庫", settings.todo_database))
-               if location is None]
-    return [f"想讓會後處理寫進 Notion，請到設定頁指定{'與'.join(missing)}"] if missing else []
+    setup = _service_setup(user_id)
+    meetings_page_missing = setup.notion and setup.settings.meetings_page is None
+    return [hint for hint in ("想讓會後處理把會議紀錄寫進 Notion，請到設定頁指定會議紀錄頁面" if meetings_page_missing else None,
+                              setup.todo_blocker()) if hint]
 
 
 def effective_status(run: PostMeetingRun, now: datetime | None = None) -> tuple[PostMeetingStatus, str | None]:
@@ -293,22 +316,24 @@ def _job_content(job_id: uuid.UUID) -> JobContent:
     )
 
 
-def _notion_rules(settings: Settings | None) -> str:
-    """系統提示裡關於 Notion 的規則：指定的位置，或沒指定時不要提 Notion 動作。沒連結 Notion（None）就沒有這一段。"""
-    if settings is None:
-        return ""
-    lines = []
-    if settings.meetings_page:
-        lines.append(f"- Notion 的會議紀錄放在使用者指定的頁面「{settings.meetings_page.title}」底下（用 notion_create_meeting_page）。")
-    if settings.todo_database:
+def _service_rules(setup: _ServiceSetup) -> str:
+    """系統提示裡關於外部服務的規則：待辦建在哪裡、Notion 的指定位置；做不到的事叫 agent 不要提。"""
+    settings, lines = setup.settings, []
+    if setup.todo_blocker():
+        lines.append("- 使用者設定的待辦去處現在用不了：不要提待辦。")
+    elif setup.todo_destination == TodoDestination.GOOGLE_TASKS:
+        lines.append("- 待辦建在使用者的 Google Tasks（用 tasks_create_task，先用 tasks_list_tasks 看已經有的待辦、不要重複）："
+                     "assignee 填講者的名字、due 填期限，timestamp 填依據的錄音時間。")
+    elif settings.todo_database:
         lines.append(f"- 待辦寫進使用者指定的 Notion 資料庫「{settings.todo_database.title}」（{settings.todo_database.id}，用 "
                      "notion_create_todo）：寫之前先用 notion_fetch 讀它的欄位結構，負責人填講者的名字、期限填日期，依據的時間戳寫進 content。")
-    if not lines:
-        lines.append("- 使用者沒有指定 Notion 的會議紀錄頁面或待辦資料庫：不要提任何寫進 Notion 的動作。")
+    if setup.notion:
+        lines.append(f"- Notion 的會議紀錄放在使用者指定的頁面「{settings.meetings_page.title}」底下（用 notion_create_meeting_page）。"
+                     if settings.meetings_page else "- 使用者沒有指定 Notion 的會議紀錄頁面：不要提建立 Notion 會議紀錄頁的動作。")
     return "\n" + "\n".join(lines)
 
 
-def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str], notion_rules: str) -> str:
+def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str], service_rules: str) -> str:
     uploaded = run.uploaded_at.astimezone(ZoneInfo(run.timezone))
     speakers = "、".join(content.speakers) if len(content.speakers) >= 2 else "（只有一位講者，或沒有講者資訊）"
     return f"""你是會後處理助手：讀這場會議（一段錄音的逐字稿、摘要、章節），查使用者連結的服務（例如行事曆），把會後該做的事整理成「行動提案」，交給使用者確認。
@@ -318,21 +343,26 @@ def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[s
 - 寫入類工具（{"、".join(write_tools) or "目前沒有"}）不會真的執行，只會記成提案，等使用者確認；同一件事只提一次。
 - 只提會議裡真的談到、有根據，而且是這位使用者或團隊要做的事；不要自己編日期或內容。
 - 相對日期（明天、下週三、兩週後）依錄音上傳時間換算：上傳時間是 {uploaded.isoformat()}（星期{_WEEKDAYS[uploaded.weekday()]}），使用者時區是 {run.timezone}。
-- 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。{notion_rules}
+- 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。{service_rules}
 - 你總共最多只能呼叫 {MAX_TOOL_CALLS} 次工具（讀取加寫入），到了就會被停下。先讀摘要與章節，真的需要細節才搜尋逐字稿，要留足夠的次數給提案。可以一次呼叫多個工具。
 - 做完就直接回覆一段簡短的說明，不要再呼叫工具。"""
 
 
-def _connected_service_tools(user_id: uuid.UUID, notion: Settings | None) -> list[AgentTool]:
-    """使用者已連結的外部服務的工具；沒連結（或已失效）的服務不提供。notion 是 _notion_settings() 的結果。"""
+def _connected_service_tools(user_id: uuid.UUID, setup: _ServiceSetup,
+                             todo_destinations: frozenset[TodoDestination]) -> list[AgentTool]:
+    """使用者已連結的外部服務的工具；沒連結（或已失效）的服務不提供。建立待辦的工具只提供 todo_destinations 裡的：agent
+    只拿到待辦去處那一個；執行提案時兩個都要（提案之後才換了待辦去處，之前的提案仍然可以執行）。"""
     tools: list[AgentTool] = []
-    if _connection_status(user_id, "google") == ConnectionStatus.CONNECTED:
+    if setup.google:
         def google_token() -> str:
             return _service_token(user_id, "google", "Google")
 
         tools += calendar_tools(google_token) + gmail_tools(google_token)
-    if notion is not None:
-        tools += notion_tools(lambda: _service_token(user_id, "notion", "Notion"), notion.meetings_page, notion.todo_database)
+        if TodoDestination.GOOGLE_TASKS in todo_destinations:
+            tools += tasks_tools(google_token)
+    if setup.notion:
+        tools += notion_tools(lambda: _service_token(user_id, "notion", "Notion"), setup.settings.meetings_page,
+                              setup.settings.todo_database if TodoDestination.NOTION in todo_destinations else None)
     return tools
 
 
@@ -348,11 +378,12 @@ def _service_token(user_id: uuid.UUID, service: str, name: str) -> str:
 def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_id: uuid.UUID) -> PostMeetingStatus:
     """模型每一輪可以呼叫工具：讀取類真的執行、結果回給模型；寫入類驗證參數後記成提案。模型說結束就完成；工具呼叫到
     MAX_TOOL_CALLS 次（同一輪平行呼叫超過的部分不執行）或超過 TIME_LIMIT 就停下，已經產生的提案保留。"""
-    notion = _notion_settings(user_id)
-    tools = {tool.name: tool for tool in job_tools(content) + _connected_service_tools(user_id, notion)}
+    setup = _service_setup(user_id)
+    service_tools = _connected_service_tools(user_id, setup, frozenset({setup.todo_destination}))
+    tools = {tool.name: tool for tool in job_tools(content) + service_tools}
     schemas = [tool.schema() for tool in tools.values()]
     writes = [tool.name for tool in tools.values() if tool.kind == ToolKind.WRITE]
-    messages: list[dict] = [{"role": "system", "content": _system_prompt(run, content, writes, _notion_rules(notion))},
+    messages: list[dict] = [{"role": "system", "content": _system_prompt(run, content, writes, _service_rules(setup))},
                             {"role": "user", "content": "請幫我處理這場會議的會後事項。"}]
     meter = UsageMeter(user_id, run.job_id, LlmFeature.POST_MEETING)
     deadline = time.monotonic() + TIME_LIMIT.total_seconds()
@@ -456,7 +487,7 @@ def _executable_proposals(job_id: uuid.UUID, run_id: uuid.UUID) -> dict[uuid.UUI
 
 def _write_tools(user_id: uuid.UUID) -> dict[str, AgentTool]:
     """執行時用得到的寫入類工具：跟 agent 同一份設定（同樣的參數檢查）。服務沒連結的就不在裡面。"""
-    tools = _connected_service_tools(user_id, _notion_settings(user_id))
+    tools = _connected_service_tools(user_id, _service_setup(user_id), frozenset(TodoDestination))
     return {tool.name: tool for tool in tools if tool.kind == ToolKind.WRITE}
 
 

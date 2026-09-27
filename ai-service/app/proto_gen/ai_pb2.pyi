@@ -30,6 +30,12 @@ class ConnectionStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     CONNECTION_STATUS_CONNECTED: _ClassVar[ConnectionStatus]
     CONNECTION_STATUS_INVALID: _ClassVar[ConnectionStatus]
 
+class TodoDestination(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    TODO_DESTINATION_UNSPECIFIED: _ClassVar[TodoDestination]
+    TODO_DESTINATION_GOOGLE_TASKS: _ClassVar[TodoDestination]
+    TODO_DESTINATION_NOTION: _ClassVar[TodoDestination]
+
 class PostMeetingStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     POST_MEETING_STATUS_UNSPECIFIED: _ClassVar[PostMeetingStatus]
@@ -55,6 +61,9 @@ CONNECTION_STATUS_UNSPECIFIED: ConnectionStatus
 CONNECTION_STATUS_NOT_CONNECTED: ConnectionStatus
 CONNECTION_STATUS_CONNECTED: ConnectionStatus
 CONNECTION_STATUS_INVALID: ConnectionStatus
+TODO_DESTINATION_UNSPECIFIED: TodoDestination
+TODO_DESTINATION_GOOGLE_TASKS: TodoDestination
+TODO_DESTINATION_NOTION: TodoDestination
 POST_MEETING_STATUS_UNSPECIFIED: PostMeetingStatus
 POST_MEETING_STATUS_RUNNING: PostMeetingStatus
 POST_MEETING_STATUS_COMPLETED: PostMeetingStatus
@@ -236,22 +245,26 @@ class GetPostMeetingSettingsRequest(_message.Message):
     def __init__(self, user_id: _Optional[str] = ...) -> None: ...
 
 class UpdatePostMeetingSettingsRequest(_message.Message):
-    __slots__ = ("user_id", "notion_meetings_page_url", "notion_todo_database_url")
+    __slots__ = ("user_id", "notion_meetings_page_url", "notion_todo_database_url", "todo_destination")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     NOTION_MEETINGS_PAGE_URL_FIELD_NUMBER: _ClassVar[int]
     NOTION_TODO_DATABASE_URL_FIELD_NUMBER: _ClassVar[int]
+    TODO_DESTINATION_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     notion_meetings_page_url: str
     notion_todo_database_url: str
-    def __init__(self, user_id: _Optional[str] = ..., notion_meetings_page_url: _Optional[str] = ..., notion_todo_database_url: _Optional[str] = ...) -> None: ...
+    todo_destination: TodoDestination
+    def __init__(self, user_id: _Optional[str] = ..., notion_meetings_page_url: _Optional[str] = ..., notion_todo_database_url: _Optional[str] = ..., todo_destination: _Optional[_Union[TodoDestination, str]] = ...) -> None: ...
 
 class PostMeetingSettings(_message.Message):
-    __slots__ = ("notion_meetings_page", "notion_todo_database")
+    __slots__ = ("notion_meetings_page", "notion_todo_database", "todo_destination")
     NOTION_MEETINGS_PAGE_FIELD_NUMBER: _ClassVar[int]
     NOTION_TODO_DATABASE_FIELD_NUMBER: _ClassVar[int]
+    TODO_DESTINATION_FIELD_NUMBER: _ClassVar[int]
     notion_meetings_page: NotionLocation
     notion_todo_database: NotionLocation
-    def __init__(self, notion_meetings_page: _Optional[_Union[NotionLocation, _Mapping]] = ..., notion_todo_database: _Optional[_Union[NotionLocation, _Mapping]] = ...) -> None: ...
+    todo_destination: TodoDestination
+    def __init__(self, notion_meetings_page: _Optional[_Union[NotionLocation, _Mapping]] = ..., notion_todo_database: _Optional[_Union[NotionLocation, _Mapping]] = ..., todo_destination: _Optional[_Union[TodoDestination, str]] = ...) -> None: ...
 
 class NotionLocation(_message.Message):
     __slots__ = ("id", "title", "url")

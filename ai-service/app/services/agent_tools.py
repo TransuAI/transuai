@@ -6,7 +6,7 @@ import re
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -14,6 +14,7 @@ from app.services.gmail import GmailError, create_draft
 from app.services.notion import NotionError, call_tool, url_of
 from app.services.post_meeting_settings import NotionLocation
 from app.services.google_calendar import CalendarError, create_event, list_events
+from app.services.google_tasks import TasksError, create_task, list_open_tasks
 
 
 class ToolKind(StrEnum):
@@ -216,6 +217,73 @@ def gmail_tools(access_token: Callable[[], str]) -> list[AgentTool]:
                   # The model only writes the subject and body; who it goes to is the user's to fill in.
                   ToolKind.WRITE, "正在整理行動提案…", lambda args: draft_proposal({**args, "to": []}),
                   service="gmail", proposal_kind="email_draft", execute=create, check_confirmed=draft_proposal),
+    ]
+
+
+# --- Google Tasks（Google 沒有官方的 Tasks MCP，自己用 Tasks API 寫的） ---
+
+
+def _optional_text(args: dict[str, Any], name: str) -> str | None:
+    """選填的文字：沒給或空白都是沒有——跟 text_argument(required=False) 不同，空白不算錯（使用者在表單裡清空的欄位送來的是
+    空字串）。"""
+    value = args.get(name)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise ToolArgumentError(f"{name} 要是文字")
+    return value.strip()
+
+
+def _due_argument(args: dict[str, Any]) -> str | None:
+    due = _optional_text(args, "due")
+    if due is None:
+        return None
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", due):
+            raise ValueError
+        date.fromisoformat(due)
+    except ValueError:
+        raise ToolArgumentError("due 要是日期 YYYY-MM-DD，例如 2026-11-20") from None
+    return due
+
+
+def _task_notes(args: dict[str, Any]) -> str:
+    """待辦的內容：負責人與依據的時間戳放在最前面（Google Tasks 沒有這兩個欄位），再接模型或使用者寫的內容。"""
+    header = "\n".join(line for line in (
+        f"負責人：{args['assignee']}" if args.get("assignee") else "",
+        f"依據：錄音 {args['timestamp']}" if args.get("timestamp") else "") if line)
+    return "\n\n".join(part for part in (header, args.get("notes") or "") if part)
+
+
+def tasks_tools(access_token: Callable[[], str]) -> list[AgentTool]:
+    def open_tasks(_args: dict[str, Any]) -> Any:
+        try:
+            return list_open_tasks(access_token()) or "預設清單裡沒有未完成的待辦"
+        except TasksError as exc:
+            raise ToolFailed(str(exc)) from exc
+
+    def todo_proposal(args: dict[str, Any]) -> dict[str, Any]:
+        proposal = {"title": text_argument(args, "title"), "due": _due_argument(args),
+                    **{name: _optional_text(args, name) for name in ("notes", "assignee", "timestamp")}}
+        return {name: value for name, value in proposal.items() if value is not None}
+
+    def create(args: dict[str, Any]) -> str:
+        try:
+            return create_task(access_token(), args["title"], _task_notes(args), args.get("due"))
+        except TasksError as exc:
+            raise ToolFailed(str(exc)) from exc
+
+    return [
+        AgentTool("tasks_list_tasks", "（Google Tasks，讀取）列出使用者預設清單裡還沒完成的待辦（標題、期限），避免重複提出。",
+                  _object({}, []), ToolKind.READ, "正在查看你的 Google Tasks…", open_tasks),
+        AgentTool("tasks_create_task", "（Google Tasks，寫入）在使用者的 Google Tasks 預設清單建立一個待辦。assignee 填負責的講者"
+                  "目前的名字，timestamp 填依據的錄音時間（例如 12:34），due 是期限。只會記成提案，等使用者確認。",
+                  _object({"title": {"type": "string"}, "notes": {"type": "string", "description": "補充說明"},
+                           "assignee": {"type": "string"},
+                           "due": {"type": "string", "description": "YYYY-MM-DD，例如 2026-11-20"},
+                           "timestamp": {"type": "string", "description": "依據的錄音時間，例如 12:34"}}, ["title"]),
+                  ToolKind.WRITE, "正在整理行動提案…", todo_proposal, service="google_tasks", proposal_kind="google_task",
+                  execute=create),
     ]
 
 

@@ -1,4 +1,5 @@
-"""會後處理的設定（見 CONTEXT.md「會後處理」）：Notion 的會議紀錄父頁面與待辦資料庫。儲存前用 Notion MCP 確認存在而且讀得到。"""
+"""會後處理的設定（見 CONTEXT.md「會後處理」）：Notion 的會議紀錄父頁面與待辦資料庫（儲存前用 Notion MCP 確認存在而且
+讀得到），以及待辦要建在 Google Tasks 還是 Notion。"""
 
 import uuid
 from collections.abc import Callable
@@ -7,7 +8,7 @@ from datetime import datetime, timezone
 from functools import cache
 
 from app.db import new_session
-from app.models import PostMeetingSettings
+from app.models import PostMeetingSettings, TodoDestination
 from app.services import connections
 from app.services.notion import NotionError, NotionUnreachable, call_tool, data_source_of, page_id_from, title_of
 
@@ -23,6 +24,7 @@ class NotionLocation:
 class Settings:
     meetings_page: NotionLocation | None
     todo_database: NotionLocation | None
+    todo_destination: TodoDestination = TodoDestination.GOOGLE_TASKS
 
 
 class NotionNotLinked(Exception):
@@ -46,12 +48,14 @@ def get_settings(user_id: uuid.UUID) -> Settings:
         if row.notion_meetings_page_id else None,
         NotionLocation(row.notion_todo_data_source_id, row.notion_todo_database_title or "", row.notion_todo_database_url or "")
         if row.notion_todo_data_source_id else None,
+        TodoDestination(row.todo_destination),
     )
 
 
-def save_settings(user_id: uuid.UUID, meetings_page_url: str, todo_database_url: str) -> Settings:
-    """整份換掉；空字串是不指定。改過的位置先向 Notion 確認（NotionUnreachable 讓呼叫端回 UNAVAILABLE）；沒改的沿用，
-    不再問 Notion——之後設定頁多了別的欄位，存那些欄位不會因為 Notion 連不上而失敗。"""
+def save_settings(user_id: uuid.UUID, meetings_page_url: str, todo_database_url: str,
+                  todo_destination: TodoDestination | None = None) -> Settings:
+    """整份換掉；網址是空字串是不指定，todo_destination 是 None 就維持原本的。改過的位置先向 Notion 確認
+    （NotionUnreachable 讓呼叫端回 UNAVAILABLE）；沒改的沿用、不再問 Notion——只換待辦去處不會因為 Notion 連不上而失敗。"""
     meetings_page_url, todo_database_url = meetings_page_url.strip(), todo_database_url.strip()
     current = get_settings(user_id)
     token = cache(lambda: _notion_token(user_id))
@@ -65,12 +69,14 @@ def save_settings(user_id: uuid.UUID, meetings_page_url: str, todo_database_url:
             (page.id, page.title, page.url) if page else (None, None, None))
         row.notion_todo_data_source_id, row.notion_todo_database_title, row.notion_todo_database_url = (
             (database.id, database.title, database.url) if database else (None, None, None))
+        destination = todo_destination or current.todo_destination
+        row.todo_destination = destination
         row.updated_at = datetime.now(timezone.utc)
         session.merge(row)
         session.commit()
     finally:
         session.close()
-    return Settings(page, database)
+    return Settings(page, database, destination)
 
 
 def _kept_or_checked(current: NotionLocation | None, url: str,

@@ -24,7 +24,7 @@ from mcp.server.mcpserver import MCPServer
 from app.proto_gen import ai_pb2, transcription_pb2
 from app.repositories.chapter_repository import save_chapters
 from app.repositories.summary_repository import save_summary
-from app.services import gmail, google_calendar, notion, post_meeting, usage_meter
+from app.services import gmail, google_calendar, google_tasks, notion, post_meeting, usage_meter
 from app.services.key_encryption import encrypt, key_binding
 from app.services.retry import RetryableMessageError
 
@@ -106,6 +106,37 @@ class FakeGmail:
 def mailbox(monkeypatch):
     fake = FakeGmail()
     monkeypatch.setattr(gmail, "_http_client", httpx2.Client(transport=httpx2.MockTransport(fake.handle)))
+    return fake
+
+
+class FakeTasks:
+    """Google Tasks API at the HTTP layer: the default list's open tasks, and task creations."""
+
+    def __init__(self):
+        self.requests: list[httpx2.Request] = []
+        self.tasks = [{"id": "t-0", "title": "訂會議室", "status": "needsAction", "due": "2026-11-13T00:00:00.000Z"}]
+        self.create_replies: list[httpx2.Response] = []
+
+    def created(self) -> list[dict]:
+        return [json.loads(r.content) for r in self.requests if r.method == "POST"]
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        request.read()
+        self.requests.append(request)
+        if request.url.path == "/tasks/v1/lists/@default/tasks":
+            if request.method == "GET":
+                return httpx2.Response(200, json={"items": self.tasks})
+            if request.method == "POST":
+                if self.create_replies:
+                    return self.create_replies.pop(0)
+                return httpx2.Response(200, json={"id": "t-1", "webViewLink": "https://tasks.google.com/task/t-1"})
+        return httpx2.Response(404)
+
+
+@pytest.fixture(autouse=True)
+def tasks(monkeypatch):
+    fake = FakeTasks()
+    monkeypatch.setattr(google_tasks, "_http_client", httpx2.Client(transport=httpx2.MockTransport(fake.handle)))
     return fake
 
 
@@ -319,7 +350,8 @@ def test_the_model_is_offered_only_the_tools_it_may_use(queued, fake_llm, calend
 
     offered = {tool["function"]["name"] for tool in fake_llm.bodies()[0]["tools"]}
     assert offered == {"get_summary", "get_chapters", "search_transcript", "list_speakers",
-                       "calendar_list_events", "calendar_create_event", "gmail_create_draft"}
+                       "calendar_list_events", "calendar_create_event", "gmail_create_draft",
+                       "tasks_list_tasks", "tasks_create_task"}  # todos go to Google Tasks unless the user says otherwise
 
 
 def test_the_system_prompt_sets_the_ground_rules(queued, fake_llm, calendar):
@@ -780,9 +812,10 @@ def link_notion():
         session.close()
 
 
-def save_settings(stub, page="", database=""):
+def save_settings(stub, page="", database="", destination=ai_pb2.TODO_DESTINATION_UNSPECIFIED):
     return stub.UpdatePostMeetingSettings(ai_pb2.UpdatePostMeetingSettingsRequest(
-        user_id=str(USER), notion_meetings_page_url=page, notion_todo_database_url=database))
+        user_id=str(USER), notion_meetings_page_url=page, notion_todo_database_url=database,
+        todo_destination=destination))
 
 
 def test_notion_locations_are_checked_with_notion_and_saved(ai_stub, ready, notion_mcp):
@@ -879,7 +912,7 @@ def test_without_notion_locations_the_agent_gets_no_notion_writes(queued, fake_l
 def test_with_notion_locations_the_agent_can_propose_meeting_notes_and_todos(ai_stub, queued, fake_llm, calendar,
                                                                            notion_mcp):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE)
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
     todo = {"名稱": "聯繫搬家公司", "負責人": "金萊", "期限": "2026-11-20"}
     fake_llm.reply_tool_calls([("notion_fetch", {"id": TODO_SOURCE})])
     fake_llm.reply_tool_calls([
@@ -904,7 +937,7 @@ def test_with_notion_locations_the_agent_can_propose_meeting_notes_and_todos(ai_
 
 def test_confirmed_notion_proposals_are_written_where_the_user_said(ai_stub, queued, fake_llm, calendar, notion_mcp):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE)
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
     fake_llm.reply_tool_calls([
         ("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "內容"}),
         ("notion_create_todo", {"properties": {"名稱": "聯繫搬家公司"}}),
@@ -925,3 +958,174 @@ def test_confirmed_notion_proposals_are_written_where_the_user_said(ai_stub, que
                          "pages": [{"properties": {"名稱": "聯繫搬家公司", "負責人": "金萊"}, "content": "依據：12:34"}]}
     assert (done_page.status, done_page.result_url) == (ai_pb2.PROPOSAL_STATUS_DONE, "https://www.notion.so/new-1")
     assert done_item.status == ai_pb2.PROPOSAL_STATUS_DONE
+
+
+
+# --- Google Tasks 與待辦去處 ---
+
+TODO = {"title": "聯繫搬家公司", "notes": "問三家的報價", "assignee": "金萊", "due": "2026-11-20", "timestamp": "12:34"}
+
+
+def test_todos_go_to_google_tasks_until_the_user_chooses_otherwise(ai_stub, ready):
+    settings = ai_stub.GetPostMeetingSettings(ai_pb2.GetPostMeetingSettingsRequest(user_id=str(USER)))
+
+    assert settings.todo_destination == ai_pb2.TODO_DESTINATION_GOOGLE_TASKS
+
+
+def test_the_todo_destination_is_saved_without_asking_notion(ai_stub, ready, notion_mcp):
+    saved = save_settings(ai_stub, destination=ai_pb2.TODO_DESTINATION_NOTION)
+
+    assert saved.todo_destination == ai_pb2.TODO_DESTINATION_NOTION
+    assert notion_mcp.calls == []
+    kept = save_settings(ai_stub)  # unspecified keeps what was chosen
+    assert kept.todo_destination == ai_pb2.TODO_DESTINATION_NOTION
+
+
+def test_with_notion_as_the_destination_the_agent_gets_no_google_tasks(ai_stub, queued, fake_llm, calendar, notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    offered = {tool["function"]["name"] for tool in fake_llm.bodies()[0]["tools"]}
+    assert "notion_create_todo" in offered
+    assert not offered & {"tasks_list_tasks", "tasks_create_task"}
+
+
+def test_with_google_tasks_as_the_destination_the_agent_gets_no_notion_todos(ai_stub, queued, fake_llm, calendar,
+                                                                             notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_GOOGLE_TASKS)
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    offered = {tool["function"]["name"] for tool in fake_llm.bodies()[0]["tools"]}
+    assert {"tasks_list_tasks", "tasks_create_task", "notion_create_meeting_page"} <= offered
+    assert "notion_create_todo" not in offered
+    system = fake_llm.bodies()[0]["messages"][0]["content"]
+    assert "Google Tasks" in system and "團隊待辦" not in system
+
+
+def test_the_agent_reads_open_tasks_and_proposes_a_todo_without_creating_it(ai_stub, queued, fake_llm, calendar,
+                                                                            tasks):
+    fake_llm.reply_tool_calls([("tasks_list_tasks", {})])
+    fake_llm.reply_tool_calls([("tasks_create_task", TODO)])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    [listing] = tool_results(fake_llm.bodies()[1])
+    assert "訂會議室" in listing and "2026-11-13" in listing
+    [read] = tasks.requests
+    assert read.headers["Authorization"] == "Bearer google-access-token"
+    assert read.url.params["showCompleted"] == "false"
+    [proposal] = latest(ai_stub, queued).proposals
+    assert (proposal.service, proposal.tool, proposal.kind, json.loads(proposal.arguments_json)) == (
+        "google_tasks", "tasks_create_task", "google_task", TODO)
+    assert tasks.created() == []
+
+
+@pytest.mark.parametrize("arguments, error", [
+    ({**TODO, "due": "11/20"}, "due"),
+    ({**TODO, "title": ""}, "title"),
+])
+def test_a_todo_with_bad_values_goes_back_to_the_model(ai_stub, queued, fake_llm, calendar, arguments, error):
+    fake_llm.reply_tool_calls([("tasks_create_task", arguments)])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    assert list(latest(ai_stub, queued).proposals) == []
+    [result] = tool_results(fake_llm.bodies()[1])
+    assert result.startswith("錯誤") and error in result
+
+
+def test_a_confirmed_todo_is_created_in_google_tasks_with_owner_and_timestamp_in_its_notes(ai_stub, queued, fake_llm,
+                                                                                         calendar, tasks):
+    fake_llm.reply_tool_calls([("tasks_create_task", TODO)])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+
+    [done] = execute(ai_stub, queued, [(proposal.id, {**TODO, "assignee": "王經理"})]).proposals
+
+    [created] = tasks.created()
+    assert created == {"title": "聯繫搬家公司", "notes": "負責人：王經理\n依據：錄音 12:34\n\n問三家的報價",
+                       "due": "2026-11-20T00:00:00.000Z"}
+    assert (done.status, done.result_url) == (ai_pb2.PROPOSAL_STATUS_DONE, "https://tasks.google.com/task/t-1")
+
+
+def test_a_todo_needs_only_a_title(ai_stub, queued, fake_llm, calendar, tasks):
+    fake_llm.reply_tool_calls([("tasks_create_task", {"title": "訂餐廳"})])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+
+    execute(ai_stub, queued, [(proposal.id, json.loads(proposal.arguments_json))])
+
+    assert tasks.created() == [{"title": "訂餐廳"}]
+
+
+def test_google_tasks_refusing_a_todo_fails_it_with_the_reason(ai_stub, queued, fake_llm, calendar, tasks):
+    tasks.create_replies.append(httpx2.Response(403, json={"error": {"message": "Insufficient Permission"}}))
+    fake_llm.reply_tool_calls([("tasks_create_task", TODO)])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+
+    [failed] = execute(ai_stub, queued, [(proposal.id, TODO)]).proposals
+
+    assert failed.status == ai_pb2.PROPOSAL_STATUS_FAILED
+    assert "403" in failed.failure_reason and "Insufficient Permission" in failed.failure_reason
+
+
+def test_google_tasks_as_the_destination_without_google_is_hinted(ai_stub, db_session, providers, calendar,
+                                                                   notion_mcp):
+    choose_default(ai_stub)
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE)
+
+    state = get(ai_stub, uuid.uuid4())
+
+    assert state.available
+    assert any("Google Tasks" in hint and "連結 Google" in hint for hint in state.hints)
+
+
+def test_notion_as_the_destination_without_a_database_is_hinted(ai_stub, db_session, providers, calendar, notion_mcp):
+    choose_default(ai_stub)
+    link_google()
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, destination=ai_pb2.TODO_DESTINATION_NOTION)
+
+    [hint] = get(ai_stub, uuid.uuid4()).hints
+
+    assert "待辦資料庫" in hint and "會議紀錄頁面" not in hint
+
+
+def test_with_google_tasks_as_the_destination_a_missing_todo_database_is_not_hinted(ai_stub, db_session, providers,
+                                                                                    calendar, notion_mcp):
+    choose_default(ai_stub)
+    link_google()
+    link_notion()
+
+    [hint] = get(ai_stub, uuid.uuid4()).hints
+
+    assert "會議紀錄頁面" in hint and "待辦資料庫" not in hint
+
+
+def test_a_todo_proposed_before_the_destination_changed_can_still_be_carried_out(ai_stub, queued, fake_llm, calendar,
+                                                                                 notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_todo", {"properties": {"名稱": "聯繫搬家公司"}})])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_GOOGLE_TASKS)
+
+    [done] = execute(ai_stub, queued, [(proposal.id, json.loads(proposal.arguments_json))]).proposals
+
+    assert done.status == ai_pb2.PROPOSAL_STATUS_DONE
+    assert len(notion_mcp.created()) == 1

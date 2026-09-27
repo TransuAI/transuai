@@ -1,4 +1,4 @@
-"""自己寫的 Google API 工具（日曆、Gmail）共用的小東西。"""
+"""自己寫的 Google API 工具（日曆、Gmail、Tasks）共用的小東西。"""
 
 import httpx2
 

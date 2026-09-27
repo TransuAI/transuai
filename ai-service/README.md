@@ -98,7 +98,7 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 
 ### 會後處理（`post_meeting.requested`）
 
-使用者對一個 Job 手動啟動的 agent（見 `CONTEXT.md`「會後處理」）：讀這場會議、查使用者的 Google 日曆與 Notion，把會後該做的事（排下次會議、會議紀錄的 email 草稿、Notion 會議紀錄頁與待辦）整理成
+使用者對一個 Job 手動啟動的 agent（見 `CONTEXT.md`「會後處理」）：讀這場會議、查使用者的 Google 日曆、Google Tasks 與 Notion，把會後該做的事（排下次會議、會議紀錄的 email 草稿、待辦、Notion 會議紀錄頁）整理成
 **行動提案**，等使用者確認（寫入類工具只會變成提案，見 [ADR 0007](docs/adr/0007-write-tools-become-action-proposals.md)）。
 
 ```
@@ -108,8 +108,8 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
 消費 post_meeting.requested
   → 已經結束或卡住的就不跑（卡住的寫成 FAILED，不花使用者的額度）
   → 清掉上一次留下的提案、記下這一次開始的時間（重試從頭來）→ GetTranscript、讀摘要與章節 → agent 迴圈：
-      讀取類工具（讀摘要、讀章節、搜尋逐字稿、列出講者、查行事曆、搜尋與讀取 Notion）真的執行，結果回給模型；
-      寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立 Notion 會議紀錄頁與待辦）檢查參數後存成 action_proposals（服務、工具、種類、參數），回給模型「已記錄為提案」；
+      讀取類工具（讀摘要、讀章節、搜尋逐字稿、列出講者、查行事曆、看 Google Tasks 未完成的待辦、搜尋與讀取 Notion）真的執行，結果回給模型；
+      寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立待辦（Google Tasks 或 Notion）、建立 Notion 會議紀錄頁）檢查參數後存成 action_proposals（服務、工具、種類、參數），回給模型「已記錄為提案」；
       每一步把進度文字寫進紀錄；模型說結束就 COMPLETED
   → 工具呼叫到 15 次或超過 2 分鐘 → LIMIT_REACHED，保留已經產生的提案；每次呼叫模型前與每個工具呼叫前都檢查，超過的工具
     呼叫不執行、回給模型「未執行」（對話保持完整）。單一次模型呼叫本身沒有另外限時
@@ -121,16 +121,22 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
   `app/services/gmail.py`，不用官方遠端 MCP，見 ADR 0006）；Gmail 只有建立草稿（不寄出、沒有讀信的工具），收件人一律由使用者在確認時
   填（模型提的收件人會被清空），可以留空。寫入類工具有兩道檢查：模型提案時的 `handle`，與使用者確認時的 `check_confirmed`（沒有就跟
   `handle` 一樣）——使用者可以填模型不能填的欄位。
+- Google Tasks 沒有官方的 MCP，也是自己用 Tasks API 寫的（`app/services/google_tasks.py`，同一次 Google 授權的 `tasks` 權限），只用使用者的
+  預設清單：讀取類 `tasks_list_tasks` 列出還沒完成的待辦（避免重複提出），寫入類 `tasks_create_task`（提案種類 `google_task`）的提案是標題、內容、負責人、期限
+  （YYYY-MM-DD）、依據的錄音時間——Google Tasks 沒有負責人與時間戳的欄位，執行時寫在內容的最前面。
+- **待辦去處**（設定，`google_tasks` 或 `notion`，還沒選過是 Google Tasks；migration 0014 把已經指定了 Notion 待辦資料庫的人設成 `notion`）
+  決定 agent 只拿到哪一個建立待辦的工具（執行提案時兩個都在，換了待辦去處之前的提案仍然可以執行）：Google Tasks 要已連結 Google，
+  Notion 要已連結 Notion 而且指定了待辦資料庫；做不到時系統提示要 agent 不提待辦，`GetPostMeeting` 的 `hints` 也提醒使用者去設定。
 - Notion 是官方遠端 MCP（`mcp.notion.com/mcp`，ai-service 是 MCP client，用 MCP Python SDK）：讀取類是 `notion_search`、`notion_fetch`
   （讀資料庫會拿到欄位結構）；寫入類只有在使用者指定了位置時才提供，而且一律寫到指定的地方——`notion_create_meeting_page`（在會議
-  紀錄頁面底下建一頁）、`notion_create_todo`（在待辦資料庫新增一筆，欄位依資料庫結構；依據的時間戳與補充說明寫進那一筆的內文——
+  紀錄頁面底下建一頁）、`notion_create_todo`（待辦去處是 Notion 時才提供；在待辦資料庫新增一筆，欄位依資料庫結構；依據的時間戳與補充說明寫進那一筆的內文——
   人員類型的欄位填不了講者名字，負責人沒有文字欄位可填時也寫進內文），執行時都是 `notion-create-pages`。沒指定位置
   時系統提示要 agent 不提 Notion 動作，`GetPostMeeting` 的 `hints` 也提醒使用者去設定。Notion 回應的格式沒有正式文件，標題、data source
   ID、建立好的網址是寬鬆地從回應裡找出來的，還沒用真的 Notion 走過。
 - 搜尋逐字稿先做正規化比對（全形半形、空白、標點），找不到再用雙字重疊的比例（至少 3/4）：語音辨識常把「3 月 24 日」寫成「3 月 24」。
 - 呼叫模型用 `llm_client.chat_with_tools`：assistant 訊息原封不動放回對話（Gemini 3 的 `thought_signature` 要帶回去）；工具參數
   不是合法 JSON（Groq 的 `tool_use_failed`）時重試那一輪，最多兩次、算進次數。系統提示寫明逐字稿是資料不是指令、寫入只會變成
-  提案、上傳時間（依使用者的時區）、講者目前的名字、Notion 位置（沒指定就不要提 Notion 動作）、工具次數上限。
+  提案、上傳時間（依使用者的時區）、講者目前的名字、待辦去處與 Notion 位置（用不了的待辦去處、沒指定的 Notion 位置就不要提對應的動作）、工具次數上限。
 - **執行行動提案**（`ExecuteProposals`／`RetryProposal`，使用者確認之後）：在請求裡同步執行，逐項用使用者確認（可能改過）的
   最終參數呼叫對應的外部服務——跟 agent 同一份工具設定、同樣的參數檢查（寫入類工具多一個 `execute`）。每項記成 DONE（附建立好
   的項目網址）或 FAILED（附原因：參數不對、服務拒絕並附它的說明、連結已失效），沒勾選的不動、已經 DONE 的不再執行；失敗的可以
@@ -141,7 +147,7 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
 
 ### 已連結的帳號
 
-使用者可以連結 Google（Calendar 查行程與建立活動、Gmail 建立草稿、Tasks）與 Notion（官方遠端 MCP），給會後處理用（目前用到 Google 日曆、Gmail 草稿與 Notion）。
+使用者可以連結 Google（Calendar 查行程與建立活動、Gmail 建立草稿、Tasks）與 Notion（官方遠端 MCP），給會後處理用（目前用到 Google 日曆、Gmail 草稿、Google Tasks 與 Notion）。
 每個服務是 `app/services/connections.py` 裡的一份設定（授權、換權杖、撤銷的網址、權限、是否 PKCE、是否動態註冊 client）。
 
 - **開始連結**（`StartConnection`）：產生一次性的 `state`（10 分鐘內有效）記在 `oauth_pending_authorizations`，連同 Gateway
@@ -241,11 +247,11 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 | `ListConnections` | 使用者的已連結帳號，Google、Notion 各一筆：狀態（已連結、已失效、未連結）與連結時間；已連結的會先確認存取權杖還能用（過期就換新，換不到就是已失效） |
 | `StartConnection` | 開始連結：記下 `state` 與 `browser_binding` 的雜湊（Notion 另外 PKCE，必要時先動態註冊 client），回傳授權網址；`redirect_uri` 是 Gateway 的回呼網址，`browser_binding` 不能是空的。不認得的服務回 `INVALID_ARGUMENT`，沒設定 Google OAuth client 或加密主金鑰回 `FAILED_PRECONDITION`，連不上 Notion 回 `UNAVAILABLE` |
 | `CompleteConnection` | 完成連結：用 `state` 找回使用者、拿 `code` 換權杖並加密保存，回傳 `user_id`。`state` 不認得、過期、用過、屬於別的服務，或 `browser_binding` 對不上（不是開始連結的那個瀏覽器）回 `INVALID_ARGUMENT`；使用者拒絕（`error` 有值）或對方不肯換權杖回 `FAILED_PRECONDITION` |
-| `GetPostMeeting` | 這個 Job 的會後處理：能不能跑（`available`，不能的話 `unavailable_reason` 是給使用者看的原因：預設模型是平台模型或不支援工具呼叫、Google 與 Notion 都沒連結或已失效）、提示（`hints`，能跑但有些事做不到，例如 Notion 已連結但還沒指定位置）與最新一份紀錄（狀態、進度文字、失敗原因、模型、行動提案）；「執行中」超過 5 分鐘回報成 FAILED |
+| `GetPostMeeting` | 這個 Job 的會後處理：能不能跑（`available`，不能的話 `unavailable_reason` 是給使用者看的原因：預設模型是平台模型或不支援工具呼叫、Google 與 Notion 都沒連結或已失效）、提示（`hints`，能跑但有些事做不到，例如 Notion 已連結但還沒指定位置、待辦去處是 Google Tasks 但沒連結 Google）與最新一份紀錄（狀態、進度文字、失敗原因、模型、行動提案）；「執行中」超過 5 分鐘回報成 FAILED |
 | `RequestPostMeeting` | 開始會後處理（帶瀏覽器時區與 Job 的上傳時間）：新增 RUNNING 的紀錄、排入 `post_meeting.requested`；已經有一份在跑就回傳那一份。不能跑回 `FAILED_PRECONDITION` 並附原因，時區不對回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
 | `ExecuteProposals` | 執行勾選的行動提案（每項帶使用者確認的最終參數 JSON）：逐項呼叫對應的外部服務，記成 DONE（附網址）或 FAILED（附原因），回傳整份紀錄；沒勾選的不動、已 DONE 的不再執行，單項的參數不對或服務拒絕只讓那一項失敗。紀錄不屬於這個 job 回 `NOT_FOUND`，還在跑回 `FAILED_PRECONDITION`，提案不屬於這份紀錄回 `INVALID_ARGUMENT` |
-| `GetPostMeetingSettings` | 會後處理的設定：Notion 的會議紀錄父頁面與待辦資料庫（ID、標題、網址；沒指定的不設定） |
-| `UpdatePostMeetingSettings` | 儲存設定（整份換掉，空字串是不指定）；改過的位置先用 Notion MCP 的 `notion-fetch` 確認存在而且讀得到（會議紀錄要是頁面、待辦要是拿得到 data source ID 的資料庫），沒改的沿用、不再問 Notion。沒連結 Notion 回 `FAILED_PRECONDITION`，找不到、沒權限或不是資料庫回 `INVALID_ARGUMENT`（附原因），連不上 Notion 回 `UNAVAILABLE` |
+| `GetPostMeetingSettings` | 會後處理的設定：Notion 的會議紀錄父頁面與待辦資料庫（ID、標題、網址；沒指定的不設定）、待辦去處（Google Tasks 或 Notion，還沒選過是 Google Tasks） |
+| `UpdatePostMeetingSettings` | 儲存設定（整份換掉，網址是空字串是不指定，待辦去處是 UNSPECIFIED 是維持原本的——只換待辦去處不需要 Notion）；改過的位置先用 Notion MCP 的 `notion-fetch` 確認存在而且讀得到（會議紀錄要是頁面、待辦要是拿得到 data source ID 的資料庫），沒改的沿用、不再問 Notion。沒連結 Notion 回 `FAILED_PRECONDITION`，找不到、沒權限或不是資料庫回 `INVALID_ARGUMENT`（附原因），連不上 Notion 回 `UNAVAILABLE` |
 | `RetryProposal` | 用上一次的最終參數重試一個 FAILED 的提案；不是 FAILED 回 `FAILED_PRECONDITION` |
 | `DeleteConnection` | 中斷連結：向對方撤銷授權並刪除權杖；撤銷失敗時照樣刪除，`revoked` 是 false（對方說權杖本來就無效——授權早就不在了——算撤銷成功）。沒連結也算成功 |
 | `SubmitQuizAttempt` | 送出一次作答（依題目順序、每題一個選項位置）：計分、存進 `quiz_attempts`，回傳答對題數與每題的選擇、正確選項、對錯、解說；同一份測驗可以重做，每次都保存。題數不對或選項超出範圍回 `INVALID_ARGUMENT`，還沒產生完成回 `FAILED_PRECONDITION`，不屬於這個 `job_id` 回 `NOT_FOUND` |
@@ -332,12 +338,13 @@ app/
     regeneration.py                  RequestRegeneration（排入自己的 queue）與消費 summary.regeneration.requested：重新產生摘要與章節
     quizzes.py                       RequestQuiz（排入自己的 queue）與消費 quiz.requested：產生測驗、失敗與卡住的判斷；作答的計分與保存
     post_meeting.py                  會後處理：能不能跑、RequestPostMeeting（排入自己的 queue）、消費 post_meeting.requested 的 agent 迴圈、執行與重試行動提案
-    agent_tools.py                   會後處理 agent 的工具設定（讀取類／寫入類）：內部工具、Google 日曆與 Gmail 工具、Notion 工具、逐字稿的模糊搜尋
+    agent_tools.py                   會後處理 agent 的工具設定（讀取類／寫入類）：內部工具、Google 日曆、Gmail、Google Tasks 工具、Notion 工具、逐字稿的模糊搜尋
     google_calendar.py               Google Calendar API（列出行程、建立活動）
     gmail.py                         Gmail API（只有建立草稿，回傳打開草稿的網址）
+    google_tasks.py                  Google Tasks API（預設清單：列出未完成的待辦、建立待辦）
     google_api.py                    自己寫的 Google API 工具共用的（Google 的錯誤說明）
     notion.py                        Notion 官方遠端 MCP 的 client（MCP SDK，每次呼叫開一次連線；測試換成程式內的假 MCP server）
-    post_meeting_settings.py         會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫，改過的位置儲存前用 Notion 確認
+    post_meeting_settings.py         會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫（改過的位置儲存前用 Notion 確認）、待辦去處
     quiz_generator.py                出題：組 prompt、呼叫 llm_client、驗證模型回的 JSON（格式不對 raise QuizFormatError）、過濾時間戳
     consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）

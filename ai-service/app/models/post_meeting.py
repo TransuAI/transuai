@@ -24,6 +24,11 @@ class ProposalStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class TodoDestination(StrEnum):
+    GOOGLE_TASKS = "google_tasks"
+    NOTION = "notion"  # 使用者指定的 Notion 待辦資料庫
+
+
 class PostMeetingRun(Base):
     """一次會後處理（使用者對一個 Job 手動啟動的 agent）。"""
 
@@ -81,5 +86,7 @@ class PostMeetingSettings(Base):
     notion_todo_data_source_id: Mapped[str | None] = mapped_column(String(64))
     notion_todo_database_title: Mapped[str | None] = mapped_column(Text)
     notion_todo_database_url: Mapped[str | None] = mapped_column(Text)
+    # 待辦要建在哪裡（TodoDestination）；還沒選過是 Google Tasks。
+    todo_destination: Mapped[str] = mapped_column(String(20), nullable=False, default=TodoDestination.GOOGLE_TASKS)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
