@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted。2026-09-28 修訂：時長上限從 30 分鐘改成 60 分鐘，AUDIO 專用上限從 20MB 改成 120MB（見文末「修訂」）；
+兩層分開的做法不變。
 
 ## Context
 
@@ -29,3 +30,17 @@ MVP 階段的 30 分鐘時長限制（`frontend/src/pages/upload-page.tsx` 的 `
 **已知限制（刻意接受，不是漏洞）**：`file_type` 本身是呼叫端在 `GetPresignedUploadUrl`／`CompleteUpload` 兩次請求裡各自回報的欄位，upload-service 不會（也沒辦法，沒有內容嗅探/ffprobe）驗證實際上傳的位元組內容是否真的是該類型。呼叫端只要在兩次請求裡都一致宣告 `file_type=VIDEO`，就算實際上傳的是音訊內容，也只會套用比較寬鬆的濫用防護上限（1GB），不會套用 AUDIO 專用的 Groq 上限（20MB）。這不是本 ADR 新產生的洞——這個系統目前任何一處都沒有做內容型別驗證（transcription-service 一樣完全信任 Job 記錄的 `file_type` 來決定要不要跑 ffmpeg 抽音軌），加上濫用防護上限依然生效、被誤標的內容一樣會在 Groq 呼叫時走到既有的 FAILED 路徑，所以判斷這是可以接受的既有限制，不是這次要解決的問題。
 
 **遺留的地基**：`UploadLimitsProperties` 是這個服務第一次用 `@ConfigurationPropertiesScan` 之外額外命名一組上傳限制設定，之後如果要加其他跟上傳相關的限制（例如檔名長度、允許的副檔名），可以沿用同一個 record；`applicableMaxFileSizeBytes(FileType)` 是「哪個檔案類型套用哪個上限」這個政策唯一的實作位置，`GetPresignedUploadUrl` 跟 `CompleteUpload` 都呼叫它，不會各自維護一份、將來政策改動時漏改一邊。
+
+## 修訂（2026-09-28）：抓在大約 1 小時
+
+語音辨識從 Groq 換成 Deepgram（`transcription-service/docs/adr/0001`）之後，20MB 的 Groq 前提已經不在，實際使用時一般的
+會議錄音（例如高音質的 m4a）就會被擋下。決定把兩個限制一起抓在「大約 1 小時的會議」，不要放寬太多：
+
+- **時長上限**：30 分鐘 → **60 分鐘**（前端 `upload-page.tsx` 的 `MAX_DURATION_SECONDS`，仍然只在前端檢查）。
+- **AUDIO 專用上限**：20MB → **120MB**（`app.upload.max-audio-file-size-bytes`）。1 小時 256kbps 的錄音約 115MB，放得下；
+  未壓縮的 WAV（1 小時約 635MB）放不下，要先轉檔。
+- **不分類型的上限**：維持 1GB。1 小時的會議錄影（Zoom、螢幕錄影）通常放得下；手機拍的 1080p 影片會超過，要先降解析度
+  或只取音訊。
+
+下游確認過：Deepgram 的呼叫逾時是 10 分鐘，1 小時的錄音夠用；摘要與章節把整份逐字稿送給模型，1 小時的中文大約 2 萬多個
+token，平台模型的長度上限遠大於此，只是每次的用量多一倍。
