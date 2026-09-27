@@ -57,6 +57,7 @@ data:
   PLATFORM_LLM_EXTRA_BODY: '{"reasoning_effort": "none"}'
   AI_HF_CHAT_MODEL: "qwen3.5:9b"
   # 會後處理的平台模型（ai-service/docs/adr/0008）：有設定時，預設模型是平台模型的使用者也能跑會後處理；空字串就是不提供。
+  # 本機用 qwen3:14b：實測三個候選裡唯一穩定提案的（ai-service/docs/adr/0011）。
   AI_POST_MEETING_PLATFORM_MODEL: "qwen3:14b"
   HF_EMBEDDING_MODEL: "BAAI/bge-m3"
 
