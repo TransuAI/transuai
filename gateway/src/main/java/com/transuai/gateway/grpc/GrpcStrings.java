@@ -9,4 +9,9 @@ public final class GrpcStrings {
     public static String emptyToNull(String value) {
         return value.isEmpty() ? null : value;
     }
+
+    // 反方向：JSON 的 null（沒給）送進 proto3 的字串欄位時是空字串。
+    public static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
 }

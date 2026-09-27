@@ -1,6 +1,8 @@
 package com.transuai.gateway.web.dto;
 
+import java.util.List;
+
 // 會後處理（見 ai-service/CONTEXT.md）：這位使用者能不能對這個 Job 跑（不能的話 unavailableReason 是給使用者看的原因），
-// 與最新一份紀錄（還沒跑過是 null）。
-public record PostMeetingDto(boolean available, String unavailableReason, PostMeetingRunDto latestRun) {
+// 最新一份紀錄（還沒跑過是 null），以及提示（能跑但有些事做不到，例如還沒指定 Notion 的位置）。
+public record PostMeetingDto(boolean available, String unavailableReason, PostMeetingRunDto latestRun, List<String> hints) {
 }

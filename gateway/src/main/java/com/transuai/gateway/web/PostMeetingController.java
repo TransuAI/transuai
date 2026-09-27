@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,17 +21,23 @@ import com.transuai.gateway.web.dto.ExecuteProposalsRequestDto;
 import com.transuai.gateway.web.dto.PostMeetingDto;
 import com.transuai.gateway.web.dto.PostMeetingRequestDto;
 import com.transuai.gateway.web.dto.PostMeetingRunDto;
+import com.transuai.gateway.web.dto.PostMeetingSettingsDto;
+import com.transuai.gateway.web.dto.UpdatePostMeetingSettingsDto;
 import com.transuai.upload.grpc.v1.Job;
 
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.ActionProposal;
 import transuai.ai.v1.Ai.ExecuteProposalsRequest;
 import transuai.ai.v1.Ai.GetPostMeetingRequest;
+import transuai.ai.v1.Ai.GetPostMeetingSettingsRequest;
+import transuai.ai.v1.Ai.NotionLocation;
 import transuai.ai.v1.Ai.PostMeeting;
 import transuai.ai.v1.Ai.PostMeetingRun;
+import transuai.ai.v1.Ai.PostMeetingSettings;
 import transuai.ai.v1.Ai.ProposalToExecute;
 import transuai.ai.v1.Ai.RequestPostMeetingRequest;
 import transuai.ai.v1.Ai.RetryProposalRequest;
+import transuai.ai.v1.Ai.UpdatePostMeetingSettingsRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
 // 會後處理（見 ai-service/CONTEXT.md）：在 ai-service 背景跑 agent，前端每 3 秒輪詢 GET 直到不是 RUNNING。
@@ -97,9 +104,38 @@ public class PostMeetingController {
                 .setJobId(jobId).setUserId(userId.toString()).setRunId(runId).setProposalId(proposalId).build()));
     }
 
+    @GetMapping("/me/post-meeting-settings")
+    public PostMeetingSettingsDto getSettings(@CurrentUserId UUID userId) {
+        return toDto(aiServiceStub.getPostMeetingSettings(
+                GetPostMeetingSettingsRequest.newBuilder().setUserId(userId.toString()).build()));
+    }
+
+    // 有指定的位置會先向 Notion 確認：沒連結 Notion 回 409，找不到、沒有權限或不是資料庫回 400（附原因），連不上 Notion 回 503。
+    @PutMapping("/me/post-meeting-settings")
+    public PostMeetingSettingsDto updateSettings(@CurrentUserId UUID userId,
+            @RequestBody UpdatePostMeetingSettingsDto request) {
+        UpdatePostMeetingSettingsDto body = request == null ? new UpdatePostMeetingSettingsDto(null, null) : request;
+        return toDto(aiServiceStub.updatePostMeetingSettings(UpdatePostMeetingSettingsRequest.newBuilder()
+                .setUserId(userId.toString())
+                .setNotionMeetingsPageUrl(GrpcStrings.nullToEmpty(body.notionMeetingsPageUrl()))
+                .setNotionTodoDatabaseUrl(GrpcStrings.nullToEmpty(body.notionTodoDatabaseUrl()))
+                .build()));
+    }
+
+    private static PostMeetingSettingsDto toDto(PostMeetingSettings settings) {
+        return new PostMeetingSettingsDto(
+                settings.hasNotionMeetingsPage() ? toDto(settings.getNotionMeetingsPage()) : null,
+                settings.hasNotionTodoDatabase() ? toDto(settings.getNotionTodoDatabase()) : null);
+    }
+
+    private static PostMeetingSettingsDto.NotionLocationDto toDto(NotionLocation location) {
+        return new PostMeetingSettingsDto.NotionLocationDto(location.getId(), location.getTitle(),
+                GrpcStrings.emptyToNull(location.getUrl()));
+    }
+
     private PostMeetingDto toDto(PostMeeting postMeeting) {
         return new PostMeetingDto(postMeeting.getAvailable(), GrpcStrings.emptyToNull(postMeeting.getUnavailableReason()),
-                postMeeting.hasLatestRun() ? toDto(postMeeting.getLatestRun()) : null);
+                postMeeting.hasLatestRun() ? toDto(postMeeting.getLatestRun()) : null, postMeeting.getHintsList());
     }
 
     private PostMeetingRunDto toDto(PostMeetingRun run) {
