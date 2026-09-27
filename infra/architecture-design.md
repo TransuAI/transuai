@@ -41,7 +41,7 @@ Notification Service 消費訊息
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 >
 > **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
-> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆、Google Tasks 與 Notion，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立待辦（依設定建在 Google Tasks 或指定的 Notion 資料庫）、在指定的 Notion 頁面底下建立會議紀錄頁）只存成
+> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆、Google Tasks 與 Notion，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立待辦（依設定建在 Google Tasks，或寫在 Notion 會議紀錄頁裡）、在指定的 Notion 頁面底下替每場會議建一個會議紀錄子頁面（含待辦清單））只存成
 > 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案 → 使用者檢查、修改、勾選後按執行，ai-service 才用最終參數呼叫 Google
 > 日曆、Gmail（草稿不寄出）、Google Tasks 或 Notion，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
 > 成功的記下指紋（服務、種類、正規化後的標題與時間）：同一個 Job 再跑一次時，agent 知道哪些已經建立過，跟它們相同的提案標示
@@ -190,9 +190,9 @@ POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCou
                                          輪詢列表直到不是 GENERATING）
 GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型、最佳成績
 GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
-GET    /me/post-meeting-settings        會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫（沒指定是 null）、待辦去處
-                                         （GOOGLE_TASKS / NOTION）
-PUT    /me/post-meeting-settings        儲存設定，body { notionMeetingsPageUrl, notionTodoDatabaseUrl, todoDestination }
+GET    /me/post-meeting-settings        會後處理的設定：Notion 的會議紀錄位置（沒指定是 null）、待辦去處
+                                         （GOOGLE_TASKS / NOTION：放在 Notion 會議紀錄裡）
+PUT    /me/post-meeting-settings        儲存設定，body { notionMeetingsPageUrl, todoDestination }
                                          （網址空的就是不指定，todoDestination 是 null 就不變）；
                                          改過的位置先向 Notion 確認（沒改的沿用），沒連結 Notion 回 409、找不到或種類不對
                                          （會議紀錄要是頁面、待辦要是資料庫）回 400、連不上回 503
@@ -555,16 +555,14 @@ CREATE TABLE action_proposals (
 );
 CREATE INDEX ix_action_proposals_run_id ON action_proposals (run_id);
 
--- 會後處理的設定：會議紀錄與待辦寫進 Notion 的哪裡（沒指定就不提 Notion 的寫入動作；改過的儲存前用 Notion MCP 確認）、待辦去處
+-- 會後處理的設定：Notion 會議紀錄位置（每場會議建成它底下的子頁面，含待辦清單；沒指定就不提 Notion 的寫入動作；改過的
+-- 儲存前用 Notion MCP 確認是頁面，見 ai-service/docs/adr/0009）、待辦去處
 CREATE TABLE post_meeting_settings (
     user_id UUID PRIMARY KEY,
-    notion_meetings_page_id VARCHAR(64),       -- 會議紀錄建在這個頁面底下
+    notion_meetings_page_id VARCHAR(64),       -- 每場會議的子頁面建在這個頁面底下
     notion_meetings_page_title TEXT,
     notion_meetings_page_url TEXT,
-    notion_todo_data_source_id VARCHAR(64),    -- 待辦新增到這個資料庫（data source ID，collection://…）
-    notion_todo_database_title TEXT,
-    notion_todo_database_url TEXT,
-    todo_destination VARCHAR(20) NOT NULL DEFAULT 'google_tasks',  -- 待辦建在 google_tasks 或 notion
+    todo_destination VARCHAR(20) NOT NULL DEFAULT 'google_tasks',  -- 待辦放在 google_tasks 或 notion（會議紀錄子頁面的打勾清單）
     updated_at TIMESTAMPTZ NOT NULL
 );
 ```
@@ -684,8 +682,8 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
       `ai-service/app/services/chapter_generator.py`
 - [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
 - [ ] Google 的權限審查——連結 Google 帳號已實作，但 `gmail.compose`（建立草稿）是 Google 的受限權限，通過 Google 的
-      應用程式審查之前只有同意畫面登記的測試使用者能連結，還沒申請；Google 與 Notion 的連結也還沒用真的帳號走過，
-      Notion MCP 回應的格式沒有正式文件（標題、data source ID、建立好的網址是寬鬆地從回應裡找出來的）
+      應用程式審查之前只有同意畫面登記的測試使用者能連結，還沒申請；Notion 已經用真的帳號走過一次（2026-09-28），但回應的
+      格式沒有正式文件（標題、建立好的網址是寬鬆地從回應裡找出來的）
       （見 `ai-service/README.md` 已知限制）。Google 日曆與 Gmail 不用官方的遠端 MCP（預覽計畫 GA 前不能開放給網域外的
       使用者），會後處理改用自己寫的 REST API 工具（見 `ai-service/docs/adr/0006-post-meeting-agent-model-and-google-tools.md`）
 - [x] 會後處理的平台模型——**已決定**：改成部署設定、預設不提供（`ai-service/docs/adr/0008-configurable-post-meeting-platform-model.md`，
