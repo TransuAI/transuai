@@ -80,6 +80,14 @@ service AiService {
   // 無效（授權早就不在了）算撤銷成功。
   rpc DeleteConnection(DeleteConnectionRequest) returns (DeleteConnectionResponse);
 
+  // 會後處理（見 ai-service/CONTEXT.md）：這個 Job 能不能跑（不能的話附原因）與最新一份紀錄（狀態、進度文字、行動提案）。
+  // 「執行中」超過 5 分鐘回報成 FAILED。
+  rpc GetPostMeeting(GetPostMeetingRequest) returns (PostMeeting);
+  // 開始會後處理：建立一份「執行中」的紀錄、排入 ai-service 自己的 post_meeting.requested queue，立即回傳。
+  // 不能跑（預設模型是平台模型或不支援工具呼叫、沒有可用的已連結帳號）回 FAILED_PRECONDITION 並附原因；
+  // 已經有一份在跑（沒有卡住）就回傳那一份，不重複排入；timezone 不是 IANA 時區回 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE。
+  rpc RequestPostMeeting(RequestPostMeetingRequest) returns (PostMeeting);
+
   // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
   // 取得的使用者，不另外驗證。
   //
@@ -221,6 +229,67 @@ message DeleteConnectionResponse {
   bool revoked = 1;
 }
 
+message GetPostMeetingRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message RequestPostMeetingRequest {
+  string job_id = 1;
+  string user_id = 2;
+  // 瀏覽器的 IANA 時區（例如 Asia/Taipei），換算相對日期用。
+  string timezone = 3;
+  // Job 的上傳時間（Gateway 查 Job 時一起拿到），換算「明天」「下週三」用。
+  google.protobuf.Timestamp uploaded_at = 4;
+}
+
+message PostMeeting {
+  // 這位使用者現在能不能對這個 Job 跑會後處理；不能的話 unavailable_reason 是給使用者看的原因。
+  bool available = 1;
+  string unavailable_reason = 2;
+  // 最新一份紀錄；還沒跑過就不設定。
+  PostMeetingRun latest_run = 3;
+}
+
+enum PostMeetingStatus {
+  POST_MEETING_STATUS_UNSPECIFIED = 0;
+  POST_MEETING_STATUS_RUNNING = 1;
+  POST_MEETING_STATUS_COMPLETED = 2;
+  // 到了工具呼叫次數或時間的上限而停下；已經產生的提案保留。
+  POST_MEETING_STATUS_LIMIT_REACHED = 3;
+  POST_MEETING_STATUS_FAILED = 4;
+}
+
+message PostMeetingRun {
+  string id = 1;
+  PostMeetingStatus status = 2;
+  // 目前在做什麼（例如「正在查詢你的行事曆…」）。
+  string progress = 3;
+  // FAILED 時給使用者看的原因。
+  string failure_reason = 4;
+  // 用哪個模型跑的。
+  string model_provider = 5;
+  string model = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  // 結束的時間；還在跑就不設定。
+  google.protobuf.Timestamp finished_at = 8;
+  // 依產生的順序。
+  repeated ActionProposal proposals = 9;
+}
+
+// 行動提案（見 ai-service/CONTEXT.md）：agent 想做的一個寫入動作，等使用者確認才執行。
+message ActionProposal {
+  string id = 1;
+  // 哪個外部服務，例如 "google_calendar"。
+  string service = 2;
+  // 哪一種提案，決定前端用哪種表單，例如 "calendar_event"（arguments：summary、start、end、description）。
+  string kind = 3;
+  // 要送出的參數，JSON 物件。
+  string arguments_json = 4;
+  // 確認後要呼叫的工具，例如 "calendar_create_event"。
+  string tool = 5;
+}
+
 message SubmitQuizAttemptRequest {
   string job_id = 1;
   string quiz_id = 2;
@@ -294,7 +363,7 @@ message LlmUsageSum {
 
 // 一次 LLM 呼叫的用量。
 message LlmUsage {
-  // summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz
+  // summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting
   string feature = 1;
   // "platform"（平台模型）或廠商名稱
   string provider = 2;
