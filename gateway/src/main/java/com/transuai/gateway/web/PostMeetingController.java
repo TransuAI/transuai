@@ -37,6 +37,7 @@ import transuai.ai.v1.Ai.PostMeetingSettings;
 import transuai.ai.v1.Ai.ProposalToExecute;
 import transuai.ai.v1.Ai.RequestPostMeetingRequest;
 import transuai.ai.v1.Ai.RetryProposalRequest;
+import transuai.ai.v1.Ai.TodoDestination;
 import transuai.ai.v1.Ai.UpdatePostMeetingSettingsRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
@@ -114,18 +115,31 @@ public class PostMeetingController {
     @PutMapping("/me/post-meeting-settings")
     public PostMeetingSettingsDto updateSettings(@CurrentUserId UUID userId,
             @RequestBody UpdatePostMeetingSettingsDto request) {
-        UpdatePostMeetingSettingsDto body = request == null ? new UpdatePostMeetingSettingsDto(null, null) : request;
+        UpdatePostMeetingSettingsDto body = request == null ? new UpdatePostMeetingSettingsDto(null, null, null) : request;
         return toDto(aiServiceStub.updatePostMeetingSettings(UpdatePostMeetingSettingsRequest.newBuilder()
                 .setUserId(userId.toString())
                 .setNotionMeetingsPageUrl(GrpcStrings.nullToEmpty(body.notionMeetingsPageUrl()))
                 .setNotionTodoDatabaseUrl(GrpcStrings.nullToEmpty(body.notionTodoDatabaseUrl()))
+                .setTodoDestination(todoDestination(body.todoDestination()))
                 .build()));
+    }
+
+    private static TodoDestination todoDestination(String value) {
+        if (value == null) {
+            return TodoDestination.TODO_DESTINATION_UNSPECIFIED;
+        }
+        return switch (value) {
+            case "GOOGLE_TASKS" -> TodoDestination.TODO_DESTINATION_GOOGLE_TASKS;
+            case "NOTION" -> TodoDestination.TODO_DESTINATION_NOTION;
+            default -> throw new IllegalArgumentException("todoDestination is GOOGLE_TASKS or NOTION"); // → 400
+        };
     }
 
     private static PostMeetingSettingsDto toDto(PostMeetingSettings settings) {
         return new PostMeetingSettingsDto(
                 settings.hasNotionMeetingsPage() ? toDto(settings.getNotionMeetingsPage()) : null,
-                settings.hasNotionTodoDatabase() ? toDto(settings.getNotionTodoDatabase()) : null);
+                settings.hasNotionTodoDatabase() ? toDto(settings.getNotionTodoDatabase()) : null,
+                settings.getTodoDestination().name().replace("TODO_DESTINATION_", ""));
     }
 
     private static PostMeetingSettingsDto.NotionLocationDto toDto(NotionLocation location) {
