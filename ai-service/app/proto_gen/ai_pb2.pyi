@@ -29,6 +29,14 @@ class ConnectionStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     CONNECTION_STATUS_NOT_CONNECTED: _ClassVar[ConnectionStatus]
     CONNECTION_STATUS_CONNECTED: _ClassVar[ConnectionStatus]
     CONNECTION_STATUS_INVALID: _ClassVar[ConnectionStatus]
+
+class PostMeetingStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    POST_MEETING_STATUS_UNSPECIFIED: _ClassVar[PostMeetingStatus]
+    POST_MEETING_STATUS_RUNNING: _ClassVar[PostMeetingStatus]
+    POST_MEETING_STATUS_COMPLETED: _ClassVar[PostMeetingStatus]
+    POST_MEETING_STATUS_LIMIT_REACHED: _ClassVar[PostMeetingStatus]
+    POST_MEETING_STATUS_FAILED: _ClassVar[PostMeetingStatus]
 REGENERATION_STATUS_IDLE: RegenerationStatus
 REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
@@ -40,6 +48,11 @@ CONNECTION_STATUS_UNSPECIFIED: ConnectionStatus
 CONNECTION_STATUS_NOT_CONNECTED: ConnectionStatus
 CONNECTION_STATUS_CONNECTED: ConnectionStatus
 CONNECTION_STATUS_INVALID: ConnectionStatus
+POST_MEETING_STATUS_UNSPECIFIED: PostMeetingStatus
+POST_MEETING_STATUS_RUNNING: PostMeetingStatus
+POST_MEETING_STATUS_COMPLETED: PostMeetingStatus
+POST_MEETING_STATUS_LIMIT_REACHED: PostMeetingStatus
+POST_MEETING_STATUS_FAILED: PostMeetingStatus
 
 class RequestQuizRequest(_message.Message):
     __slots__ = ("job_id", "user_id", "question_count")
@@ -172,6 +185,72 @@ class DeleteConnectionResponse(_message.Message):
     REVOKED_FIELD_NUMBER: _ClassVar[int]
     revoked: bool
     def __init__(self, revoked: _Optional[bool] = ...) -> None: ...
+
+class GetPostMeetingRequest(_message.Message):
+    __slots__ = ("job_id", "user_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
+
+class RequestPostMeetingRequest(_message.Message):
+    __slots__ = ("job_id", "user_id", "timezone", "uploaded_at")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    TIMEZONE_FIELD_NUMBER: _ClassVar[int]
+    UPLOADED_AT_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    timezone: str
+    uploaded_at: _timestamp_pb2.Timestamp
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., timezone: _Optional[str] = ..., uploaded_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class PostMeeting(_message.Message):
+    __slots__ = ("available", "unavailable_reason", "latest_run")
+    AVAILABLE_FIELD_NUMBER: _ClassVar[int]
+    UNAVAILABLE_REASON_FIELD_NUMBER: _ClassVar[int]
+    LATEST_RUN_FIELD_NUMBER: _ClassVar[int]
+    available: bool
+    unavailable_reason: str
+    latest_run: PostMeetingRun
+    def __init__(self, available: _Optional[bool] = ..., unavailable_reason: _Optional[str] = ..., latest_run: _Optional[_Union[PostMeetingRun, _Mapping]] = ...) -> None: ...
+
+class PostMeetingRun(_message.Message):
+    __slots__ = ("id", "status", "progress", "failure_reason", "model_provider", "model", "requested_at", "finished_at", "proposals")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
+    FINISHED_AT_FIELD_NUMBER: _ClassVar[int]
+    PROPOSALS_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    status: PostMeetingStatus
+    progress: str
+    failure_reason: str
+    model_provider: str
+    model: str
+    requested_at: _timestamp_pb2.Timestamp
+    finished_at: _timestamp_pb2.Timestamp
+    proposals: _containers.RepeatedCompositeFieldContainer[ActionProposal]
+    def __init__(self, id: _Optional[str] = ..., status: _Optional[_Union[PostMeetingStatus, str]] = ..., progress: _Optional[str] = ..., failure_reason: _Optional[str] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., finished_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., proposals: _Optional[_Iterable[_Union[ActionProposal, _Mapping]]] = ...) -> None: ...
+
+class ActionProposal(_message.Message):
+    __slots__ = ("id", "service", "kind", "arguments_json", "tool")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    ARGUMENTS_JSON_FIELD_NUMBER: _ClassVar[int]
+    TOOL_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    service: str
+    kind: str
+    arguments_json: str
+    tool: str
+    def __init__(self, id: _Optional[str] = ..., service: _Optional[str] = ..., kind: _Optional[str] = ..., arguments_json: _Optional[str] = ..., tool: _Optional[str] = ...) -> None: ...
 
 class SubmitQuizAttemptRequest(_message.Message):
     __slots__ = ("job_id", "quiz_id", "user_id", "answers")

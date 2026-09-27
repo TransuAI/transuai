@@ -114,6 +114,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.DeleteConnectionRequest.SerializeToString,
                 response_deserializer=ai__pb2.DeleteConnectionResponse.FromString,
                 _registered_method=True)
+        self.GetPostMeeting = channel.unary_unary(
+                '/transuai.ai.v1.AiService/GetPostMeeting',
+                request_serializer=ai__pb2.GetPostMeetingRequest.SerializeToString,
+                response_deserializer=ai__pb2.PostMeeting.FromString,
+                _registered_method=True)
+        self.RequestPostMeeting = channel.unary_unary(
+                '/transuai.ai.v1.AiService/RequestPostMeeting',
+                request_serializer=ai__pb2.RequestPostMeetingRequest.SerializeToString,
+                response_deserializer=ai__pb2.PostMeeting.FromString,
+                _registered_method=True)
         self.SaveProviderKey = channel.unary_unary(
                 '/transuai.ai.v1.AiService/SaveProviderKey',
                 request_serializer=ai__pb2.SaveProviderKeyRequest.SerializeToString,
@@ -290,6 +300,23 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetPostMeeting(self, request, context):
+        """會後處理（見 ai-service/CONTEXT.md）：這個 Job 能不能跑（不能的話附原因）與最新一份紀錄（狀態、進度文字、行動提案）。
+        「執行中」超過 5 分鐘回報成 FAILED。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RequestPostMeeting(self, request, context):
+        """開始會後處理：建立一份「執行中」的紀錄、排入 ai-service 自己的 post_meeting.requested queue，立即回傳。
+        不能跑（預設模型是平台模型或不支援工具呼叫、沒有可用的已連結帳號）回 FAILED_PRECONDITION 並附原因；
+        已經有一份在跑（沒有卡住）就回傳那一份，不重複排入；timezone 不是 IANA 時區回 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SaveProviderKey(self, request, context):
         """自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
         取得的使用者，不另外驗證。
@@ -419,6 +446,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.DeleteConnection,
                     request_deserializer=ai__pb2.DeleteConnectionRequest.FromString,
                     response_serializer=ai__pb2.DeleteConnectionResponse.SerializeToString,
+            ),
+            'GetPostMeeting': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetPostMeeting,
+                    request_deserializer=ai__pb2.GetPostMeetingRequest.FromString,
+                    response_serializer=ai__pb2.PostMeeting.SerializeToString,
+            ),
+            'RequestPostMeeting': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestPostMeeting,
+                    request_deserializer=ai__pb2.RequestPostMeetingRequest.FromString,
+                    response_serializer=ai__pb2.PostMeeting.SerializeToString,
             ),
             'SaveProviderKey': grpc.unary_unary_rpc_method_handler(
                     servicer.SaveProviderKey,
@@ -860,6 +897,60 @@ class AiService:
             '/transuai.ai.v1.AiService/DeleteConnection',
             ai__pb2.DeleteConnectionRequest.SerializeToString,
             ai__pb2.DeleteConnectionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetPostMeeting(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/GetPostMeeting',
+            ai__pb2.GetPostMeetingRequest.SerializeToString,
+            ai__pb2.PostMeeting.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RequestPostMeeting(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/RequestPostMeeting',
+            ai__pb2.RequestPostMeetingRequest.SerializeToString,
+            ai__pb2.PostMeeting.FromString,
             options,
             channel_credentials,
             insecure,

@@ -59,7 +59,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients"))
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals"))
 
 
 @pytest.fixture(scope="session")
@@ -95,6 +95,23 @@ class FakeLlmProvider:
         body = {
             "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
             "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+        }
+        if usage is not None:
+            body["usage"] = {"prompt_tokens": usage[0], "completion_tokens": usage[1], "total_tokens": sum(usage)}
+        self._replies.append(httpx2.Response(200, json=body))
+
+    def reply_tool_calls(self, calls: list[tuple[str, dict | str]], *, text: str = "",
+                         extra: dict | None = None, usage: tuple[int, int] | None = (12, 5)) -> None:
+        """A turn that calls tools: (name, arguments) each, arguments as a dict or a raw string. `extra` is added to
+        every tool call as-is (e.g. Gemini's `extra_content` with its thought signature)."""
+        tool_calls = [{"id": f"call_{len(self._replies)}_{i}", "type": "function",
+                       "function": {"name": name, "arguments": args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)},
+                       **(extra or {})}
+                      for i, (name, args) in enumerate(calls)]
+        body = {
+            "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text or None, "tool_calls": tool_calls},
+                         "finish_reason": "tool_calls"}],
         }
         if usage is not None:
             body["usage"] = {"prompt_tokens": usage[0], "completion_tokens": usage[1], "total_tokens": sum(usage)}

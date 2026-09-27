@@ -36,6 +36,7 @@ class LlmFeature(StrEnum):
     REGENERATED_SUMMARY = "regenerated_summary"
     REGENERATED_CHAPTERS = "regenerated_chapters"
     QUIZ = "quiz"
+    POST_MEETING = "post_meeting"
 
 
 @dataclass(frozen=True)

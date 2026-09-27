@@ -11,6 +11,7 @@ from app.services.llm_client import (
     LlmErrorReason,
     TokenUsage,
     chat,
+    chat_with_tools,
     platform_chat_model,
     stream_chat,
     stream_without_thinking,
@@ -175,3 +176,54 @@ def test_once_it_is_clear_there_is_no_think_block_deltas_pass_straight_through()
 
 def test_an_unfinished_think_block_yields_nothing():
     assert "".join(stream_without_thinking(["<think>", "還在想"])) == ""
+
+
+# --- chat_with_tools：會呼叫工具的一輪（會後處理的 agent 用） ---
+
+WEATHER_TOOL = {"type": "function", "function": {"name": "get_weather", "description": "查天氣",
+                                                 "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}
+
+
+def test_a_turn_can_call_tools_and_the_tools_are_offered(fake_llm):
+    fake_llm.reply_tool_calls([("get_weather", {"city": "臺北"}), ("get_weather", {"city": "臺中"})], usage=(50, 9))
+
+    turn = chat_with_tools(platform_chat_model(), [{"role": "user", "content": "天氣？"}], [WEATHER_TOOL],
+                           max_tokens=100, meter=None)
+
+    assert [(c.name, c.arguments) for c in turn.tool_calls] == [
+        ("get_weather", '{"city": "臺北"}'), ("get_weather", '{"city": "臺中"}')]
+    assert turn.usage == TokenUsage(50, 9)
+    assert fake_llm.bodies()[0]["tools"] == [WEATHER_TOOL]
+
+
+def test_the_assistant_turn_goes_back_exactly_as_the_provider_sent_it(fake_llm):
+    # Gemini 3 answers 400 unless each tool call's thought signature comes back on the next turn.
+    signature = {"extra_content": {"google": {"thought_signature": "sig-123"}}}
+    fake_llm.reply_tool_calls([("get_weather", {"city": "臺北"})], extra=signature)
+
+    turn = chat_with_tools(platform_chat_model(), [{"role": "user", "content": "天氣？"}], [WEATHER_TOOL],
+                           max_tokens=100, meter=None)
+
+    assert turn.message["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig-123"}}
+    assert turn.message["role"] == "assistant"
+
+
+def test_a_turn_without_tool_calls_is_the_final_answer(fake_llm):
+    fake_llm.reply("<think>想一下</think>都處理好了")
+
+    turn = chat_with_tools(platform_chat_model(), [{"role": "user", "content": "好了嗎"}], [WEATHER_TOOL],
+                           max_tokens=100, meter=None)
+
+    assert (turn.tool_calls, turn.text) == ([], "都處理好了")
+
+
+def test_tool_arguments_the_provider_could_not_parse_are_their_own_kind_of_error(fake_llm):
+    # Groq refuses the whole turn when the model's tool arguments aren't valid JSON; asking again usually works.
+    fake_llm.fail(400, {"message": "Failed to parse tool call arguments as JSON", "code": "tool_use_failed"})
+
+    with pytest.raises(LlmError) as raised:
+        chat_with_tools(platform_chat_model(), [{"role": "user", "content": "天氣？"}], [WEATHER_TOOL],
+                        max_tokens=100, meter=None)
+
+    assert raised.value.reason == LlmErrorReason.MALFORMED_TOOL_CALL
+    assert raised.value.transient is False

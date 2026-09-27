@@ -72,3 +72,16 @@ def publish_quiz_requested(channel: BlockingChannel, quiz_id: str, job_id: str, 
         properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
     )
     logger.info("queued quiz.requested for quiz %s of job %s", quiz_id, job_id)
+
+
+def publish_post_meeting_requested(channel: BlockingChannel, run_id: str, job_id: str, user_id: str) -> None:
+    """post_meeting.requested -> {runId, jobId, userId}：ai-service 排給自己的背景工作（會後處理）；userId 是觸發的使用者，
+    用他的預設模型與已連結的帳號、用量記在他名下。"""
+    channel.queue_declare(queue=settings.post_meeting_requested_queue, durable=True)
+    channel.basic_publish(
+        exchange="",
+        routing_key=settings.post_meeting_requested_queue,
+        body=json.dumps({"runId": run_id, "jobId": job_id, "userId": user_id}).encode("utf-8"),
+        properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+    )
+    logger.info("queued post_meeting.requested for run %s of job %s", run_id, job_id)

@@ -81,6 +81,7 @@ class LlmErrorReason(StrEnum):
     AUTH = "auth"  # 金鑰無效或沒有權限
     QUOTA = "quota"  # 額度或餘額用完
     MODEL_NOT_FOUND = "model_not_found"
+    MALFORMED_TOOL_CALL = "malformed_tool_call"  # 模型產生的工具參數不是合法 JSON（Groq 整輪拒絕）；再問一次通常就好
     OTHER = "other"  # 其他永久性錯誤（例如請求格式不被接受）
 
 
@@ -89,6 +90,7 @@ _REASON_TEXT = {
     LlmErrorReason.AUTH: "金鑰無效或沒有權限",
     LlmErrorReason.QUOTA: "額度不足",
     LlmErrorReason.MODEL_NOT_FOUND: "找不到這個模型",
+    LlmErrorReason.MALFORMED_TOOL_CALL: "產生了格式不正確的工具呼叫",
     LlmErrorReason.OTHER: "拒絕了這個請求",
 }
 
@@ -148,6 +150,8 @@ def _classify(exc: openai.APIError) -> tuple[LlmErrorReason, str]:
         return LlmErrorReason.QUOTA, detail
     if status == 404:
         return LlmErrorReason.MODEL_NOT_FOUND, detail
+    if body.get("code") == "tool_use_failed":
+        return LlmErrorReason.MALFORMED_TOOL_CALL, detail
     return LlmErrorReason.OTHER, detail
 
 
@@ -157,7 +161,7 @@ def _as_llm_error(model: ChatModel, exc: openai.APIError) -> LlmError:
 
 
 def _create(
-    model: ChatModel, messages: list[dict[str, str]], max_tokens: int, *, meter: UsageSink | None, **stream_args: Any
+    model: ChatModel, messages: list[dict[str, Any]], max_tokens: int, *, meter: UsageSink | None, **stream_args: Any
 ) -> Any:
     """送出請求；廠商拒絕時轉成 LlmError，並記一筆沒有數字的失敗用量。"""
     try:
@@ -176,6 +180,39 @@ def chat(model: ChatModel, messages: list[dict[str, str]], *, max_tokens: int, m
     if meter:
         meter.record(model, result.usage, succeeded=True)
     return result
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    id: str
+    name: str
+    arguments: str  # JSON 字串，照模型給的原樣；可能不合法，由呼叫端檢查
+
+
+@dataclass(frozen=True)
+class ToolTurn:
+    """會呼叫工具的一輪。message 是要原樣放回對話的 assistant 訊息——包含廠商自己加的欄位（例如 Gemini 3 每個工具呼叫
+    的 thought_signature，下一輪沒帶回去就是 400）。沒有 tool_calls 就是最後的回答（text）。"""
+
+    message: dict[str, Any]
+    tool_calls: list[ToolCall]
+    text: str
+    usage: TokenUsage
+
+
+def chat_with_tools(
+    model: ChatModel, messages: list[dict[str, Any]], tools: list[dict[str, Any]], *, max_tokens: int,
+    meter: UsageSink | None,
+) -> ToolTurn:
+    response = _create(model, messages, max_tokens, meter=meter, tools=tools)
+    message = response.choices[0].message
+    usage = _usage(response.usage)
+    if meter:
+        meter.record(model, usage, succeeded=True)
+    raw = message.model_dump(exclude_none=True)
+    raw.setdefault("content", "")
+    calls = [ToolCall(call.id, call.function.name, call.function.arguments or "{}") for call in (message.tool_calls or [])]
+    return ToolTurn(message=raw, tool_calls=calls, text=strip_thinking(message.content or ""), usage=usage)
 
 
 class ChatStream:

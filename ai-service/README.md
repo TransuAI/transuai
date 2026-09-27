@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts`、`oauth_connections`、`oauth_pending_authorizations`、`oauth_clients` 十三張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts`、`oauth_connections`、`oauth_pending_authorizations`、`oauth_clients`、`post_meeting_runs`、`action_proposals` 十五張表。
 
 原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)；embedding 仍用 `hf_client.py`。
 
@@ -49,7 +49,7 @@ uv run python -m app.main
 啟動時會：
 
 1. 把 `ai_db` 的 schema 升級到最新的 Alembic migration（多個副本同時啟動時用 Postgres advisory lock 排隊）。導入 Alembic 前用 `create_all` 建的資料庫可能只有部分表（例如只有 `summaries`），baseline（`0001`）只補建缺少的表、不動既有的表跟資料，不需要刪庫重建；唯一例外是還停在 768 維的舊 `embeddings` 表，會拒絕啟動並提示整張表 DROP 掉、重跑 pipeline
-2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）跟 `quiz.requested`（使用者要求產生測驗）
+2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）跟 `post_meeting.requested`（使用者啟動會後處理）
 3. 起 gRPC server，監聽 `8084`
 
 ## Pipeline
@@ -95,6 +95,35 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 需要金鑰的查詢 API 驗證（OpenRouter 的模型清單是公開的，所以改查「目前這把金鑰」）；只有 2xx 算通過，401／403 與其他 4xx 就拒絕並
 說明原因（附上廠商自己的說明，例如 Gemini 對無效金鑰回 400），廠商暫時連不上也不存。密文綁定「使用者:廠商」，搬到別列就解不開。通過後用 AES-256-GCM 加密存進 `provider_keys`，主金鑰是環境變數 `KEY_ENCRYPTION_KEY`（`openssl rand -base64 32` 產生，
 沒設定時不能存入自有金鑰，其他功能照常），之後只回傳末四碼。取捨見 [ADR 0005](docs/adr/0005-own-api-keys-encrypted-in-ai-service.md)。
+
+### 會後處理（`post_meeting.requested`）
+
+使用者對一個 Job 手動啟動的 agent（見 `CONTEXT.md`「會後處理」）：讀這場會議、查使用者的 Google 日曆，把會後該做的事整理成
+**行動提案**，等使用者確認（寫入類工具只會變成提案，見 [ADR 0007](docs/adr/0007-write-tools-become-action-proposals.md)）。
+
+```
+RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jobId}/post-meeting，上傳時間是 Job 建立的時間）
+  → 能不能跑：預設模型要是自有金鑰、支援工具呼叫的模型（會後處理不提供平台模型，見 ADR 0006），Google 要已連結、沒失效
+  → 已經有一份在跑（5 分鐘內）就回傳那一份（卡住的那份寫成 FAILED）；否則新增 status = RUNNING 的紀錄並存好，再排入 post_meeting.requested { runId, jobId, userId }
+消費 post_meeting.requested
+  → 已經結束或卡住的就不跑（卡住的寫成 FAILED，不花使用者的額度）
+  → 清掉上一次留下的提案、記下這一次開始的時間（重試從頭來）→ GetTranscript、讀摘要與章節 → agent 迴圈：
+      讀取類工具（讀摘要、讀章節、搜尋逐字稿、列出講者、查行事曆）真的執行，結果回給模型；
+      寫入類工具（建立行事曆活動）檢查參數後存成 action_proposals（服務、工具、種類、參數），回給模型「已記錄為提案」；
+      每一步把進度文字寫進紀錄；模型說結束就 COMPLETED
+  → 工具呼叫到 15 次或超過 2 分鐘 → LIMIT_REACHED，保留已經產生的提案；每次呼叫模型前與每個工具呼叫前都檢查，超過的工具
+    呼叫不執行、回給模型「未執行」（對話保持完整）。單一次模型呼叫本身沒有另外限時
+```
+
+- 工具在 `app/services/agent_tools.py`，每個是一份設定（說明、參數、讀取類或寫入類、進度文字）；每個外部服務是一組工具
+  （`calendar_tools(...)`），沒連結或已失效的服務不提供它的工具，沒列出的工具 agent 看不到。Google 的工具是自己寫的程式，
+  網址與授權方式跟著那組工具走；之後換成 MCP 時換掉那一組。Google 日曆是自己用 Calendar API 寫的（`app/services/google_calendar.py`，不用官方遠端 MCP，見 ADR 0006）。
+- 搜尋逐字稿先做正規化比對（全形半形、空白、標點），找不到再用雙字重疊的比例（至少 3/4）：語音辨識常把「3 月 24 日」寫成「3 月 24」。
+- 呼叫模型用 `llm_client.chat_with_tools`：assistant 訊息原封不動放回對話（Gemini 3 的 `thought_signature` 要帶回去）；工具參數
+  不是合法 JSON（Groq 的 `tool_use_failed`）時重試那一輪，最多兩次、算進次數。系統提示寫明逐字稿是資料不是指令、寫入只會變成
+  提案、上傳時間（依使用者的時區）、講者目前的名字、工具次數上限。
+- 暫時性失敗走訊息層級重試（`post_meeting.requested.retry.2s`／`.4s`），重試從頭來；最終失敗（含自有金鑰不能用——不改用平台模型）
+  → FAILED 並附原因。「執行中」從這一次開始跑（還沒開始就從要求）起超過 5 分鐘回報成 FAILED。用量記在觸發的使用者名下，功能是 `post_meeting`。
 
 ### 已連結的帳號
 
@@ -198,6 +227,8 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 | `ListConnections` | 使用者的已連結帳號，Google、Notion 各一筆：狀態（已連結、已失效、未連結）與連結時間；已連結的會先確認存取權杖還能用（過期就換新，換不到就是已失效） |
 | `StartConnection` | 開始連結：記下 `state` 與 `browser_binding` 的雜湊（Notion 另外 PKCE，必要時先動態註冊 client），回傳授權網址；`redirect_uri` 是 Gateway 的回呼網址，`browser_binding` 不能是空的。不認得的服務回 `INVALID_ARGUMENT`，沒設定 Google OAuth client 或加密主金鑰回 `FAILED_PRECONDITION`，連不上 Notion 回 `UNAVAILABLE` |
 | `CompleteConnection` | 完成連結：用 `state` 找回使用者、拿 `code` 換權杖並加密保存，回傳 `user_id`。`state` 不認得、過期、用過、屬於別的服務，或 `browser_binding` 對不上（不是開始連結的那個瀏覽器）回 `INVALID_ARGUMENT`；使用者拒絕（`error` 有值）或對方不肯換權杖回 `FAILED_PRECONDITION` |
+| `GetPostMeeting` | 這個 Job 的會後處理：能不能跑（`available`，不能的話 `unavailable_reason` 是給使用者看的原因：預設模型是平台模型或不支援工具呼叫、沒連結 Google 或已失效）與最新一份紀錄（狀態、進度文字、失敗原因、模型、行動提案）；「執行中」超過 5 分鐘回報成 FAILED |
+| `RequestPostMeeting` | 開始會後處理（帶瀏覽器時區與 Job 的上傳時間）：新增 RUNNING 的紀錄、排入 `post_meeting.requested`；已經有一份在跑就回傳那一份。不能跑回 `FAILED_PRECONDITION` 並附原因，時區不對回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
 | `DeleteConnection` | 中斷連結：向對方撤銷授權並刪除權杖；撤銷失敗時照樣刪除，`revoked` 是 false（對方說權杖本來就無效——授權早就不在了——算撤銷成功）。沒連結也算成功 |
 | `SubmitQuizAttempt` | 送出一次作答（依題目順序、每題一個選項位置）：計分、存進 `quiz_attempts`，回傳答對題數與每題的選擇、正確選項、對錯、解說；同一份測驗可以重做，每次都保存。題數不對或選項超出範圍回 `INVALID_ARGUMENT`，還沒產生完成回 `FAILED_PRECONDITION`，不屬於這個 `job_id` 回 `NOT_FOUND` |
 | `SumUserLlmUsage` | 一位使用者在 `[start, end)` 之間的 LLM 用量，依廠商、模型、金鑰來源加總：輸入 / 輸出 token（已知數字的加總）、呼叫次數（失敗也算）、廠商沒回報 token 的次數；Gateway 把「某個月」換成時間範圍。`user_id` 不合法或沒給 `start` / `end` 回 `INVALID_ARGUMENT`，沒有用量回空列表 |
@@ -275,12 +306,16 @@ app/
     embedding.py                  Embedding（SQLAlchemy ORM，pgvector Vector(1024) 欄位）
     qa_history.py                 QaHistory（SQLAlchemy ORM）
     quiz.py                       Quiz、QuizQuestion、QuizAttempt（SQLAlchemy ORM）
+    post_meeting.py               PostMeetingRun、ActionProposal（SQLAlchemy ORM）
   controllers/
     ai_controller.py               AiServiceServicer 實作（摘要、章節、問答、重新產生、用量、自有金鑰、預設模型、測驗的 rpc）
   services/
     reembed.py                       消費 transcript.edited：只重算文字有變的片段的 embedding
     regeneration.py                  RequestRegeneration（排入自己的 queue）與消費 summary.regeneration.requested：重新產生摘要與章節
     quizzes.py                       RequestQuiz（排入自己的 queue）與消費 quiz.requested：產生測驗、失敗與卡住的判斷；作答的計分與保存
+    post_meeting.py                  會後處理：能不能跑、RequestPostMeeting（排入自己的 queue）、消費 post_meeting.requested 的 agent 迴圈
+    agent_tools.py                   會後處理 agent 的工具設定（讀取類／寫入類）：內部工具、Google 日曆工具、逐字稿的模糊搜尋
+    google_calendar.py               Google Calendar API（列出行程）
     quiz_generator.py                出題：組 prompt、呼叫 llm_client、驗證模型回的 JSON（格式不對 raise QuizFormatError）、過濾時間戳
     consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
@@ -310,6 +345,7 @@ app/
     llm_usage_repository.py                ai_db 存取（llm_usage）：每筆用量用自己的 session 立即寫入
     provider_key_repository.py             ai_db 存取（provider_keys）：存入或替換（upsert）、刪除、列出
     default_model_repository.py            ai_db 存取（default_models）
+    post_meeting_repository.py             ai_db 存取（post_meeting_runs、action_proposals）
     quiz_repository.py                     ai_db 存取（quizzes、quiz_questions、quiz_attempts）：題目與「完成」一起寫入、最佳成績
   db/
     session.py                              engine / session / init_db（Alembic upgrade）
@@ -343,4 +379,4 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 - chat/embedding model 選擇都受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 embedding 模型 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `AI_HF_CHAT_MODEL`／`HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
 - 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了。還停在 768 維的舊表會讓服務拒絕啟動（baseline migration 檢查），要整張表 DROP 掉讓 migration 重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
 - `Qwen/Qwen3.5-9B` 屬於 Qwen3 系列，預設會開 thinking mode：完整思考過程另外算 completion tokens、放在 HF 回應的 `message.reasoning`（不是混進 `content` 的 `<think>` 標籤，這點實測跟原本 Groq `qwen3.6-27b` 的行為不同）。**已踩過的坑**：不設 `max_tokens` 時 provider 預設只給 2048，稍長的輸入光思考就把預算燒光，`content` 直接是空字串（`finish_reason="length"`）但整個呼叫不會報錯——摘要/章節分段因此曾經整段是空的，pipeline 卻顯示成功；而且單純拉高 `max_tokens` 治標不治本，實測 500+ 段的章節分段呼叫就算給到 32768 還是會在思考階段被 HF gateway 504 timeout 打斷。目前的做法是透過 `llm_client.DISABLE_THINKING`（chat template 的 `enable_thinking=False`）直接關掉 thinking mode，平台模型的每次呼叫都會帶上（`platform_chat_model()`），HF 的 OpenAI 相容路由會原樣轉給模型；`strip_thinking()`／`stream_without_thinking()` 保留作為防禦性 fallback（防之後換模型/provider 又變回把思考混進 `content` 的行為），正常情況下是 no-op。換其他 HF 聊天模型時要重新確認是否還會有類似的 thinking-mode 行為
-- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；摘要 / 章節 / 問答帶講者名稱（`tests/test_speaker_aware_pipeline.py`、`tests/test_qa.py`：`stream_answer()` mock 檢索與 transcript client，模型是假 AI 廠商）；gRPC controller 的 `GetSummary`、`RequestRegeneration`、`ListJobLlmUsage`、`SumUserLlmUsage`、測驗的四個 rpc 有 in-process 測試（測驗的背景產生也在 `tests/test_quizzes.py`，模型是假 AI 廠商）（真的 Postgres），問答 streaming 的 gRPC 層仍只靠手動 grpcurl smoke test
+- 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；摘要 / 章節 / 問答帶講者名稱（`tests/test_speaker_aware_pipeline.py`、`tests/test_qa.py`：`stream_answer()` mock 檢索與 transcript client，模型是假 AI 廠商）；gRPC controller 的 `GetSummary`、`RequestRegeneration`、`ListJobLlmUsage`、`SumUserLlmUsage`、測驗的四個 rpc 有 in-process 測試（測驗的背景產生也在 `tests/test_quizzes.py`，模型是假 AI 廠商），會後處理的兩個 rpc 與 agent（`tests/test_post_meeting.py`：照劇本回應的假 AI 廠商、Google Calendar API 的假 HTTP）也是（真的 Postgres），問答 streaming 的 gRPC 層仍只靠手動 grpcurl smoke test

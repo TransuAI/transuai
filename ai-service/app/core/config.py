@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     transcript_edited_queue: str = "transcript.edited"
     summary_regeneration_requested_queue: str = "summary.regeneration.requested"
     quiz_requested_queue: str = "quiz.requested"
+    post_meeting_requested_queue: str = "post_meeting.requested"
 
     upload_service_grpc_target: str = "localhost:9090"
     transcription_service_grpc_target: str = "localhost:8083"

@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from collections.abc import Sequence
@@ -40,6 +41,14 @@ from app.services.key_encryption import EncryptionUnavailable
 from app.services.llm_client import LlmError
 from app.services.model_catalog import CatalogUnreachable, ModelChoice, UnknownModel
 from app.services.provider_keys import InvalidKey, ProviderUnreachable, UnknownProvider, save_provider_key
+from app.services.post_meeting import (
+    InvalidTimezone,
+    NotAvailable,
+    PostMeetingNotQueued,
+    post_meeting_state,
+    request_post_meeting,
+)
+from app.services.post_meeting import effective_status as post_meeting_effective_status
 from app.services.qa import NoEmbeddingsError, stream_answer
 from app.services.quizzes import (
     InvalidAnswers,
@@ -51,7 +60,16 @@ from app.services.quizzes import (
     request_quiz,
     submit_attempt,
 )
-from app.models import ConnectionStatus, Quiz, QuizQuestion, QuizStatus, RegenerationStatus
+from app.models import (
+    ActionProposal,
+    ConnectionStatus,
+    PostMeetingRun,
+    PostMeetingStatus,
+    Quiz,
+    QuizQuestion,
+    QuizStatus,
+    RegenerationStatus,
+)
 from app.services.regeneration import (
     RegenerationNotQueued,
     SummaryNotFound,
@@ -412,6 +430,31 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         return ai_pb2.DeleteConnectionResponse(revoked=revoked)
 
 
+    def GetPostMeeting(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        reason, run, proposals = post_meeting_state(job_id, user_id)
+        response = ai_pb2.PostMeeting(available=reason is None, unavailable_reason=reason or "")
+        if run is not None:
+            response.latest_run.CopyFrom(_post_meeting_run_to_proto(run, proposals))
+        return response
+
+    def RequestPostMeeting(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        if not request.HasField("uploaded_at"):
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "uploaded_at is required")
+        try:
+            run = request_post_meeting(job_id, user_id, request.timezone, request.uploaded_at.ToDatetime(timezone.utc))
+        except InvalidTimezone:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, f"不認得的時區：{request.timezone}")
+        except NotAvailable as exc:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, str(exc))
+        except PostMeetingNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法開始會後處理，請稍後再試")
+        return ai_pb2.PostMeeting(available=True, latest_run=_post_meeting_run_to_proto(run, []))
+
+
 _CONNECTION_STATUS = {
     None: ai_pb2.CONNECTION_STATUS_NOT_CONNECTED,
     ConnectionStatus.CONNECTED: ai_pb2.CONNECTION_STATUS_CONNECTED,
@@ -431,6 +474,27 @@ _QUIZ_STATUS = {
     QuizStatus.COMPLETED: ai_pb2.QUIZ_STATUS_COMPLETED,
     QuizStatus.FAILED: ai_pb2.QUIZ_STATUS_FAILED,
 }
+
+
+_POST_MEETING_STATUS = {
+    PostMeetingStatus.RUNNING: ai_pb2.POST_MEETING_STATUS_RUNNING,
+    PostMeetingStatus.COMPLETED: ai_pb2.POST_MEETING_STATUS_COMPLETED,
+    PostMeetingStatus.LIMIT_REACHED: ai_pb2.POST_MEETING_STATUS_LIMIT_REACHED,
+    PostMeetingStatus.FAILED: ai_pb2.POST_MEETING_STATUS_FAILED,
+}
+
+
+def _post_meeting_run_to_proto(run: PostMeetingRun, proposals: Sequence[ActionProposal]) -> ai_pb2.PostMeetingRun:
+    status, failure_reason = post_meeting_effective_status(run)
+    message = ai_pb2.PostMeetingRun(
+        id=str(run.id), status=_POST_MEETING_STATUS[status], progress=run.progress if status == PostMeetingStatus.RUNNING else "",
+        failure_reason=failure_reason or "", model_provider=run.model_provider or "", model=run.model or "",
+        proposals=[ai_pb2.ActionProposal(id=str(p.id), service=p.service, tool=p.tool, kind=p.kind,
+                                         arguments_json=json.dumps(p.arguments, ensure_ascii=False)) for p in proposals])
+    message.requested_at.FromDatetime(run.requested_at)
+    if run.finished_at is not None:
+        message.finished_at.FromDatetime(run.finished_at)
+    return message
 
 
 def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = (), *, best: int | None = None) -> ai_pb2.Quiz:
