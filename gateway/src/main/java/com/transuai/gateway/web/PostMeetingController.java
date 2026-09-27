@@ -16,6 +16,7 @@ import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.web.dto.ActionProposalDto;
+import com.transuai.gateway.web.dto.ExecuteProposalsRequestDto;
 import com.transuai.gateway.web.dto.PostMeetingDto;
 import com.transuai.gateway.web.dto.PostMeetingRequestDto;
 import com.transuai.gateway.web.dto.PostMeetingRunDto;
@@ -23,10 +24,13 @@ import com.transuai.upload.grpc.v1.Job;
 
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.ActionProposal;
+import transuai.ai.v1.Ai.ExecuteProposalsRequest;
 import transuai.ai.v1.Ai.GetPostMeetingRequest;
 import transuai.ai.v1.Ai.PostMeeting;
 import transuai.ai.v1.Ai.PostMeetingRun;
+import transuai.ai.v1.Ai.ProposalToExecute;
 import transuai.ai.v1.Ai.RequestPostMeetingRequest;
+import transuai.ai.v1.Ai.RetryProposalRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
 // 會後處理（見 ai-service/CONTEXT.md）：在 ai-service 背景跑 agent，前端每 3 秒輪詢 GET 直到不是 RUNNING。
@@ -63,6 +67,36 @@ public class PostMeetingController {
                 .build()));
     }
 
+    // 用確認過的最終參數執行勾選的提案，回傳整份紀錄（每項的結果）；沒勾選的不動，已建立過的不再執行。還在跑回 409，
+    // 提案不屬於這份紀錄回 400，紀錄不屬於這個 Job 回 404。
+    @PostMapping("/jobs/{jobId}/post-meeting/{runId}/execute")
+    public PostMeetingRunDto executeProposals(@CurrentUserId UUID userId, @PathVariable String jobId,
+            @PathVariable String runId, @RequestBody ExecuteProposalsRequestDto request) {
+        jobOwnershipGuard.check(userId, jobId);
+        if (request == null || request.proposals() == null) {
+            throw new IllegalArgumentException("proposals are required"); // → 400 via GrpcExceptionAdvice
+        }
+        ExecuteProposalsRequest.Builder grpcRequest = ExecuteProposalsRequest.newBuilder()
+                .setJobId(jobId).setUserId(userId.toString()).setRunId(runId);
+        for (ExecuteProposalsRequestDto.Item item : request.proposals()) {
+            if (item == null || item.proposalId() == null || item.arguments() == null || !item.arguments().isObject()) {
+                throw new IllegalArgumentException("each proposal needs proposalId and an arguments object");
+            }
+            grpcRequest.addProposals(ProposalToExecute.newBuilder()
+                    .setProposalId(item.proposalId()).setArgumentsJson(item.arguments().toString()));
+        }
+        return toDto(aiServiceStub.executeProposals(grpcRequest.build()));
+    }
+
+    // 用上一次的最終參數重試一個失敗的提案；不是失敗的回 409。
+    @PostMapping("/jobs/{jobId}/post-meeting/{runId}/proposals/{proposalId}/retry")
+    public PostMeetingRunDto retryProposal(@CurrentUserId UUID userId, @PathVariable String jobId,
+            @PathVariable String runId, @PathVariable String proposalId) {
+        jobOwnershipGuard.check(userId, jobId);
+        return toDto(aiServiceStub.retryProposal(RetryProposalRequest.newBuilder()
+                .setJobId(jobId).setUserId(userId.toString()).setRunId(runId).setProposalId(proposalId).build()));
+    }
+
     private PostMeetingDto toDto(PostMeeting postMeeting) {
         return new PostMeetingDto(postMeeting.getAvailable(), GrpcStrings.emptyToNull(postMeeting.getUnavailableReason()),
                 postMeeting.hasLatestRun() ? toDto(postMeeting.getLatestRun()) : null);
@@ -80,7 +114,9 @@ public class PostMeetingController {
     private ActionProposalDto toDto(ActionProposal proposal) {
         try {
             return new ActionProposalDto(proposal.getId(), proposal.getService(), proposal.getTool(), proposal.getKind(),
-                    objectMapper.readTree(proposal.getArgumentsJson()));
+                    objectMapper.readTree(proposal.getArgumentsJson()),
+                    proposal.getStatus().name().replace("PROPOSAL_STATUS_", ""),
+                    GrpcStrings.emptyToNull(proposal.getResultUrl()), GrpcStrings.emptyToNull(proposal.getFailureReason()));
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("ai-service sent proposal arguments that are not JSON", e);
         }
