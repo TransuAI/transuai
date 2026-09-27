@@ -41,9 +41,9 @@ Notification Service 消費訊息
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 >
 > **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
-> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆與 Notion，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿、在指定的 Notion 位置建立會議紀錄頁與待辦）只存成
+> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆、Google Tasks 與 Notion，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立待辦（依設定建在 Google Tasks 或指定的 Notion 資料庫）、在指定的 Notion 頁面底下建立會議紀錄頁）只存成
 > 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案 → 使用者檢查、修改、勾選後按執行，ai-service 才用最終參數呼叫 Google
-> 日曆、Gmail（草稿不寄出）或 Notion，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
+> 日曆、Gmail（草稿不寄出）、Google Tasks 或 Notion，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
 > 只能用自有金鑰、支援工具呼叫的模型（`0006`）。
 
 ---
@@ -186,8 +186,10 @@ POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCou
                                          輪詢列表直到不是 GENERATING）
 GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型、最佳成績
 GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
-GET    /me/post-meeting-settings        會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫（沒指定是 null）
-PUT    /me/post-meeting-settings        儲存設定，body { notionMeetingsPageUrl, notionTodoDatabaseUrl }（空的就是不指定）；
+GET    /me/post-meeting-settings        會後處理的設定：Notion 的會議紀錄頁面與待辦資料庫（沒指定是 null）、待辦去處
+                                         （GOOGLE_TASKS / NOTION）
+PUT    /me/post-meeting-settings        儲存設定，body { notionMeetingsPageUrl, notionTodoDatabaseUrl, todoDestination }
+                                         （網址空的就是不指定，todoDestination 是 null 就不變）；
                                          改過的位置先向 Notion 確認（沒改的沿用），沒連結 Notion 回 409、找不到或種類不對
                                          （會議紀錄要是頁面、待辦要是資料庫）回 400、連不上回 503
 GET    /jobs/{jobId}/post-meeting       會後處理：能不能跑（不能的話附原因）與最新一份紀錄（狀態、進度文字、行動提案）
@@ -546,7 +548,7 @@ CREATE TABLE action_proposals (
 );
 CREATE INDEX ix_action_proposals_run_id ON action_proposals (run_id);
 
--- 會後處理的設定：會議紀錄與待辦寫進 Notion 的哪裡（沒指定就不提 Notion 的寫入動作）；儲存前用 Notion MCP 確認
+-- 會後處理的設定：會議紀錄與待辦寫進 Notion 的哪裡（沒指定就不提 Notion 的寫入動作；改過的儲存前用 Notion MCP 確認）、待辦去處
 CREATE TABLE post_meeting_settings (
     user_id UUID PRIMARY KEY,
     notion_meetings_page_id VARCHAR(64),       -- 會議紀錄建在這個頁面底下
@@ -555,6 +557,7 @@ CREATE TABLE post_meeting_settings (
     notion_todo_data_source_id VARCHAR(64),    -- 待辦新增到這個資料庫（data source ID，collection://…）
     notion_todo_database_title TEXT,
     notion_todo_database_url TEXT,
+    todo_destination VARCHAR(20) NOT NULL DEFAULT 'google_tasks',  -- 待辦建在 google_tasks 或 notion
     updated_at TIMESTAMPTZ NOT NULL
 );
 ```
