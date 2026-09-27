@@ -2772,6 +2772,20 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     expect(within(card()).getByDisplayValue('搬家確認會議')).toBeInTheDocument()
   })
 
+  it('says a run that stopped at the limit did not get to any proposals, rather than that there was nothing to do', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      hints: [], earlierRuns: [],
+      latestRun: run({ status: 'LIMIT_REACHED', proposals: [] }),
+    })
+    await renderCard()
+
+    expect(await within(card()).findByText(/已達上限.*還沒整理出任何提案/)).toBeInTheDocument()
+    expect(within(card()).queryByText('這場會議沒有需要處理的事項')).not.toBeInTheDocument()
+    expect(within(card()).queryByText(/以下是已經整理好的提案/)).not.toBeInTheDocument()
+  })
+
   it('shows why a run failed and lets it run again', async () => {
     vi.mocked(postMeetingApi.get).mockResolvedValue({
       available: true,

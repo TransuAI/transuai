@@ -516,15 +516,22 @@ export function PostMeetingSection({ postMeeting, onStart, isStarting, onExecute
       {(run?.status === 'COMPLETED' || run?.status === 'LIMIT_REACHED') && (
         <>
           {run.status === 'LIMIT_REACHED' && (
-            <p className="text-xs text-muted-foreground">已達上限（模型呼叫次數、工具呼叫次數或時間），以下是已經整理好的提案。</p>
+            <p className="text-xs text-muted-foreground">
+              {run.proposals.length > 0
+                ? '已達上限（模型呼叫次數、工具呼叫次數或時間），以下是已經整理好的提案。'
+                : '已達上限（模型呼叫次數、工具呼叫次數或時間），還沒整理出任何提案。可以再試一次。'}
+            </p>
           )}
-          <ProposalList
-            key={run.id}
-            run={run}
-            onExecute={(proposals) => onExecute(run.id, proposals)}
-            onRetry={(proposalId) => onRetry(run.id, proposalId)}
-            isExecuting={isExecuting}
-          />
+          {/* Stopping at the limit with nothing proposed isn't "nothing to do": the notice above says so instead. */}
+          {(run.status === 'COMPLETED' || run.proposals.length > 0) && (
+            <ProposalList
+              key={run.id}
+              run={run}
+              onExecute={(proposals) => onExecute(run.id, proposals)}
+              onRetry={(proposalId) => onRetry(run.id, proposalId)}
+              isExecuting={isExecuting}
+            />
+          )}
         </>
       )}
       {postMeeting && postMeeting.earlierRuns.length > 0 && <EarlierRuns runs={postMeeting.earlierRuns} />}
