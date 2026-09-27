@@ -87,6 +87,12 @@ service AiService {
   // 不能跑（預設模型是平台模型或不支援工具呼叫、沒有可用的已連結帳號）回 FAILED_PRECONDITION 並附原因；
   // 已經有一份在跑（沒有卡住）就回傳那一份，不重複排入；timezone 不是 IANA 時區回 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE。
   rpc RequestPostMeeting(RequestPostMeetingRequest) returns (PostMeeting);
+  // 執行使用者勾選的行動提案（arguments_json 是使用者確認、可能改過的最終參數），逐項呼叫對應的外部服務，每項記錄成功（附
+  // 連結）或失敗（附原因）；沒勾選的不動，已經建立過的不再執行。參數不對或對方拒絕只讓那一項失敗。紀錄不屬於這個 job 回
+  // NOT_FOUND；還在跑回 FAILED_PRECONDITION；提案不屬於這份紀錄回 INVALID_ARGUMENT。
+  rpc ExecuteProposals(ExecuteProposalsRequest) returns (PostMeetingRun);
+  // 用上一次的最終參數重試一個失敗的提案；只有失敗的能重試（其他回 FAILED_PRECONDITION）。
+  rpc RetryProposal(RetryProposalRequest) returns (PostMeetingRun);
 
   // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
   // 取得的使用者，不另外驗證。
@@ -277,6 +283,34 @@ message PostMeetingRun {
   repeated ActionProposal proposals = 9;
 }
 
+message ExecuteProposalsRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string run_id = 3;
+  repeated ProposalToExecute proposals = 4;
+}
+
+message ProposalToExecute {
+  string proposal_id = 1;
+  // 使用者確認的最終參數（JSON 物件）。
+  string arguments_json = 2;
+}
+
+message RetryProposalRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string run_id = 3;
+  string proposal_id = 4;
+}
+
+enum ProposalStatus {
+  PROPOSAL_STATUS_UNSPECIFIED = 0;
+  // 還沒執行（等使用者確認）。
+  PROPOSAL_STATUS_PROPOSED = 1;
+  PROPOSAL_STATUS_DONE = 2;
+  PROPOSAL_STATUS_FAILED = 3;
+}
+
 // 行動提案（見 ai-service/CONTEXT.md）：agent 想做的一個寫入動作，等使用者確認才執行。
 message ActionProposal {
   string id = 1;
@@ -288,6 +322,11 @@ message ActionProposal {
   string arguments_json = 4;
   // 確認後要呼叫的工具，例如 "calendar_create_event"。
   string tool = 5;
+  ProposalStatus status = 6;
+  // 執行成功時，建立好的項目的連結（例如 Google 日曆活動的網址）。
+  string result_url = 7;
+  // 執行失敗時給使用者看的原因。
+  string failure_reason = 8;
 }
 
 message SubmitQuizAttemptRequest {
