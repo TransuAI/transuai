@@ -44,6 +44,8 @@ Notification Service 消費訊息
 > 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆、Google Tasks 與 Notion，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立待辦（依設定建在 Google Tasks 或指定的 Notion 資料庫）、在指定的 Notion 頁面底下建立會議紀錄頁）只存成
 > 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案 → 使用者檢查、修改、勾選後按執行，ai-service 才用最終參數呼叫 Google
 > 日曆、Gmail（草稿不寄出）、Google Tasks 或 Notion，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
+> 成功的記下指紋（服務、種類、正規化後的標題與時間）：同一個 Job 再跑一次時，agent 知道哪些已經建立過，跟它們相同的提案標示
+> 「上次已建立」、預設不勾選；每一次的紀錄都保留，工作區看得到歷次的提案與結果。
 > 只能用自有金鑰、支援工具呼叫的模型（`0006`）。
 
 ---
@@ -192,7 +194,8 @@ PUT    /me/post-meeting-settings        儲存設定，body { notionMeetingsPage
                                          （網址空的就是不指定，todoDestination 是 null 就不變）；
                                          改過的位置先向 Notion 確認（沒改的沿用），沒連結 Notion 回 409、找不到或種類不對
                                          （會議紀錄要是頁面、待辦要是資料庫）回 400、連不上回 503
-GET    /jobs/{jobId}/post-meeting       會後處理：能不能跑（不能的話附原因）與最新一份紀錄（狀態、進度文字、行動提案）
+GET    /jobs/{jobId}/post-meeting       會後處理：能不能跑（不能的話附原因）、最新一份紀錄（狀態、進度文字、行動提案，
+                                         跟之前已建立過的相同的標 previouslyCreated）與之前的紀錄（earlierRuns）
 POST   /jobs/{jobId}/post-meeting       開始會後處理，body { "timezone" }，回 202（背景跑 agent，前端每 3 秒輪詢 GET）；
                                          不能跑回 409 並附原因
 POST   /jobs/{jobId}/post-meeting/{runId}/execute  執行勾選的行動提案，body { "proposals": [{ proposalId, arguments }] }
@@ -544,7 +547,8 @@ CREATE TABLE action_proposals (
     status VARCHAR(10) NOT NULL DEFAULT 'PROPOSED',  -- PROPOSED（等確認）/ DONE / FAILED
     result_url TEXT,                        -- 執行成功時，建立好的項目的網址
     failure_reason TEXT,                    -- 執行失敗時給使用者看的原因（可以重試）
-    executed_at TIMESTAMPTZ
+    executed_at TIMESTAMPTZ,
+    fingerprint TEXT                        -- 執行成功時：服務|種類|正規化後的標題|時間，下一次認出同一件事（上次已建立）
 );
 CREATE INDEX ix_action_proposals_run_id ON action_proposals (run_id);
 
