@@ -3,9 +3,10 @@ import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { PostMeetingSection } from '@/pages/job-detail/post-meeting-section'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
 import { UsageSection } from '@/pages/job-detail/usage-section'
-import type { Chapter, JobUsage, Quiz, Summary, Transcript } from '@/types/api'
+import type { Chapter, JobUsage, PostMeeting, Quiz, Summary, Transcript } from '@/types/api'
 
 interface StudioPaneProps {
   jobId: string
@@ -26,6 +27,9 @@ interface StudioPaneProps {
   onRequestQuiz: (questionCount: number) => void
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
+  postMeeting: PostMeeting | null
+  onStartPostMeeting: () => void
+  isStartingPostMeeting: boolean
 }
 
 export function StudioPane({
@@ -44,6 +48,9 @@ export function StudioPane({
   onRequestQuiz,
   isRequestingQuiz,
   onQuizAttempted,
+  postMeeting,
+  onStartPostMeeting,
+  isStartingPostMeeting,
 }: StudioPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -136,6 +143,12 @@ export function StudioPane({
               onSeek={onSeek}
               mediaAvailable={mediaAvailable}
               onAttempted={onQuizAttempted}
+            />
+
+            <PostMeetingSection
+              postMeeting={postMeeting}
+              onStart={onStartPostMeeting}
+              isStarting={isStartingPostMeeting}
             />
 
             <UsageSection usage={usage} />

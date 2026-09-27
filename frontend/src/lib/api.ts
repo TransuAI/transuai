@@ -10,6 +10,7 @@ import type {
   JobUsage,
   MediaUrlResponse,
   ModelChoice,
+  PostMeeting,
   MonthlyUsage,
   PresignResponse,
   ProviderKey,
@@ -163,6 +164,13 @@ export const usageApi = {
   getJobUsage: (jobId: string) => apiFetch<JobUsage>(`/jobs/${jobId}/usage`),
   // 這位使用者某個月（YYYY-MM）依模型加總的用量；省略就是這個月（由伺服器決定，台灣時間）。
   getMonthly: (month?: string) => apiFetch<MonthlyUsage>(month ? `/me/usage?month=${month}` : '/me/usage'),
+}
+
+// 會後處理：在背景跑 agent，執行中的輪詢 get 直到不是 RUNNING。timezone 是瀏覽器的 IANA 時區（換算相對日期）。
+export const postMeetingApi = {
+  get: (jobId: string) => apiFetch<PostMeeting>(`/jobs/${jobId}/post-meeting`),
+  start: (jobId: string, timezone: string) =>
+    apiFetch<PostMeeting>(`/jobs/${jobId}/post-meeting`, { method: 'POST', body: { timezone } }),
 }
 
 // 已連結的帳號（Google、Notion）：權杖只在後端，這裡只看得到狀態。連結時後端給授權網址，由前端把使用者轉過去。

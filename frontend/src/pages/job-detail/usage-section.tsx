@@ -10,6 +10,7 @@ const FEATURE_LABELS: Record<string, string> = {
   regenerated_summary: '重新產生摘要',
   regenerated_chapters: '重新產生章節',
   quiz: '測驗',
+  post_meeting: '會後處理',
   transcription: '轉錄',
 }
 

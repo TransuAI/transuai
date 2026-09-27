@@ -12,7 +12,7 @@ import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
-import type { Chapter, Job, JobUsage, ModelChoice, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
   job: Job
@@ -41,6 +41,9 @@ interface CompletedWorkspaceProps {
   onRequestQuiz: (questionCount: number) => void
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
+  postMeeting: PostMeeting | null
+  onStartPostMeeting: () => void
+  isStartingPostMeeting: boolean
   modelChoices: ModelChoice[]
   selectedModel: ModelChoice | null
   onSelectModel: (model: ModelChoice) => void
@@ -97,6 +100,9 @@ export function CompletedWorkspace({
   onRequestQuiz,
   isRequestingQuiz,
   onQuizAttempted,
+  postMeeting,
+  onStartPostMeeting,
+  isStartingPostMeeting,
   modelChoices,
   selectedModel,
   onSelectModel,
@@ -149,6 +155,9 @@ export function CompletedWorkspace({
       onRequestQuiz={onRequestQuiz}
       isRequestingQuiz={isRequestingQuiz}
       onQuizAttempted={onQuizAttempted}
+      postMeeting={postMeeting}
+      onStartPostMeeting={onStartPostMeeting}
+      isStartingPostMeeting={isStartingPostMeeting}
       jobId={job.jobId}
     />
   )

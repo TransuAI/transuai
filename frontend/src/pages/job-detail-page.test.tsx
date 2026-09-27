@@ -4,8 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, qaApi, quizApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
-import type { Chapter, Job, JobUsage, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
+import { chapterApi, jobsApi, modelsApi, postMeetingApi, qaApi, quizApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
+import type { Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -21,6 +21,7 @@ vi.mock('@/lib/api', () => ({
   usageApi: { getJobUsage: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
   quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), submitAttempt: vi.fn() },
+  postMeetingApi: { get: vi.fn(), start: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -43,6 +44,7 @@ beforeEach(() => {
   vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false })
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platformModel)
   vi.mocked(quizApi.list).mockResolvedValue([])
+  vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: null })
 })
 
 beforeAll(async () => {
@@ -2280,5 +2282,157 @@ describe('JobDetailPage quiz staleness and export', () => {
     const markdown = await blobs[0].text()
     expect(markdown).toContain('### 1. 講者主張砍一成。\n\n- A. 是\n- B. 否')
     expect(markdown).toContain('## 解答\n\n### 1. A. 是\n\n他說要砍一成。\n\n依據：[00:12]')
+  })
+})
+
+describe('JobDetailPage post-meeting processing (會後處理)', () => {
+  const run = (overrides: Partial<PostMeetingRun> = {}): PostMeetingRun => ({
+    id: 'run-1',
+    status: 'COMPLETED',
+    progress: null,
+    failureReason: null,
+    modelProvider: 'openai',
+    model: 'gpt-5',
+    requestedAt: '2026-11-11T10:00:00Z',
+    finishedAt: '2026-11-11T10:00:40Z',
+    proposals: [],
+    ...overrides,
+  })
+  const nextMeeting = {
+    id: 'p-1',
+    service: 'google_calendar',
+    tool: 'calendar_create_event',
+    kind: 'calendar_event',
+    arguments: { summary: '搬家確認會議', start: '2026-11-18T14:00:00+08:00', end: '2026-11-18T15:00:00+08:00', description: '確認搬家分工' },
+  }
+  const card = () => screen.getByRole('region', { name: '會後處理' })
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function renderCard() {
+    stubDesktopLayout()
+    await renderCompletedJob()
+    await screen.findByRole('region', { name: '會後處理' })
+    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+  }
+
+  it('says why it cannot run, with the button turned off', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: false,
+      unavailableReason: '請先到設定頁連結 Google 帳號，會後處理才能查詢你的行事曆',
+      latestRun: null,
+    })
+    await renderCard()
+
+    expect(await within(card()).findByText('請先到設定頁連結 Google 帳號，會後處理才能查詢你的行事曆')).toBeInTheDocument()
+    expect(within(card()).getByRole('button', { name: '開始會後處理' })).toBeDisabled()
+  })
+
+  it('starts with the browser time zone, shows what it is doing, and lists its proposals when done', async () => {
+    const user = await renderCard()
+    vi.mocked(postMeetingApi.start).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      latestRun: run({ status: 'RUNNING', progress: '排隊中…', finishedAt: null }),
+    })
+
+    await user.click(await within(card()).findByRole('button', { name: '開始會後處理' }))
+
+    expect(postMeetingApi.start).toHaveBeenCalledWith('job-1', Intl.DateTimeFormat().resolvedOptions().timeZone)
+    expect(await within(card()).findByText('排隊中…')).toBeInTheDocument()
+    expect(within(card()).getByRole('button', { name: '開始會後處理' })).toBeDisabled()
+
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      latestRun: run({ status: 'RUNNING', progress: '正在查詢你的行事曆…', finishedAt: null }),
+    })
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(await within(card()).findByText('正在查詢你的行事曆…')).toBeInTheDocument()
+
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
+    vi.mocked(usageApi.getJobUsage).mockClear()
+    await vi.advanceTimersByTimeAsync(3000)
+
+    const [proposal] = await within(card()).findAllByRole('listitem')
+    expect(proposal).toHaveTextContent('行事曆活動')
+    expect(proposal).toHaveTextContent('搬家確認會議')
+    expect(proposal).toHaveTextContent('確認搬家分工')
+    const start = new Date('2026-11-18T14:00:00+08:00')
+    const pad = (value: number) => String(value).padStart(2, '0')
+    expect(proposal).toHaveTextContent(`${start.getMonth() + 1}/${start.getDate()} ${pad(start.getHours())}:${pad(start.getMinutes())}`)
+    expect(within(card()).queryByText('正在查詢你的行事曆…')).not.toBeInTheDocument()
+    expect(usageApi.getJobUsage).toHaveBeenCalled() // the run used the model
+  })
+
+  it('does not go back to an older state when an earlier poll answers late', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      latestRun: run({ status: 'RUNNING', progress: '正在閱讀摘要…', finishedAt: null }),
+    })
+    await renderCard()
+    await within(card()).findByText('正在閱讀摘要…')
+    let answerOldPoll: (value: Awaited<ReturnType<typeof postMeetingApi.get>>) => void = () => {}
+    vi.mocked(postMeetingApi.get).mockReturnValueOnce(new Promise((resolve) => (answerOldPoll = resolve)))
+    await vi.advanceTimersByTimeAsync(3000) // a slow poll goes out…
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run({ proposals: [nextMeeting] }) })
+    await vi.advanceTimersByTimeAsync(3000) // …a later one says it's done
+
+    expect(await within(card()).findByText('搬家確認會議')).toBeInTheDocument()
+    await act(async () =>
+      answerOldPoll({ available: true, unavailableReason: null, latestRun: run({ status: 'RUNNING', progress: '正在閱讀摘要…', finishedAt: null }) }),
+    )
+
+    expect(within(card()).getByText('搬家確認會議')).toBeInTheDocument()
+    expect(within(card()).queryByText('正在閱讀摘要…')).not.toBeInTheDocument()
+  })
+
+  it('says when there was nothing to do', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, latestRun: run() })
+    await renderCard()
+
+    expect(await within(card()).findByText('這場會議沒有需要處理的事項')).toBeInTheDocument()
+  })
+
+  it('keeps the proposals of a run that stopped at its limit, and says so', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      latestRun: run({ status: 'LIMIT_REACHED', proposals: [nextMeeting] }),
+    })
+    await renderCard()
+
+    expect(await within(card()).findByText(/已達上限/)).toBeInTheDocument()
+    expect(within(card()).getByText('搬家確認會議')).toBeInTheDocument()
+  })
+
+  it('shows why a run failed and lets it run again', async () => {
+    vi.mocked(postMeetingApi.get).mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      latestRun: run({ status: 'FAILED', failureReason: 'openai（gpt-5）額度不足：HTTP 402' }),
+    })
+    await renderCard()
+
+    expect(await within(card()).findByText('openai（gpt-5）額度不足：HTTP 402')).toBeInTheDocument()
+    expect(within(card()).getByRole('button', { name: '開始會後處理' })).toBeEnabled()
+  })
+
+  it('says why it could not start', async () => {
+    const user = await renderCard()
+    vi.mocked(postMeetingApi.start).mockRejectedValue(
+      new ApiError(409, { error: 'FAILED_PRECONDITION', message: 'Google 連結已失效，請到設定頁重新連結' }),
+    )
+
+    await user.click(await within(card()).findByRole('button', { name: '開始會後處理' }))
+
+    expect(await screen.findByText('Google 連結已失效，請到設定頁重新連結')).toBeInTheDocument()
   })
 })

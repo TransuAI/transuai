@@ -10,6 +10,7 @@ import { sameModel } from '@/lib/providers'
 import { useAutoFollow } from '@/hooks/use-auto-follow'
 import { useJobSocket } from '@/hooks/use-job-socket'
 import { usePlaybackContinuity } from '@/hooks/use-playback-continuity'
+import { usePostMeeting } from '@/hooks/use-post-meeting'
 import { useQuizzes } from '@/hooks/use-quizzes'
 import { useSummaryRegeneration } from '@/hooks/use-summary-regeneration'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
@@ -174,6 +175,7 @@ export function JobDetailPage() {
   )
   const regeneration = useSummaryRegeneration(jobId, summary, setSummary, reloadAfterRegeneration)
   const quizzes = useQuizzes(jobId, jobStatus === 'COMPLETED', reloadUsage)
+  const postMeeting = usePostMeeting(jobId, jobStatus === 'COMPLETED', reloadUsage)
 
   const seekTo = (seconds: number) => {
     if (mediaElement) {
@@ -375,6 +377,9 @@ export function JobDetailPage() {
       onRequestQuiz={quizzes.requestQuiz}
       isRequestingQuiz={quizzes.isRequesting}
       onQuizAttempted={quizzes.reload}
+      postMeeting={postMeeting.postMeeting}
+      onStartPostMeeting={postMeeting.start}
+      isStartingPostMeeting={postMeeting.isStarting}
       usage={usage}
       modelChoices={modelChoices}
       selectedModel={selectedModel}

@@ -154,7 +154,7 @@ export interface JobStatusEvent {
 /** One billed call (用量): an LLM call counts tokens, a transcription counts audio seconds. */
 export interface UsageRecord {
   kind: 'llm' | 'transcription'
-  /** What the call was for, e.g. summary, chapters, qa_answer, qa_rewrite, regenerated_summary, quiz, transcription. */
+  /** What the call was for, e.g. summary, chapters, qa_answer, qa_rewrite, regenerated_summary, quiz, post_meeting, transcription. */
   feature: string
   provider: string
   model: string
@@ -243,6 +243,41 @@ export interface QuizAttemptResult {
   correctCount: number
   questionCount: number
   results: { chosenOption: number; correctOption: number; correct: boolean; explanation: string }[]
+}
+
+/** An action proposal (行動提案): a write the post-meeting agent wants to make, done only once the user confirms. */
+export interface ActionProposal {
+  id: string
+  /** e.g. google_calendar */
+  service: string
+  /** The tool to call once confirmed, e.g. calendar_create_event. */
+  tool: string
+  /** Which form it needs, e.g. calendar_event (arguments: summary, start, end, description). */
+  kind: string
+  arguments: Record<string, unknown>
+}
+
+/** One run of 會後處理 (post-meeting processing) on a job. */
+export interface PostMeetingRun {
+  id: string
+  /** LIMIT_REACHED: stopped at its tool-call or time limit, keeping the proposals so far. A run going for over 5
+   * minutes comes back FAILED. */
+  status: 'RUNNING' | 'COMPLETED' | 'LIMIT_REACHED' | 'FAILED'
+  /** What it is doing while RUNNING, e.g. 「正在查詢你的行事曆…」. */
+  progress: string | null
+  failureReason: string | null
+  modelProvider: string | null
+  model: string | null
+  requestedAt: string
+  finishedAt: string | null
+  proposals: ActionProposal[]
+}
+
+export interface PostMeeting {
+  /** Whether this user can run it now; if not, unavailableReason says why (for the user). */
+  available: boolean
+  unavailableReason: string | null
+  latestRun: PostMeetingRun | null
 }
 
 /** A linked account (已連結的帳號): an outside service the user lets the platform use on their behalf. */
