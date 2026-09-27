@@ -523,7 +523,7 @@ CREATE TABLE post_meeting_runs (
     id UUID PRIMARY KEY,
     job_id UUID NOT NULL,
     user_id UUID NOT NULL,                  -- 觸發的使用者（用他的預設模型與已連結的帳號、用量記在他名下）
-    status VARCHAR(16) NOT NULL,            -- RUNNING / COMPLETED / LIMIT_REACHED（到了工具次數或時間上限）/ FAILED
+    status VARCHAR(16) NOT NULL,            -- RUNNING / COMPLETED / LIMIT_REACHED（到了工具次數、模型呼叫次數或時間上限）/ FAILED
     progress TEXT NOT NULL,                 -- 執行中在做什麼（例如「正在查詢你的行事曆…」）
     failure_reason TEXT,
     timezone VARCHAR(64) NOT NULL,          -- 瀏覽器的時區，換算相對日期用
