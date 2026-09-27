@@ -2,6 +2,10 @@
 agent——直接呼叫處理 post_meeting.requested 的函式，模型是照劇本回應的假 AI 廠商（HTTP 層），Google 日曆 API 也是假的
 （httpx `MockTransport`），逐字稿 client mock 掉。"""
 
+import base64
+import email
+import email.message
+import email.policy
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -18,7 +22,7 @@ from app.models import ConnectionStatus, OAuthConnection, PostMeetingRun
 from app.proto_gen import ai_pb2, transcription_pb2
 from app.repositories.chapter_repository import save_chapters
 from app.repositories.summary_repository import save_summary
-from app.services import google_calendar, post_meeting, usage_meter
+from app.services import gmail, google_calendar, post_meeting, usage_meter
 from app.services.key_encryption import encrypt, key_binding
 from app.services.retry import RetryableMessageError
 
@@ -76,6 +80,30 @@ class FakeCalendar:
 def calendar(monkeypatch):
     fake = FakeCalendar()
     monkeypatch.setattr(google_calendar, "_http_client", httpx2.Client(transport=httpx2.MockTransport(fake.handle)))
+    return fake
+
+
+class FakeGmail:
+    """Gmail API at the HTTP layer: records draft creations."""
+
+    def __init__(self):
+        self.requests: list[httpx2.Request] = []
+
+    def drafts(self) -> list[dict]:
+        return [json.loads(r.content) for r in self.requests if r.method == "POST"]
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        request.read()
+        self.requests.append(request)
+        if request.method == "POST" and request.url.path == "/gmail/v1/users/me/drafts":
+            return httpx2.Response(200, json={"id": "r-1", "message": {"id": "msg-1", "threadId": "t-1"}})
+        return httpx2.Response(404)
+
+
+@pytest.fixture(autouse=True)
+def mailbox(monkeypatch):
+    fake = FakeGmail()
+    monkeypatch.setattr(gmail, "_http_client", httpx2.Client(transport=httpx2.MockTransport(fake.handle)))
     return fake
 
 
@@ -289,7 +317,7 @@ def test_the_model_is_offered_only_the_tools_it_may_use(queued, fake_llm, calend
 
     offered = {tool["function"]["name"] for tool in fake_llm.bodies()[0]["tools"]}
     assert offered == {"get_summary", "get_chapters", "search_transcript", "list_speakers",
-                       "calendar_list_events", "calendar_create_event"}
+                       "calendar_list_events", "calendar_create_event", "gmail_create_draft"}
 
 
 def test_the_system_prompt_sets_the_ground_rules(queued, fake_llm, calendar):
@@ -584,3 +612,107 @@ def test_a_failed_proposal_can_be_fixed_and_carried_out_again(ai_stub, proposed,
 
     assert done.status == ai_pb2.PROPOSAL_STATUS_DONE
     assert [c["summary"] for c in calendar.created()] == ["搬家確認會議"]
+
+
+# --- Gmail 草稿 ---
+
+MINUTES = {"subject": "搬家會議紀錄", "body": "各位好，\n今天確認了搬家分工……"}
+
+
+def test_a_minutes_email_becomes_a_draft_proposal_with_no_recipients(ai_stub, queued, fake_llm, calendar, mailbox):
+    fake_llm.reply_tool_calls([("gmail_create_draft", MINUTES)])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    [proposal] = latest(ai_stub, queued).proposals
+    assert (proposal.service, proposal.tool, proposal.kind) == ("gmail", "gmail_create_draft", "email_draft")
+    assert json.loads(proposal.arguments_json) == {"to": [], **MINUTES}  # the user fills in who it goes to
+    assert mailbox.requests == []  # nothing drafted yet
+
+
+def draft_of(request_body: dict) -> email.message.EmailMessage:
+    raw = request_body["message"]["raw"]
+    parsed = email.message_from_bytes(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)), policy=email.policy.default)
+    assert isinstance(parsed, email.message.EmailMessage)
+    return parsed
+
+
+def test_a_confirmed_draft_is_made_in_gmail_with_the_recipients_the_user_filled_in(ai_stub, queued, fake_llm,
+                                                                                  calendar, mailbox):
+    fake_llm.reply_tool_calls([("gmail_create_draft", MINUTES)])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+
+    [done] = execute(ai_stub, queued, [(proposal.id, {**MINUTES, "to": ["a@example.com", "b@example.com"],
+                                                       "subject": "搬家會議紀錄（定稿）"})]).proposals
+
+    [request] = mailbox.requests
+    assert request.headers["Authorization"] == "Bearer google-access-token"
+    message = draft_of(mailbox.drafts()[0])
+    assert message["To"] == "a@example.com, b@example.com"
+    assert message["Subject"] == "搬家會議紀錄（定稿）"
+    assert message.get_content().strip() == MINUTES["body"].strip()
+    assert (done.status, done.result_url) == (
+        ai_pb2.PROPOSAL_STATUS_DONE, "https://mail.google.com/mail/u/0/#drafts?compose=msg-1")
+
+
+def test_a_draft_can_be_made_without_recipients(ai_stub, queued, fake_llm, calendar, mailbox):
+    fake_llm.reply_tool_calls([("gmail_create_draft", MINUTES)])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+
+    [done] = execute(ai_stub, queued, [(proposal.id, {"to": [], **MINUTES})]).proposals
+
+    assert done.status == ai_pb2.PROPOSAL_STATUS_DONE
+    assert draft_of(mailbox.drafts()[0])["To"] is None
+
+
+def test_a_recipient_that_is_not_an_email_address_fails_the_draft(ai_stub, queued, fake_llm, calendar, mailbox):
+    fake_llm.reply_tool_calls([("gmail_create_draft", MINUTES)])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+
+    [failed] = execute(ai_stub, queued, [(proposal.id, {**MINUTES, "to": ["王小明"]})]).proposals
+
+    assert failed.status == ai_pb2.PROPOSAL_STATUS_FAILED and "王小明" in failed.failure_reason
+    assert mailbox.requests == []
+
+
+def test_recipients_are_the_users_to_fill_in_even_if_the_model_suggests_some(ai_stub, queued, fake_llm, calendar,
+                                                                            mailbox):
+    fake_llm.reply_tool_calls([("gmail_create_draft", {**MINUTES, "to": ["someone@example.com"]})])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    [proposal] = latest(ai_stub, queued).proposals
+    assert json.loads(proposal.arguments_json)["to"] == []
+
+
+def test_a_subject_with_line_breaks_goes_back_to_the_model(ai_stub, queued, fake_llm, calendar, mailbox):
+    fake_llm.reply_tool_calls([("gmail_create_draft", {**MINUTES, "subject": "搬家會議紀錄\nBcc: x@evil.example"})])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    assert list(latest(ai_stub, queued).proposals) == []
+    [result] = tool_results(fake_llm.bodies()[1])
+    assert result.startswith("錯誤") and "subject" in result
+
+
+@pytest.mark.parametrize("recipient", ["a,b@example.com", "<b@example.com>", "王小明"])
+def test_a_recipient_that_is_not_a_plain_address_fails_the_draft(ai_stub, queued, fake_llm, calendar, mailbox,
+                                                                 recipient):
+    fake_llm.reply_tool_calls([("gmail_create_draft", MINUTES)])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+
+    [failed] = execute(ai_stub, queued, [(proposal.id, {**MINUTES, "to": [recipient]})]).proposals
+
+    assert failed.status == ai_pb2.PROPOSAL_STATUS_FAILED
+    assert mailbox.requests == []

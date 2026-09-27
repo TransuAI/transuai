@@ -2,6 +2,7 @@
 讀取類真的執行、結果回給模型；寫入類不執行，只驗證參數後記成行動提案（見 docs/adr/0007）。沒列在這裡的工具 agent 看不到。"""
 
 import json
+import re
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+from app.services.gmail import GmailError, create_draft
 from app.services.google_calendar import CalendarError, create_event, list_events
 
 
@@ -36,8 +38,13 @@ class AgentTool:
     handle: Callable[[dict[str, Any]], Any]
     service: str | None = None  # 寫入類：哪個外部服務
     proposal_kind: str | None = None  # 寫入類：哪一種提案（決定前端的表單）
-    # 寫入類：使用者確認後，用（已經過 handle 驗證的）最終參數真的執行，回傳建立好的項目的網址；失敗 raise ToolFailed。
+    # 寫入類：使用者確認後，用（已經過 confirm 驗證的）最終參數真的執行，回傳建立好的項目的網址；失敗 raise ToolFailed。
     execute: Callable[[dict[str, Any]], str] | None = None
+    # 寫入類：驗證使用者確認的最終參數；沒有就跟模型提案時一樣用 handle。使用者可以填模型不能填的欄位（例如收件人）。
+    check_confirmed: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+
+    def validate_confirmed(self, args: dict[str, Any]) -> dict[str, Any]:
+        return (self.check_confirmed or self.handle)(args)
 
     def schema(self) -> dict[str, Any]:
         return {"type": "function", "function": {"name": self.name, "description": self.description,
@@ -170,6 +177,43 @@ def calendar_tools(access_token: Callable[[], str]) -> list[AgentTool]:
                           ["summary", "start", "end"]),
                   ToolKind.WRITE, "正在整理行動提案…", event_proposal, service="google_calendar",
                   proposal_kind="calendar_event", execute=create),
+    ]
+
+
+# --- Gmail（只有建立草稿） ---
+
+# A plain address only: no display names, quotes, brackets or commas (a comma would make it two addresses in To).
+_EMAIL = re.compile(r"[^@\s,;:<>()\[\]\"]+@[^@\s,;:<>()\[\]\"]+\.[^@\s,;:<>()\[\]\"]+")
+
+
+def gmail_tools(access_token: Callable[[], str]) -> list[AgentTool]:
+    def draft_proposal(args: dict[str, Any]) -> dict[str, Any]:
+        subject, body = text_argument(args, "subject"), text_argument(args, "body")
+        if subject and ("\n" in subject or "\r" in subject):
+            raise ToolArgumentError("subject 只能有一行")
+        to = args.get("to", [])
+        if not isinstance(to, list) or not all(isinstance(address, str) for address in to):
+            raise ToolArgumentError("to 要是 email 地址的陣列")
+        to = [address.strip() for address in to if address.strip()]
+        invalid = [address for address in to if not _EMAIL.fullmatch(address)]
+        if invalid:
+            raise ToolArgumentError(f"這些不是 email 地址：{'、'.join(invalid)}")
+        return {"to": to, "subject": subject, "body": body}
+
+    def create(args: dict[str, Any]) -> str:
+        try:
+            return create_draft(access_token(), args["to"], args["subject"], args["body"])
+        except GmailError as exc:
+            raise ToolFailed(str(exc)) from exc
+
+    return [
+        AgentTool("gmail_create_draft", "（Gmail，寫入）建立一封 email 草稿，例如會議紀錄；不會寄出。收件人由使用者自己填，"
+                  "你只要寫主旨與內文。只會記成提案，等使用者確認。",
+                  _object({"subject": {"type": "string"}, "body": {"type": "string", "description": "純文字內文"}},
+                          ["subject", "body"]),
+                  # The model only writes the subject and body; who it goes to is the user's to fill in.
+                  ToolKind.WRITE, "正在整理行動提案…", lambda args: draft_proposal({**args, "to": []}),
+                  service="gmail", proposal_kind="email_draft", execute=create, check_confirmed=draft_proposal),
     ]
 
 

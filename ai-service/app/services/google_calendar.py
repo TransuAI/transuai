@@ -2,6 +2,8 @@
 
 import httpx2
 
+from app.services.google_api import google_error_message
+
 _API = "https://www.googleapis.com/calendar/v3"
 _http_client = httpx2.Client(timeout=httpx2.Timeout(15.0, connect=5.0))
 
@@ -38,14 +40,5 @@ def create_event(access_token: str, summary: str, start: str, end: str, descript
     except httpx2.HTTPError as exc:
         raise CalendarError("暫時連不上 Google 日曆，請稍後重試") from exc
     if not response.is_success:
-        raise CalendarError(f"Google 日曆沒有建立這個活動（HTTP {response.status_code}）{_google_message(response)}")
+        raise CalendarError(f"Google 日曆沒有建立這個活動（HTTP {response.status_code}）{google_error_message(response)}")
     return response.json().get("htmlLink", "")
-
-
-def _google_message(response: httpx2.Response) -> str:
-    """Google 自己的說明（例如「Calendar usage limits exceeded.」），使用者才知道發生什麼事。"""
-    try:
-        message = response.json().get("error", {}).get("message")
-    except ValueError:
-        return ""
-    return f"：{message}" if message else ""

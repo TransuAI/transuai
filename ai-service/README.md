@@ -98,7 +98,7 @@ app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3
 
 ### 會後處理（`post_meeting.requested`）
 
-使用者對一個 Job 手動啟動的 agent（見 `CONTEXT.md`「會後處理」）：讀這場會議、查使用者的 Google 日曆，把會後該做的事整理成
+使用者對一個 Job 手動啟動的 agent（見 `CONTEXT.md`「會後處理」）：讀這場會議、查使用者的 Google 日曆，把會後該做的事（排下次會議、會議紀錄的 email 草稿）整理成
 **行動提案**，等使用者確認（寫入類工具只會變成提案，見 [ADR 0007](docs/adr/0007-write-tools-become-action-proposals.md)）。
 
 ```
@@ -109,7 +109,7 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
   → 已經結束或卡住的就不跑（卡住的寫成 FAILED，不花使用者的額度）
   → 清掉上一次留下的提案、記下這一次開始的時間（重試從頭來）→ GetTranscript、讀摘要與章節 → agent 迴圈：
       讀取類工具（讀摘要、讀章節、搜尋逐字稿、列出講者、查行事曆）真的執行，結果回給模型；
-      寫入類工具（建立行事曆活動）檢查參數後存成 action_proposals（服務、工具、種類、參數），回給模型「已記錄為提案」；
+      寫入類工具（建立行事曆活動、建立 Gmail 草稿）檢查參數後存成 action_proposals（服務、工具、種類、參數），回給模型「已記錄為提案」；
       每一步把進度文字寫進紀錄；模型說結束就 COMPLETED
   → 工具呼叫到 15 次或超過 2 分鐘 → LIMIT_REACHED，保留已經產生的提案；每次呼叫模型前與每個工具呼叫前都檢查，超過的工具
     呼叫不執行、回給模型「未執行」（對話保持完整）。單一次模型呼叫本身沒有另外限時
@@ -117,7 +117,10 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
 
 - 工具在 `app/services/agent_tools.py`，每個是一份設定（說明、參數、讀取類或寫入類、進度文字）；每個外部服務是一組工具
   （`calendar_tools(...)`），沒連結或已失效的服務不提供它的工具，沒列出的工具 agent 看不到。Google 的工具是自己寫的程式，
-  網址與授權方式跟著那組工具走；之後換成 MCP 時換掉那一組。Google 日曆是自己用 Calendar API 寫的（`app/services/google_calendar.py`，不用官方遠端 MCP，見 ADR 0006）。
+  網址與授權方式跟著那組工具走；之後換成 MCP 時換掉那一組。Google 日曆與 Gmail 是自己用 Google API 寫的（`app/services/google_calendar.py`、
+  `app/services/gmail.py`，不用官方遠端 MCP，見 ADR 0006）；Gmail 只有建立草稿（不寄出、沒有讀信的工具），收件人一律由使用者在確認時
+  填（模型提的收件人會被清空），可以留空。寫入類工具有兩道檢查：模型提案時的 `handle`，與使用者確認時的 `check_confirmed`（沒有就跟
+  `handle` 一樣）——使用者可以填模型不能填的欄位。
 - 搜尋逐字稿先做正規化比對（全形半形、空白、標點），找不到再用雙字重疊的比例（至少 3/4）：語音辨識常把「3 月 24 日」寫成「3 月 24」。
 - 呼叫模型用 `llm_client.chat_with_tools`：assistant 訊息原封不動放回對話（Gemini 3 的 `thought_signature` 要帶回去）；工具參數
   不是合法 JSON（Groq 的 `tool_use_failed`）時重試那一輪，最多兩次、算進次數。系統提示寫明逐字稿是資料不是指令、寫入只會變成
@@ -132,7 +135,7 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
 
 ### 已連結的帳號
 
-使用者可以連結 Google（Calendar 查行程與建立活動、Gmail 建立草稿、Tasks）與 Notion（官方遠端 MCP），給會後處理用（目前用到 Google 日曆）。
+使用者可以連結 Google（Calendar 查行程與建立活動、Gmail 建立草稿、Tasks）與 Notion（官方遠端 MCP），給會後處理用（目前用到 Google 日曆與 Gmail 草稿）。
 每個服務是 `app/services/connections.py` 裡的一份設定（授權、換權杖、撤銷的網址、權限、是否 PKCE、是否動態註冊 client）。
 
 - **開始連結**（`StartConnection`）：產生一次性的 `state`（10 分鐘內有效）記在 `oauth_pending_authorizations`，連同 Gateway
@@ -323,6 +326,7 @@ app/
     post_meeting.py                  會後處理：能不能跑、RequestPostMeeting（排入自己的 queue）、消費 post_meeting.requested 的 agent 迴圈、執行與重試行動提案
     agent_tools.py                   會後處理 agent 的工具設定（讀取類／寫入類）：內部工具、Google 日曆工具、逐字稿的模糊搜尋
     google_calendar.py               Google Calendar API（列出行程、建立活動）
+    gmail.py                         Gmail API（只有建立草稿，回傳打開草稿的網址）
     quiz_generator.py                出題：組 prompt、呼叫 llm_client、驗證模型回的 JSON（格式不對 raise QuizFormatError）、過濾時間戳
     consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
