@@ -46,7 +46,8 @@ Notification Service 消費訊息
 > 日曆、Gmail（草稿不寄出）、Google Tasks 或 Notion，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
 > 成功的記下指紋（服務、種類、正規化後的標題與時間）：同一個 Job 再跑一次時，agent 知道哪些已經建立過，跟它們相同的提案標示
 > 「上次已建立」、預設不勾選；每一次的紀錄都保留，工作區看得到歷次的提案與結果。
-> 只能用自有金鑰、支援工具呼叫的模型（`0006`）。
+> 用自有金鑰、支援工具呼叫的模型；部署有設定會後處理的平台模型（`AI_POST_MEETING_PLATFORM_MODEL`，預設沒有）時，平台模型的使用者
+> 也能用（`0006`、`0008`）。
 
 ---
 
@@ -685,8 +686,10 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
       Notion MCP 回應的格式沒有正式文件（標題、data source ID、建立好的網址是寬鬆地從回應裡找出來的）
       （見 `ai-service/README.md` 已知限制）。Google 日曆與 Gmail 不用官方的遠端 MCP（預覽計畫 GA 前不能開放給網域外的
       使用者），會後處理改用自己寫的 REST API 工具（見 `ai-service/docs/adr/0006-post-meeting-agent-model-and-google-tools.md`）
-- [x] 會後處理的平台模型——**已決定**：不提供。實測最好的免費選擇 Groq `openai/gpt-oss-120b` 在免費層額度不夠（一次要等
-      3～5 分鐘、全平台一天 3～4 次），付費層決定不開；會後處理只能用自有金鑰、支援工具呼叫的模型（同一份 ADR）
+- [x] 會後處理的平台模型——**已決定**：改成部署設定、預設不提供（`ai-service/docs/adr/0008-configurable-post-meeting-platform-model.md`，
+      局部取代 0006）。原本的結論是不提供：實測最好的免費選擇 Groq `openai/gpt-oss-120b` 在免費層額度不夠（一次要等 3～5 分鐘、
+      全平台一天 3～4 次），付費層決定不開。現在可以設 `AI_POST_MEETING_PLATFORM_MODEL`（例如 HF 上的 `Qwen/Qwen3.8-27B:deepinfra`，
+      一次約 US$0.02，費用算在平台的 HF 金鑰）；沒設定時仍只能用自有金鑰、支援工具呼叫的模型。正式開放前要先有用量上限
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
       靠背景清理排除）。但這只清 upload_db 自己的資料，**不會**連帶清 transcription_db / ai_db
