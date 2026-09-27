@@ -42,7 +42,8 @@ Notification Service 消費訊息
 >
 > **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
 > 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆，讀取類工具真的執行、寫入類工具只存成
-> 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案，使用者確認後才執行（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
+> 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案 → 使用者檢查、修改、勾選後按執行，ai-service 才用最終參數呼叫 Google
+> 日曆，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
 > 只能用自有金鑰、支援工具呼叫的模型（`0006`）。
 
 ---
@@ -188,6 +189,9 @@ GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確�
 GET    /jobs/{jobId}/post-meeting       會後處理：能不能跑（不能的話附原因）與最新一份紀錄（狀態、進度文字、行動提案）
 POST   /jobs/{jobId}/post-meeting       開始會後處理，body { "timezone" }，回 202（背景跑 agent，前端每 3 秒輪詢 GET）；
                                          不能跑回 409 並附原因
+POST   /jobs/{jobId}/post-meeting/{runId}/execute  執行勾選的行動提案，body { "proposals": [{ proposalId, arguments }] }
+                                         （確認、可能改過的最終參數）；回傳每項的結果（成功附連結、失敗附原因）
+POST   /jobs/{jobId}/post-meeting/{runId}/proposals/{proposalId}/retry  用同樣的最終參數重試一個失敗的提案
 POST   /jobs/{jobId}/quizzes/{quizId}/attempts  送出一次作答，body { "answers": number[] }；後端計分並保存，回傳分數與每題結果
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料；每則附回答的 modelProvider / model）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string, "model"?: { provider, model } }
@@ -214,7 +218,7 @@ GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省�
                                          Gateway 把月份換成時間範圍，向兩個服務分別查詢
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`GetPostMeeting`/`RequestPostMeeting`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`GetPostMeeting`/`RequestPostMeeting`/`ExecuteProposals`/`RetryProposal`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -530,7 +534,11 @@ CREATE TABLE action_proposals (
     service VARCHAR(32) NOT NULL,           -- 例如 google_calendar
     tool VARCHAR(64) NOT NULL,              -- 確認後要呼叫的工具，例如 calendar_create_event
     kind VARCHAR(32) NOT NULL,              -- 例如 calendar_event，決定前端的表單
-    arguments JSONB NOT NULL                -- 要送出的參數
+    arguments JSONB NOT NULL,               -- 要送出的參數；執行時換成使用者確認的最終參數
+    status VARCHAR(10) NOT NULL DEFAULT 'PROPOSED',  -- PROPOSED（等確認）/ DONE / FAILED
+    result_url TEXT,                        -- 執行成功時，建立好的項目的網址
+    failure_reason TEXT,                    -- 執行失敗時給使用者看的原因（可以重試）
+    executed_at TIMESTAMPTZ
 );
 CREATE INDEX ix_action_proposals_run_id ON action_proposals (run_id);
 ```
