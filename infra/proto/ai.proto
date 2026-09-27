@@ -93,6 +93,12 @@ service AiService {
   rpc ExecuteProposals(ExecuteProposalsRequest) returns (PostMeetingRun);
   // 用上一次的最終參數重試一個失敗的提案；只有失敗的能重試（其他回 FAILED_PRECONDITION）。
   rpc RetryProposal(RetryProposalRequest) returns (PostMeetingRun);
+  // 會後處理的設定：Notion 的會議紀錄父頁面與待辦資料庫（沒指定的不設定）。
+  rpc GetPostMeetingSettings(GetPostMeetingSettingsRequest) returns (PostMeetingSettings);
+  // 儲存設定（整份換掉）：網址是空字串就是不指定。改過的位置會先用 Notion 確認存在、讀得到而且種類對（會議紀錄是頁面、待辦是
+  // 資料庫），沒改的沿用；沒連結 Notion 回 FAILED_PRECONDITION，找不到、沒有權限或種類不對回 INVALID_ARGUMENT（附原因），連不上
+  // Notion 回 UNAVAILABLE。
+  rpc UpdatePostMeetingSettings(UpdatePostMeetingSettingsRequest) returns (PostMeetingSettings);
 
   // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
   // 取得的使用者，不另外驗證。
@@ -255,6 +261,34 @@ message PostMeeting {
   string unavailable_reason = 2;
   // 最新一份紀錄；還沒跑過就不設定。
   PostMeetingRun latest_run = 3;
+  // 給使用者的提示（能跑，但有些事做不到），例如 Notion 已連結但還沒指定會議紀錄頁面與待辦資料庫。
+  repeated string hints = 4;
+}
+
+message GetPostMeetingSettingsRequest {
+  string user_id = 1;
+}
+
+message UpdatePostMeetingSettingsRequest {
+  string user_id = 1;
+  // Notion 頁面的網址（或 ID）；空字串是不指定。
+  string notion_meetings_page_url = 2;
+  // Notion 資料庫的網址（或 ID）；空字串是不指定。
+  string notion_todo_database_url = 3;
+}
+
+message PostMeetingSettings {
+  // 會議紀錄放在這個 Notion 頁面底下；沒指定就不設定。
+  NotionLocation notion_meetings_page = 1;
+  // 待辦寫進這個 Notion 資料庫；沒指定就不設定。
+  NotionLocation notion_todo_database = 2;
+}
+
+message NotionLocation {
+  // 頁面 ID，或資料庫的 data source ID（collection://…）。
+  string id = 1;
+  string title = 2;
+  string url = 3;
 }
 
 enum PostMeetingStatus {
