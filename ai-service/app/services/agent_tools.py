@@ -290,10 +290,35 @@ def tasks_tools(access_token: Callable[[], str]) -> list[AgentTool]:
 # --- Notion（官方遠端 MCP） ---
 
 
-def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation | None,
-                 todo_database: NotionLocation | None) -> list[AgentTool]:
-    """讀取類：搜尋、讀頁面或資料庫（含欄位結構）。寫入類只有在使用者指定了位置時才提供，而且一律寫到指定的位置——模型不能
-    自己挑地方寫。"""
+def _meeting_todos(args: dict[str, Any]) -> list[dict[str, str]]:
+    """會議紀錄子頁面裡的待辦：每條標題必填，負責人、期限（YYYY-MM-DD）、依據的錄音時間選填；空白的欄位拿掉。"""
+    todos = args.get("todos", [])
+    if not isinstance(todos, list) or not all(isinstance(todo, dict) for todo in todos):
+        raise ToolArgumentError("todos 要是陣列，每條是 {title, assignee, due, timestamp}")
+    checked = []
+    for todo in todos:
+        item = {"title": text_argument(todo, "title"), "assignee": _optional_text(todo, "assignee"),
+                "due": _due_argument(todo), "timestamp": _optional_text(todo, "timestamp")}
+        checked.append({name: value for name, value in item.items() if value is not None})
+    return checked
+
+
+def meeting_page_content(args: dict[str, Any], *, checkboxes: bool) -> str:
+    """子頁面的內容：會議紀錄，加上一段「待辦」——待辦放在 Notion 時是打勾清單，放在 Google Tasks 時只是方便閱讀的清單。"""
+    lines = []
+    for todo in args.get("todos") or []:
+        details = "；".join(part for part in (
+            f"負責人：{todo['assignee']}" if todo.get("assignee") else "",
+            f"期限：{todo['due']}" if todo.get("due") else "",
+            f"依據：錄音 {todo['timestamp']}" if todo.get("timestamp") else "") if part)
+        lines.append(("- [ ] " if checkboxes else "- ") + todo["title"] + (f"（{details}）" if details else ""))
+    return args["content"] + ("\n\n## 待辦\n" + "\n".join(lines) if lines else "")
+
+
+def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation | None, *,
+                 todos_as_checkboxes: bool) -> list[AgentTool]:
+    """讀取類：搜尋、讀頁面。寫入類只有在使用者指定了會議紀錄位置時才提供，而且一律建在那個頁面底下——模型不能自己挑地方
+    寫（見 docs/adr/0009）。todos_as_checkboxes：待辦放在 Notion（打勾清單）還是 Google Tasks（這裡只列清單）。"""
 
     def mcp(name: str, arguments: dict[str, Any]) -> str:
         try:
@@ -305,66 +330,34 @@ def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation 
         AgentTool("notion_search", "（Notion，讀取）搜尋使用者的 Notion。", _object({"query": {"type": "string"}}, ["query"]),
                   ToolKind.READ, "正在搜尋 Notion…",
                   lambda args: mcp("notion-search", {"query": text_argument(args, "query")})),
-        AgentTool("notion_fetch", "（Notion，讀取）讀一個頁面或資料庫；資料庫會回傳欄位結構。",
+        AgentTool("notion_fetch", "（Notion，讀取）讀一個頁面。",
                   _object({"id": {"type": "string", "description": "網址或 ID"}}, ["id"]),
                   ToolKind.READ, "正在讀取 Notion…", lambda args: mcp("notion-fetch", {"id": text_argument(args, "id")})),
     ]
     if meetings_page is not None:
         def page_proposal(args: dict[str, Any]) -> dict[str, Any]:
-            return {"title": text_argument(args, "title"), "content": text_argument(args, "content")}
+            return {"title": text_argument(args, "title"), "content": text_argument(args, "content"),
+                    "todos": _meeting_todos(args)}
+
+        def create_page(args: dict[str, Any]) -> str:
+            content = meeting_page_content(args, checkboxes=todos_as_checkboxes)
+            return url_of(mcp("notion-create-pages", {
+                "parent": {"type": "page_id", "page_id": meetings_page.id},
+                "pages": [{"properties": {"title": args["title"]}, "content": content}]}))
 
         tools.append(AgentTool(
             "notion_create_meeting_page",
-            f"（Notion，寫入）在使用者指定的會議紀錄頁面「{meetings_page.title}」底下建立一頁會議紀錄。只會記成提案，等使用者確認。",
-            _object({"title": {"type": "string"}, "content": {"type": "string", "description": "Markdown"}},
+            f"（Notion，寫入）在使用者指定的頁面「{meetings_page.title}」底下，替這場會議建立一頁會議紀錄：content 是會議紀錄"
+            "（重點、決議、下一步，Markdown），todos 是這場會議的待辦（每條的負責人填講者目前的名字、期限是 YYYY-MM-DD、"
+            "timestamp 是依據的錄音時間，例如 12:34），會一起寫在這一頁。一場會議只提一頁。只會記成提案，等使用者確認。",
+            _object({"title": {"type": "string"}, "content": {"type": "string", "description": "會議紀錄，Markdown"},
+                     "todos": {"type": "array", "items": _object({
+                         "title": {"type": "string"}, "assignee": {"type": "string"},
+                         "due": {"type": "string", "description": "YYYY-MM-DD"},
+                         "timestamp": {"type": "string", "description": "依據的錄音時間，例如 12:34"}}, ["title"])}},
                     ["title", "content"]),
             ToolKind.WRITE, "正在整理行動提案…", page_proposal, service="notion", proposal_kind="notion_page",
-            execute=lambda args: url_of(mcp("notion-create-pages", {
-                "parent": {"page_id": meetings_page.id},
-                "pages": [{"properties": {"title": args["title"]}, "content": args["content"]}]}))))
-    if todo_database is not None:
-        def confirmed_todo(args: dict[str, Any]) -> dict[str, Any]:
-            """使用者確認的值：title_property 可以沒有（加上 title_property 之前提的待辦），有的話要是其中一欄。"""
-            properties = args.get("properties")
-            if not isinstance(properties, dict) or not properties:
-                raise ToolArgumentError("properties 要是物件：欄位名稱對到值")
-            if not all(isinstance(value, (str, int, float, bool)) or value is None for value in properties.values()):
-                raise ToolArgumentError("properties 的值要是文字、數字、true/false 或 null")
-            title_property = args.get("title_property")
-            if title_property is not None and title_property not in properties:
-                raise ToolArgumentError("title_property 要是 properties 裡、資料庫的標題（title）欄位的名稱")
-            content = args.get("content", "")
-            if not isinstance(content, str):
-                raise ToolArgumentError("content 要是文字")
-            return {**({"title_property": title_property} if title_property is not None else {}),
-                    "properties": properties, "content": content}
-
-        def todo_proposal(args: dict[str, Any]) -> dict[str, Any]:
-            """模型提的：一定要說哪一欄是標題，而且標題要有內容（認出同一件待辦靠它）。"""
-            todo = confirmed_todo(args)
-            title = todo["properties"].get(todo.get("title_property"))
-            if not isinstance(title, str) or not title.strip():
-                raise ToolArgumentError("title_property 要是 properties 裡、資料庫的標題（title）欄位的名稱，而且要填上待辦的標題")
-            return todo
-
-        def create_todo(args: dict[str, Any]) -> str:
-            page: dict[str, Any] = {"properties": args["properties"]}
-            if args["content"].strip():
-                page["content"] = args["content"]
-            return url_of(mcp("notion-create-pages", {"parent": {"data_source_id": todo_database.id}, "pages": [page]}))
-
-        tools.append(AgentTool(
-            "notion_create_todo",
-            f"（Notion，寫入）在使用者指定的待辦資料庫「{todo_database.title}」（{todo_database.id}）新增一筆待辦。"
-            "寫之前先用 notion_fetch 讀這個資料庫的欄位結構，properties 的欄位名稱要跟資料庫一樣（例如負責人、期限）；"
-            "人員（person）類型的欄位填不了講者名字，負責人沒有文字欄位可填時寫進 content。依據的時間戳寫進 content。"
-            "只會記成提案，等使用者確認。",
-            _object({"properties": {"type": "object", "description": "欄位名稱對到值"},
-                     "title_property": {"type": "string", "description": "資料庫的標題（title 類型）欄位的名稱"},
-                     "content": {"type": "string", "description": "這筆待辦的內文（Markdown）：依據的時間戳、補充說明"}},
-                    ["properties", "title_property"]),
-            ToolKind.WRITE, "正在整理行動提案…", todo_proposal, service="notion", proposal_kind="notion_database_item",
-            execute=create_todo, check_confirmed=confirmed_todo))
+            execute=create_page))
     return tools
 
 

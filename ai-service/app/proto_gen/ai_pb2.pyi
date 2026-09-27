@@ -247,26 +247,22 @@ class GetPostMeetingSettingsRequest(_message.Message):
     def __init__(self, user_id: _Optional[str] = ...) -> None: ...
 
 class UpdatePostMeetingSettingsRequest(_message.Message):
-    __slots__ = ("user_id", "notion_meetings_page_url", "notion_todo_database_url", "todo_destination")
+    __slots__ = ("user_id", "notion_meetings_page_url", "todo_destination")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     NOTION_MEETINGS_PAGE_URL_FIELD_NUMBER: _ClassVar[int]
-    NOTION_TODO_DATABASE_URL_FIELD_NUMBER: _ClassVar[int]
     TODO_DESTINATION_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     notion_meetings_page_url: str
-    notion_todo_database_url: str
     todo_destination: TodoDestination
-    def __init__(self, user_id: _Optional[str] = ..., notion_meetings_page_url: _Optional[str] = ..., notion_todo_database_url: _Optional[str] = ..., todo_destination: _Optional[_Union[TodoDestination, str]] = ...) -> None: ...
+    def __init__(self, user_id: _Optional[str] = ..., notion_meetings_page_url: _Optional[str] = ..., todo_destination: _Optional[_Union[TodoDestination, str]] = ...) -> None: ...
 
 class PostMeetingSettings(_message.Message):
-    __slots__ = ("notion_meetings_page", "notion_todo_database", "todo_destination")
+    __slots__ = ("notion_meetings_page", "todo_destination")
     NOTION_MEETINGS_PAGE_FIELD_NUMBER: _ClassVar[int]
-    NOTION_TODO_DATABASE_FIELD_NUMBER: _ClassVar[int]
     TODO_DESTINATION_FIELD_NUMBER: _ClassVar[int]
     notion_meetings_page: NotionLocation
-    notion_todo_database: NotionLocation
     todo_destination: TodoDestination
-    def __init__(self, notion_meetings_page: _Optional[_Union[NotionLocation, _Mapping]] = ..., notion_todo_database: _Optional[_Union[NotionLocation, _Mapping]] = ..., todo_destination: _Optional[_Union[TodoDestination, str]] = ...) -> None: ...
+    def __init__(self, notion_meetings_page: _Optional[_Union[NotionLocation, _Mapping]] = ..., todo_destination: _Optional[_Union[TodoDestination, str]] = ...) -> None: ...
 
 class NotionLocation(_message.Message):
     __slots__ = ("id", "title", "url")

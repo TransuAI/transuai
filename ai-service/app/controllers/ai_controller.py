@@ -505,7 +505,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
     def UpdatePostMeetingSettings(self, request, context):
         user_id = _parse_user_id(request.user_id, context)
         try:
-            settings = save_settings(user_id, request.notion_meetings_page_url, request.notion_todo_database_url,
+            settings = save_settings(user_id, request.notion_meetings_page_url,
                                      _TODO_DESTINATION_FROM_PROTO.get(request.todo_destination))
         except NotionNotLinked:
             _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "請先到設定頁連結 Notion 帳號")
@@ -588,7 +588,6 @@ def _settings_to_proto(settings: Settings) -> ai_pb2.PostMeetingSettings:
         return ai_pb2.NotionLocation(id=place.id, title=place.title, url=place.url) if place else None
 
     return ai_pb2.PostMeetingSettings(notion_meetings_page=location(settings.meetings_page),
-                                      notion_todo_database=location(settings.todo_database),
                                       todo_destination=_TODO_DESTINATION_TO_PROTO[settings.todo_destination])
 
 

@@ -77,7 +77,7 @@ class ActionProposal(Base):
 
 
 class PostMeetingSettings(Base):
-    """一位使用者的會後處理設定：Notion 的會議紀錄父頁面、待辦資料庫（沒指定是空的）。"""
+    """一位使用者的會後處理設定：Notion 的會議紀錄位置（每場會議建成它底下的子頁面；沒指定是空的）與待辦去處。"""
 
     __tablename__ = "post_meeting_settings"
 
@@ -85,11 +85,7 @@ class PostMeetingSettings(Base):
     notion_meetings_page_id: Mapped[str | None] = mapped_column(String(64))
     notion_meetings_page_title: Mapped[str | None] = mapped_column(Text)
     notion_meetings_page_url: Mapped[str | None] = mapped_column(Text)
-    # 資料庫的 data source ID（collection://…），新增一筆時當 parent。
-    notion_todo_data_source_id: Mapped[str | None] = mapped_column(String(64))
-    notion_todo_database_title: Mapped[str | None] = mapped_column(Text)
-    notion_todo_database_url: Mapped[str | None] = mapped_column(Text)
-    # 待辦要建在哪裡（TodoDestination）；還沒選過是 Google Tasks。
+    # 待辦要放在哪裡（TodoDestination：Google Tasks，或 Notion 會議紀錄子頁面裡的打勾清單）；還沒選過是 Google Tasks。
     todo_destination: Mapped[str] = mapped_column(String(20), nullable=False, default=TodoDestination.GOOGLE_TASKS)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))

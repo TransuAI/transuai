@@ -354,16 +354,15 @@ class AiServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def GetPostMeetingSettings(self, request, context):
-        """會後處理的設定：Notion 的會議紀錄父頁面與待辦資料庫（沒指定的不設定）。
+        """會後處理的設定：Notion 的會議紀錄位置（沒指定就不設定）與待辦去處。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def UpdatePostMeetingSettings(self, request, context):
-        """儲存設定（整份換掉）：網址是空字串就是不指定。改過的位置會先用 Notion 確認存在、讀得到而且種類對（會議紀錄是頁面、待辦是
-        資料庫），沒改的沿用；沒連結 Notion 回 FAILED_PRECONDITION，找不到、沒有權限或種類不對回 INVALID_ARGUMENT（附原因），連不上
-        Notion 回 UNAVAILABLE。
+        """儲存設定（整份換掉）：網址是空字串就是不指定。網址改過時先用 Notion 確認是一個讀得到的頁面（不是資料庫），沒改的沿用；
+        沒連結 Notion 回 FAILED_PRECONDITION，找不到或不是頁面回 INVALID_ARGUMENT（附原因），連不上 Notion 回 UNAVAILABLE。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

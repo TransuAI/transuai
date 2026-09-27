@@ -140,11 +140,11 @@ class _ServiceSetup:
     def todo_blocker(self) -> str | None:
         """為什麼現在建不了待辦（給使用者看）；建得了是 None。"""
         if self.todo_destination == TodoDestination.GOOGLE_TASKS:
-            return None if self.google else "待辦設定建在 Google Tasks，請先到設定頁連結 Google（或把待辦改成寫進 Notion）"
+            return None if self.google else "待辦設定放在 Google Tasks，請先到設定頁連結 Google（或改成放在 Notion 會議紀錄裡）"
         if not self.notion:
-            return "待辦設定寫進 Notion，請先到設定頁連結 Notion 並指定待辦資料庫"
-        if self.settings.todo_database is None:
-            return "待辦設定寫進 Notion，請到設定頁指定待辦資料庫"
+            return "待辦設定放在 Notion 會議紀錄裡，請先到設定頁連結 Notion，並指定會議紀錄要放在哪個頁面"
+        if self.settings.meetings_page is None:
+            return "待辦設定放在 Notion 會議紀錄裡，請到設定頁指定會議紀錄要放在哪個頁面；指定之前，會後處理不會提待辦"
         return None
 
 
@@ -156,9 +156,11 @@ def _service_setup(user_id: uuid.UUID) -> _ServiceSetup:
 def hints(user_id: uuid.UUID) -> list[str]:
     """能跑但有些事做不到時給使用者的提示。"""
     setup = _service_setup(user_id)
-    meetings_page_missing = setup.notion and setup.settings.meetings_page is None
-    return [hint for hint in ("想讓會後處理把會議紀錄寫進 Notion，請到設定頁指定會議紀錄頁面" if meetings_page_missing else None,
-                              setup.todo_blocker()) if hint]
+    # 待辦放在 Notion 又沒指定位置時，todo_blocker() 已經講了同一件事，只提一次。
+    meetings_page_missing = (setup.notion and setup.settings.meetings_page is None
+                             and setup.todo_destination != TodoDestination.NOTION)
+    return [hint for hint in ("想讓會後處理把會議紀錄寫進 Notion，請到設定頁指定會議紀錄要放在哪個頁面" if meetings_page_missing
+                              else None, setup.todo_blocker()) if hint]
 
 
 def effective_status(run: PostMeetingRun, now: datetime | None = None) -> tuple[PostMeetingStatus, str | None]:
@@ -355,17 +357,19 @@ def _job_content(job_id: uuid.UUID) -> JobContent:
 def _service_rules(setup: _ServiceSetup) -> str:
     """系統提示裡關於外部服務的規則：待辦建在哪裡、Notion 的指定位置；做不到的事叫 agent 不要提。"""
     settings, lines = setup.settings, []
+    page = settings.meetings_page if setup.notion else None
     if setup.todo_blocker():
         lines.append("- 使用者設定的待辦去處現在用不了：不要提待辦。")
     elif setup.todo_destination == TodoDestination.GOOGLE_TASKS:
         lines.append("- 待辦建在使用者的 Google Tasks（用 tasks_create_task，先用 tasks_list_tasks 看已經有的待辦、不要重複）："
-                     "assignee 填講者的名字、due 填期限，timestamp 填依據的錄音時間。")
-    elif settings.todo_database:
-        lines.append(f"- 待辦寫進使用者指定的 Notion 資料庫「{settings.todo_database.title}」（{settings.todo_database.id}，用 "
-                     "notion_create_todo）：寫之前先用 notion_fetch 讀它的欄位結構，負責人填講者的名字、期限填日期，依據的時間戳寫進 content。")
+                     "assignee 填講者的名字、due 填期限，timestamp 填依據的錄音時間。"
+                     + ("Notion 會議紀錄頁的 todos 也列出同一份待辦（只是方便閱讀的清單）。" if page else ""))
+    else:
+        lines.append("- 待辦寫進 Notion 會議紀錄頁（notion_create_meeting_page 的 todos），會成為那一頁的打勾清單：assignee 填"
+                     "講者的名字、due 填期限，timestamp 填依據的錄音時間。")
     if setup.notion:
-        lines.append(f"- Notion 的會議紀錄放在使用者指定的頁面「{settings.meetings_page.title}」底下（用 notion_create_meeting_page）。"
-                     if settings.meetings_page else "- 使用者沒有指定 Notion 的會議紀錄頁面：不要提建立 Notion 會議紀錄頁的動作。")
+        lines.append(f"- Notion 的會議紀錄放在使用者指定的頁面「{page.title}」底下（用 notion_create_meeting_page，一場會議一頁）。"
+                     if page else "- 使用者沒有指定 Notion 的會議紀錄位置：不要提建立 Notion 會議紀錄頁的動作。")
     return "\n" + "\n".join(lines)
 
 
@@ -395,8 +399,8 @@ def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[s
 
 def _connected_service_tools(user_id: uuid.UUID, setup: _ServiceSetup,
                              todo_destinations: frozenset[TodoDestination]) -> list[AgentTool]:
-    """使用者已連結的外部服務的工具；沒連結（或已失效）的服務不提供。建立待辦的工具只提供 todo_destinations 裡的：agent
-    只拿到待辦去處那一個；執行提案時兩個都要（提案之後才換了待辦去處，之前的提案仍然可以執行）。"""
+    """使用者已連結的外部服務的工具；沒連結（或已失效）的服務不提供。Google Tasks 的工具只在 todo_destinations 有它時提供：
+    agent 只拿到待辦去處那一個；執行提案時都要（提案之後才換了待辦去處，之前的提案仍然可以執行）。"""
     tools: list[AgentTool] = []
     if setup.google:
         def google_token() -> str:
@@ -407,7 +411,7 @@ def _connected_service_tools(user_id: uuid.UUID, setup: _ServiceSetup,
             tools += tasks_tools(google_token)
     if setup.notion:
         tools += notion_tools(lambda: _service_token(user_id, "notion", "Notion"), setup.settings.meetings_page,
-                              setup.settings.todo_database if TodoDestination.NOTION in todo_destinations else None)
+                              todos_as_checkboxes=setup.todo_destination == TodoDestination.NOTION)
     return tools
 
 
@@ -570,6 +574,12 @@ def _execute(proposal_id: uuid.UUID, arguments_json: str, tools: dict[str, Agent
         session.close()
 
 
+# 已經拿掉、但可能還留在舊紀錄裡的寫入工具：執行時說清楚原因，而不是誤報成「沒有連結」。
+_RETIRED_TOOLS = {
+    "notion_create_todo": "這種提案已經不再提供（待辦改成寫在 Notion 會議紀錄頁裡），請重新跑一次會後處理",
+}
+
+
 def _call_service(proposal: ActionProposal, arguments_json: str,
                   tools: dict[str, AgentTool]) -> tuple[ProposalStatus, dict, str | None, str | None]:
     """用最終參數呼叫對應的外部服務：(狀態, 要存下的參數, 網址, 失敗原因)。"""
@@ -581,6 +591,8 @@ def _call_service(proposal: ActionProposal, arguments_json: str,
         return ProposalStatus.FAILED, proposal.arguments, None, "參數不是合法的 JSON 物件"
     tool = tools.get(proposal.tool)
     try:
+        if proposal.tool in _RETIRED_TOOLS:
+            raise ToolFailed(_RETIRED_TOOLS[proposal.tool])
         if tool is None or tool.execute is None:
             raise ToolFailed("這個服務沒有連結或已失效，請到設定頁重新連結")
         final = tool.validate_confirmed(arguments)

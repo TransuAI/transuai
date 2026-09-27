@@ -48,8 +48,8 @@ async def _call_tool(access_token: str, name: str, arguments: dict[str, Any]) ->
 
 
 # notion-fetch / notion-create-pages 的結果是給模型看的文字（常見是 JSON）；這裡只挑需要的欄位，挑不到就寬鬆地找。
-_DATA_SOURCE = re.compile(r"collection://[0-9a-fA-F-]{36}")
-_URL = re.compile(r"https://(?:www\.)?notion\.so/[^\s\"'<>)]+")
+# Notion 的網址現在是 app.notion.com，舊的是 notion.so。
+_URL = re.compile(r"https://(?:www\.|app\.)?notion\.(?:so|com)/[^\s\"'<>)]+")
 _TITLE = re.compile(r"\"title\"\s*:\s*\"([^\"]+)\"")
 
 
@@ -61,20 +61,19 @@ def _as_json(text: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def object_type_of(text: str) -> str | None:
+    """notion-fetch 回的是哪一種東西（metadata.type：page、database、data_source…）；看不出來是 None。"""
+    metadata = _as_json(text).get("metadata")
+    kind = metadata.get("type") if isinstance(metadata, dict) else None
+    return kind if isinstance(kind, str) else None
+
+
 def title_of(text: str) -> str:
     data = _as_json(text)
     if isinstance(data.get("title"), str):
         return data["title"]
     match = _TITLE.search(text)
     return match.group(1) if match else ""
-
-
-def data_source_of(text: str) -> str | None:
-    data = _as_json(text)
-    if isinstance(data.get("data_source_id"), str):
-        return data["data_source_id"]
-    match = _DATA_SOURCE.search(text)
-    return match.group(0) if match else None
 
 
 def url_of(text: str) -> str:

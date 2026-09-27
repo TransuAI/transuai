@@ -1,21 +1,19 @@
-"""會後處理的設定（見 CONTEXT.md「會後處理」）：Notion 的會議紀錄父頁面與待辦資料庫（儲存前用 Notion MCP 確認存在而且
-讀得到），以及待辦要建在 Google Tasks 還是 Notion。"""
+"""會後處理的設定（見 CONTEXT.md「會後處理」）：Notion 的會議紀錄位置——每場會議的會議紀錄（含待辦清單）建成這個頁面底下的
+子頁面（儲存前用 Notion MCP 確認讀得到而且是頁面，見 docs/adr/0009）——以及待辦要放在 Notion 會議紀錄裡還是 Google Tasks。"""
 
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from functools import cache
 
 from app.db import new_session
 from app.models import PostMeetingSettings, TodoDestination
 from app.services import connections
-from app.services.notion import NotionError, NotionUnreachable, call_tool, data_source_of, page_id_from, title_of
+from app.services.notion import NotionError, NotionUnreachable, call_tool, object_type_of, page_id_from, title_of
 
 
 @dataclass(frozen=True)
 class NotionLocation:
-    id: str  # 頁面 ID，或資料庫的 data source ID（collection://…）
+    id: str  # 頁面 ID
     title: str
     url: str
 
@@ -23,7 +21,6 @@ class NotionLocation:
 @dataclass(frozen=True)
 class Settings:
     meetings_page: NotionLocation | None
-    todo_database: NotionLocation | None
     todo_destination: TodoDestination = TodoDestination.GOOGLE_TASKS
 
 
@@ -32,7 +29,7 @@ class NotionNotLinked(Exception):
 
 
 class InvalidLocation(Exception):
-    """The URL isn't a page (or database) Notion lets us read; the message says so, for the user."""
+    """The URL isn't a Notion page we can read; the message says so, for the user."""
 
 
 def get_settings(user_id: uuid.UUID) -> Settings:
@@ -42,50 +39,38 @@ def get_settings(user_id: uuid.UUID) -> Settings:
     finally:
         session.close()
     if row is None:
-        return Settings(None, None)
+        return Settings(None)
     return Settings(
         NotionLocation(row.notion_meetings_page_id, row.notion_meetings_page_title or "", row.notion_meetings_page_url or "")
         if row.notion_meetings_page_id else None,
-        NotionLocation(row.notion_todo_data_source_id, row.notion_todo_database_title or "", row.notion_todo_database_url or "")
-        if row.notion_todo_data_source_id else None,
         TodoDestination(row.todo_destination),
     )
 
 
-def save_settings(user_id: uuid.UUID, meetings_page_url: str, todo_database_url: str,
-                  todo_destination: TodoDestination | None = None) -> Settings:
-    """整份換掉；網址是空字串是不指定，todo_destination 是 None 就維持原本的。改過的位置先向 Notion 確認
+def save_settings(user_id: uuid.UUID, meetings_page_url: str, todo_destination: TodoDestination | None = None) -> Settings:
+    """整份換掉；網址是空字串是不指定，todo_destination 是 None 就維持原本的。網址改過時先向 Notion 確認
     （NotionUnreachable 讓呼叫端回 UNAVAILABLE）；沒改的沿用、不再問 Notion——只換待辦去處不會因為 Notion 連不上而失敗。"""
-    meetings_page_url, todo_database_url = meetings_page_url.strip(), todo_database_url.strip()
+    meetings_page_url = meetings_page_url.strip()
     current = get_settings(user_id)
-    token = cache(lambda: _notion_token(user_id))
-    page = _kept_or_checked(current.meetings_page, meetings_page_url, lambda: _check_page(token(), meetings_page_url))
-    database = _kept_or_checked(current.todo_database, todo_database_url,
-                                lambda: _check_database(token(), todo_database_url))
+    if not meetings_page_url:
+        page = None
+    elif current.meetings_page is not None and current.meetings_page.url == meetings_page_url:
+        page = current.meetings_page
+    else:
+        page = _check_page(_notion_token(user_id), meetings_page_url)
+    destination = todo_destination or current.todo_destination
     session = new_session()
     try:
         row = session.get(PostMeetingSettings, user_id) or PostMeetingSettings(user_id=user_id)
         row.notion_meetings_page_id, row.notion_meetings_page_title, row.notion_meetings_page_url = (
             (page.id, page.title, page.url) if page else (None, None, None))
-        row.notion_todo_data_source_id, row.notion_todo_database_title, row.notion_todo_database_url = (
-            (database.id, database.title, database.url) if database else (None, None, None))
-        destination = todo_destination or current.todo_destination
         row.todo_destination = destination
         row.updated_at = datetime.now(timezone.utc)
         session.merge(row)
         session.commit()
     finally:
         session.close()
-    return Settings(page, database, destination)
-
-
-def _kept_or_checked(current: NotionLocation | None, url: str,
-                     check: Callable[[], NotionLocation]) -> NotionLocation | None:
-    if not url:
-        return None
-    if current is not None and current.url == url:
-        return current
-    return check()
+    return Settings(page, destination)
 
 
 def _notion_token(user_id: uuid.UUID) -> str:
@@ -95,31 +80,19 @@ def _notion_token(user_id: uuid.UUID) -> str:
         raise NotionNotLinked() from exc
 
 
-_NOT_READABLE = "找不到這個 Notion {what}，或 TransuAI 沒有權限讀取（請在 Notion 把它分享給 TransuAI）"
-
-
-def _fetch(token: str, url: str, what: str) -> str:
-    try:
-        return call_tool(token, "notion-fetch", {"id": url})
-    except NotionUnreachable:
-        raise
-    except NotionError as exc:
-        raise InvalidLocation(_NOT_READABLE.format(what=what)) from exc
-
-
 def _check_page(token: str, url: str) -> NotionLocation:
     page_id = page_id_from(url)
     if page_id is None:
-        raise InvalidLocation("這不是 Notion 頁面的網址")
-    text = _fetch(token, url, "頁面")
-    if data_source_of(text) is not None:
-        raise InvalidLocation("這是 Notion 資料庫，會議紀錄要建在一個頁面底下")
+        raise InvalidLocation("這不是 Notion 頁面的連結")
+    try:
+        text = call_tool(token, "notion-fetch", {"id": url})
+    except NotionUnreachable:
+        raise
+    except NotionError as exc:
+        # Notion's MCP works with the user's own access: if they can open the page, so can we. Nothing to share.
+        raise InvalidLocation("找不到這個 Notion 頁面：請確認連結正確，而且你的 Notion 帳號打得開它") from exc
+    # Notion 標明了種類；頁面裡嵌了表格照樣是頁面。看不出種類（格式變了）就當成頁面，交給建立時的結果。
+    kind = object_type_of(text)
+    if kind is not None and kind != "page":
+        raise InvalidLocation("這是 Notion 資料庫，請改貼一個一般頁面的連結")
     return NotionLocation(page_id, title_of(text) or "未命名頁面", url)
-
-
-def _check_database(token: str, url: str) -> NotionLocation:
-    text = _fetch(token, url, "資料庫")
-    data_source = data_source_of(text)
-    if data_source is None:
-        raise InvalidLocation("這不是 Notion 資料庫，待辦要寫進資料庫")
-    return NotionLocation(data_source, title_of(text) or "未命名資料庫", url)

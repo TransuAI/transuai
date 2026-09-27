@@ -852,7 +852,6 @@ def test_a_recipient_that_is_not_a_plain_address_fails_the_draft(ai_stub, queued
 
 MEETINGS_PAGE = "https://www.notion.so/Team/Meeting-notes-1f2e3d4c5b6a47889900aabbccddeeff"
 TODO_DATABASE = "https://www.notion.so/Team/Todos-aabbccddeeff00112233445566778899?v=1"
-TODO_SOURCE = "collection://11112222-3333-4444-5555-666677778888"
 
 
 class FakeNotion:
@@ -870,17 +869,20 @@ class FakeNotion:
         @server.tool(name="notion-fetch")
         def fetch(id: str) -> str:
             self.calls.append(("notion-fetch", {"id": id}))
+            # Shaped like Notion's real answers: JSON whose metadata.type says what it is.
             if "1f2e3d4c5b6a47889900aabbccddeeff" in id:
-                return json.dumps({"title": "Meeting notes", "url": MEETINGS_PAGE})
-            if "aabbccddeeff00112233445566778899" in id or id == TODO_SOURCE:
-                return json.dumps({"title": "團隊待辦", "url": TODO_DATABASE, "data_source_id": TODO_SOURCE,
-                                   "schema": {"名稱": "title", "負責人": "text", "期限": "date"}}, ensure_ascii=False)
+                return json.dumps({"metadata": {"type": "page"}, "title": "Meeting notes", "url": MEETINGS_PAGE,
+                                   "text": '<page url="x"><content><database url="collection://y"/></content></page>'})
+            if "aabbccddeeff00112233445566778899" in id:
+                return json.dumps({"metadata": {"type": "data_source"}, "title": "團隊待辦", "url": TODO_DATABASE,
+                                   "text": '<data-source url="{{collection://11112222-3333-4444-5555-666677778888}}">'},
+                                  ensure_ascii=False)
             raise ValueError("Could not find page or database")
 
         @server.tool(name="notion-create-pages")
         def create(parent: dict, pages: list[dict]) -> str:
             self.calls.append(("notion-create-pages", {"parent": parent, "pages": pages}))
-            return json.dumps({"pages": [{"id": "new-1", "url": "https://www.notion.so/new-1"}]})
+            return json.dumps({"pages": [{"id": "new-1", "url": "https://app.notion.com/p/new1"}]})
 
         self.server = server
 
@@ -907,43 +909,33 @@ def link_notion():
         session.close()
 
 
-def save_settings(stub, page="", database="", destination=ai_pb2.TODO_DESTINATION_UNSPECIFIED):
+def save_settings(stub, page="", destination=ai_pb2.TODO_DESTINATION_UNSPECIFIED):
     return stub.UpdatePostMeetingSettings(ai_pb2.UpdatePostMeetingSettingsRequest(
-        user_id=str(USER), notion_meetings_page_url=page, notion_todo_database_url=database,
-        todo_destination=destination))
+        user_id=str(USER), notion_meetings_page_url=page, todo_destination=destination))
 
 
-def test_notion_locations_are_checked_with_notion_and_saved(ai_stub, ready, notion_mcp):
+def test_the_notion_meetings_page_is_checked_with_notion_and_saved(ai_stub, ready, notion_mcp):
     link_notion()
 
-    saved = save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE)
+    saved = save_settings(ai_stub, MEETINGS_PAGE)
 
     assert (saved.notion_meetings_page.id, saved.notion_meetings_page.title) == (
         "1f2e3d4c-5b6a-4788-9900-aabbccddeeff", "Meeting notes")
-    assert (saved.notion_todo_database.id, saved.notion_todo_database.title) == (TODO_SOURCE, "團隊待辦")
     again = ai_stub.GetPostMeetingSettings(ai_pb2.GetPostMeetingSettingsRequest(user_id=str(USER)))
-    assert again.notion_todo_database.url == TODO_DATABASE
-    assert [name for name, _ in notion_mcp.calls] == ["notion-fetch", "notion-fetch"]
+    assert again.notion_meetings_page.url == MEETINGS_PAGE
+    assert [name for name, _ in notion_mcp.calls] == ["notion-fetch"]
 
 
-def test_a_location_notion_cannot_find_is_refused(ai_stub, ready, notion_mcp):
+def test_a_page_notion_cannot_find_is_refused_without_talk_of_sharing(ai_stub, ready, notion_mcp):
     link_notion()
 
     with pytest.raises(grpc.RpcError) as error:
         save_settings(ai_stub, page="https://www.notion.so/Nope-00000000000000000000000000000000")
 
     assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
-    assert "找不到" in (error.value.details() or "")
-
-
-def test_a_page_given_as_the_todo_database_is_refused(ai_stub, ready, notion_mcp):
-    link_notion()
-
-    with pytest.raises(grpc.RpcError) as error:
-        save_settings(ai_stub, database=MEETINGS_PAGE)
-
-    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
-    assert "資料庫" in (error.value.details() or "")
+    details = error.value.details() or ""
+    assert "找不到" in details
+    assert "分享" not in details  # Notion's MCP works with the user's own access: there is nothing to share
 
 
 def test_a_database_given_as_the_meetings_page_is_refused(ai_stub, ready, notion_mcp):
@@ -956,31 +948,31 @@ def test_a_database_given_as_the_meetings_page_is_refused(ai_stub, ready, notion
     assert "頁面" in (error.value.details() or "")
 
 
-def test_unchanged_locations_are_not_checked_again(ai_stub, ready, notion_mcp):
+def test_an_unchanged_meetings_page_is_not_checked_again(ai_stub, ready, notion_mcp):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE)
+    save_settings(ai_stub, MEETINGS_PAGE)
     notion_mcp.calls.clear()
 
-    again = save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE)
+    again = save_settings(ai_stub, MEETINGS_PAGE)
 
     assert notion_mcp.calls == []
-    assert again.notion_todo_database.id == TODO_SOURCE
+    assert again.notion_meetings_page.title == "Meeting notes"
 
 
-def test_locations_need_a_linked_notion(ai_stub, ready, notion_mcp):
+def test_the_meetings_page_needs_a_linked_notion(ai_stub, ready, notion_mcp):
     with pytest.raises(grpc.RpcError) as error:
         save_settings(ai_stub, MEETINGS_PAGE)
 
     assert error.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
-def test_locations_can_be_cleared(ai_stub, ready, notion_mcp):
+def test_the_meetings_page_can_be_cleared(ai_stub, ready, notion_mcp):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE)
+    save_settings(ai_stub, MEETINGS_PAGE)
 
     cleared = save_settings(ai_stub)
 
-    assert not cleared.HasField("notion_meetings_page") and not cleared.HasField("notion_todo_database")
+    assert not cleared.HasField("notion_meetings_page")
 
 
 def test_a_user_with_only_notion_linked_can_run_it(ai_stub, db_session, providers, calendar, notion_mcp):
@@ -990,10 +982,10 @@ def test_a_user_with_only_notion_linked_can_run_it(ai_stub, db_session, provider
     state = get(ai_stub, uuid.uuid4())
 
     assert state.available
-    assert any("指定" in hint for hint in state.hints)  # no Notion locations yet
+    assert any("指定" in hint for hint in state.hints)  # no meetings page yet
 
 
-def test_without_notion_locations_the_agent_gets_no_notion_writes(queued, fake_llm, calendar, notion_mcp):
+def test_without_a_meetings_page_the_agent_gets_no_notion_writes(queued, fake_llm, calendar, notion_mcp):
     link_notion()
     fake_llm.reply("好。")
 
@@ -1001,59 +993,100 @@ def test_without_notion_locations_the_agent_gets_no_notion_writes(queued, fake_l
 
     offered = {tool["function"]["name"] for tool in fake_llm.bodies()[0]["tools"]}
     assert {"notion_search", "notion_fetch"} <= offered
-    assert not offered & {"notion_create_meeting_page", "notion_create_todo"}
+    assert "notion_create_meeting_page" not in offered
 
 
-def test_with_notion_locations_the_agent_can_propose_meeting_notes_and_todos(ai_stub, queued, fake_llm, calendar,
+MEETING_TODOS = [{"title": "聯繫搬家公司", "assignee": "金萊", "due": "2026-11-20", "timestamp": "12:34"},
+                 {"title": "整理停車位調查"}]
+
+
+def test_the_agent_proposes_one_notion_page_holding_the_notes_and_the_todos(ai_stub, queued, fake_llm, calendar,
                                                                            notion_mcp):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
-    todo = {"名稱": "聯繫搬家公司", "負責人": "金萊", "期限": "2026-11-20"}
-    fake_llm.reply_tool_calls([("notion_fetch", {"id": TODO_SOURCE})])
-    fake_llm.reply_tool_calls([
-        ("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "## 決議\n- 下週三再開會"}),
-        ("notion_create_todo", {"title_property": "名稱", "properties": todo, "content": "依據：12:34 金萊說會聯繫搬家公司"}),
-    ])
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_meeting_page", {
+        "title": "搬家會議紀錄", "content": "## 決議\n- 下週三再開會", "todos": MEETING_TODOS})])
     fake_llm.reply("好。")
 
     work(queued)
 
+    offered = {tool["function"]["name"]: tool["function"] for tool in fake_llm.bodies()[0]["tools"]}
+    assert "todos" in offered["notion_create_meeting_page"]["parameters"]["properties"]
+    assert "notion_create_todo" not in offered
+    assert not {"tasks_list_tasks", "tasks_create_task"} & offered.keys()  # todos go into the Notion page
     system = fake_llm.bodies()[0]["messages"][0]["content"]
-    assert "Meeting notes" in system and "團隊待辦" in system
-    [schema] = tool_results(fake_llm.bodies()[1])
-    assert "負責人" in schema  # the agent read the database's fields
-    page, item = latest(ai_stub, queued).proposals
-    assert (page.service, page.kind, json.loads(page.arguments_json)) == (
-        "notion", "notion_page", {"title": "搬家會議紀錄", "content": "## 決議\n- 下週三再開會"})
-    assert (item.kind, json.loads(item.arguments_json)) == (
-        "notion_database_item", {"title_property": "名稱", "properties": todo, "content": "依據：12:34 金萊說會聯繫搬家公司"})
+    assert "Meeting notes" in system
+    [page] = latest(ai_stub, queued).proposals
+    assert (page.service, page.kind, json.loads(page.arguments_json)) == ("notion", "notion_page", {
+        "title": "搬家會議紀錄", "content": "## 決議\n- 下週三再開會", "todos": MEETING_TODOS})
     assert notion_mcp.created() == []  # nothing written yet
 
 
-def test_confirmed_notion_proposals_are_written_where_the_user_said(ai_stub, queued, fake_llm, calendar, notion_mcp):
+def test_a_confirmed_notion_page_is_written_under_the_chosen_page_with_its_todos_as_checkboxes(ai_stub, queued, fake_llm,
+                                                                                              calendar, notion_mcp):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
-    fake_llm.reply_tool_calls([
-        ("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "內容"}),
-        ("notion_create_todo", {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司"}}),
-    ])
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_meeting_page", {
+        "title": "搬家會議紀錄", "content": "內容", "todos": MEETING_TODOS})])
     fake_llm.reply("好。")
     work(queued)
-    page, item = latest(ai_stub, queued).proposals
+    [page] = latest(ai_stub, queued).proposals
 
-    done_page, done_item = execute(ai_stub, queued, [
-        (page.id, {"title": "搬家會議紀錄（定稿）", "content": "內容"}),
-        (item.id, {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司", "負責人": "金萊"}, "content": "依據：12:34"}),
-    ]).proposals
+    [done] = execute(ai_stub, queued, [(page.id, {
+        "title": "搬家會議紀錄（定稿）", "content": "內容",
+        "todos": [{**MEETING_TODOS[0], "assignee": "王經理"}, MEETING_TODOS[1], {"title": "訂餐廳", "due": ""}]})]).proposals
 
-    page_call, item_call = notion_mcp.created()
-    assert page_call == {"parent": {"page_id": "1f2e3d4c-5b6a-4788-9900-aabbccddeeff"},
-                         "pages": [{"properties": {"title": "搬家會議紀錄（定稿）"}, "content": "內容"}]}
-    assert item_call == {"parent": {"data_source_id": TODO_SOURCE},
-                         "pages": [{"properties": {"名稱": "聯繫搬家公司", "負責人": "金萊"}, "content": "依據：12:34"}]}
-    assert (done_page.status, done_page.result_url) == (ai_pb2.PROPOSAL_STATUS_DONE, "https://www.notion.so/new-1")
-    assert done_item.status == ai_pb2.PROPOSAL_STATUS_DONE
+    [call] = notion_mcp.created()
+    assert call["parent"] == {"type": "page_id", "page_id": "1f2e3d4c-5b6a-4788-9900-aabbccddeeff"}
+    assert call["pages"] == [{"properties": {"title": "搬家會議紀錄（定稿）"}, "content": (
+        "內容\n\n## 待辦\n"
+        "- [ ] 聯繫搬家公司（負責人：王經理；期限：2026-11-20；依據：錄音 12:34）\n"
+        "- [ ] 整理停車位調查\n"
+        "- [ ] 訂餐廳")}]
+    assert (done.status, done.result_url) == (ai_pb2.PROPOSAL_STATUS_DONE, "https://app.notion.com/p/new1")
 
+
+def test_with_todos_in_google_tasks_the_notion_page_lists_them_without_checkboxes(ai_stub, queued, fake_llm, calendar,
+                                                                                 notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_GOOGLE_TASKS)
+    fake_llm.reply_tool_calls([("notion_create_meeting_page", {
+        "title": "搬家會議紀錄", "content": "內容", "todos": MEETING_TODOS[1:]})])
+    fake_llm.reply("好。")
+    work(queued)
+    [page] = latest(ai_stub, queued).proposals
+
+    execute(ai_stub, queued, [(page.id, json.loads(page.arguments_json))])
+
+    [call] = notion_mcp.created()
+    assert call["pages"][0]["content"] == "內容\n\n## 待辦\n- 整理停車位調查"
+
+
+def test_a_notion_page_without_todos_has_no_todo_section(ai_stub, queued, fake_llm, calendar, notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "內容"})])
+    fake_llm.reply("好。")
+    work(queued)
+    [page] = latest(ai_stub, queued).proposals
+
+    execute(ai_stub, queued, [(page.id, json.loads(page.arguments_json))])
+
+    assert notion_mcp.created()[0]["pages"][0]["content"] == "內容"
+
+
+def test_a_todo_in_the_notion_page_needs_a_title_and_a_real_due_date(ai_stub, queued, fake_llm, calendar, notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_meeting_page", {
+        "title": "搬家會議紀錄", "content": "內容", "todos": [{"title": "聯繫搬家公司", "due": "下週五"}]})])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    assert list(latest(ai_stub, queued).proposals) == []
+    [result] = tool_results(fake_llm.bodies()[1])
+    assert result.startswith("錯誤") and "due" in result
 
 
 # --- Google Tasks 與待辦去處 ---
@@ -1076,31 +1109,32 @@ def test_the_todo_destination_is_saved_without_asking_notion(ai_stub, ready, not
     assert kept.todo_destination == ai_pb2.TODO_DESTINATION_NOTION
 
 
-def test_with_notion_as_the_destination_the_agent_gets_no_google_tasks(ai_stub, queued, fake_llm, calendar, notion_mcp):
+def test_with_todos_in_notion_the_agent_gets_no_google_tasks(ai_stub, queued, fake_llm, calendar, notion_mcp):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
     fake_llm.reply("好。")
 
     work(queued)
 
     offered = {tool["function"]["name"] for tool in fake_llm.bodies()[0]["tools"]}
-    assert "notion_create_todo" in offered
+    assert "notion_create_meeting_page" in offered
     assert not offered & {"tasks_list_tasks", "tasks_create_task"}
+    system = fake_llm.bodies()[0]["messages"][0]["content"]
+    assert "Meeting notes" in system and "打勾" in system
 
 
-def test_with_google_tasks_as_the_destination_the_agent_gets_no_notion_todos(ai_stub, queued, fake_llm, calendar,
-                                                                             notion_mcp):
+def test_with_todos_in_google_tasks_the_agent_gets_google_tasks_and_the_notion_page(ai_stub, queued, fake_llm, calendar,
+                                                                                    notion_mcp):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_GOOGLE_TASKS)
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_GOOGLE_TASKS)
     fake_llm.reply("好。")
 
     work(queued)
 
     offered = {tool["function"]["name"] for tool in fake_llm.bodies()[0]["tools"]}
     assert {"tasks_list_tasks", "tasks_create_task", "notion_create_meeting_page"} <= offered
-    assert "notion_create_todo" not in offered
     system = fake_llm.bodies()[0]["messages"][0]["content"]
-    assert "Google Tasks" in system and "團隊待辦" not in system
+    assert "Google Tasks" in system
 
 
 def test_the_agent_reads_open_tasks_and_proposes_a_todo_without_creating_it(ai_stub, queued, fake_llm, calendar,
@@ -1188,43 +1222,41 @@ def test_google_tasks_as_the_destination_without_google_is_hinted(ai_stub, db_se
     assert any("Google Tasks" in hint and "連結 Google" in hint for hint in state.hints)
 
 
-def test_notion_as_the_destination_without_a_database_is_hinted(ai_stub, db_session, providers, calendar, notion_mcp):
+def test_todos_in_notion_without_a_meetings_page_is_hinted_once(ai_stub, db_session, providers, calendar, notion_mcp):
     choose_default(ai_stub)
     link_google()
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, destination=ai_pb2.TODO_DESTINATION_NOTION)
+    save_settings(ai_stub, destination=ai_pb2.TODO_DESTINATION_NOTION)
 
     [hint] = get(ai_stub, uuid.uuid4()).hints
 
-    assert "待辦資料庫" in hint and "會議紀錄頁面" not in hint
+    assert "會議紀錄" in hint and "不會提待辦" in hint
 
 
-def test_with_google_tasks_as_the_destination_a_missing_todo_database_is_not_hinted(ai_stub, db_session, providers,
-                                                                                    calendar, notion_mcp):
+def test_with_todos_in_google_tasks_a_missing_meetings_page_only_affects_notion(ai_stub, db_session, providers,
+                                                                                calendar, notion_mcp):
     choose_default(ai_stub)
     link_google()
     link_notion()
 
     [hint] = get(ai_stub, uuid.uuid4()).hints
 
-    assert "會議紀錄頁面" in hint and "待辦資料庫" not in hint
+    assert "會議紀錄" in hint and "不會提待辦" not in hint
 
 
 def test_a_todo_proposed_before_the_destination_changed_can_still_be_carried_out(ai_stub, queued, fake_llm, calendar,
-                                                                                 notion_mcp):
-    link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
-    fake_llm.reply_tool_calls([("notion_create_todo", {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司"}})])
+                                                                                 tasks, notion_mcp):
+    fake_llm.reply_tool_calls([("tasks_create_task", TODO)])
     fake_llm.reply("好。")
     work(queued)
     [proposal] = latest(ai_stub, queued).proposals
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_GOOGLE_TASKS)
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
 
-    [done] = execute(ai_stub, queued, [(proposal.id, json.loads(proposal.arguments_json))]).proposals
+    [done] = execute(ai_stub, queued, [(proposal.id, TODO)]).proposals
 
     assert done.status == ai_pb2.PROPOSAL_STATUS_DONE
-    assert len(notion_mcp.created()) == 1
-
+    assert len(tasks.created()) == 1
 
 
 # --- 歷次紀錄與避免重複 ---
@@ -1332,46 +1364,24 @@ def test_earlier_runs_are_listed_newest_first_with_what_was_carried_out(ai_stub,
     assert first.proposals[0].result_url == "https://www.google.com/calendar/event?eid=evt-1"
 
 
-def test_a_notion_todo_names_its_title_property(ai_stub, queued, fake_llm, calendar, notion_mcp):
+def test_a_notion_database_todo_from_before_says_it_is_no_longer_offered(ai_stub, queued, fake_llm, calendar,
+                                                                         notion_mcp, db_session):
     link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
-    fake_llm.reply_tool_calls([("notion_create_todo", {"title_property": "標題", "properties": {"名稱": "聯繫搬家公司"}})])
-    fake_llm.reply("好。")
-
-    work(queued)
-
-    assert list(latest(ai_stub, queued).proposals) == []
-    [result] = tool_results(fake_llm.bodies()[1])
-    assert result.startswith("錯誤") and "title_property" in result
-
-
-def test_a_notion_todo_needs_a_value_in_its_title_property(ai_stub, queued, fake_llm, calendar, notion_mcp):
-    link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
-    fake_llm.reply_tool_calls([("notion_create_todo", {"title_property": "名稱", "properties": {"名稱": "", "負責人": "金萊"}})])
-    fake_llm.reply("好。")
-
-    work(queued)
-
-    assert list(latest(ai_stub, queued).proposals) == []
-
-
-def test_a_notion_todo_proposed_before_title_property_existed_can_still_be_carried_out(ai_stub, queued, fake_llm,
-                                                                                       calendar, notion_mcp,
-                                                                                       db_session):
-    link_notion()
-    save_settings(ai_stub, MEETINGS_PAGE, TODO_DATABASE, ai_pb2.TODO_DESTINATION_NOTION)
-    fake_llm.reply_tool_calls([("notion_create_todo", {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司"}})])
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "內容"})])
     fake_llm.reply("好。")
     work(queued)
     [proposal] = latest(ai_stub, queued).proposals
-    legacy = {"properties": {"名稱": "聯繫搬家公司"}, "content": ""}
-    db_session.execute(update(ActionProposal).where(ActionProposal.id == uuid.UUID(proposal.id)).values(arguments=legacy))
+    legacy = {"title_property": "名稱", "properties": {"名稱": "聯繫搬家公司"}, "content": ""}
+    db_session.execute(update(ActionProposal).where(ActionProposal.id == uuid.UUID(proposal.id)).values(
+        tool="notion_create_todo", kind="notion_database_item", arguments=legacy))
     db_session.commit()
 
-    [done] = execute(ai_stub, queued, [(proposal.id, legacy)]).proposals
+    [failed] = execute(ai_stub, queued, [(proposal.id, legacy)]).proposals
 
-    assert done.status == ai_pb2.PROPOSAL_STATUS_DONE
+    assert failed.status == ai_pb2.PROPOSAL_STATUS_FAILED
+    assert "不再提供" in failed.failure_reason
+    assert notion_mcp.created() == []
 
 
 def test_what_was_created_before_fingerprints_were_recorded_is_still_recognised(ai_stub, queued, fake_llm, calendar,
