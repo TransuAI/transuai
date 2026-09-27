@@ -263,6 +263,8 @@ message PostMeeting {
   PostMeetingRun latest_run = 3;
   // 給使用者的提示（能跑，但有些事做不到），例如 Notion 已連結但還沒指定會議紀錄頁面，或待辦要建在 Google Tasks 但還沒連結 Google。
   repeated string hints = 4;
+  // 這個 Job 之前的紀錄（不含 latest_run），新的在前：提案、勾選執行了哪些（沒執行的仍是 PROPOSED）、結果與連結。
+  repeated PostMeetingRun earlier_runs = 5;
 }
 
 message GetPostMeetingSettingsRequest {
@@ -372,6 +374,9 @@ message ActionProposal {
   string result_url = 7;
   // 執行失敗時給使用者看的原因。
   string failure_reason = 8;
+  // 還沒執行，而且跟這個 Job 其他次會後處理已經建立過的事項相同（服務、種類、正規化後的標題與時間一樣）：前端標示「上次已建立」、
+  // 預設不勾選。
+  bool previously_created = 9;
 }
 
 message SubmitQuizAttemptRequest {
