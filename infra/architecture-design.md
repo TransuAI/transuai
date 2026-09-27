@@ -3,7 +3,7 @@
 ## 1. 系統概觀
 
 ### 1.1 產品定位
-使用者上傳音訊/影片（MVP 階段限制 30 分鐘），系統自動產出逐字稿，並提供 AI 摘要、問答、多格式輸出等功能。差異化重點：
+使用者上傳音訊/影片（限制 60 分鐘），系統自動產出逐字稿，並提供 AI 摘要、問答、多格式輸出等功能。差異化重點：
 
 - **時間戳記精準跳轉問答**：AI 回答附上時間戳，可直接跳轉播放對應片段
 - **一鍵生成多格式輸出**：依場景輸出會議紀錄（待辦事項+負責人+期限）、Podcast 節目介紹、YouTube 描述、社群貼文草稿
@@ -673,7 +673,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 
 ## 8. 待確認事項（開發前建議先想清楚）
 
-- [x] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制——**已解決**：不是二選一，兩者對應不同的東西，分開處理（見 `upload-service/docs/adr/0001-upload-size-limit-is-file-type-aware.md`）。時長限制（30 分鐘，前端強制）維持現狀，是獨立的 MVP 產品決策，當時也是 VIDEO 上傳唯一有意義的 Groq 相關把關（VIDEO 原始檔案大小含容器/畫面編碼開銷，不等於最終送進 Groq 的音軌大小）。新增兩層後端強制的大小限制：AUDIO 專用上限（20MB，當時對齊 Groq 免費層）跟不分類型的濫用防護上限（1GB）——過去這兩層完全沒有後端驗證，`file_size_bytes` 只檢查是否為正數，繞過前端就能上傳任意大小。`GetPresignedUploadUrl` 用呼叫端回報的大小做早期擋檢查，`CompleteUpload` 改問物件儲存實際存了多大（不信任呼叫端回報的數字），超過限制立即刪除物件。語音辨識已從 Groq 換成 Deepgram（沒有 25MB 上限），這兩個以 Groq 為前提的限制要不要放寬尚待另外評估（見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）。
+- [x] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制——**已解決**：不是二選一，兩者對應不同的東西，分開處理（見 `upload-service/docs/adr/0001-upload-size-limit-is-file-type-aware.md`）。時長限制（30 分鐘，前端強制）維持現狀，是獨立的 MVP 產品決策，當時也是 VIDEO 上傳唯一有意義的 Groq 相關把關（VIDEO 原始檔案大小含容器/畫面編碼開銷，不等於最終送進 Groq 的音軌大小）。新增兩層後端強制的大小限制：AUDIO 專用上限（20MB，當時對齊 Groq 免費層）跟不分類型的濫用防護上限（1GB）——過去這兩層完全沒有後端驗證，`file_size_bytes` 只檢查是否為正數，繞過前端就能上傳任意大小。`GetPresignedUploadUrl` 用呼叫端回報的大小做早期擋檢查，`CompleteUpload` 改問物件儲存實際存了多大（不信任呼叫端回報的數字），超過限制立即刪除物件。語音辨識已從 Groq 換成 Deepgram（沒有 25MB 上限），2026-09-28 兩個限制一起放寬、抓在大約 1 小時：時長 60 分鐘、AUDIO 上限 120MB，1GB 的濫用防護上限不變（見 upload-service ADR 0001 的修訂）。
 - [x] embedding model 選擇——**已解決**：`BAAI/bge-m3`（透過 HF Inference API），1024 維，
       query/document 對稱不用加 instruction 前綴；選型過程見 `ai-service/README.md` 已知限制
       （HF Inference Providers 當下有沒有 provider 實際托管該模型會隨時間變動，換模型前建議先查）
