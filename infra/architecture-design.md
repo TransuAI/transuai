@@ -37,8 +37,13 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`）。只剩多格式輸出還沒做。見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
+>
+> **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
+> 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆，讀取類工具真的執行、寫入類工具只存成
+> 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案，使用者確認後才執行（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
+> 只能用自有金鑰、支援工具呼叫的模型（`0006`）。
 
 ---
 
@@ -66,7 +71,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` 十三張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` 十五張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -180,6 +185,9 @@ POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCou
                                          輪詢列表直到不是 GENERATING）
 GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型、最佳成績
 GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
+GET    /jobs/{jobId}/post-meeting       會後處理：能不能跑（不能的話附原因）與最新一份紀錄（狀態、進度文字、行動提案）
+POST   /jobs/{jobId}/post-meeting       開始會後處理，body { "timezone" }，回 202（背景跑 agent，前端每 3 秒輪詢 GET）；
+                                         不能跑回 409 並附原因
 POST   /jobs/{jobId}/quizzes/{quizId}/attempts  送出一次作答，body { "answers": number[] }；後端計分並保存，回傳分數與每題結果
 GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料；每則附回答的 modelProvider / model）
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string, "model"?: { provider, model } }
@@ -206,7 +214,7 @@ GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省�
                                          Gateway 把月份換成時間範圍，向兩個服務分別查詢
 ```
 
-都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
+都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`GetPostMeeting`/`RequestPostMeeting`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
 細節見 [`gateway/README.md`](../gateway/README.md) 的 API 表跟
 [`ai-service/README.md`](../ai-service/README.md)。`AskQuestion` 是 server-streaming
 （原本是 unary），`POST /qa/{jobId}` 因此改回傳 SSE 而不是單次 JSON——見
@@ -331,7 +339,7 @@ CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
 
 ### 4.4 ai_db
 
-**現況（已建立，十三張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，十五張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -388,7 +396,7 @@ CREATE TABLE llm_usage (
     id UUID PRIMARY KEY,
     user_id UUID,                           -- Job 擁有者 / 提問者；升級前排入的舊訊息沒有
     job_id UUID NOT NULL,
-    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz
+    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting
     provider VARCHAR(32) NOT NULL,          -- platform 或廠商名稱
     model VARCHAR(200) NOT NULL,
     key_source VARCHAR(16) NOT NULL,        -- platform / own_key
@@ -495,6 +503,36 @@ CREATE TABLE oauth_clients (
     created_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (service, redirect_uri)
 );
+
+-- 會後處理：使用者對一個 Job 手動啟動的 agent，一次一筆；「執行中」超過 5 分鐘回報成 FAILED（背景工作或下一次要求遇到時寫成 FAILED）
+CREATE TABLE post_meeting_runs (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL,
+    user_id UUID NOT NULL,                  -- 觸發的使用者（用他的預設模型與已連結的帳號、用量記在他名下）
+    status VARCHAR(16) NOT NULL,            -- RUNNING / COMPLETED / LIMIT_REACHED（到了工具次數或時間上限）/ FAILED
+    progress TEXT NOT NULL,                 -- 執行中在做什麼（例如「正在查詢你的行事曆…」）
+    failure_reason TEXT,
+    timezone VARCHAR(64) NOT NULL,          -- 瀏覽器的時區，換算相對日期用
+    uploaded_at TIMESTAMPTZ NOT NULL,       -- Job 建立（上傳）的時間，換算相對日期用
+    model_provider VARCHAR(32),
+    model VARCHAR(200),
+    requested_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,                 -- 這一次（重試也算新的一次）開始跑的時間；卡住從這裡算
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX ix_post_meeting_runs_job_id ON post_meeting_runs (job_id);
+
+-- 行動提案：agent 的寫入類工具不執行，只存成提案，等使用者確認（ai-service ADR 0007）
+CREATE TABLE action_proposals (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES post_meeting_runs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    service VARCHAR(32) NOT NULL,           -- 例如 google_calendar
+    tool VARCHAR(64) NOT NULL,              -- 確認後要呼叫的工具，例如 calendar_create_event
+    kind VARCHAR(32) NOT NULL,              -- 例如 calendar_event，決定前端的表單
+    arguments JSONB NOT NULL                -- 要送出的參數
+);
+CREATE INDEX ix_action_proposals_run_id ON action_proposals (run_id);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
@@ -522,6 +560,7 @@ CREATE TABLE export_outputs (
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
 | `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
+| `post_meeting.requested` | AI Service | AI Service | `{ runId, jobId, userId }`（`userId` 是觸發的使用者）——使用者啟動會後處理（`POST /jobs/{jobId}/post-meeting`）；ai-service 排給自己的背景工作 |
 | `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
 
 **實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
