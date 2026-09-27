@@ -23,6 +23,9 @@ export interface AuthResponse {
   user: User
 }
 
+/** 轉錄語言: zh-TW 中文(預設)、en 英文、auto 請語音辨識在中文與英文之間自動偵測。 */
+export type TranscriptionLanguage = 'zh-TW' | 'en' | 'auto'
+
 export interface Job {
   jobId: string
   userId: string
@@ -35,6 +38,7 @@ export interface Job {
   errorReason: string | null
   createdAt: string
   updatedAt: string
+  transcriptionLanguage: TranscriptionLanguage
 }
 
 export interface JobListResponse {

@@ -8,8 +8,16 @@ import { detectFileType, formatBytes, formatDuration, readMediaDuration } from '
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
+import type { TranscriptionLanguage } from '@/types/api'
 
 const MAX_DURATION_SECONDS = 60 * 60
+
+// Speech recognition is told the language up front; guessing Chinese for an English meeting loses most of it.
+const LANGUAGES: [TranscriptionLanguage, string][] = [
+  ['zh-TW', '中文'],
+  ['en', '英文'],
+  ['auto', '自動偵測（中文或英文）'],
+]
 
 type Stage = 'idle' | 'reading' | 'presigning' | 'uploading' | 'finalizing'
 
@@ -21,6 +29,7 @@ export function UploadPage() {
   const [stage, setStage] = useState<Stage>('idle')
   const [progress, setProgress] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
+  const [language, setLanguage] = useState<TranscriptionLanguage>('zh-TW')
 
   const handleFile = async (candidate: File) => {
     const fileType = detectFileType(candidate)
@@ -84,6 +93,7 @@ export function UploadPage() {
         fileType,
         fileSizeBytes: file.size,
         durationSeconds: duration,
+        transcriptionLanguage: language,
       })
 
       toast.success('上傳完成,開始處理中')
@@ -143,6 +153,29 @@ export function UploadPage() {
               </>
             )}
           </div>
+
+          <fieldset className="flex flex-col gap-1" disabled={isBusy}>
+            <legend className="text-sm font-medium">錄音的語言</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {LANGUAGES.map(([value, label]) => (
+                <label key={value} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="radio"
+                    name="transcription-language"
+                    value={value}
+                    checked={language === value}
+                    onChange={() => setLanguage(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            {language === 'auto' && (
+              <span className="text-xs text-muted-foreground">
+                整段錄音只會判斷成一種語言;判斷成中文時錯字會比選「中文」多,確定是中文請選「中文」
+              </span>
+            )}
+          </fieldset>
 
           {stage === 'uploading' && <Progress value={progress} />}
 

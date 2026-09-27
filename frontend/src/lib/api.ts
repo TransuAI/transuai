@@ -17,6 +17,7 @@ import type {
   PostMeetingSettingsUpdate,
   MonthlyUsage,
   PresignResponse,
+  TranscriptionLanguage,
   ProviderKey,
   Quiz,
   QuizAttemptResult,
@@ -50,6 +51,7 @@ export const uploadApi = {
     fileType: 'AUDIO' | 'VIDEO'
     fileSizeBytes: number
     durationSeconds: number
+    transcriptionLanguage: TranscriptionLanguage
   }) => apiFetch<Job>('/uploads/complete', { method: 'POST', body: params }),
 }
 

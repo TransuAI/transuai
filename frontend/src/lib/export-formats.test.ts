@@ -243,7 +243,7 @@ describe('toMarkdownReport', () => {
 describe('buildExportContent', () => {
   it('only exports Q&A turns whose answer has finished', () => {
     const content = buildExportContent({
-      job: { jobId: 'job-1', userId: 'u', fileName: 'a.mp3', fileType: 'AUDIO', fileSizeBytes: 1, storagePath: 'p', durationSeconds: 1, status: 'COMPLETED', errorReason: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      job: { jobId: 'job-1', userId: 'u', fileName: 'a.mp3', fileType: 'AUDIO', fileSizeBytes: 1, storagePath: 'p', durationSeconds: 1, status: 'COMPLETED', errorReason: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', transcriptionLanguage: 'zh-TW' },
       transcript: null,
       summary: null,
       chapters: [],
