@@ -42,7 +42,7 @@ COMPLETED: JobStatus
 FAILED: JobStatus
 
 class Job(_message.Message):
-    __slots__ = ("job_id", "user_id", "file_name", "file_type", "file_size_bytes", "storage_path", "duration_seconds", "status", "error_reason", "created_at", "updated_at")
+    __slots__ = ("job_id", "user_id", "file_name", "file_type", "file_size_bytes", "storage_path", "duration_seconds", "status", "error_reason", "created_at", "updated_at", "transcription_language")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     FILE_NAME_FIELD_NUMBER: _ClassVar[int]
@@ -54,6 +54,7 @@ class Job(_message.Message):
     ERROR_REASON_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    TRANSCRIPTION_LANGUAGE_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     user_id: str
     file_name: str
@@ -65,7 +66,8 @@ class Job(_message.Message):
     error_reason: str
     created_at: _timestamp_pb2.Timestamp
     updated_at: _timestamp_pb2.Timestamp
-    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., file_name: _Optional[str] = ..., file_type: _Optional[_Union[FileType, str]] = ..., file_size_bytes: _Optional[int] = ..., storage_path: _Optional[str] = ..., duration_seconds: _Optional[int] = ..., status: _Optional[_Union[JobStatus, str]] = ..., error_reason: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    transcription_language: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., file_name: _Optional[str] = ..., file_type: _Optional[_Union[FileType, str]] = ..., file_size_bytes: _Optional[int] = ..., storage_path: _Optional[str] = ..., duration_seconds: _Optional[int] = ..., status: _Optional[_Union[JobStatus, str]] = ..., error_reason: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., transcription_language: _Optional[str] = ...) -> None: ...
 
 class GetPresignedUploadUrlRequest(_message.Message):
     __slots__ = ("file_name", "file_type", "file_size_bytes")
@@ -88,18 +90,20 @@ class GetPresignedUploadUrlResponse(_message.Message):
     def __init__(self, upload_url: _Optional[str] = ..., storage_path: _Optional[str] = ..., expires_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class CompleteUploadRequest(_message.Message):
-    __slots__ = ("storage_path", "file_name", "file_type", "file_size_bytes", "duration_seconds")
+    __slots__ = ("storage_path", "file_name", "file_type", "file_size_bytes", "duration_seconds", "transcription_language")
     STORAGE_PATH_FIELD_NUMBER: _ClassVar[int]
     FILE_NAME_FIELD_NUMBER: _ClassVar[int]
     FILE_TYPE_FIELD_NUMBER: _ClassVar[int]
     FILE_SIZE_BYTES_FIELD_NUMBER: _ClassVar[int]
     DURATION_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    TRANSCRIPTION_LANGUAGE_FIELD_NUMBER: _ClassVar[int]
     storage_path: str
     file_name: str
     file_type: FileType
     file_size_bytes: int
     duration_seconds: int
-    def __init__(self, storage_path: _Optional[str] = ..., file_name: _Optional[str] = ..., file_type: _Optional[_Union[FileType, str]] = ..., file_size_bytes: _Optional[int] = ..., duration_seconds: _Optional[int] = ...) -> None: ...
+    transcription_language: str
+    def __init__(self, storage_path: _Optional[str] = ..., file_name: _Optional[str] = ..., file_type: _Optional[_Union[FileType, str]] = ..., file_size_bytes: _Optional[int] = ..., duration_seconds: _Optional[int] = ..., transcription_language: _Optional[str] = ...) -> None: ...
 
 class GetJobRequest(_message.Message):
     __slots__ = ("job_id",)
