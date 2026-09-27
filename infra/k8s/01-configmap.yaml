@@ -43,14 +43,21 @@ data:
   # 外部 API 型號（key 本身是機敏資訊，放在 02-secret.yaml）
   # DEEPGRAM_MODEL / DEEPGRAM_LANGUAGE 是 transcription-service 的語音辨識（含講者分離，見
   # transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md）；
-  # AI_HF_CHAT_MODEL 是 ai-service 用的聊天模型（摘要/章節分段/RAG 問答都走 HF Inference Providers，見
-  # ai-service/docs/adr/0003-hf-inference-providers-for-generation.md）
+  # AI_HF_CHAT_MODEL 是 ai-service 平台模型的聊天模型（摘要/章節分段/RAG 問答；名稱沿用，跑在哪裡看下面的
+  # PLATFORM_LLM_BASE_URL，見 ai-service/docs/adr/0010）
   DEEPGRAM_MODEL: "nova-3"
   DEEPGRAM_LANGUAGE: "zh-TW"
-  AI_HF_CHAT_MODEL: "Qwen/Qwen3.5-9B"
-  # 會後處理的平台模型（ai-service/docs/adr/0008）：有設定時，預設模型是平台模型的使用者也能跑會後處理，費用算在
-  # HF_API_KEY 上；空字串就是不提供。本機開發設成 Qwen3.8-27B，指定支援工具呼叫、最便宜的 deepinfra。
-  AI_POST_MEETING_PLATFORM_MODEL: "Qwen/Qwen3.8-27B:deepinfra"
+  # 平台模型跑在哪裡：本機開發指向自己電腦上用 Docker 跑的 Ollama（infra/scripts/ollama.sh，用 GPU，不用付 AI API 的錢），
+  # pod 經由 Docker Desktop 的 host.docker.internal 連到它。模型名稱是 Ollama 的；Ollama 關 thinking 要帶 reasoning_effort。
+  # 切回 HF：PLATFORM_LLM_BASE_URL 設成 https://router.huggingface.co/v1、PLATFORM_LLM_API_KEY 設成空字串（改用
+  # HF_API_KEY）、PLATFORM_LLM_EXTRA_BODY 設成 {"chat_template_kwargs": {"enable_thinking": false}}，模型換回
+  # Qwen/Qwen3.5-9B 與 Qwen/Qwen3.8-27B:deepinfra（HF 免費帳號每月只有 US$0.10）。
+  PLATFORM_LLM_BASE_URL: "http://host.docker.internal:11434/v1"
+  PLATFORM_LLM_API_KEY: "ollama"
+  PLATFORM_LLM_EXTRA_BODY: '{"reasoning_effort": "none"}'
+  AI_HF_CHAT_MODEL: "qwen3.5:9b"
+  # 會後處理的平台模型（ai-service/docs/adr/0008）：有設定時，預設模型是平台模型的使用者也能跑會後處理；空字串就是不提供。
+  AI_POST_MEETING_PLATFORM_MODEL: "qwen3:14b"
   HF_EMBEDDING_MODEL: "BAAI/bge-m3"
 
   # 已連結的帳號（Google / Notion OAuth，gateway）：對方回呼 {OAUTH_CALLBACK_BASE_URL}/oauth/{service}/callback，這個網址要
