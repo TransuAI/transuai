@@ -199,6 +199,16 @@ app/
 scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```
 
+## 正式環境（`APP_ENV=production`）
+
+`APP_ENV` 預設是 `development`；設成 `production`時：
+
+- 啟動前檢查密鑰（`app/core/production.py`）：`DB_PASSWORD`、`RABBITMQ_PASSWORD`、`STORAGE_SECRET_KEY`、`REDIS_PASSWORD`、`DEEPGRAM_API_KEY` 沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
+  或少於 12 字元，就不啟動，錯誤訊息列出是哪幾個環境變數。
+- gRPC reflection 關掉（`app/main.py` 的 `build_server`）。
+
+開發環境都不檢查、照舊開著。見 `.scratch/pre-launch-hardening/issues/07`。
+
 ## 已知限制 / 待辦
 
 - `recognize()` 呼叫 Deepgram 遇到暫時性錯誤（429、5xx、逾時、連不上）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、認證失敗、額度用完的 402 等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
