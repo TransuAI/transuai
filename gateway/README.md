@@ -11,6 +11,7 @@
 | 對下游服務 | gRPC blocking stub，`ManagedChannel` 直連四個服務固定位址（見下方「環境變數」），不透過 declarative `spring.grpc.client.channels.*`，單純 `@Bean` 手動組——跟其他服務用 `grpc.insecure_channel(target)` / `ManagedChannelBuilder.forTarget` 是同一種簡單模式，見 `config/GrpcClientConfig.java` |
 | JWT 驗證 | [`jjwt`](https://github.com/jwtio/jjwt) 本地驗章（HS256），沒有拉整個 Spring Security——只需要一個 `OncePerRequestFilter` 解 `Authorization: Bearer`，不需要 form login / CSRF / 多重 filter chain |
 | API 文件 | [springdoc-openapi](https://springdoc.org/)，`GET /v3/api-docs`、`GET /swagger-ui.html` |
+| 限流 | Redis（`spring-boot-starter-data-redis`，Lettuce）上的固定視窗計數器，見下方「限流」 |
 
 > **架構文件原本寫的是 Spring Cloud Gateway**（declarative 反向代理），但下游服務全部只講 gRPC，Spring Cloud Gateway 的 route 是設計給 HTTP→HTTP 轉發，沒辦法直接轉 gRPC。這裡改成一個一般的 Spring Boot Web app：REST controller 直接呼叫 gRPC blocking stub、手動把回應組成 JSON DTO——本質上是 BFF（Backend For Frontend），跟平台其他服務「文件寫 REST、實際改 gRPC」的調整方向一致（見 upload-service / transcription-service / ai-service README 的類似說明）。
 
@@ -131,6 +132,23 @@ docker compose up -d
 
 `architecture-design.md` §3.4 還規劃了 `POST /export/{jobId}`、`GET /export/{jobId}/{format}`——ai-service 目前還沒有對應的 rpc（見 [`../ai-service/README.md`](../ai-service/README.md) 已知限制），沒有 rpc 可以轉發，這裡先不開，等 ai-service 補上再加。
 
+### 限流
+
+計數器存在 Redis（gateway 有多個副本時共用），固定視窗：每個鍵第一次計數時開始一段時間，時間到就重算（`ratelimit/RateLimiter`，
+一個 Lua script 做 `INCR` + 第一次時 `PEXPIRE`）。超過回 `429`，`Retry-After` 是還要等幾秒，body 是
+`{ "error": "RATE_LIMITED", "message": "嘗試太多次，請 N 分鐘後再試" }`。**Redis 連不上時放行並記 log**（fail-open）：Redis 故障不能把所有人
+擋在外面。
+
+| 限制 | 預設 | 說明 |
+|---|---|---|
+| 登入失敗 | 同一個 IP 對同一個 email，15 分鐘 5 次 | 猜密碼；到了之後連正確的密碼也擋到時間過去；登入成功就重算。email 跟 auth-service 一樣去空白、轉小寫，Redis 的鍵只放雜湊（看不到 email） |
+| 登入 | 同一個 IP，15 分鐘 20 次 | 不分 email，換 email 猜也擋得到 |
+| 註冊 | 同一個 IP，每小時 5 次 | |
+
+來源 IP 是 `request.getRemoteAddr()`。正式環境在反向代理後面時靠 `server.forward-headers-strategy=native`：Tomcat 只在直接連進來的是
+內部網路位址（代理）時採用 `X-Forwarded-For`，所以**代理一定要覆寫這個標頭**（不是附加），否則使用者可以自己填 IP 繞過限流。本機經過
+Vite proxy 或 `kubectl port-forward` 時所有請求都是同一個 IP。
+
 ### 錯誤格式
 
 下游 gRPC 呼叫失敗時（`GrpcExceptionAdvice`），統一轉成：
@@ -139,7 +157,7 @@ docker compose up -d
 { "error": "NOT_FOUND", "message": "job not found" }
 ```
 
-對應表：`INVALID_ARGUMENT`→400、`UNAUTHENTICATED`→401、`PERMISSION_DENIED`→403、`NOT_FOUND`→404、`ALREADY_EXISTS`/`FAILED_PRECONDITION`→409、`UNAVAILABLE`（下游服務沒開/連不上）→503，其餘→500。JWT 驗證失敗（缺 header、簽章錯、過期）直接在 filter 層回 401，不會走到這裡。
+對應表：`INVALID_ARGUMENT`→400、`UNAUTHENTICATED`→401、`PERMISSION_DENIED`→403、`NOT_FOUND`→404、`ALREADY_EXISTS`/`FAILED_PRECONDITION`→409、`UNAVAILABLE`（下游服務沒開/連不上）→503，其餘→500。JWT 驗證失敗（缺 header、簽章錯、過期）直接在 filter 層回 401，不會走到這裡。超過限流是 429（見上方「限流」）。
 
 ## 環境變數
 
@@ -152,6 +170,10 @@ docker compose up -d
 | `AI_SERVICE_GRPC_TARGET` | `localhost:8084` | ai-service |
 | `OAUTH_CALLBACK_BASE_URL` | `http://localhost:5173/api` | 已連結的帳號：Google / Notion 回呼的是 `{這個}/oauth/{service}/callback`（要登記在 Google 的 OAuth client）；本地開發時瀏覽器經過 Vite 的 `/api` proxy 到 Gateway |
 | `FRONTEND_URL` | `http://localhost:5173` | 連結完成（或失敗）後把使用者轉回 `{這個}/settings` |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / 空 | 限流用的 Redis（k8s 裡 `REDIS_PORT` 一定要設，否則會被 k8s 自動注入的 `tcp://…` 蓋掉） |
+| `REDIS_TIMEOUT` / `REDIS_CONNECT_TIMEOUT` | `500ms` | Redis 慢或連不上時多久放棄（放棄就放行） |
+| `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`（與各自的 `_WINDOW`） | `5`/`15m`、`20`/`15m`、`5`/`1h` | 限流的上限與時間長度，見「限流」 |
+| `FORWARD_HEADERS_STRATEGY` | `native` | 取得來源 IP 的方式，見「限流」 |
 
 ## 專案結構
 
@@ -163,7 +185,8 @@ src/main/java/com/transuai/gateway/
                        TranscriptionController、AiController、QuizController、UsageController、ModelController、
                        ProviderKeyController、ConnectionController、PostMeetingController
   web/dto/            REST 用的 JSON DTO（跟 proto message 分開，不直接把 protobuf 型別序列化給前端）
-  web/advice/         GrpcExceptionAdvice（StatusRuntimeException → HTTP status + JSON error body）
+  web/advice/         GrpcExceptionAdvice（StatusRuntimeException → HTTP status + JSON error body；RateLimitedException → 429）
+  ratelimit/          RateLimiter（Redis 固定視窗計數器，連不上放行）、RateLimitProperties、AuthRateLimits（登入與註冊）、RateLimitedException
   grpc/               GrpcMetadataSupport（組 x-user-id metadata）、JobOwnershipGuard（Transcription/AI 端點的 ownership 檢查）、
                        GrpcTimestamps、GrpcStrings（空字串 → null）、UploadMapper（proto ↔ DTO）
 ```
@@ -172,7 +195,8 @@ src/main/java/com/transuai/gateway/
 
 - **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 現在會在轉發前先呼叫 `upload-service` 的 `GetJob` 確認 ownership（`JobOwnershipGuard`，別人的 job 回 404），每個請求因此多一趟內部 gRPC 往返——量大的話可以考慮快取，MVP 階段先不做
 - 多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
-- 沒有限流（架構文件 §2 有提到 Gateway 要做「限流」），MVP 階段先不做
+- 限流目前只有登入與註冊；花錢的功能與全站限流見 `.scratch/pre-launch-hardening` 的 02、03
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
-- 沒有測試，目前只靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）
+- 測試只涵蓋限流（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
+  要有 Docker）；其他端點仍靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）

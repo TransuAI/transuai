@@ -1,10 +1,12 @@
 package com.transuai.gateway.web.advice;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import com.transuai.gateway.ratelimit.RateLimitedException;
 import com.transuai.gateway.web.dto.ErrorResponse;
 
 import io.grpc.Status;
@@ -36,6 +38,13 @@ public class GrpcExceptionAdvice {
         }
         return ResponseEntity.status(httpStatus)
                 .body(new ErrorResponse(status.getCode().name(), status.getDescription()));
+    }
+
+    @ExceptionHandler(RateLimitedException.class)
+    public ResponseEntity<ErrorResponse> handleRateLimited(RateLimitedException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()))
+                .body(new ErrorResponse("RATE_LIMITED", e.getMessage()));
     }
 
     // 例如 fileType 傳了 FileType enum 沒有的字串（FileType.valueOf 直接丟這個），
