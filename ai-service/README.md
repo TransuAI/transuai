@@ -420,6 +420,16 @@ app/
 scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```
 
+## 正式環境（`APP_ENV=production`）
+
+`APP_ENV` 預設是 `development`；設成 `production`時：
+
+- 啟動前檢查密鑰（`app/core/production.py`）：`DB_PASSWORD`、`RABBITMQ_PASSWORD`、`KEY_ENCRYPTION_KEY` 沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
+  或少於 12 字元，就不啟動，錯誤訊息列出是哪幾個環境變數。
+- gRPC reflection 關掉（`app/main.py` 的 `build_server`）。
+
+開發環境都不檢查、照舊開著。見 `.scratch/pre-launch-hardening/issues/07`。
+
 ## 已知限制 / 待辦
 
 - 已連結的帳號：Google 的 `gmail.compose`（建立草稿）屬於 Google 的受限權限，應用程式通過 Google 的審查之前，只有 OAuth
