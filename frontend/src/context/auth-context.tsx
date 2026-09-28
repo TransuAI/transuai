@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { authApi } from '@/lib/api'
 import { ApiError, SESSION_EXPIRED_EVENT } from '@/lib/api-client'
-import { clearSession, loadSession, saveSession } from '@/lib/auth-storage'
+import { clearSession, getRefreshToken, loadSession, saveSession } from '@/lib/auth-storage'
 import type { User } from '@/types/api'
 
 interface AuthContextValue {
@@ -10,6 +10,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, displayName: string) => Promise<void>
   logout: () => void
+  /** Signs out every device (revokes all refresh tokens), then this one. */
+  logoutEverywhere: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -54,13 +56,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.user)
   }, [])
 
+  // Signing out here doesn't wait for the server: the refresh token is revoked there if it can be, and forgotten here
+  // regardless.
   const logout = useCallback(() => {
+    const refreshToken = getRefreshToken()
+    if (refreshToken) void authApi.logout(refreshToken).catch(() => {})
+    clearSession()
+    setUser(null)
+  }, [])
+
+  const logoutEverywhere = useCallback(async () => {
+    await authApi.logoutAll()
     clearSession()
     setUser(null)
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, register, logout, logoutEverywhere }}>
       {children}
     </AuthContext.Provider>
   )

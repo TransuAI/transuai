@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { AccountSection } from '@/pages/settings/account-section'
 import { ConnectedAccountsSection } from '@/pages/settings/connected-accounts-section'
 import { DefaultModelSection } from '@/pages/settings/default-model-section'
 import { MonthlyUsageSection } from '@/pages/settings/monthly-usage-section'
@@ -16,6 +17,7 @@ export function SettingsPage() {
       <ConnectedAccountsSection />
       <PostMeetingSettingsSection />
       <MonthlyUsageSection />
+      <AccountSection />
     </div>
   )
 }

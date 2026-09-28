@@ -18,6 +18,9 @@ vi.mock('@/lib/api', () => ({
 
 vi.mock('@/lib/navigation', () => ({ leaveTo: vi.fn() }))
 
+const logoutEverywhere = vi.fn()
+vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ logoutEverywhere }) }))
+
 afterEach(() => {
   vi.clearAllMocks()
 })
@@ -475,5 +478,18 @@ describe('SettingsPage post-meeting settings (會後處理)', () => {
     await user.click(within(section).getByRole('button', { name: '儲存' }))
 
     expect(await within(section).findByText('這是 Notion 資料庫，請改貼一個一般頁面的連結')).toBeInTheDocument()
+  })
+})
+
+describe('SettingsPage account (帳號)', () => {
+  it('logs out of every device', async () => {
+    logoutEverywhere.mockResolvedValue(undefined)
+    const clicker = userEvent.setup()
+    await renderSettings()
+    const section = screen.getByRole('region', { name: '帳號' })
+
+    await clicker.click(within(section).getByRole('button', { name: '登出所有裝置' }))
+
+    expect(logoutEverywhere).toHaveBeenCalled()
   })
 })

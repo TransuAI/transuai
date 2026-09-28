@@ -39,6 +39,12 @@ export const authApi = {
     apiFetch<AuthResponse>('/auth/login', { method: 'POST', body: params, auth: false }),
 
   me: () => apiFetch<User>('/auth/me'),
+
+  // Revokes this sign-in's refresh token on the server; needs no access token (it may have expired).
+  logout: (refreshToken: string) =>
+    apiFetchVoid('/auth/logout', { method: 'POST', body: { refreshToken }, auth: false }),
+
+  logoutAll: () => apiFetchVoid('/auth/logout-all', { method: 'POST' }),
 }
 
 export const uploadApi = {

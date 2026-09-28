@@ -12,7 +12,7 @@
 | UI | Tailwind CSS v4 + shadcn/ui（Nova preset：Radix + Geist 字型） |
 | 路由 | react-router-dom v7 |
 | 狀態 | 沒有拉 Redux/Zustand,登入狀態用一個簡單的 `AuthContext`（`src/context/auth-context.tsx`），Job 資料用各頁面自己的 `useState`/`useEffect`,規模還不需要全域 data-fetching 套件 |
-| API 呼叫 | 手刻的 `fetch` wrapper（`src/lib/api-client.ts`），處理 401 → 自動 refresh token → 重試一次；問答走 SSE（`requestSse`），不用原生 `EventSource`——它沒辦法附加 Authorization header，見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md) |
+| API 呼叫 | 手刻的 `fetch` wrapper（`src/lib/api-client.ts`），處理 401 → 自動 refresh token（伺服器每次換發都會輪替 refresh token）→ 重試一次；問答走 SSE（`requestSse`），不用原生 `EventSource`——它沒辦法附加 Authorization header，見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md) |
 | 即時更新 | 原生 `WebSocket`（`src/hooks/use-job-socket.ts`）直連 notification-service |
 
 ## 前置需求
@@ -61,7 +61,7 @@ src/
     job-status-badge.tsx
     protected-route.tsx
   context/
-    auth-context.tsx  登入狀態、token 儲存、自動載入 /auth/me
+    auth-context.tsx  登入狀態、token 儲存、自動載入 /auth/me;登出時通知伺服器作廢 refresh token(不等回應,連不上也照樣登出),登出所有裝置(`logoutEverywhere`)
   hooks/
     use-auto-follow.ts 自動跟隨的兩態狀態(跟隨中 / 已暫停)與 pause / resume
     use-job-socket.ts  WebSocket 訂閱單一 job 狀態更新,斷線自動重連
@@ -92,7 +92,7 @@ src/
     login-page.tsx / register-page.tsx
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete;檔案長度限制 60 分鐘(前端檢查),音訊 120MB、影片 1GB 以內(後端檢查);錄音的語言:中文(預設)/ 英文 / 自動偵測(中文或英文,選它時提示判斷成中文的錯字較多)
     jobs-page.tsx           Job 列表、分頁、刪除
-    settings-page.tsx       設定頁(側邊欄「設定」):預設模型、自有金鑰、已連結的帳號、會後處理(Notion 位置、待辦去處)、本月用量;存入或刪除金鑰後重新載入可選的模型
+    settings-page.tsx       設定頁(側邊欄「設定」):預設模型、自有金鑰、已連結的帳號、會後處理(Notion 位置、待辦去處)、本月用量、帳號(登出所有裝置);存入或刪除金鑰後重新載入可選的模型
     settings/
       default-model-section.tsx 預設模型:平台模型與有金鑰的廠商的模型(單選),有 OpenRouter 金鑰時可輸入模型 ID;換模型不會重做既有內容
       post-meeting-settings-section.tsx 會後處理的設定:Notion 會議紀錄位置(每場會議在這個頁面底下新增一頁,含會議紀錄和待辦清單;說明去哪裡複製連結,不用另外分享;改過的網址儲存時後端先向 Notion 確認是頁面,不行就顯示原因;顯示目前的頁面標題)、待辦放在 Notion 會議紀錄裡(打勾清單)或 Google Tasks(選 Notion 又沒填位置時提醒)
