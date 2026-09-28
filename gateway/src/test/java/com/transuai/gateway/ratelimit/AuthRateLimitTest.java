@@ -30,8 +30,8 @@ import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.auth.grpc.v1.LoginRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
-import com.transuai.auth.grpc.v1.User;
 import com.transuai.gateway.RedisContainerConfig;
+import com.transuai.gateway.TestTokens;
 
 import io.grpc.Status;
 
@@ -64,9 +64,9 @@ class AuthRateLimitTest {
             if (!PASSWORD.equals(request.getPassword())) {
                 throw Status.UNAUTHENTICATED.withDescription("invalid email or password").asRuntimeException();
             }
-            return signedIn(request.getEmail());
+            return TestTokens.signedIn(request.getEmail());
         });
-        when(authServiceStub.register(any())).thenAnswer(invocation -> signedIn(
+        when(authServiceStub.register(any())).thenAnswer(invocation -> TestTokens.signedIn(
                 invocation.<RegisterRequest>getArgument(0).getEmail()));
     }
 
@@ -164,7 +164,7 @@ class AuthRateLimitTest {
         for (int i = 0; i < 3; i++) {
             login("1.1.1.1", "a@example.com", PASSWORD).andExpect(status().isServiceUnavailable());
         }
-        doReturn(signedIn("a@example.com")).when(authServiceStub).login(any());
+        doReturn(TestTokens.signedIn("a@example.com")).when(authServiceStub).login(any());
 
         login("1.1.1.1", "a@example.com", PASSWORD).andExpect(status().isOk());
     }
@@ -208,9 +208,4 @@ class AuthRateLimitTest {
                 .content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, password)));
     }
 
-    static AuthResponse signedIn(String email) {
-        return AuthResponse.newBuilder().setAccessToken("access").setRefreshToken("refresh")
-                .setUser(User.newBuilder().setId("00000000-0000-0000-0000-000000000001").setEmail(email.trim()))
-                .build();
-    }
 }

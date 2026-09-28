@@ -4,13 +4,13 @@ import java.util.List;
 import java.util.function.LongFunction;
 import java.util.function.Supplier;
 
-import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
+import com.transuai.gateway.redis.RedisFallback;
+
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * 固定視窗的計數器，存在 Redis（gateway 有多個副本時共用）：每個鍵第一次計數時開始一個視窗，視窗結束就重算。
@@ -19,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @RequiredArgsConstructor
-@Slf4j
 public class RateLimiter {
 
     /** 計一次；鍵沒有過期時間（第一次，或不知為何遺失了）就設定視窗。回傳 {計數, 視窗剩幾毫秒}。 */
@@ -74,11 +73,6 @@ public class RateLimiter {
     }
 
     private static <T> T failOpen(String key, T whenUnavailable, Supplier<T> work) {
-        try {
-            return work.get();
-        } catch (DataAccessException e) {
-            log.warn("rate limit {} skipped, Redis unavailable: {}", key, e.getMessage());
-            return whenUnavailable;
-        }
+        return RedisFallback.orElse("rate limit " + key, whenUnavailable, work);
     }
 }

@@ -82,7 +82,7 @@ class ApiRateLimitTest {
         when(uploadServiceStub.withInterceptors(any())).thenReturn(uploadServiceStub);
         when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.getDefaultInstance());
         when(aiServiceStub.listQaHistory(any())).thenReturn(ListQaHistoryResponse.getDefaultInstance());
-        when(authServiceStub.refresh(any())).thenReturn(AuthRateLimitTest.signedIn("a@example.com"));
+        when(authServiceStub.refresh(any())).thenReturn(TestTokens.signedIn("a@example.com"));
     }
 
     @Test

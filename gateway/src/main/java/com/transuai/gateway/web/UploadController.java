@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.transuai.gateway.cache.JobOwnerCache;
 import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
@@ -45,8 +46,8 @@ import lombok.RequiredArgsConstructor;
 public class UploadController {
 
         private final UploadServiceGrpc.UploadServiceBlockingStub uploadServiceStub;
-
         private final UsageLimitGuard usageLimitGuard;
+        private final JobOwnerCache jobOwnerCache;
 
         @CostlyFeature("upload-url")
         @PostMapping("/uploads/presign")
@@ -113,5 +114,7 @@ public class UploadController {
         public void deleteJob(@CurrentUserId UUID userId, @PathVariable String jobId) {
                 GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .deleteJob(DeleteJobRequest.newBuilder().setJobId(jobId).build());
+                // 刪掉之後忘掉擁有者（cache-aside 的寫入端），之後的請求重新問 upload-service、得到 404。
+                jobOwnerCache.forget(jobId);
         }
 }

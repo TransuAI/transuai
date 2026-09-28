@@ -182,6 +182,21 @@ docker compose up -d
 `{ "error": "USAGE_LIMIT_REACHED", "message": "這個月的轉錄已經到用量上限（600 分鐘），下個月 1 日恢復" }`，`Retry-After` 是到下個月
 1 日的秒數。已經在跑的不受影響（剛上傳、還在轉錄的照樣轉錄完；上傳時自動產生的摘要與章節照樣產生），所以可能超過一點：排隊中、還沒轉錄完的檔案還沒算進用量（連續上傳靠限流擋），沒回報用量的呼叫也不算。查不到用量（ai-service 或 transcription-service 連不上）時放行並記 log，跟限流一樣。問答時的 embedding 與編輯後的重算不算在上限裡（embedding 不記用量）。
 
+### 快取
+
+cache-aside，存在 Redis（`cache/`）：讀的時候先查 Redis，沒有才問下游並寫回；會變的時候由寫入端刪掉。只快取「讀很多、很少變、變了知道
+何時」的資料：
+
+| 快取 | 鍵 → 值 | 寫回 | 刪掉 | 有效時間 |
+|---|---|---|---|---|
+| Job 的擁有者（`JobOwnerCache`） | `job-owner:{jobId}` → 使用者 id | `JobOwnershipGuard` 向 upload-service 確認過（`GetJob` 成功）之後 | `DELETE /jobs/{jobId}` 成功之後 | 1 小時（`CACHE_JOB_OWNER_TTL`，只是保險：擁有者不會變） |
+
+每個 Job 的 API（逐字稿、摘要、章節、問答、測驗、會後處理、用量……）都要先確認 Job 是這位使用者的，前端每 3～4 秒輪詢一次；記住之後不用
+每次都呼叫 upload-service。記住的擁有者不是這位使用者就直接回 404（跟 upload-service 一樣，不透露 Job 存在）；找不到的 Job 不記（不做
+negative cache）。只記擁有者、不記會變的 Job 狀態——`GET /jobs/{jobId}` 與需要 Job 內容的呼叫（`JobOwnershipGuard.fetch`，例如會後處理
+要上傳時間）照樣問 upload-service。鍵用正規化的 UUID（大小寫不同是同一個鍵），不是 UUID 的不記。Redis 連不上時當作沒記住（跟限流
+一樣，`redis/RedisFallback`）。
+
 ### 錯誤格式
 
 下游 gRPC 呼叫失敗時（`GrpcExceptionAdvice`），統一轉成：
@@ -206,6 +221,7 @@ docker compose up -d
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / 空 | 限流用的 Redis（k8s 裡 `REDIS_PORT` 一定要設，否則會被 k8s 自動注入的 `tcp://…` 蓋掉） |
 | `REDIS_TIMEOUT` / `REDIS_CONNECT_TIMEOUT` | `500ms` | Redis 慢或連不上時多久放棄（放棄就放行） |
 | `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`、`RATE_LIMIT_PER_USER`、`RATE_LIMIT_PER_ADDRESS`、`RATE_LIMIT_UPLOAD_URL`、`RATE_LIMIT_UPLOAD`、`RATE_LIMIT_QUESTION`、`RATE_LIMIT_QUIZ`、`RATE_LIMIT_REGENERATE`、`RATE_LIMIT_POST_MEETING`、`RATE_LIMIT_PROVIDER_KEY`、`RATE_LIMIT_TRANSCRIPT_EDIT`、`RATE_LIMIT_LINKED_SERVICE`（與各自的 `_WINDOW`） | 見「限流」的表 | 限流的上限與時間長度 |
+| `CACHE_JOB_OWNER_TTL` | `1h` | Job 擁有者快取的有效時間，見「快取」 |
 | `USAGE_LIMIT_TRANSCRIPTION_MINUTES` / `USAGE_LIMIT_PLATFORM_TOKENS` | `600` / `2000000` | 每月用量上限，見「每月用量上限」 |
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
 
@@ -220,6 +236,8 @@ src/main/java/com/transuai/gateway/
                        ProviderKeyController、ConnectionController、PostMeetingController
   web/dto/            REST 用的 JSON DTO（跟 proto message 分開，不直接把 protobuf 型別序列化給前端）
   web/advice/         GrpcExceptionAdvice（StatusRuntimeException → HTTP status + JSON error body；RateLimitedException → 429）
+  cache/              JobOwnerCache（Job 的擁有者，cache-aside）
+  redis/              RedisFallback（Redis 連不上時照常服務）
   usage/              MonthlyUsage（某個月的用量，向 ai-service 與 transcription-service 查）、UsageLimits、UsageLimitGuard、UsageLimitReachedException
   ratelimit/          RateLimiter（Redis 固定視窗計數器，連不上放行）、RateLimitProperties、AuthRateLimits（登入與註冊）、
                        ApiRateLimits（所有 API 與花錢的功能）、CostlyFeature（標在 controller 方法上）、RateLimitedException
@@ -229,10 +247,10 @@ src/main/java/com/transuai/gateway/
 
 ## 已知限制 / 待辦
 
-- **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 現在會在轉發前先呼叫 `upload-service` 的 `GetJob` 確認 ownership（`JobOwnershipGuard`，別人的 job 回 404），每個請求因此多一趟內部 gRPC 往返——量大的話可以考慮快取，MVP 階段先不做
+- **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 在轉發前先確認 ownership（`JobOwnershipGuard`，別人的 job 回 404）：擁有者記在 Redis（見「快取」），沒記住時才呼叫 `upload-service` 的 `GetJob`
 - 多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
 - 每月用量上限用的是已記錄的用量加上這次檔案的長度（前端量的，可能不準）：排隊中、還沒轉錄完的檔案還沒算進去，可能超過上限一點（見「每月用量上限」）
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
-- 測試只涵蓋限流與每月用量上限（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
+- 測試只涵蓋限流、每月用量上限與快取（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
   要有 Docker）；其他端點仍靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）
