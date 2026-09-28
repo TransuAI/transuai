@@ -1,16 +1,28 @@
+import atexit
 import json
 import os
 
 import httpx2
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from testcontainers.community.postgres import PostgresContainer
 
-# Tests that touch the database use their own database on the dev Postgres from infra's docker
-# compose — never the real ai_db. Environment variables win over .env in pydantic-settings, and
-# app.core.config reads them at import time, so this has to be set before anything under app/ is
+# Tests that touch the database get a throwaway Postgres (with pgvector) that testcontainers starts
+# for this test run and removes afterwards — never the real ai_db, and nothing to start by hand
+# (Docker has to be running). Environment variables win over .env in pydantic-settings, and
+# app.core.config reads them at import time, so this has to happen before anything under app/ is
 # imported.
 TEST_DB_NAME = "ai_test_db"
-os.environ["DB_NAME"] = TEST_DB_NAME
+_postgres = PostgresContainer("pgvector/pgvector:pg16", username="test", password="test", dbname=TEST_DB_NAME)
+_postgres.start()
+atexit.register(_postgres.stop)
+os.environ |= {
+    "DB_HOST": _postgres.get_container_host_ip(),
+    "DB_PORT": str(_postgres.get_exposed_port(5432)),
+    "DB_USER": "test",
+    "DB_PASSWORD": "test",
+    "DB_NAME": TEST_DB_NAME,
+}
 # A fixed master key for encrypting own API keys (自有金鑰) in tests: 32 bytes, base64.
 os.environ["KEY_ENCRYPTION_KEY"] = "dGVzdC1tYXN0ZXIta2V5LWZvci1hZXMtZ2NtLTMyYiE="
 
@@ -28,14 +40,8 @@ def _reset_schema():
 
 @pytest.fixture(scope="session")
 def test_database():
-    """A clean test database, (re)created per test session, with the schema set up the same way
-    the service does it at startup (init_db)."""
-    admin = create_engine(settings.database_url.rsplit("/", 1)[0] + "/postgres", isolation_level="AUTOCOMMIT")
-    with admin.connect() as conn:
-        if not conn.scalar(text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": TEST_DB_NAME}):
-            conn.execute(text(f'CREATE DATABASE "{TEST_DB_NAME}"'))
-    admin.dispose()
-
+    """A clean test database with the schema set up the same way the service does it at startup
+    (init_db)."""
     _reset_schema()
     init_db()
     yield engine

@@ -327,10 +327,11 @@ uv run pytest
 
 用 pytest，mocking 只用標準庫的 `unittest.mock`（沒有額外裝 `pytest-mock`）。
 
-碰資料庫的測試——migration（`tests/test_db_migrations.py`）、逐字稿編輯後重算 embedding（`tests/test_reembed.py`，只 mock gRPC client 跟 HF embedder）、in-process 的 gRPC 服務（`tests/test_ai_grpc.py`）——是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
-`tests/conftest.py` 會在同一個 Postgres 上建（或清空重建）一個獨立的 `ai_test_db`，絕對不會碰到 `ai_db`。
+碰資料庫的測試——migration（`tests/test_db_migrations.py`）、逐字稿編輯後重算 embedding（`tests/test_reembed.py`，只 mock gRPC client 跟 HF embedder）、in-process 的 gRPC 服務（`tests/test_ai_grpc.py`）——是對**真的 Postgres** 測：`tests/conftest.py` 用 Testcontainers 在測試開始時起一個用完即丟的 Postgres
+（`pgvector/pgvector:pg16`，隨機 port），跑完自動刪掉，不用先開 `infra` 的 docker compose，也絕對不會碰到 `ai_db`。只要
+Docker 有在跑；每次多約幾秒啟動時間。
 
-其餘測試不需要跑起 `infra`（Postgres/RabbitMQ）或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（HF、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
+其餘測試不需要 RabbitMQ 或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（HF、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
 
 生成類呼叫（摘要、章節、問答）的廠商邊界用 `tests/conftest.py` 的 **假 AI 廠商**（`fake_llm` fixture）：在 HTTP 層用
 `httpx2.MockTransport` 假裝成 OpenAI 相容的廠商（`openai` SDK 3.x 底層是 `httpx2`），錄下送出的請求、回傳指定的內容／串流／

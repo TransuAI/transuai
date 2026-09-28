@@ -27,6 +27,7 @@ dependencies = [
 dev = [
     "grpcio-tools>=1.83.0",
     "pytest>=9.1.1",
+    "testcontainers[postgres]>=4.15.0",
 ]
 
 [tool.pytest.ini_options]
