@@ -187,8 +187,9 @@ def test_a_streamed_answer_without_reported_usage_is_recorded_as_unknown(fake_ll
 
 
 def test_an_answer_abandoned_part_way_is_recorded_as_failed(fake_llm, saved_usage):
-    # The browser went away: the gRPC stream stops being read before the provider finished.
-    fake_llm.stream(["一", "二", "三四五六七八"])
+    # The browser went away: the gRPC stream stops being read before the provider finished. The first text only goes out
+    # once the answer's opening is long enough to tell whether it's simplified Chinese (traditional_chinese.py).
+    fake_llm.stream(["這場會議主要在談工程團隊的關鍵指標，決定把月會拆成四個部門各自的檢討，", "並且改用新的指標。", "後面還有。"])
 
     with answering(uuid.uuid4()) as events:
         next(events)  # sources

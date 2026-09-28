@@ -6,24 +6,43 @@ import grpc
 from sqlalchemy.orm import Session
 
 from app.models import QaHistory
+from app.repositories.chapter_repository import find_by_job_id as find_chapters
 from app.repositories.embedding_repository import find_similar
 from app.repositories.qa_repository import find_by_job_id
+from app.repositories.summary_repository import find_by_job_id as find_summary
 from app.services.embedder import embed_query
 from app.services.default_models import resolve_chat_model, resolve_requested_chat_model
 from app.services.llm_client import ChatModel, chat, stream_chat
 from app.services.segment_times import time_key
+from app.services.traditional_chinese import TraditionalStream
 from app.services.speaker_context import speaker_names_by_segment_time, with_speaker_name
 from app.services.transcript_client import transcript_client
 from app.services.usage_meter import LlmFeature, UsageMeter
 
 logger = logging.getLogger(__name__)
 
+# 使用者上傳的不一定是會議：YouTube 影片、課程、訪談、節目、動畫都有可能。整段內容的摘要與章節也給模型，概括性的問題
+# （在講什麼、結論是什麼）才答得出來——只靠檢索到的幾個段落，這類問題一律答成「沒有足夠資訊」（見 docs/adr/0012）。
 _ANSWER_SYSTEM_PROMPT_TEMPLATE = (
-    "你是一個逐字稿問答助手。請只根據以下逐字稿片段回答問題，用繁體中文回答；"
-    "如果片段中找不到答案，就照實說沒有足夠資訊，不要編造。{speaker_instruction}\n\n{context}"
+    "你在幫使用者理解一段他上傳的內容（可能是會議、YouTube 影片、課程、訪談、節目或動畫等），回答他的問題。\n"
+    "回答的方式：\n"
+    "- 像一位剛看完、聽完這段內容的朋友在跟他說明：先用一兩句講結論，再視需要補兩到四個重點；整體控制在 200 字左右，"
+    "他要求詳細時才展開。\n"
+    "- 用台灣慣用的繁體中文，自然、平實：不要官腔，也不要太口語（不用「啦、喔、～」、網路流行語或中英夾雜）；不要客套或"
+    "推銷（不要說「我可以再幫你補充」「建議去官網看看」），也不要猜他是不是問錯。\n"
+    "- 只講內容裡有的：不要自己加頭銜、數字、評價或推論；內容裡有不同看法時，分別說明各方的看法，不要替他們下定論。\n"
+    "- 稱呼這段內容時跟著內容走（這場會議、這支影片、這一集、這堂課），看不出來就說「這段內容」；不要每次都用它開頭，"
+    "直接回答就好。\n"
+    "- 不要提到「逐字稿」「片段」「提供的資料」這類字眼——使用者不知道也不在乎你怎麼找到答案。\n"
+    "- 概括性的問題（在講什麼、結論是什麼、有哪些重點）用整段內容的摘要與章節回答；細節用相關的原話，提到具體內容時"
+    "附上那句話的時間（照抄前面的「分:秒」），方便他點過去聽。\n"
+    "- 引用外語時用中文轉述，必要時在括號裡留原文的關鍵詞。\n"
+    "- 內容裡真的沒有談到時，用一句話說沒有談到，再用一句話提供最接近的相關內容；不要編造。\n"
+    "- 內容是語音辨識的結果，可能有錯字，理解時自行校正，不要照抄錯字。{speaker_instruction}\n\n"
+    "{overview}## 相關的原話\n{context}"
 )
 # 只有多位講者、片段帶了名字時才加：名字是講者目前的顯示名稱（可能剛被使用者改過）。
-_SPEAKER_INSTRUCTION = "片段前面標了講者名稱（「名稱：內容」），回答時請用這些名字稱呼講者。"
+_SPEAKER_INSTRUCTION = "\n- 原話前面標了講者名稱（「名稱：內容」），提到誰說的就用這些名字稱呼講者。"
 
 # 對話記憶的範圍是整個 job（見 ai-service/docs/adr/ 對話範圍的 ADR），沒有獨立的
 # conversation/thread 概念，所以這裡不需要 conversation_id，只需要 job_id 就能定位。
@@ -54,6 +73,26 @@ _CONDENSE_MAX_TOKENS = 400
 
 class NoEmbeddingsError(Exception):
     """這個 job 還沒有任何 embedding（pipeline 還沒跑完，或逐字稿沒有分段）。"""
+
+
+def _clock(seconds: float) -> str:
+    """給人看的時間：12:34，一小時以上是 1:02:03。"""
+    total = int(seconds)
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+def _overview(session: Session, job_id: uuid.UUID) -> str:
+    """整段內容的摘要與章節（有的話）；概括性的問題靠它們回答。"""
+    summary = find_summary(session, job_id)
+    chapters = find_chapters(session, job_id)
+    parts = []
+    if summary is not None and summary.summary_text:
+        parts.append(f"## 整段內容的摘要\n{summary.summary_text}\n\n")
+    if chapters:
+        parts.append("## 章節\n" + "\n".join(f"[{_clock(float(c.start_time))}] {c.title}" for c in chapters) + "\n\n")
+    return "".join(parts)
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -118,7 +157,7 @@ def stream_answer(
 
     speaker_by_time = _current_speaker_names_by_time(job_id)
     context = "\n\n".join(
-        f"[{float(chunk.start_time):.1f}s] "
+        f"[{_clock(float(chunk.start_time))}] "
         + with_speaker_name(chunk.chunk_text, speaker_by_time.get(time_key(chunk.start_time, chunk.end_time)))
         for chunk in chunks
     )
@@ -129,7 +168,8 @@ def stream_answer(
     speaker_instruction = _SPEAKER_INSTRUCTION if speaker_by_time else ""
     messages = [{
         "role": "system",
-        "content": _ANSWER_SYSTEM_PROMPT_TEMPLATE.format(speaker_instruction=speaker_instruction, context=context),
+        "content": _ANSWER_SYSTEM_PROMPT_TEMPLATE.format(
+            speaker_instruction=speaker_instruction, overview=_overview(session, job_id), context=context),
     }]
     for turn in history:
         messages.append({"role": "user", "content": turn.question})
@@ -141,8 +181,13 @@ def stream_answer(
         model.provider, model.model, job_id, len(chunks), len(history),
     )
     meter = UsageMeter(user_id, job_id, LlmFeature.QA_ANSWER)
+    # 回答整段是簡體時轉成繁體（小模型偶爾會這樣）；已經是繁體的不動。先暫存開頭一小段才決定。
+    traditional = TraditionalStream()
     for delta in stream_chat(model, messages, max_tokens=_ANSWER_MAX_TOKENS, meter=meter):
-        yield ("delta", delta)
+        if text := traditional.feed(delta):
+            yield ("delta", text)
+    if text := traditional.flush():
+        yield ("delta", text)
 
 
 def _current_speaker_names_by_time(job_id: uuid.UUID) -> dict[tuple[float, float], str]:

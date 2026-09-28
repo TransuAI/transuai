@@ -19,7 +19,7 @@
 | 摘要 | 平台模型（預設 `Qwen/Qwen3.5-9B`，可用 `AI_HF_CHAT_MODEL` 換模型），把逐字稿全文丟給模型產生摘要；兩位以上講者時改成每行「名稱：文字」（見下方「講者」） |
 | 章節分段 | 同一個平台模型，把逐字稿片段（含時間戳，兩位以上講者時每行 `[開始時間] 名稱：文字`）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
 | Embedding | HF Inference Providers 的 `BAAI/bge-m3`（1024 維，query/document 對稱，不用加任何 instruction 前綴）：pipeline 內把逐字稿分段轉成向量存進 `embeddings` |
-| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個平台模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段，組成 context 連同最近 5 輪對話歷史一起餵給模型，用 `stream=True` 逐字串流生成回答；兩位以上講者時 context 每行帶講者**目前的**名稱（回答當下呼叫 `GetTranscript` 取得） |
+| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個平台模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段；給模型的內容是**整段內容的摘要與章節**（概括性的問題靠它們回答）加上這 5 段原話（時間寫成「分:秒」），連同最近 5 輪對話歷史，用 `stream=True` 逐字串流生成回答（[ADR 0012](docs/adr/0012-qa-answers-from-summary-chapters-and-passages.md)）。提示要求的口吻：像剛看完這段內容的朋友在說明，先講結論、簡潔平實，不提「逐字稿」「片段」，稱呼跟著內容走（會議、影片、課程…）。回答整段是簡體時轉成繁體（`traditional_chinese.py`，已經是繁體的不動）。兩位以上講者時原話每行帶講者**目前的**名稱（回答當下呼叫 `GetTranscript` 取得） |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
 | 向量儲存 | PostgreSQL + `pgvector` extension（`Vector(1024)` 欄位，cosine distance 查詢，沒有建 ivfflat 索引——見已知限制） |
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級 |
@@ -366,7 +366,8 @@ app/
     summarizer.py                       摘要（呼叫 llm_client）
     chapter_generator.py                 章節分段（呼叫 llm_client）
     embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
-    qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（多位講者時帶講者目前的名稱）+ 對話歷史 → streaming 生成回答
+    qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（摘要、章節、相關的原話，多位講者時帶講者目前的名稱）+ 對話歷史 → streaming 生成回答（整段是簡體時轉繁體）
+    traditional_chinese.py               模型輸出的繁體保險：整段是簡體才用 OpenCC s2tw 轉（已經是繁體的不動），串流時先看開頭一小段再決定
     providers.py                         自有金鑰支援的廠商（固定清單）：OpenAI 相容網址、驗證金鑰用的查詢 API
     key_encryption.py                    自有金鑰與已連結帳號權杖的 AES-256-GCM 加密；主金鑰來自 KEY_ENCRYPTION_KEY
     connections.py                       已連結的帳號：每個服務的 OAuth 設定、開始 / 完成連結、續期、中斷連結（撤銷）
