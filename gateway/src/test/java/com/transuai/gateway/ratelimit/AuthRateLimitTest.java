@@ -26,12 +26,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
-import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.auth.grpc.v1.LoginRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
 import com.transuai.gateway.RedisContainerConfig;
-import com.transuai.gateway.TestTokens;
+import com.transuai.gateway.TestAuth;
 
 import io.grpc.Status;
 
@@ -64,9 +63,9 @@ class AuthRateLimitTest {
             if (!PASSWORD.equals(request.getPassword())) {
                 throw Status.UNAUTHENTICATED.withDescription("invalid email or password").asRuntimeException();
             }
-            return TestTokens.signedIn(request.getEmail());
+            return TestAuth.signedIn(request.getEmail());
         });
-        when(authServiceStub.register(any())).thenAnswer(invocation -> TestTokens.signedIn(
+        when(authServiceStub.register(any())).thenAnswer(invocation -> TestAuth.signedIn(
                 invocation.<RegisterRequest>getArgument(0).getEmail()));
     }
 
@@ -164,7 +163,7 @@ class AuthRateLimitTest {
         for (int i = 0; i < 3; i++) {
             login("1.1.1.1", "a@example.com", PASSWORD).andExpect(status().isServiceUnavailable());
         }
-        doReturn(TestTokens.signedIn("a@example.com")).when(authServiceStub).login(any());
+        doReturn(TestAuth.signedIn("a@example.com")).when(authServiceStub).login(any());
 
         login("1.1.1.1", "a@example.com", PASSWORD).andExpect(status().isOk());
     }
@@ -207,5 +206,4 @@ class AuthRateLimitTest {
         }).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, password)));
     }
-
 }

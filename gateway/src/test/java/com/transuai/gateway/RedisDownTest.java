@@ -56,8 +56,8 @@ class RedisDownTest {
 
     @Test
     void signingInAndUpStillWork() throws Exception {
-        when(authServiceStub.login(any())).thenReturn(TestTokens.signedIn("a@example.com"));
-        when(authServiceStub.register(any())).thenReturn(TestTokens.signedIn("a@example.com"));
+        when(authServiceStub.login(any())).thenReturn(TestAuth.signedIn("a@example.com"));
+        when(authServiceStub.register(any())).thenReturn(TestAuth.signedIn("a@example.com"));
 
         for (int i = 0; i < 3; i++) {  // 超過上限的 1 次
             for (String path : new String[] {"/auth/login", "/auth/register"}) {
@@ -72,7 +72,7 @@ class RedisDownTest {
     void theRestOfTheApiStillWorks() throws Exception {
         when(uploadServiceStub.withInterceptors(any())).thenReturn(uploadServiceStub);
         when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.getDefaultInstance());
-        String token = TestTokens.accessToken(jwt, UUID.randomUUID());
+        String token = TestAuth.accessToken(jwt, UUID.randomUUID());
 
         for (int i = 0; i < 3; i++) {  // 超過每人 1 次的上限
             mvc.perform(get("/jobs?page=1&pageSize=10").header("Authorization", "Bearer " + token))
@@ -85,7 +85,7 @@ class RedisDownTest {
         when(uploadServiceStub.withInterceptors(any())).thenReturn(uploadServiceStub);
         when(uploadServiceStub.getJob(any())).thenReturn(Job.getDefaultInstance());
         when(aiServiceStub.listChapters(any())).thenReturn(ListChaptersResponse.getDefaultInstance());
-        String token = TestTokens.accessToken(jwt, UUID.randomUUID());
+        String token = TestAuth.accessToken(jwt, UUID.randomUUID());
 
         for (int i = 0; i < 2; i++) {
             mvc.perform(get("/chapters/11111111-1111-1111-1111-111111111111").header("Authorization", "Bearer " + token))

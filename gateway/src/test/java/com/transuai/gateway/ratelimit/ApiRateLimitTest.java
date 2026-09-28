@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.gateway.RedisContainerConfig;
-import com.transuai.gateway.TestTokens;
+import com.transuai.gateway.TestAuth;
 import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
@@ -82,7 +82,7 @@ class ApiRateLimitTest {
         when(uploadServiceStub.withInterceptors(any())).thenReturn(uploadServiceStub);
         when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.getDefaultInstance());
         when(aiServiceStub.listQaHistory(any())).thenReturn(ListQaHistoryResponse.getDefaultInstance());
-        when(authServiceStub.refresh(any())).thenReturn(TestTokens.signedIn("a@example.com"));
+        when(authServiceStub.refresh(any())).thenReturn(TestAuth.signedIn("a@example.com"));
     }
 
     @Test
@@ -196,7 +196,7 @@ class ApiRateLimitTest {
 
     private ResultActions call(UUID user, HttpMethod method, String path) throws Exception {
         return mvc.perform(MockMvcRequestBuilders.request(method, path)
-                .header("Authorization", "Bearer " + TestTokens.accessToken(jwt, user))
+                .header("Authorization", "Bearer " + TestAuth.accessToken(jwt, user))
                 .contentType(MediaType.APPLICATION_JSON).content("{}"));
     }
 

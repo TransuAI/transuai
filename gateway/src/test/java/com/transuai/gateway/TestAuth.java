@@ -13,9 +13,9 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 
 /** 測試用的身分：跟 auth-service 簽發的一樣的 access token，與 auth-service 登入成功的回應。 */
-public final class TestTokens {
+public final class TestAuth {
 
-    private TestTokens() {
+    private TestAuth() {
     }
 
     /** 同一把密鑰、type=access，10 分鐘有效。 */

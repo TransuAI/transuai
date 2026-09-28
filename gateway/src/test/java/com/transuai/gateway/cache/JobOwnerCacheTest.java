@@ -25,12 +25,14 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.transuai.gateway.RedisContainerConfig;
-import com.transuai.gateway.TestTokens;
+import com.transuai.gateway.TestAuth;
+import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.grpc.Status;
+
 import transuai.ai.v1.Ai.ListChaptersResponse;
 import transuai.ai.v1.AiServiceGrpc;
 
@@ -53,6 +55,12 @@ class JobOwnerCacheTest {
 
     @Autowired
     private JwtProperties jwt;
+
+    @Autowired
+    private JobOwnershipGuard guard;
+
+    @Autowired
+    private JobOwnerCache cache;
 
     @MockitoBean
     private UploadServiceGrpc.UploadServiceBlockingStub uploadServiceStub;
@@ -88,15 +96,13 @@ class JobOwnerCacheTest {
     }
 
     @Test
-    void aDeletedJobIsForgotten() throws Exception {
+    void aDeletedJobIsNotFoundStraightAway() throws Exception {
         chapters(alice).andExpect(status().isOk());
 
         as(alice, delete("/jobs/" + JOB)).andExpect(status().isNoContent());
-        doThrow(Status.NOT_FOUND.withDescription("job not found").asRuntimeException())
-                .when(uploadServiceStub).getJob(any());
 
         chapters(alice).andExpect(status().isNotFound());
-        verify(uploadServiceStub, times(2)).getJob(any());
+        verify(uploadServiceStub, times(1)).getJob(any());  // 刪除的標記直接回答，不用再問
     }
 
     @Test
@@ -111,11 +117,44 @@ class JobOwnerCacheTest {
     }
 
     @Test
-    void anOwnerIsRememberedForALimitedTime() throws Exception {
+    void anOwnerIsRememberedForTenMinutes() throws Exception {
         chapters(alice).andExpect(status().isOk());
 
         assertThat(redis.keys("job-owner:*")).singleElement()
-                .satisfies(key -> assertThat(redis.getExpire(key)).isPositive());
+                .satisfies(key -> assertThat(redis.getExpire(key)).isBetween(9 * 60L, 10 * 60L));
+    }
+
+    @Test
+    void fetchingAJobRemembersItsOwnerToo() throws Exception {
+        guard.fetch(alice, JOB);  // 例如開始會後處理，要 Job 的上傳時間
+
+        chapters(alice).andExpect(status().isOk());
+        verify(uploadServiceStub, times(1)).getJob(any());
+    }
+
+    @Test
+    void theSameJobWrittenInCapitalsIsTheSameEntry() throws Exception {
+        chapters(alice).andExpect(status().isOk());
+
+        as(alice, get("/chapters/" + JOB.toUpperCase())).andExpect(status().isOk());
+        verify(uploadServiceStub, times(1)).getJob(any());
+    }
+
+    @Test
+    void anOwnerLookedUpBeforeTheJobWasDeletedIsNotRememberedAfterIt() throws Exception {
+        guard.forget(JOB);  // 刪掉了
+        cache.remember(JOB, alice);  // 刪除之前就在路上的請求，這時才寫回
+
+        chapters(alice).andExpect(status().isNotFound());
+        verify(uploadServiceStub, times(0)).getJob(any());
+    }
+
+    @Test
+    void aGarbledEntryIsTreatedAsNotRemembered() throws Exception {
+        redis.opsForValue().set("job-owner:" + JOB, "not-a-uuid");
+
+        chapters(alice).andExpect(status().isOk());
+        verify(uploadServiceStub, times(1)).getJob(any());
     }
 
     private ResultActions chapters(UUID user) throws Exception {
@@ -123,6 +162,6 @@ class JobOwnerCacheTest {
     }
 
     private ResultActions as(UUID user, MockHttpServletRequestBuilder request) throws Exception {
-        return mvc.perform(request.header("Authorization", "Bearer " + TestTokens.accessToken(jwt, user)));
+        return mvc.perform(request.header("Authorization", "Bearer " + TestAuth.accessToken(jwt, user)));
     }
 }

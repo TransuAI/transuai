@@ -1,6 +1,5 @@
 package com.transuai.gateway.grpc;
 
-import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Component;
@@ -29,12 +28,12 @@ public class JobOwnershipGuard {
     private final JobOwnerCache ownerCache;
 
     public void check(UUID userId, String jobId) {
-        Optional<UUID> owner = ownerCache.owner(jobId);
-        if (owner.isEmpty()) {
-            fetch(userId, jobId);
-        } else if (!owner.get().equals(userId)) {
-            // 跟 upload-service 對別人的 job 回的一樣：不透露這個 job 存在。
-            throw Status.NOT_FOUND.withDescription("job not found").asRuntimeException();
+        switch (ownerCache.lookup(jobId).orElse(null)) {
+            case null -> fetch(userId, jobId);
+            case JobOwnerCache.Owner(UUID owner) when owner.equals(userId) -> {
+            }
+            // 別人的 Job，或已經刪掉：跟 upload-service 回的一樣，不透露這個 job 存在。
+            default -> throw Status.NOT_FOUND.withDescription("job not found").asRuntimeException();
         }
     }
 
@@ -44,5 +43,10 @@ public class JobOwnershipGuard {
                 .getJob(GetJobRequest.newBuilder().setJobId(jobId).build());
         ownerCache.remember(jobId, userId);
         return job;
+    }
+
+    /** Job 刪掉之後：忘掉記住的擁有者（cache-aside 的寫入端），之後的請求重新問 upload-service、得到 404。 */
+    public void forget(String jobId) {
+        ownerCache.forget(jobId);
     }
 }

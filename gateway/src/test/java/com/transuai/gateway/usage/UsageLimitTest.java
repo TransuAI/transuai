@@ -29,7 +29,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import com.transuai.gateway.RedisContainerConfig;
-import com.transuai.gateway.TestTokens;
+import com.transuai.gateway.TestAuth;
 import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
 import com.transuai.upload.grpc.v1.Job;
@@ -229,6 +229,6 @@ class UsageLimitTest {
     }
 
     private ResultActions call(MockHttpServletRequestBuilder request) throws Exception {
-        return mvc.perform(request.header("Authorization", "Bearer " + TestTokens.accessToken(jwt, user)));
+        return mvc.perform(request.header("Authorization", "Bearer " + TestAuth.accessToken(jwt, user)));
     }
 }

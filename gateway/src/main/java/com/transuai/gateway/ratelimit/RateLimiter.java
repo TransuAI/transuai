@@ -2,7 +2,6 @@ package com.transuai.gateway.ratelimit;
 
 import java.util.List;
 import java.util.function.LongFunction;
-import java.util.function.Supplier;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -50,7 +49,7 @@ public class RateLimiter {
 
     /** 計一次，並回答這次算不算超過（第 limit + 1 次起超過）。 */
     public Decision hit(String key, RateLimitProperties.Rule rule) {
-        return failOpen(key, Decision.ALLOWED, () -> {
+        return RedisFallback.orElse(what(key), Decision.ALLOWED, () -> {
             List<?> result = redis.execute(HIT, List.of(redisKey(key)), String.valueOf(rule.window().toMillis()));
             long count = ((Number) result.get(0)).longValue();
             long remainingMillis = ((Number) result.get(1)).longValue();
@@ -61,18 +60,18 @@ public class RateLimiter {
 
     /** 退回先前計的一次（例如那次嘗試其實沒有發生）。 */
     public void release(String key) {
-        failOpen(key, null, () -> redis.execute(RELEASE, List.of(redisKey(key))));
+        RedisFallback.run(what(key), () -> redis.execute(RELEASE, List.of(redisKey(key))));
     }
 
     public void reset(String key) {
-        failOpen(key, null, () -> redis.delete(redisKey(key)));
+        RedisFallback.run(what(key), () -> redis.delete(redisKey(key)));
     }
 
     private static String redisKey(String key) {
         return "rate-limit:" + key;
     }
 
-    private static <T> T failOpen(String key, T whenUnavailable, Supplier<T> work) {
-        return RedisFallback.orElse("rate limit " + key, whenUnavailable, work);
+    private static String what(String key) {
+        return "rate limit " + key;
     }
 }

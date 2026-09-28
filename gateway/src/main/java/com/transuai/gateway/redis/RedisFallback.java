@@ -24,4 +24,12 @@ public final class RedisFallback {
             return whenUnavailable;
         }
     }
+
+    /** 做 work（沒有回傳值的）；Redis 連不上就略過。 */
+    public static void run(String what, Runnable work) {
+        orElse(what, null, () -> {
+            work.run();
+            return null;
+        });
+    }
 }
