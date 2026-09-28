@@ -1,5 +1,6 @@
 package com.transuai.gateway.usage;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
@@ -10,9 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -31,13 +29,13 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import com.transuai.gateway.RedisContainerConfig;
+import com.transuai.gateway.TestTokens;
 import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
 import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import io.grpc.Status;
 import transuai.ai.v1.Ai.AskQuestionChunk;
 import transuai.ai.v1.Ai.LlmUsageSum;
 import transuai.ai.v1.Ai.ModelChoice;
@@ -128,7 +126,7 @@ class UsageLimitTest {
     @Test
     void tokensUsedWithOwnKeysDoNotCountTowardThePlatformLimit() throws Exception {
         when(aiServiceStub.sumUserLlmUsage(any())).thenReturn(SumUserLlmUsageResponse.newBuilder()
-                .addSums(LlmUsageSum.newBuilder().setKeySource("own").setInputTokens(5000).setOutputTokens(5000))
+                .addSums(LlmUsageSum.newBuilder().setKeySource("own_key").setInputTokens(5000).setOutputTokens(5000))
                 .build());
 
         requestQuiz().andExpect(status().isAccepted());
@@ -142,6 +140,52 @@ class UsageLimitTest {
                 .andExpect(status().is(not(429)));
         verify(aiServiceStub).askQuestion(any());
         ask("{\"question\":\"q\"}").andExpect(status().isTooManyRequests());  // 沒指定就是預設模型：平台模型
+    }
+
+    @Test
+    void aFileThatWouldNotFitInWhatIsLeftIsRefusedBeforeItIsUploaded() throws Exception {
+        usedThisMonth(50 * 60, 0, 0);
+
+        presign(15 * 60).andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value(containsString("只剩 10 分鐘")));
+        presign(5 * 60).andExpect(status().isOk());
+    }
+
+    @Test
+    void completingAnUploadIsCheckedToo() throws Exception {
+        usedThisMonth(60 * 60, 0, 0);
+
+        call(MockMvcRequestBuilders.post("/uploads/complete").contentType(MediaType.APPLICATION_JSON).content(
+                "{\"storagePath\":\"p\",\"fileName\":\"a.mp3\",\"fileType\":\"AUDIO\",\"fileSizeBytes\":1,"
+                        + "\"durationSeconds\":60}"))
+                .andExpect(status().isTooManyRequests());
+        verify(uploadServiceStub, never()).completeUpload(any());
+    }
+
+    @Test
+    void regeneratingAndPostMeetingOnThePlatformModelStopAtTheLimitToo() throws Exception {
+        usedThisMonth(0, 600, 400);
+
+        call(MockMvcRequestBuilders.post("/summary/" + JOB + "/regenerate")).andExpect(status().isTooManyRequests());
+        call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/post-meeting").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"timezone\":\"Asia/Taipei\"}")).andExpect(status().isTooManyRequests());
+        verify(aiServiceStub, never()).requestRegeneration(any());
+        verify(aiServiceStub, never()).requestPostMeeting(any());
+    }
+
+    @Test
+    void theLimitComesBackAtTheStartOfNextMonth() throws Exception {
+        usedThisMonth(60 * 60, 0, 0);
+
+        presign().andExpect(result -> assertThat(Long.parseLong(result.getResponse().getHeader("Retry-After")))
+                .isBetween(1L, 31L * 24 * 3600));
+    }
+
+    @Test
+    void uploadsGoOnWhenUsageCannotBeLookedUp() throws Exception {
+        when(transcriptionServiceStub.sumUserTranscriptionUsage(any())).thenThrow(Status.UNAVAILABLE.asRuntimeException());
+
+        presign().andExpect(status().isOk());
     }
 
     @Test
@@ -166,8 +210,13 @@ class UsageLimitTest {
     }
 
     private ResultActions presign() throws Exception {
-        return call(MockMvcRequestBuilders.post("/uploads/presign").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"fileName\":\"a.mp3\",\"fileType\":\"AUDIO\",\"fileSizeBytes\":1000}"));
+        return presign(60);
+    }
+
+    private ResultActions presign(int durationSeconds) throws Exception {
+        return call(MockMvcRequestBuilders.post("/uploads/presign").contentType(MediaType.APPLICATION_JSON).content(
+                "{\"fileName\":\"a.mp3\",\"fileType\":\"AUDIO\",\"fileSizeBytes\":1000,\"durationSeconds\":%d}"
+                        .formatted(durationSeconds)));
     }
 
     private ResultActions requestQuiz() throws Exception {
@@ -180,9 +229,6 @@ class UsageLimitTest {
     }
 
     private ResultActions call(MockHttpServletRequestBuilder request) throws Exception {
-        String token = Jwts.builder().subject(user.toString()).claim("type", "access")
-                .expiration(Date.from(Instant.now().plusSeconds(600)))
-                .signWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).compact();
-        return mvc.perform(request.header("Authorization", "Bearer " + token));
+        return mvc.perform(request.header("Authorization", "Bearer " + TestTokens.accessToken(jwt, user)));
     }
 }

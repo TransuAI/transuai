@@ -17,6 +17,7 @@ import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.usage.MonthlyUsage;
 import com.transuai.gateway.usage.UsageLimits;
+import com.transuai.gateway.usage.UsageMonth;
 import com.transuai.gateway.web.dto.JobUsageDto;
 import com.transuai.gateway.web.dto.LlmUsageSumDto;
 import com.transuai.gateway.web.dto.MonthlyUsageDto;
@@ -67,7 +68,7 @@ public class UsageController {
     @GetMapping("/me/usage")
     public MonthlyUsageDto getMonthlyUsage(@CurrentUserId UUID userId,
             @RequestParam(required = false) String month) {
-        YearMonth yearMonth = month == null ? MonthlyUsage.thisMonth() : parseMonth(month);
+        UsageMonth yearMonth = month == null ? UsageMonth.current() : new UsageMonth(parseMonth(month));
         List<LlmUsageSumDto> llm = monthlyUsage.llm(userId, yearMonth).stream().map(UsageController::toDto).toList();
         List<TranscriptionUsageSumDto> transcription = monthlyUsage.transcription(userId, yearMonth).stream()
                 .map(UsageController::toDto)

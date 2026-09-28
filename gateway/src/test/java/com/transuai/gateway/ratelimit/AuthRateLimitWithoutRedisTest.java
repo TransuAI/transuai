@@ -6,9 +6,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.Date;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -20,12 +17,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.gateway.TestTokens;
 import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
-
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 
 /** Redis 連不上時限流放行（fail-open）：Redis 故障不能把所有人擋在登入頁外面。 */
 @SpringBootTest(properties = {
@@ -67,9 +62,7 @@ class AuthRateLimitWithoutRedisTest {
     void theRestOfTheApiStillWorksWhenRedisIsDown() throws Exception {
         when(uploadServiceStub.withInterceptors(any())).thenReturn(uploadServiceStub);
         when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.getDefaultInstance());
-        String token = Jwts.builder().subject(UUID.randomUUID().toString()).claim("type", "access")
-                .expiration(Date.from(Instant.now().plusSeconds(600)))
-                .signWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).compact();
+        String token = TestTokens.accessToken(jwt, UUID.randomUUID());
 
         for (int i = 0; i < 3; i++) {  // 超過每人 1 次的上限
             mvc.perform(get("/jobs?page=1&pageSize=10").header("Authorization", "Bearer " + token))

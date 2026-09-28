@@ -68,7 +68,7 @@ docker compose up -d
 
 | Method | Path | 說明 |
 |---|---|---|
-| `POST` | `/uploads/presign` | 取得物件儲存的 presigned upload URL |
+| `POST` | `/uploads/presign` | 取得物件儲存的 presigned upload URL；body 帶 `durationSeconds`（檔案長度，檢查每月用量上限用，可省略） |
 | `POST` | `/uploads/complete` | 前端上傳完成後呼叫，建立 Job；body 的 `transcriptionLanguage` 是轉錄語言 `zh-TW`（中文，省略時的預設）/ `en` / `auto`（自動偵測中英文），回傳的 Job 也帶這個欄位（之前建立的 Job 是 `zh-TW`） |
 | `GET` | `/jobs/{jobId}` | 查詢單一 Job（`upload-service` 會做 ownership 檢查，別人的 job 回 404） |
 | `GET` | `/jobs/{jobId}/media-url?download=` | 取得該 Job 媒體檔案的 presigned 播放 URL（`upload-service` 做 ownership 檢查），見 `../docs/adr/0002-presigned-get-url-for-media-playback.md`；`download=true` 時改拿「以附件方式下載、存成原始檔名」的 URL（轉成 `GetPresignedDownloadUrl` 的 `as_attachment`） |
@@ -174,13 +174,13 @@ docker compose up -d
 
 | 上限 | 預設 | 到了之後 |
 |---|---|---|
-| 轉錄分鐘數 | 600 分鐘（`USAGE_LIMIT_TRANSCRIPTION_MINUTES`） | `POST /uploads/presign`、`POST /uploads/complete` 回 429（先在取得上傳網址時擋，不讓人傳完 1GB 才被拒） |
+| 轉錄分鐘數 | 600 分鐘（`USAGE_LIMIT_TRANSCRIPTION_MINUTES`） | `POST /uploads/presign`、`POST /uploads/complete` 回 429；兩者都帶檔案長度 `durationSeconds`（前端量的），整個檔案要放得進剩下的分鐘數——在取得上傳網址時就擋，不讓人傳完 1GB 才被拒 |
 | 平台模型的 token（輸入加輸出） | 2,000,000（`USAGE_LIMIT_PLATFORM_TOKENS`） | 要用平台模型的問答、產生測驗、重新產生摘要、開始會後處理回 429；自有金鑰的模型照常可以用（問答這次指定的模型優先，否則看預設模型） |
 
 用量是 `/me/usage` 同一份加總（`usage/MonthlyUsage`：LLM 向 ai-service 的 `SumUserLlmUsage`、轉錄向 transcription-service 的
 `SumUserTranscriptionUsage`，自有金鑰的 LLM 用量不算），在送出之前檢查（`usage/UsageLimitGuard`）。回 `429`，body 是
 `{ "error": "USAGE_LIMIT_REACHED", "message": "這個月的轉錄已經到用量上限（600 分鐘），下個月 1 日恢復" }`，`Retry-After` 是到下個月
-1 日的秒數。已經在跑的不受影響（剛上傳、還在轉錄的照樣轉錄完；上傳時自動產生的摘要與章節照樣產生），所以最後一次可能超過一點。
+1 日的秒數。已經在跑的不受影響（剛上傳、還在轉錄的照樣轉錄完；上傳時自動產生的摘要與章節照樣產生），所以可能超過一點：排隊中、還沒轉錄完的檔案還沒算進用量（連續上傳靠限流擋），沒回報用量的呼叫也不算。查不到用量（ai-service 或 transcription-service 連不上）時放行並記 log，跟限流一樣。問答時的 embedding 與編輯後的重算不算在上限裡（embedding 不記用量）。
 
 ### 錯誤格式
 
@@ -234,5 +234,5 @@ src/main/java/com/transuai/gateway/
 - 每月用量上限只看已記錄的用量：一次上傳的長度在轉錄完成前不知道，最後一次上傳可能讓這個月超過上限一點
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
-- 測試只涵蓋限流（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
+- 測試只涵蓋限流與每月用量上限（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
   要有 Docker）；其他端點仍靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）

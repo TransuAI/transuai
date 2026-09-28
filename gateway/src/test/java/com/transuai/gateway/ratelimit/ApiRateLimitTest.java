@@ -7,9 +7,6 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.Date;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -30,13 +27,12 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.gateway.RedisContainerConfig;
+import com.transuai.gateway.TestTokens;
 import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
-import io.jsonwebtoken.Jwts;
 import jakarta.servlet.ServletException;
-import io.jsonwebtoken.security.Keys;
 import transuai.ai.v1.Ai.ListQaHistoryResponse;
 import transuai.ai.v1.AiServiceGrpc;
 
@@ -200,13 +196,8 @@ class ApiRateLimitTest {
 
     private ResultActions call(UUID user, HttpMethod method, String path) throws Exception {
         return mvc.perform(MockMvcRequestBuilders.request(method, path)
-                .header("Authorization", "Bearer " + accessToken(user))
+                .header("Authorization", "Bearer " + TestTokens.accessToken(jwt, user))
                 .contentType(MediaType.APPLICATION_JSON).content("{}"));
     }
 
-    private String accessToken(UUID user) {
-        return Jwts.builder().subject(user.toString()).claim("type", "access")
-                .expiration(Date.from(Instant.now().plusSeconds(600)))
-                .signWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).compact();
-    }
 }

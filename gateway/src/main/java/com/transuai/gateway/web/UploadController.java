@@ -51,7 +51,7 @@ public class UploadController {
         @CostlyFeature("upload-url")
         @PostMapping("/uploads/presign")
         public PresignResponseDto presign(@CurrentUserId UUID userId, @RequestBody PresignRequestDto request) {
-                usageLimitGuard.requireTranscriptionLeft(userId);
+                usageLimitGuard.requireTranscriptionLeft(userId, request.durationSeconds());
                 GetPresignedUploadUrlResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                                                 .setFileName(request.fileName())
@@ -65,7 +65,7 @@ public class UploadController {
         @CostlyFeature("upload")
         @PostMapping("/uploads/complete")
         public JobDto completeUpload(@CurrentUserId UUID userId, @RequestBody CompleteUploadRequestDto request) {
-                usageLimitGuard.requireTranscriptionLeft(userId);
+                usageLimitGuard.requireTranscriptionLeft(userId, request.durationSeconds());
                 Job job = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .completeUpload(CompleteUploadRequest.newBuilder()
                                                 .setStoragePath(request.storagePath())
