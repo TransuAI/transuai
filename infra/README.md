@@ -55,7 +55,7 @@ compose 裡每個服務都是 `restart: unless-stopped`：`up` 過一次之後�
 docker compose stop
 ```
 
-> Redis 目前沒有任何服務真的在用（保留給未來的 cache/rate limit），開著純粹是佔位，不影響現有功能。
+> Redis 是 gateway 限流的計數器（見 [`../gateway/README.md`](../gateway/README.md)「限流」）；本機直接跑 gateway 時要開著它，沒開時限流放行、不影響其他功能。
 
 ### 重置環境（清掉所有資料重來）
 

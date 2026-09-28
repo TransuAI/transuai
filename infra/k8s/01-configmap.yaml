@@ -67,3 +67,8 @@ data:
   # 登記在 Google Cloud 的 OAuth client；完成後轉回 {FRONTEND_URL}/settings。前端目前在本機跑 Vite（/api proxy 到 gateway）。
   OAUTH_CALLBACK_BASE_URL: "http://localhost:5173/api"
   FRONTEND_URL: "http://localhost:5173"
+
+  # gateway 的限流計數器放在 Redis（見 gateway README「限流」）。REDIS_PORT 一定要寫：Service 叫 redis，k8s 會自動注入
+  # REDIS_PORT=tcp://<ip>:6379（跟 RABBITMQ_PORT 一樣），這裡的值蓋掉它。
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
