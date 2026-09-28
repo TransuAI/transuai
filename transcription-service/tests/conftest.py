@@ -159,6 +159,12 @@ def transcription_stub(test_database):
     server.stop(grace=None)
 
 
+@pytest.fixture
+def redis_client():
+    """A client on the test Redis (the transcript cache)."""
+    return _redis.get_client()
+
+
 @pytest.fixture(autouse=True)
 def empty_cache():
     """Every test starts with an empty transcript cache."""

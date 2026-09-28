@@ -2,21 +2,35 @@
 編輯時才變。
 
 每份快取帶著逐字稿的 revision（每次編輯 +1）。讀的時候沒有就讀資料庫、寫回（`remember`）；編輯成功之後把「最新的 revision」記下並
-丟掉內容（`edited`）。寫回只在自己讀到的 revision 不比記下的舊時才寫：編輯之前就開始、晚一步寫回的讀取，帶不回舊版。比較與寫入在
-同一個 Lua script 裡。有效時間是保險。Redis 連不上時照樣讀資料庫，只記 log。"""
+丟掉內容（`record_edit`）。寫回只在自己讀到的 revision 不比記下的舊時才寫：編輯之前就開始、晚一步寫回的讀取，帶不回舊版。比較與寫入在
+同一個 Lua script 裡。有效時間是保險。
+
+會寫逐字稿的地方都要呼叫 `record_edit`：三種編輯，與 pipeline 存檔（訊息重送時會再存一次）。之後要刪除逐字稿的（例如刪除帳號）也要。
+鍵帶著格式的版本（`v1`）：`Transcript` 的欄位變了就換版本，舊格式的快取不會被讀到。Redis 連不上時照樣讀資料庫，只記 log；不重試
+（redis-py 預設會重試 10 次，連不上時一次要好幾秒）。"""
 
 import logging
 import uuid
 
 import redis
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 from app.core.config import settings
+from app.proto_gen import transcription_pb2
 
 logger = logging.getLogger(__name__)
 
-_client = redis.Redis(
-    host=settings.redis_host, port=settings.redis_port, password=settings.redis_password or None,
-    socket_timeout=settings.redis_timeout_seconds, socket_connect_timeout=settings.redis_timeout_seconds)
+
+
+def _new_client(host: str, port: int) -> redis.Redis:
+    return redis.Redis(
+        host=host, port=port, password=settings.redis_password or None,
+        socket_timeout=settings.redis_timeout_seconds, socket_connect_timeout=settings.redis_timeout_seconds,
+        retry=Retry(NoBackoff(), 0))
+
+
+_client = _new_client(settings.redis_host, settings.redis_port)
 
 # 寫回：記下的 revision 比這份新就不寫。KEYS[1]；ARGV：revision、內容、有效毫秒。
 _REMEMBER = """
@@ -38,30 +52,32 @@ return 1
 
 
 def _key(job_id: uuid.UUID) -> str:
-    return f"transcript:{job_id}"
+    return f"transcript:v1:{job_id}"
 
 
 def _ttl_millis() -> int:
     return settings.transcript_cache_ttl_seconds * 1000
 
 
-def cached(job_id: uuid.UUID) -> bytes | None:
-    """快取的逐字稿（序列化的 Transcript）；沒有、剛編輯過、或 Redis 連不上時是 None。"""
+def cached(job_id: uuid.UUID) -> transcription_pb2.Transcript | None:
+    """快取的逐字稿；沒有、剛編輯過、或 Redis 連不上時是 None。"""
     try:
-        return _client.hget(_key(job_id), "data")  # type: ignore[return-value]
+        data = _client.hget(_key(job_id), "data")
     except redis.RedisError as exc:
         logger.warning("transcript cache for job %s skipped, Redis unavailable: %s", job_id, exc)
         return None
+    return transcription_pb2.Transcript.FromString(data) if isinstance(data, bytes) else None
 
 
-def remember(job_id: uuid.UUID, revision: int, data: bytes) -> None:
+def remember(job_id: uuid.UUID, transcript: transcription_pb2.Transcript) -> None:
+    """讀資料庫之後寫回（帶著它的 revision）。"""
     try:
-        _client.eval(_REMEMBER, 1, _key(job_id), revision, data, _ttl_millis())
+        _client.eval(_REMEMBER, 1, _key(job_id), transcript.revision, transcript.SerializeToString(), _ttl_millis())
     except redis.RedisError as exc:
         logger.warning("transcript cache for job %s not written, Redis unavailable: %s", job_id, exc)
 
 
-def edited(job_id: uuid.UUID, revision: int) -> None:
+def record_edit(job_id: uuid.UUID, revision: int) -> None:
     """編輯成功（已經寫進資料庫）之後呼叫。Redis 連不上時舊內容最多留到有效時間結束。"""
     try:
         _client.eval(_EDITED, 1, _key(job_id), revision, _ttl_millis())

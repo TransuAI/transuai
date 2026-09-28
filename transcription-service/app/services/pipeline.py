@@ -6,6 +6,7 @@ from typing import Callable
 
 from app.db import new_session
 from app.repositories.transcript_repository import save_transcript
+from app.services import transcript_cache
 from app.services.audio import extract_audio_track
 from app.services.job_status_client import job_status_client
 from app.services.retry import RetryableMessageError, retry_queue_for
@@ -76,9 +77,11 @@ def process_message(
 
         session = new_session()
         try:
-            save_transcript(session, uuid.UUID(job_id), result)
+            saved = save_transcript(session, uuid.UUID(job_id), result)
         finally:
             session.close()
+        # 訊息重送時會再存一次；之前那份可能已經被讀過、記在快取裡。
+        transcript_cache.record_edit(uuid.UUID(job_id), saved.revision)
 
         job_status_client.update_status(job_id, "TRANSCRIBED")
         publish_completed(job_id, str(owner) if owner else None)

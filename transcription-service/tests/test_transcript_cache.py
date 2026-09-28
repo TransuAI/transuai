@@ -1,16 +1,19 @@
 """cache-aside：逐字稿（見 .scratch/pre-launch-hardening/issues/06）。GetTranscript 被問答的每一題、出題、會後處理、重新產生摘要與前端
 讀取；讀的時候先查 Redis，沒有才讀資料庫並寫回；每一種編輯之後，下一次讀到的一定是新版。"""
 
+import time
 import uuid
 from unittest.mock import patch
 
-import redis
+import grpc
+import pytest
 
 from app.controllers import transcript_controller
 from app.core.config import settings
 from app.proto_gen import transcription_pb2
 from app.repositories.transcript_repository import save_transcript
-from app.services import transcript_cache
+from app.services import pipeline, transcript_cache
+from app.services.speech_recognition import Recognition
 from app.services.transcript_result import TranscriptResult, TranscriptSegment
 
 
@@ -76,41 +79,72 @@ def test_a_read_from_before_an_edit_that_writes_back_late_does_not_bring_the_old
     transcription_stub.UpdateSegmentText(transcription_pb2.UpdateSegmentTextRequest(
         job_id=str(job_id), segment_id=before.segments[0].id, text="新的開場"))
 
-    transcript_cache.remember(job_id, before.revision, before.SerializeToString())  # a read that started earlier
+    transcript_cache.remember(job_id, before)  # 編輯之前就開始的讀取，這時才寫回
 
     assert read(transcription_stub, job_id).segments[0].text == "新的開場"
 
 
-def test_a_transcript_is_cached_for_a_limited_time(transcription_stub, db_session):
+def test_a_transcript_is_cached_for_a_limited_time(transcription_stub, db_session, redis_client):
     job_id = saved_transcript(db_session)
     read(transcription_stub, job_id)
 
-    client = redis.Redis(host=settings.redis_host, port=settings.redis_port)
-    assert 0 < client.ttl(f"transcript:{job_id}") <= settings.transcript_cache_ttl_seconds
+    assert 0 < redis_client.ttl(transcript_cache._key(job_id)) <= settings.transcript_cache_ttl_seconds
 
 
-def test_a_transcript_that_does_not_exist_is_not_cached(transcription_stub, db_session):
+def test_a_transcript_that_does_not_exist_is_not_cached(transcription_stub, db_session, redis_client):
     job_id = uuid.uuid4()
 
-    for _ in range(2):
-        try:
-            read(transcription_stub, job_id)
-        except Exception:  # noqa: BLE001 — NOT_FOUND
-            pass
+    with pytest.raises(grpc.RpcError) as error:
+        read(transcription_stub, job_id)
 
-    client = redis.Redis(host=settings.redis_host, port=settings.redis_port)
-    assert client.exists(f"transcript:{job_id}") == 0
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND
+    assert redis_client.exists(transcript_cache._key(job_id)) == 0
 
 
 def test_transcripts_are_read_from_the_database_when_redis_is_down(transcription_stub, db_session):
     job_id = saved_transcript(db_session)
+    unreachable = transcript_cache._new_client(host="localhost", port=1)
 
-    with patch.object(transcript_cache, "_client", redis.Redis(host="localhost", port=1, socket_timeout=0.3,
-                                                               socket_connect_timeout=0.3)):
+    with patch.object(transcript_cache, "_client", unreachable):
+        started = time.monotonic()
         transcript = read(transcription_stub, job_id)
+        took = time.monotonic() - started
         transcription_stub.RenameSpeaker(transcription_pb2.RenameSpeakerRequest(
             job_id=str(job_id), label="S1", name="王經理"))
         renamed = read(transcription_stub, job_id)
 
     assert transcript.segments[0].text == "主持人開場"
     assert renamed.speakers[0].display_name == "王經理"
+    assert took < 2  # redis-py 預設會重試 10 次（實測 3.7 秒以上）；不重試，連不上就放棄
+
+
+@pytest.mark.parametrize("text, expected", [("", ""), ("主持人開場", "主持人開場")])
+def test_clearing_or_restoring_a_segment_is_read_straight_away(transcription_stub, db_session, text, expected):
+    job_id = saved_transcript(db_session)
+    segment = read(transcription_stub, job_id).segments[0]
+    transcription_stub.UpdateSegmentText(transcription_pb2.UpdateSegmentTextRequest(
+        job_id=str(job_id), segment_id=segment.id, text="改過的"))
+    read(transcription_stub, job_id)
+
+    transcription_stub.UpdateSegmentText(transcription_pb2.UpdateSegmentTextRequest(
+        job_id=str(job_id), segment_id=segment.id, text=text))  # 清空，或還原成原文
+
+    assert read(transcription_stub, job_id).segments[0].text == expected
+
+
+def test_after_giving_a_segment_to_a_new_speaker_the_new_speaker_is_read_straight_away(transcription_stub, db_session):
+    job_id = saved_transcript(db_session)
+    segment = read(transcription_stub, job_id).segments[0]
+
+    transcription_stub.AssignSegmentSpeaker(transcription_pb2.AssignSegmentSpeakerRequest(
+        job_id=str(job_id), segment_id=segment.id, new_speaker=transcription_pb2.NewSpeaker(name="來賓")))
+
+    assert [s.display_name for s in read(transcription_stub, job_id).speakers] == ["講者 1", "講者 2", "來賓"]
+
+
+def test_the_pipeline_drops_a_cached_transcript_when_it_saves_one(run_pipeline):
+    # 訊息重送時 pipeline 會再存一次；之前的那份可能已經被讀過、記在快取裡。
+    with patch.object(pipeline, "transcript_cache") as cache:
+        run_pipeline(Recognition(language="en", words=[]))
+
+    cache.record_edit.assert_called_once()
