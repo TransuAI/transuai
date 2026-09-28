@@ -1,14 +1,17 @@
 package com.transuai.auth_service.grpc;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.transuai.auth.grpc.v1.AuthResponse;
@@ -25,13 +28,14 @@ class AuthGrpcServiceLoginTest {
     void anUnknownEmailStillHasAPasswordCheckedSoItTakesAsLongAsAWrongPassword() {
         UserRepository users = mock(UserRepository.class);
         when(users.findByEmail(any())).thenReturn(Optional.empty());
-        PasswordEncoder encoder = mock(PasswordEncoder.class);
+        // 真的 bcrypt：帳號不存在時比對的必須是一個真的雜湊，matches(密碼, null) 會立刻回 false，時間差就又出現了。
+        PasswordEncoder encoder = spy(new BCryptPasswordEncoder());
         StreamObserver<AuthResponse> observer = mock(StreamObserver.class);
 
         new AuthGrpcService(users, encoder, mock(JwtService.class)).login(
                 LoginRequest.newBuilder().setEmail("nobody@example.com").setPassword("guess").build(), observer);
 
-        verify(encoder).matches(eq("guess"), any());
+        verify(encoder).matches(eq("guess"), argThat(hash -> hash != null && hash.startsWith("$2")));
         verify(observer).onError(any());
     }
 }

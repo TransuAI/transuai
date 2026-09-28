@@ -1,5 +1,6 @@
 package com.transuai.auth_service.grpc;
 
+import java.util.Locale;
 import java.util.UUID;
 
 import org.springframework.grpc.server.service.GrpcService;
@@ -35,7 +36,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
 
     @Override
     public void register(RegisterRequest request, StreamObserver<AuthResponse> responseObserver) {
-        String email = request.getEmail().trim().toLowerCase();
+        String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
         if (email.isBlank() || !email.contains("@")) {
             responseObserver.onError(Status.INVALID_ARGUMENT
                     .withDescription("email must be a valid email address").asRuntimeException());
@@ -66,7 +67,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
 
     @Override
     public void login(LoginRequest request, StreamObserver<AuthResponse> responseObserver) {
-        String email = request.getEmail().trim().toLowerCase();
+        String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
         com.transuai.auth_service.domain.User user = userRepository.findByEmail(email).orElse(null);
         // 帳號不存在跟密碼錯誤回同一種錯誤、花一樣的時間，避免帳號列舉。
         String hash = user == null ? unknownUserHash() : user.getPasswordHash();
