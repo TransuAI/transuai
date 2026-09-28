@@ -29,6 +29,9 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    // 帳號不存在時也拿密碼比對這個雜湊，回應時間才跟「密碼錯」一樣長，不能用來猜哪些 email 註冊過。第一次用到才產生
+    // （跟真的密碼用同一個 encoder、同樣的成本）。
+    private volatile String unknownUserHash;
 
     @Override
     public void register(RegisterRequest request, StreamObserver<AuthResponse> responseObserver) {
@@ -65,8 +68,9 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     public void login(LoginRequest request, StreamObserver<AuthResponse> responseObserver) {
         String email = request.getEmail().trim().toLowerCase();
         com.transuai.auth_service.domain.User user = userRepository.findByEmail(email).orElse(null);
-        // 帳號不存在跟密碼錯誤回同一種錯誤，避免帳號列舉。
-        if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+        // 帳號不存在跟密碼錯誤回同一種錯誤、花一樣的時間，避免帳號列舉。
+        String hash = user == null ? unknownUserHash() : user.getPasswordHash();
+        if (!passwordEncoder.matches(request.getPassword(), hash) || user == null) {
             responseObserver.onError(
                     Status.UNAUTHENTICATED.withDescription("invalid email or password").asRuntimeException());
             return;
@@ -101,6 +105,13 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
 
         responseObserver.onNext(UserMapper.toProto(user));
         responseObserver.onCompleted();
+    }
+
+    private String unknownUserHash() {
+        if (unknownUserHash == null) {
+            unknownUserHash = passwordEncoder.encode(UUID.randomUUID().toString());
+        }
+        return unknownUserHash;
     }
 
     private AuthResponse buildAuthResponse(com.transuai.auth_service.domain.User user) {

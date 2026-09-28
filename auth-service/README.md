@@ -88,7 +88,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | RPC | 說明 |
 |---|---|
 | `Register` | 建立帳號，email 已存在回 `ALREADY_EXISTS`；成功直接簽發 token，不用再呼叫一次 `Login` |
-| `Login` | email/password 其中一項錯誤都回 `UNAUTHENTICATED`（不細分，避免帳號列舉） |
+| `Login` | email/password 其中一項錯誤都回 `UNAUTHENTICATED`（不細分，避免帳號列舉）；帳號不存在時也比對一次 bcrypt 雜湊，回應時間跟密碼錯一樣長，不能用時間猜帳號。猜密碼的次數由 gateway 限流 |
 | `Refresh` | 用 refresh token 換發新的 access/refresh token 組合；token 無效、過期、或型別不對（例如誤傳 access token）都回 `UNAUTHENTICATED` |
 | `GetMe` | 依 `x-user-id` 查目前使用者資訊，找不到（例如帳號已被刪除）回 `NOT_FOUND` |
 
@@ -123,4 +123,4 @@ src/main/java/com/transuai/auth_service/
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
 - Refresh token 是純 stateless JWT，沒有存 DB，無法個別撤銷（例如使用者登出或換裝置時沒辦法讓舊 refresh token 失效）——對應 [`architecture-design.md`](../architecture-design.md) §7 簡化建議「先做簡單 JWT，不做完整 OAuth2 flow」，要做撤銷需要另開 `refresh_tokens` 表追蹤
 - 沒有帳號刪除、密碼重設、email 驗證等功能，架構文件 §3.1 只列了 register/login/refresh/me 四支，這裡照實作
-- 沒有測試，目前只靠手動 smoke test（grpcurl / 一次性 Python 腳本）
+- 測試很少：只有 `Login` 的單元測試（`AuthGrpcServiceLoginTest`，帳號不存在也會比對密碼），其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）
