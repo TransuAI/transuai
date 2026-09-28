@@ -44,6 +44,8 @@ Notification Service 消費訊息
 > 排入自己的 `post_meeting.requested` → agent 讀這場會議、查使用者已連結的 Google 日曆、Google Tasks 與 Notion，讀取類工具真的執行、寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立待辦（依設定建在 Google Tasks，或寫在 Notion 會議紀錄頁裡）、在指定的 Notion 頁面底下替每場會議建一個會議紀錄子頁面（含待辦清單））只存成
 > 行動提案（`action_proposals`）→ 前端輪詢顯示進度與提案 → 使用者檢查、修改、勾選後按執行，ai-service 才用最終參數呼叫 Google
 > 日曆、Gmail（草稿不寄出）、Google Tasks 或 Notion，每項記錄成功（附連結）或失敗（附原因，可以重試）（見 `ai-service/docs/adr/0007-write-tools-become-action-proposals.md`）。
+> agent 跑完後另外問模型一次會議裡約好的會議（例如下次開會），由程式提成行事曆活動（本機模型在 agent 裡不會提，見
+> `ai-service/docs/adr/0013-scheduled-meetings-asked-separately.md`）；一次會後處理合計最多 10 次 LLM 呼叫、2 分鐘。
 > 成功的記下指紋（服務、種類、正規化後的標題與時間）：同一個 Job 再跑一次時，agent 知道哪些已經建立過，跟它們相同的提案標示
 > 「上次已建立」、預設不勾選；每一次的紀錄都保留，工作區看得到歷次的提案與結果。
 > 用自有金鑰、支援工具呼叫的模型；部署有設定會後處理的平台模型（`AI_POST_MEETING_PLATFORM_MODEL`，預設沒有）時，平台模型的使用者
