@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.web.dto.AvailableModelsDto;
 import com.transuai.gateway.web.dto.ModelChoiceDto;
 import com.transuai.gateway.web.dto.SetDefaultModelRequestDto;
@@ -40,6 +41,7 @@ public class ModelController {
     }
 
     // 模型不在清單上（或 OpenRouter 上不存在）回 400、沒有那個廠商的自有金鑰回 409、OpenRouter 查不到回 503。
+    @CostlyFeature("linked-service")
     @PutMapping("/me/default-model")
     public ModelChoiceDto setDefaultModel(@CurrentUserId UUID userId, @RequestBody SetDefaultModelRequestDto request) {
         if (request == null || request.provider() == null) {

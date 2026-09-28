@@ -1,6 +1,7 @@
 package com.transuai.gateway.ratelimit;
 
 import java.util.List;
+import java.util.function.LongFunction;
 import java.util.function.Supplier;
 
 import org.springframework.dao.DataAccessException;
@@ -39,6 +40,13 @@ public class RateLimiter {
 
     public record Decision(boolean allowed, long retryAfterSeconds) {
         static final Decision ALLOWED = new Decision(true, 0);
+
+        /** 超過就拋出 exception（給它還要等幾秒）。 */
+        public void orThrow(LongFunction<RateLimitedException> exception) {
+            if (!allowed) {
+                throw exception.apply(retryAfterSeconds);
+            }
+        }
     }
 
     /** 計一次，並回答這次算不算超過（第 limit + 1 次起超過）。 */

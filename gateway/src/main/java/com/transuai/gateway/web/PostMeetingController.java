@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
+import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.web.dto.ActionProposalDto;
 import com.transuai.gateway.web.dto.ExecuteProposalsRequestDto;
 import com.transuai.gateway.web.dto.PostMeetingDto;
@@ -61,6 +62,7 @@ public class PostMeetingController {
 
     // 開始會後處理，回 202 與「執行中」的紀錄（已經有一份在跑就回那一份）。不能跑回 409 並附原因（預設模型是平台模型或
     // 不支援工具呼叫、沒有可用的已連結帳號），時區不對回 400。上傳時間取自 Job（換算相對日期用）。
+    @CostlyFeature("post-meeting")
     @PostMapping("/jobs/{jobId}/post-meeting")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public PostMeetingDto requestPostMeeting(@CurrentUserId UUID userId, @PathVariable String jobId,
@@ -79,6 +81,7 @@ public class PostMeetingController {
 
     // 用確認過的最終參數執行勾選的提案，回傳整份紀錄（每項的結果）；沒勾選的不動，已建立過的不再執行。還在跑回 409，
     // 提案不屬於這份紀錄回 400，紀錄不屬於這個 Job 回 404。
+    @CostlyFeature("linked-service")
     @PostMapping("/jobs/{jobId}/post-meeting/{runId}/execute")
     public PostMeetingRunDto executeProposals(@CurrentUserId UUID userId, @PathVariable String jobId,
             @PathVariable String runId, @RequestBody ExecuteProposalsRequestDto request) {
@@ -99,6 +102,7 @@ public class PostMeetingController {
     }
 
     // 用上一次的最終參數重試一個失敗的提案；不是失敗的回 409。
+    @CostlyFeature("linked-service")
     @PostMapping("/jobs/{jobId}/post-meeting/{runId}/proposals/{proposalId}/retry")
     public PostMeetingRunDto retryProposal(@CurrentUserId UUID userId, @PathVariable String jobId,
             @PathVariable String runId, @PathVariable String proposalId) {
@@ -114,6 +118,7 @@ public class PostMeetingController {
     }
 
     // 網址改過時先向 Notion 確認：沒連結 Notion 回 409，找不到或不是一般頁面回 400（附原因），連不上 Notion 回 503。
+    @CostlyFeature("linked-service")
     @PutMapping("/me/post-meeting-settings")
     public PostMeetingSettingsDto updateSettings(@CurrentUserId UUID userId,
             @RequestBody UpdatePostMeetingSettingsDto request) {

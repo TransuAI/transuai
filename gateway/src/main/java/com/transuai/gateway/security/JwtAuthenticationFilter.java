@@ -5,9 +5,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+
+import com.transuai.gateway.ratelimit.ApiRateLimits;
+import com.transuai.gateway.ratelimit.RateLimitedException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -42,10 +46,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Pattern OAUTH_CALLBACK = Pattern.compile("/oauth/[^/]+/callback");
 
     private final JwtService jwtService;
+    private final ApiRateLimits rateLimits;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public JwtAuthenticationFilter(JwtService jwtService) {
+    public JwtAuthenticationFilter(JwtService jwtService, ApiRateLimits rateLimits) {
         this.jwtService = jwtService;
+        this.rateLimits = rateLimits;
     }
 
     @Override
@@ -60,7 +66,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
         String header = request.getHeader("Authorization");
         if (header == null || !header.startsWith(BEARER_PREFIX)) {
-            writeUnauthorized(response, "missing or malformed Authorization header");
+            reject(request, response, "missing or malformed Authorization header");
             return;
         }
 
@@ -68,7 +74,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             userId = jwtService.validateAccessToken(header.substring(BEARER_PREFIX.length()));
         } catch (InvalidTokenException e) {
-            writeUnauthorized(response, e.getMessage());
+            reject(request, response, e.getMessage());
             return;
         }
 
@@ -76,10 +82,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private void writeUnauthorized(HttpServletResponse response, String message) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+    // 被擋下的請求也算進這個 IP 的限流（拿假 token 亂打的腳本），超過時回 429 而不是 401。這裡在 controller 之外，
+    // 錯誤格式自己寫（跟 GrpcExceptionAdvice 一樣）。
+    private void reject(HttpServletRequest request, HttpServletResponse response, String message) throws IOException {
+        try {
+            rateLimits.rejectedByAuthentication(request);
+        } catch (RateLimitedException e) {
+            response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()));
+            write(response, 429, new ErrorBody("RATE_LIMITED", e.getMessage()));
+            return;
+        }
+        write(response, HttpServletResponse.SC_UNAUTHORIZED, new ErrorBody("UNAUTHENTICATED", message));
+    }
+
+    private void write(HttpServletResponse response, int status, ErrorBody body) throws IOException {
+        response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        objectMapper.writeValue(response.getWriter(), new ErrorBody("UNAUTHENTICATED", message));
+        response.setCharacterEncoding("UTF-8");
+        objectMapper.writeValue(response.getWriter(), body);
     }
 
     private record ErrorBody(String error, String message) {

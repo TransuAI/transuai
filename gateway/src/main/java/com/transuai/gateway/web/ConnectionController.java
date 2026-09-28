@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.transuai.gateway.grpc.GrpcTimestamps;
+import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.web.dto.AuthorizeUrlDto;
 import com.transuai.gateway.web.dto.ConnectionDto;
 import com.transuai.gateway.web.dto.DeleteConnectionResponseDto;
@@ -73,6 +74,7 @@ public class ConnectionController {
 
     // 回傳要把使用者轉過去的 Google / Notion 授權網址（不是 302：前端的 JWT 在 header 裡，瀏覽器轉址帶不過來）。
     // 不支援的服務回 400；伺服器沒設定 Google OAuth client 回 409；連不上 Notion 回 503。
+    @CostlyFeature("linked-service")
     @GetMapping("/me/connections/{service}/authorize")
     public ResponseEntity<AuthorizeUrlDto> authorize(@CurrentUserId UUID userId, @PathVariable String service) {
         byte[] bytes = new byte[32];

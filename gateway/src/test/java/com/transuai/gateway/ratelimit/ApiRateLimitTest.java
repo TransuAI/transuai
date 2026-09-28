@@ -35,6 +35,7 @@ import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.jsonwebtoken.Jwts;
+import jakarta.servlet.ServletException;
 import io.jsonwebtoken.security.Keys;
 import transuai.ai.v1.Ai.ListQaHistoryResponse;
 import transuai.ai.v1.AiServiceGrpc;
@@ -46,8 +47,11 @@ import transuai.ai.v1.AiServiceGrpc;
 @SpringBootTest(properties = {
         "app.rate-limit.per-user.limit=6", "app.rate-limit.per-user.window=1m",
         "app.rate-limit.per-address.limit=3", "app.rate-limit.per-address.window=1m",
-        "app.rate-limit.upload.limit=1", "app.rate-limit.question.limit=1", "app.rate-limit.quiz.limit=1",
-        "app.rate-limit.regenerate.limit=1", "app.rate-limit.post-meeting.limit=1", "app.rate-limit.provider-key.limit=1",
+        "app.rate-limit.costly.upload-url.limit=1", "app.rate-limit.costly.upload.limit=1",
+        "app.rate-limit.costly.question.limit=1", "app.rate-limit.costly.quiz.limit=1",
+        "app.rate-limit.costly.regenerate.limit=1", "app.rate-limit.costly.post-meeting.limit=1",
+        "app.rate-limit.costly.provider-key.limit=1", "app.rate-limit.costly.transcript-edit.limit=1",
+        "app.rate-limit.costly.linked-service.limit=1",
 })
 @AutoConfigureMockMvc
 @Import(RedisContainerConfig.class)
@@ -118,7 +122,15 @@ class ApiRateLimitTest {
 
     @ParameterizedTest(name = "{0} {1}")
     @CsvSource({
+            "POST, /uploads/presign",
             "POST, /uploads/complete",
+            "PATCH, /transcripts/" + JOB + "/segments/1",
+            "PATCH, /transcripts/" + JOB + "/speakers/S1",
+            "PUT, /transcripts/" + JOB + "/segments/1/speaker",
+            "PUT, /me/default-model",
+            "PUT, /me/post-meeting-settings",
+            "GET, /me/connections/google/authorize",
+            "POST, /jobs/" + JOB + "/post-meeting/22222222-2222-2222-2222-222222222222/execute",
             "POST, /qa/" + JOB,
             "POST, /jobs/" + JOB + "/quizzes",
             "POST, /summary/" + JOB + "/regenerate",
@@ -145,9 +157,34 @@ class ApiRateLimitTest {
     private void attempt(UUID user, HttpMethod method, String path) throws Exception {
         try {
             call(user, method, path).andExpect(status().is(not(429)));
-        } catch (jakarta.servlet.ServletException e) {
+        } catch (ServletException e) {
             // 下游的 mock 回了 null，controller 拋例外；這次仍然算數
         }
+    }
+
+    @Test
+    void requestsWithABadTokenAreLimitedByAddressToo() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            badToken("1.1.1.1").andExpect(status().isUnauthorized());
+        }
+
+        badToken("1.1.1.1").andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("RATE_LIMITED"));
+        badToken("2.2.2.2").andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void apisOfTheSameCostlyFeatureShareOneCount() throws Exception {
+        attempt(alice, HttpMethod.PATCH, "/transcripts/" + JOB + "/segments/1");
+
+        call(alice, HttpMethod.PATCH, "/transcripts/" + JOB + "/speakers/S1").andExpect(status().isTooManyRequests());
+    }
+
+    private ResultActions badToken(String address) throws Exception {
+        return mvc.perform(MockMvcRequestBuilders.get("/jobs").with(request -> {
+            request.setRemoteAddr(address);
+            return request;
+        }).header("Authorization", "Bearer not-a-token"));
     }
 
     private ResultActions listJobs(UUID user) throws Exception {

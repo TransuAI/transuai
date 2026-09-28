@@ -138,7 +138,7 @@ docker compose up -d
 計數與設定過期時間在同一個 Lua script 裡；鍵不知為何沒有過期時間時也補上，不會永遠擋著）。超過回 `429`，`Retry-After` 是還要等幾秒，body 是
 `{ "error": "RATE_LIMITED", "message": "嘗試太多次，請 N 分鐘後再試" }`（登入、註冊；其他 API 是「使用得太頻繁，請 N 分鐘後再試」，
 前端照樣顯示 `message`）。花錢的功能被擋下時（包括 Job 不存在或不是自己的）也算一次，擋下的請求不會送到下游服務。串流結束時的 async
-分派與錯誤頁的分派不重算。JWT 無效的請求在 filter 就回 401，不經過限流（驗章很便宜）。**Redis 連不上時放行並記 log**（fail-open）：Redis 故障不能把所有人
+分派與錯誤頁的分派不重算。**Redis 連不上時放行並記 log**（fail-open）：Redis 故障不能把所有人
 擋在外面。
 
 | 限制 | 預設 | 說明 |
@@ -146,14 +146,19 @@ docker compose up -d
 | 登入失敗 | 同一個 IP 對同一個 email，15 分鐘 5 次 | 猜密碼。每次嘗試**先**計成一次失敗再送去 auth-service（同時送出的請求也只放得進 5 次），登入成功就清掉，auth-service 沒回答（例如 503）就退回；到了上限連正確的密碼也擋到時間過去。email 跟 auth-service 一樣去空白、轉小寫（`Locale.ROOT`），Redis 的鍵只放雜湊（看不到 email） |
 | 登入 | 同一個 IP，15 分鐘 20 次 | 不分 email，換 email 猜也擋得到 |
 | 註冊 | 同一個 IP，每小時 5 次 | |
-| **所有 API**（登入後） | 每位使用者，每分鐘 300 個請求 | `ratelimit/ApiRateLimits`（HandlerInterceptor，在 JWT 驗證之後、controller 之前）；前端的輪詢每 3～4 秒一次，正常使用碰不到 |
-| **所有 API**（沒登入的：登入、註冊、換發、OAuth 回呼、API 文件） | 每個 IP，每分鐘 60 個請求 | 跟上面兩列登入／註冊的限制**同時**生效 |
-| 完成上傳（`POST /uploads/complete`） | 每人每小時 10 次 | 以下是**花錢的功能**，在「所有 API」之外另外算、比較嚴：每次上傳都觸發要付費的轉錄 |
+| **所有 API**（登入後） | 每位使用者，每分鐘 600 個請求 | `ratelimit/ApiRateLimits`（HandlerInterceptor，在 JWT 驗證之後、controller 之前）；一個 Job 頁面的輪詢最多約每分鐘 75 個請求，同時開幾個分頁也碰不到 |
+| **所有 API**（沒登入的：登入、註冊、換發、OAuth 回呼、API 文件，以及 token 缺少或無效被擋下的） | 每個 IP，每分鐘 60 個請求 | 跟上面登入／註冊的限制**同時**生效；token 無效的請求在 `JwtAuthenticationFilter` 裡計數，超過時回 429 而不是 401（拿假 token 亂打的腳本也擋得到） |
+| 取得上傳網址（`POST /uploads/presign`） | 每人每小時 30 次 | 以下是**花錢的功能**（controller 方法上標了 `@CostlyFeature("名稱")`），在「所有 API」之外另外算、比較嚴；同一個名稱的 API 共用一個計數。上傳網址：擋住塞滿物件儲存 |
+| 完成上傳（`POST /uploads/complete`） | 每人每小時 10 次 | 每次上傳都觸發要付費的轉錄 |
 | 問答（`POST /qa/{jobId}`） | 每人每分鐘 20 題 | 每題都呼叫 AI |
 | 產生測驗（`POST /jobs/{jobId}/quizzes`） | 每人每小時 10 份 | |
 | 重新產生摘要（`POST /summary/{jobId}/regenerate`） | 每人每小時 5 次 | |
 | 開始會後處理（`POST /jobs/{jobId}/post-meeting`） | 每人每小時 10 次 | 一次最多 10 次 AI 呼叫 |
 | 存自有金鑰（`PUT /me/provider-keys/{provider}`） | 每人每小時 10 次 | 每次都向 AI 廠商驗證：不讓人拿平台去試偷來的金鑰 |
+| 編輯逐字稿（改文字、講者名稱、片段講者） | 每人每小時 300 次（共用） | 每次編輯都讓 ai-service 重算 embedding（付費的 API） |
+| 會用到外部服務的設定與執行（改預設模型、會後處理設定、開始連結帳號、執行與重試行動提案） | 每人每小時 60 次（共用） | 查 OpenRouter、Notion，呼叫 Google／Notion：用掉平台在對方的額度 |
+
+每個 `@CostlyFeature` 的名稱都要在 `app.rate-limit.costly.<名稱>.*` 設定上限，漏設時 gateway 啟動就失敗（`ApiRateLimits.CostlyFeaturesConfigured`）。
 
 來源 IP 是 `request.getRemoteAddr()`，預設（`FORWARD_HEADERS_STRATEGY=none`）就是直接連進來的位址，**不看 `X-Forwarded-For`**——那是
 使用者可以自己填的，信了就能每次換一個假 IP 無限猜密碼（`ForwardedAddressTest` 用真的 Tomcat 驗證）。正式環境在反向代理後面時設
@@ -186,7 +191,7 @@ docker compose up -d
 | `FRONTEND_URL` | `http://localhost:5173` | 連結完成（或失敗）後把使用者轉回 `{這個}/settings` |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / 空 | 限流用的 Redis（k8s 裡 `REDIS_PORT` 一定要設，否則會被 k8s 自動注入的 `tcp://…` 蓋掉） |
 | `REDIS_TIMEOUT` / `REDIS_CONNECT_TIMEOUT` | `500ms` | Redis 慢或連不上時多久放棄（放棄就放行） |
-| `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`、`RATE_LIMIT_PER_USER`、`RATE_LIMIT_PER_ADDRESS`、`RATE_LIMIT_UPLOAD`、`RATE_LIMIT_QUESTION`、`RATE_LIMIT_QUIZ`、`RATE_LIMIT_REGENERATE`、`RATE_LIMIT_POST_MEETING`、`RATE_LIMIT_PROVIDER_KEY`（與各自的 `_WINDOW`） | 見「限流」的表 | 限流的上限與時間長度 |
+| `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`、`RATE_LIMIT_PER_USER`、`RATE_LIMIT_PER_ADDRESS`、`RATE_LIMIT_UPLOAD_URL`、`RATE_LIMIT_UPLOAD`、`RATE_LIMIT_QUESTION`、`RATE_LIMIT_QUIZ`、`RATE_LIMIT_REGENERATE`、`RATE_LIMIT_POST_MEETING`、`RATE_LIMIT_PROVIDER_KEY`、`RATE_LIMIT_TRANSCRIPT_EDIT`、`RATE_LIMIT_LINKED_SERVICE`（與各自的 `_WINDOW`） | 見「限流」的表 | 限流的上限與時間長度 |
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
 
 ## 專案結構
@@ -201,7 +206,7 @@ src/main/java/com/transuai/gateway/
   web/dto/            REST 用的 JSON DTO（跟 proto message 分開，不直接把 protobuf 型別序列化給前端）
   web/advice/         GrpcExceptionAdvice（StatusRuntimeException → HTTP status + JSON error body；RateLimitedException → 429）
   ratelimit/          RateLimiter（Redis 固定視窗計數器，連不上放行）、RateLimitProperties、AuthRateLimits（登入與註冊）、
-                       ApiRateLimits（所有 API 與花錢的功能）、RateLimitedException
+                       ApiRateLimits（所有 API 與花錢的功能）、CostlyFeature（標在 controller 方法上）、RateLimitedException
   grpc/               GrpcMetadataSupport（組 x-user-id metadata）、JobOwnershipGuard（Transcription/AI 端點的 ownership 檢查）、
                        GrpcTimestamps、GrpcStrings（空字串 → null）、UploadMapper（proto ↔ DTO）
 ```

@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
+import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.web.dto.ChapterDto;
 import com.transuai.gateway.web.dto.QaTurnDto;
 import com.transuai.gateway.web.dto.QuestionRequestDto;
@@ -67,6 +68,7 @@ public class AiController {
 
     // 摘要與章節過時之後，在背景依最新逐字稿重新產生（Job 狀態不變）。回傳目前的摘要（regenerationStatus
     // 通常是 RUNNING），前端輪詢 GET /summary 直到不是 RUNNING。
+    @CostlyFeature("regenerate")
     @PostMapping("/summary/{jobId}/regenerate")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public SummaryDto regenerateSummary(@CurrentUserId UUID userId, @PathVariable String jobId) {
@@ -112,6 +114,7 @@ public class AiController {
     // 而且維持「查詢一律經 Gateway 轉發」的既有原則（跟 notification-service 的 WS 不同，那是
     // 推播、這裡是查詢）。前端用 fetch + 手動解析 SSE frame，不是原生 EventSource——因為
     // EventSource 無法附加 Authorization header，這個 gateway 全部端點都是 Bearer JWT 驗證。
+    @CostlyFeature("question")
     @PostMapping(value = "/qa/{jobId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter askQuestion(@CurrentUserId UUID userId, @PathVariable String jobId,
             @RequestBody QuestionRequestDto request) {

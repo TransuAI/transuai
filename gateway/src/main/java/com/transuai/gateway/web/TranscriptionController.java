@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.gateway.grpc.JobOwnershipGuard;
+import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.web.dto.AssignSegmentSpeakerRequestDto;
 import com.transuai.gateway.web.dto.RenameSpeakerRequestDto;
 import com.transuai.gateway.web.dto.SegmentDto;
@@ -58,6 +59,7 @@ public class TranscriptionController {
     }
 
     // 編輯片段文字（空字串＝清空、送回 originalText＝還原），見 transcription.proto 的 UpdateSegmentText。
+    @CostlyFeature("transcript-edit")
     @PatchMapping("/transcripts/{jobId}/segments/{segmentId}")
     public SegmentUpdateDto updateSegmentText(@CurrentUserId UUID userId, @PathVariable String jobId,
             @PathVariable String segmentId, @RequestBody UpdateSegmentTextRequestDto request) {
@@ -76,6 +78,7 @@ public class TranscriptionController {
     }
 
     // 替講者命名（name 空字串＝恢復預設名稱），見 transcription.proto 的 RenameSpeaker。
+    @CostlyFeature("transcript-edit")
     @PatchMapping("/transcripts/{jobId}/speakers/{label}")
     public SpeakerUpdateDto renameSpeaker(@CurrentUserId UUID userId, @PathVariable String jobId,
             @PathVariable String label, @RequestBody RenameSpeakerRequestDto request) {
@@ -94,6 +97,7 @@ public class TranscriptionController {
     }
 
     // 把片段改成另一位講者，或新增一位講者給它，見 transcription.proto 的 AssignSegmentSpeaker。
+    @CostlyFeature("transcript-edit")
     @PutMapping("/transcripts/{jobId}/segments/{segmentId}/speaker")
     public SegmentSpeakerUpdateDto assignSegmentSpeaker(@CurrentUserId UUID userId, @PathVariable String jobId,
             @PathVariable String segmentId, @RequestBody AssignSegmentSpeakerRequestDto request) {

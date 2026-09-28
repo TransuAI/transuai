@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.gateway.grpc.GrpcTimestamps;
+import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.web.dto.DeleteProviderKeyResponseDto;
 import com.transuai.gateway.web.dto.ProviderKeyDto;
 import com.transuai.gateway.web.dto.SaveProviderKeyRequestDto;
@@ -39,6 +40,7 @@ public class ProviderKeyController {
     }
 
     // 存入或替換；ai-service 先向廠商驗證，金鑰無效回 400（附原因）、廠商暫時連不上回 503。
+    @CostlyFeature("provider-key")
     @PutMapping("/me/provider-keys/{provider}")
     public ProviderKeyDto saveProviderKey(@CurrentUserId UUID userId, @PathVariable String provider,
             @RequestBody SaveProviderKeyRequestDto request) {

@@ -33,9 +33,9 @@ public class AuthRateLimits {
      * 上限那麼多次），登入成功就清掉，auth-service 沒回答（不是密碼錯）就退回這一次。
      */
     public <T> T login(String address, String email, Supplier<T> attempt) {
-        require(limiter.hit(LOGIN_BY_ADDRESS + address, properties.login()));
+        limiter.hit(LOGIN_BY_ADDRESS + address, properties.login()).orThrow(RateLimitedException::tooManyTries);
         String failures = LOGIN_FAILURES + sha256(address + "\n" + email.trim().toLowerCase(Locale.ROOT));
-        require(limiter.hit(failures, properties.loginFailures()));
+        limiter.hit(failures, properties.loginFailures()).orThrow(RateLimitedException::tooManyTries);
         T result;
         try {
             result = attempt.get();
@@ -50,13 +50,7 @@ public class AuthRateLimits {
     }
 
     public void beforeRegister(String address) {
-        require(limiter.hit(REGISTER_BY_ADDRESS + address, properties.register()));
-    }
-
-    private static void require(RateLimiter.Decision decision) {
-        if (!decision.allowed()) {
-            throw RateLimitedException.tooManyTries(decision.retryAfterSeconds());
-        }
+        limiter.hit(REGISTER_BY_ADDRESS + address, properties.register()).orThrow(RateLimitedException::tooManyTries);
     }
 
     private static String sha256(String text) {

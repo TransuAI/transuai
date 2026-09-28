@@ -1,13 +1,14 @@
 package com.transuai.gateway.ratelimit;
 
-import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Function;
 
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
-import org.springframework.web.servlet.HandlerMapping;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import com.transuai.gateway.security.JwtAuthenticationFilter;
 
@@ -17,51 +18,68 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 每個 API 都限流：登入的使用者每人一個總上限（{@code perUser}），沒登入的請求每個 IP 一個（{@code perAddress}）；會觸發轉錄或
- * 呼叫 AI 的功能另外有更嚴的每人上限（下面的表）。在 JWT 驗證之後、controller 之前（HandlerInterceptor，看得到對到哪個路由）；
- * 登入與註冊另外還有 {@link AuthRateLimits}。
+ * 每個 API 都限流：登入的使用者每人一個總上限（{@code perUser}），沒登入的請求每個 IP 一個（{@code perAddress}，token 無效被
+ * {@link JwtAuthenticationFilter} 擋下的也算，見 {@link #rejectedByAuthentication}）；標了 {@link CostlyFeature} 的 API 每人另外有更嚴的
+ * 上限。在 JWT 驗證之後、controller 之前（HandlerInterceptor）；登入與註冊另外還有 {@link AuthRateLimits}。
  */
 @Component
 @RequiredArgsConstructor
 public class ApiRateLimits implements HandlerInterceptor {
 
-    /** 花錢的功能：「方法 路由」→ 它自己的上限。 */
-    private static final Map<String, CostlyFeature> COSTLY = Map.of(
-            "POST /uploads/complete", new CostlyFeature("upload", RateLimitProperties::upload),
-            "POST /qa/{jobId}", new CostlyFeature("question", RateLimitProperties::question),
-            "POST /jobs/{jobId}/quizzes", new CostlyFeature("quiz", RateLimitProperties::quiz),
-            "POST /summary/{jobId}/regenerate", new CostlyFeature("regenerate", RateLimitProperties::regenerate),
-            "POST /jobs/{jobId}/post-meeting", new CostlyFeature("post-meeting", RateLimitProperties::postMeeting),
-            "PUT /me/provider-keys/{provider}", new CostlyFeature("provider-key", RateLimitProperties::providerKey));
+    private static final String ALL_BY_USER = "all:user:";
+    private static final String ALL_BY_ADDRESS = "all:ip:";
 
     private final RateLimiter limiter;
     private final RateLimitProperties properties;
 
-    private record CostlyFeature(String name, Function<RateLimitProperties, RateLimitProperties.Rule> rule) {
-    }
-
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         // 只算真正的請求：串流結束時的 async 重新分派、錯誤頁的分派不再算一次。
-        if (request.getDispatcherType() != DispatcherType.REQUEST || !(handler instanceof HandlerMethod)) {
+        if (request.getDispatcherType() != DispatcherType.REQUEST) {
             return true;
         }
         if (!(request.getAttribute(JwtAuthenticationFilter.USER_ID_ATTRIBUTE) instanceof UUID user)) {
-            require(limiter.hit("all:ip:" + request.getRemoteAddr(), properties.perAddress()));
+            limiter.hit(ALL_BY_ADDRESS + request.getRemoteAddr(), properties.perAddress())
+                    .orThrow(RateLimitedException::tooFrequent);
             return true;
         }
-        require(limiter.hit("all:user:" + user, properties.perUser()));
-        CostlyFeature costly = COSTLY.get(request.getMethod() + " "
-                + request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE));
+        limiter.hit(ALL_BY_USER + user, properties.perUser()).orThrow(RateLimitedException::tooFrequent);
+        CostlyFeature costly = handler instanceof HandlerMethod method ? method.getMethodAnnotation(CostlyFeature.class) : null;
         if (costly != null) {
-            require(limiter.hit(costly.name() + ":user:" + user, costly.rule().apply(properties)));
+            limiter.hit(costly.value() + ":user:" + user, properties.costly().get(costly.value()))
+                    .orThrow(RateLimitedException::tooFrequent);
         }
         return true;
     }
 
-    private static void require(RateLimiter.Decision decision) {
-        if (!decision.allowed()) {
-            throw RateLimitedException.tooFrequent(decision.retryAfterSeconds());
+    /**
+     * token 缺少或無效的請求（在 filter 就回 401，不會到 controller）：一樣算進這個 IP 的上限，超過時回 429 而不是 401，拿假
+     * token 亂打的腳本也擋得到。
+     */
+    public void rejectedByAuthentication(HttpServletRequest request) {
+        limiter.hit(ALL_BY_ADDRESS + request.getRemoteAddr(), properties.perAddress())
+                .orThrow(RateLimitedException::tooFrequent);
+    }
+
+    /** 啟動時檢查：每個 {@link CostlyFeature} 都要有設定上限，漏設就不啟動（否則那個 API 會在執行時才出錯）。 */
+    @Component
+    @RequiredArgsConstructor
+    static class CostlyFeaturesConfigured implements ApplicationRunner {
+
+        private final RequestMappingHandlerMapping mappings;
+        private final RateLimitProperties properties;
+
+        @Override
+        public void run(ApplicationArguments args) {
+            mappings.getHandlerMethods().values().stream()
+                    .map(method -> method.getMethodAnnotation(CostlyFeature.class))
+                    .filter(Objects::nonNull)
+                    .map(CostlyFeature::value)
+                    .filter(name -> properties.costly() == null || !properties.costly().containsKey(name))
+                    .findFirst()
+                    .ifPresent(name -> {
+                        throw new IllegalStateException("app.rate-limit.costly." + name + " is not configured");
+                    });
         }
     }
 }

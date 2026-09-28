@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
+import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.web.dto.QuizAttemptRequestDto;
 import com.transuai.gateway.web.dto.QuizAttemptResultDto;
 import com.transuai.gateway.web.dto.QuizDto;
@@ -40,6 +41,7 @@ public class QuizController {
     private final JobOwnershipGuard jobOwnershipGuard;
 
     // 每次都多一份新的測驗（舊的保留）；回傳「產生中」的測驗，不含題目。題數不是 5、10、20 回 400。
+    @CostlyFeature("quiz")
     @PostMapping("/jobs/{jobId}/quizzes")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public QuizDto requestQuiz(@CurrentUserId UUID userId, @PathVariable String jobId,
