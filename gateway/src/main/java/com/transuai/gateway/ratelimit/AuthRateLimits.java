@@ -55,7 +55,7 @@ public class AuthRateLimits {
 
     private static void require(RateLimiter.Decision decision) {
         if (!decision.allowed()) {
-            throw new RateLimitedException(decision.retryAfterSeconds());
+            throw RateLimitedException.tooManyTries(decision.retryAfterSeconds());
         }
     }
 

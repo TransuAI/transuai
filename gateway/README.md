@@ -136,7 +136,9 @@ docker compose up -d
 
 計數器存在 Redis（gateway 有多個副本時共用），固定視窗：每個鍵第一次計數時開始一段時間，時間到就重算（`ratelimit/RateLimiter`，
 計數與設定過期時間在同一個 Lua script 裡；鍵不知為何沒有過期時間時也補上，不會永遠擋著）。超過回 `429`，`Retry-After` 是還要等幾秒，body 是
-`{ "error": "RATE_LIMITED", "message": "嘗試太多次，請 N 分鐘後再試" }`。**Redis 連不上時放行並記 log**（fail-open）：Redis 故障不能把所有人
+`{ "error": "RATE_LIMITED", "message": "嘗試太多次，請 N 分鐘後再試" }`（登入、註冊；其他 API 是「使用得太頻繁，請 N 分鐘後再試」，
+前端照樣顯示 `message`）。花錢的功能被擋下時（包括 Job 不存在或不是自己的）也算一次，擋下的請求不會送到下游服務。串流結束時的 async
+分派與錯誤頁的分派不重算。JWT 無效的請求在 filter 就回 401，不經過限流（驗章很便宜）。**Redis 連不上時放行並記 log**（fail-open）：Redis 故障不能把所有人
 擋在外面。
 
 | 限制 | 預設 | 說明 |
@@ -144,6 +146,14 @@ docker compose up -d
 | 登入失敗 | 同一個 IP 對同一個 email，15 分鐘 5 次 | 猜密碼。每次嘗試**先**計成一次失敗再送去 auth-service（同時送出的請求也只放得進 5 次），登入成功就清掉，auth-service 沒回答（例如 503）就退回；到了上限連正確的密碼也擋到時間過去。email 跟 auth-service 一樣去空白、轉小寫（`Locale.ROOT`），Redis 的鍵只放雜湊（看不到 email） |
 | 登入 | 同一個 IP，15 分鐘 20 次 | 不分 email，換 email 猜也擋得到 |
 | 註冊 | 同一個 IP，每小時 5 次 | |
+| **所有 API**（登入後） | 每位使用者，每分鐘 300 個請求 | `ratelimit/ApiRateLimits`（HandlerInterceptor，在 JWT 驗證之後、controller 之前）；前端的輪詢每 3～4 秒一次，正常使用碰不到 |
+| **所有 API**（沒登入的：登入、註冊、換發、OAuth 回呼、API 文件） | 每個 IP，每分鐘 60 個請求 | 跟上面兩列登入／註冊的限制**同時**生效 |
+| 完成上傳（`POST /uploads/complete`） | 每人每小時 10 次 | 以下是**花錢的功能**，在「所有 API」之外另外算、比較嚴：每次上傳都觸發要付費的轉錄 |
+| 問答（`POST /qa/{jobId}`） | 每人每分鐘 20 題 | 每題都呼叫 AI |
+| 產生測驗（`POST /jobs/{jobId}/quizzes`） | 每人每小時 10 份 | |
+| 重新產生摘要（`POST /summary/{jobId}/regenerate`） | 每人每小時 5 次 | |
+| 開始會後處理（`POST /jobs/{jobId}/post-meeting`） | 每人每小時 10 次 | 一次最多 10 次 AI 呼叫 |
+| 存自有金鑰（`PUT /me/provider-keys/{provider}`） | 每人每小時 10 次 | 每次都向 AI 廠商驗證：不讓人拿平台去試偷來的金鑰 |
 
 來源 IP 是 `request.getRemoteAddr()`，預設（`FORWARD_HEADERS_STRATEGY=none`）就是直接連進來的位址，**不看 `X-Forwarded-For`**——那是
 使用者可以自己填的，信了就能每次換一個假 IP 無限猜密碼（`ForwardedAddressTest` 用真的 Tomcat 驗證）。正式環境在反向代理後面時設
@@ -176,7 +186,7 @@ docker compose up -d
 | `FRONTEND_URL` | `http://localhost:5173` | 連結完成（或失敗）後把使用者轉回 `{這個}/settings` |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / 空 | 限流用的 Redis（k8s 裡 `REDIS_PORT` 一定要設，否則會被 k8s 自動注入的 `tcp://…` 蓋掉） |
 | `REDIS_TIMEOUT` / `REDIS_CONNECT_TIMEOUT` | `500ms` | Redis 慢或連不上時多久放棄（放棄就放行） |
-| `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`（與各自的 `_WINDOW`） | `5`/`15m`、`20`/`15m`、`5`/`1h` | 限流的上限與時間長度，見「限流」 |
+| `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`、`RATE_LIMIT_PER_USER`、`RATE_LIMIT_PER_ADDRESS`、`RATE_LIMIT_UPLOAD`、`RATE_LIMIT_QUESTION`、`RATE_LIMIT_QUIZ`、`RATE_LIMIT_REGENERATE`、`RATE_LIMIT_POST_MEETING`、`RATE_LIMIT_PROVIDER_KEY`（與各自的 `_WINDOW`） | 見「限流」的表 | 限流的上限與時間長度 |
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
 
 ## 專案結構
@@ -190,7 +200,8 @@ src/main/java/com/transuai/gateway/
                        ProviderKeyController、ConnectionController、PostMeetingController
   web/dto/            REST 用的 JSON DTO（跟 proto message 分開，不直接把 protobuf 型別序列化給前端）
   web/advice/         GrpcExceptionAdvice（StatusRuntimeException → HTTP status + JSON error body；RateLimitedException → 429）
-  ratelimit/          RateLimiter（Redis 固定視窗計數器，連不上放行）、RateLimitProperties、AuthRateLimits（登入與註冊）、RateLimitedException
+  ratelimit/          RateLimiter（Redis 固定視窗計數器，連不上放行）、RateLimitProperties、AuthRateLimits（登入與註冊）、
+                       ApiRateLimits（所有 API 與花錢的功能）、RateLimitedException
   grpc/               GrpcMetadataSupport（組 x-user-id metadata）、JobOwnershipGuard（Transcription/AI 端點的 ownership 檢查）、
                        GrpcTimestamps、GrpcStrings（空字串 → null）、UploadMapper（proto ↔ DTO）
 ```
@@ -199,7 +210,7 @@ src/main/java/com/transuai/gateway/
 
 - **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 現在會在轉發前先呼叫 `upload-service` 的 `GetJob` 確認 ownership（`JobOwnershipGuard`，別人的 job 回 404），每個請求因此多一趟內部 gRPC 往返——量大的話可以考慮快取，MVP 階段先不做
 - 多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
-- 限流目前只有登入與註冊；花錢的功能與全站限流見 `.scratch/pre-launch-hardening` 的 02、03
+- 限流是短時間的頻率；每月用量上限（轉錄分鐘數、平台模型 token）還沒做，見 `.scratch/pre-launch-hardening` 的 04
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
 - 測試只涵蓋限流（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，

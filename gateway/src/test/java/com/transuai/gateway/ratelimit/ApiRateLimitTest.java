@@ -1,0 +1,175 @@
+package com.transuai.gateway.ratelimit;
+
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Date;
+import java.util.UUID;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+
+import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.gateway.RedisContainerConfig;
+import com.transuai.gateway.security.JwtProperties;
+import com.transuai.upload.grpc.v1.ListJobsResponse;
+import com.transuai.upload.grpc.v1.UploadServiceGrpc;
+
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import transuai.ai.v1.Ai.ListQaHistoryResponse;
+import transuai.ai.v1.AiServiceGrpc;
+
+/**
+ * 每個 API 都限流：登入的使用者每人一個總上限，沒登入的每個 IP 一個；花錢的功能（會觸發轉錄或呼叫 AI）另外有更嚴的每人上限
+ * （見 .scratch/pre-launch-hardening/issues/02）。上限在這裡調小。
+ */
+@SpringBootTest(properties = {
+        "app.rate-limit.per-user.limit=6", "app.rate-limit.per-user.window=1m",
+        "app.rate-limit.per-address.limit=3", "app.rate-limit.per-address.window=1m",
+        "app.rate-limit.upload.limit=1", "app.rate-limit.question.limit=1", "app.rate-limit.quiz.limit=1",
+        "app.rate-limit.regenerate.limit=1", "app.rate-limit.post-meeting.limit=1", "app.rate-limit.provider-key.limit=1",
+})
+@AutoConfigureMockMvc
+@Import(RedisContainerConfig.class)
+class ApiRateLimitTest {
+
+    private static final String JOB = "11111111-1111-1111-1111-111111111111";
+
+    @Autowired
+    private MockMvc mvc;
+
+    @Autowired
+    private StringRedisTemplate redis;
+
+    @Autowired
+    private JwtProperties jwt;
+
+    @MockitoBean
+    private AuthServiceGrpc.AuthServiceBlockingStub authServiceStub;
+
+    @MockitoBean
+    private UploadServiceGrpc.UploadServiceBlockingStub uploadServiceStub;
+
+    @MockitoBean
+    private AiServiceGrpc.AiServiceBlockingStub aiServiceStub;
+
+    private final UUID alice = UUID.randomUUID();
+    private final UUID bob = UUID.randomUUID();
+
+    @BeforeEach
+    void startClean() {
+        redis.getConnectionFactory().getConnection().serverCommands().flushAll();
+        when(uploadServiceStub.withInterceptors(any())).thenReturn(uploadServiceStub);
+        when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.getDefaultInstance());
+        when(aiServiceStub.listQaHistory(any())).thenReturn(ListQaHistoryResponse.getDefaultInstance());
+        when(authServiceStub.refresh(any())).thenReturn(AuthRateLimitTest.signedIn("a@example.com"));
+    }
+
+    @Test
+    void aSignedInUserHasOneLimitForAllRequests() throws Exception {
+        for (int i = 0; i < 6; i++) {
+            listJobs(alice).andExpect(status().isOk());
+        }
+
+        listJobs(alice).andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("RATE_LIMITED"))
+                .andExpect(jsonPath("$.message").value(containsString("分鐘後再試")));
+        listJobs(bob).andExpect(status().isOk());  // 每個人各自計算
+    }
+
+    @Test
+    void requestsWithoutSigningInAreLimitedByAddress() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            refresh("1.1.1.1").andExpect(status().is(not(429)));
+        }
+
+        refresh("1.1.1.1").andExpect(status().isTooManyRequests());
+        refresh("2.2.2.2").andExpect(status().is(not(429)));
+    }
+
+    @Test
+    void aCostlyFeatureHasItsOwnStricterLimit() throws Exception {
+        attempt(alice, HttpMethod.POST, "/uploads/complete");
+
+        call(alice, HttpMethod.POST, "/uploads/complete").andExpect(status().isTooManyRequests());
+        listJobs(alice).andExpect(status().isOk());  // 其他 API 照常
+        attempt(bob, HttpMethod.POST, "/uploads/complete");
+    }
+
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource({
+            "POST, /uploads/complete",
+            "POST, /qa/" + JOB,
+            "POST, /jobs/" + JOB + "/quizzes",
+            "POST, /summary/" + JOB + "/regenerate",
+            "POST, /jobs/" + JOB + "/post-meeting",
+            "PUT, /me/provider-keys/openai",
+    })
+    void everyCostlyFeatureIsLimited(HttpMethod method, String path) throws Exception {
+        attempt(alice, method, path);
+
+        call(alice, method, path).andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void readingIsNotACostlyFeature() throws Exception {
+        attempt(alice, HttpMethod.GET, "/qa/" + JOB);
+
+        call(alice, HttpMethod.GET, "/qa/" + JOB).andExpect(status().is(not(429)));
+    }
+
+    /**
+     * 呼叫一次，不管下游的結果：下游服務是 mock（回 null），controller 可能拋例外——這些測試只在乎這次有沒有被計入、
+     * 下一次會不會被擋。
+     */
+    private void attempt(UUID user, HttpMethod method, String path) throws Exception {
+        try {
+            call(user, method, path).andExpect(status().is(not(429)));
+        } catch (jakarta.servlet.ServletException e) {
+            // 下游的 mock 回了 null，controller 拋例外；這次仍然算數
+        }
+    }
+
+    private ResultActions listJobs(UUID user) throws Exception {
+        return call(user, HttpMethod.GET, "/jobs?page=1&pageSize=10");
+    }
+
+    private ResultActions refresh(String address) throws Exception {
+        return mvc.perform(MockMvcRequestBuilders.post("/auth/refresh").with(request -> {
+            request.setRemoteAddr(address);
+            return request;
+        }).contentType(MediaType.APPLICATION_JSON).content("{\"refreshToken\":\"x\"}"));
+    }
+
+    private ResultActions call(UUID user, HttpMethod method, String path) throws Exception {
+        return mvc.perform(MockMvcRequestBuilders.request(method, path)
+                .header("Authorization", "Bearer " + accessToken(user))
+                .contentType(MediaType.APPLICATION_JSON).content("{}"));
+    }
+
+    private String accessToken(UUID user) {
+        return Jwts.builder().subject(user.toString()).claim("type", "access")
+                .expiration(Date.from(Instant.now().plusSeconds(600)))
+                .signWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).compact();
+    }
+}
