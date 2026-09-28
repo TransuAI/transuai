@@ -236,9 +236,9 @@ describe('SettingsPage monthly usage (本月用量)', () => {
     const section = await renderUsage()
 
     const limitsGroup = await within(section).findByRole('group', { name: '用量上限' })
-    expect(within(limitsGroup).getByText('25.5 / 600 分鐘 · 剩 574.5 分鐘')).toBeInTheDocument()
+    expect(within(limitsGroup).getByText('25.5 分鐘 / 600.0 分鐘 · 剩 574.5 分鐘')).toBeInTheDocument()
     // own keys don't count toward the platform model's limit
-    expect(within(limitsGroup).getByText('6,000 / 2,000,000 tokens · 剩 1,994,000 tokens')).toBeInTheDocument()
+    expect(within(limitsGroup).getByText('6,000 tokens / 2,000,000 tokens · 剩 1,994,000 tokens')).toBeInTheDocument()
   })
 
   it('says when a limit is used up and when it comes back', async () => {
@@ -249,7 +249,7 @@ describe('SettingsPage monthly usage (本月用量)', () => {
     const section = await renderUsage()
 
     const limitsGroup = await within(section).findByRole('group', { name: '用量上限' })
-    expect(within(limitsGroup).getByText('605.0 / 600 分鐘 · 已到上限，下個月 1 日恢復')).toBeInTheDocument()
+    expect(within(limitsGroup).getByText('605.0 分鐘 / 600.0 分鐘 · 已到上限，下個月 1 日恢復')).toBeInTheDocument()
   })
 
   it('says when some calls of a model had no reported usage', async () => {

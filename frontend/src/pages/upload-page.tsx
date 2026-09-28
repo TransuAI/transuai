@@ -80,6 +80,7 @@ export function UploadPage() {
         fileName: file.name,
         fileType,
         fileSizeBytes: file.size,
+        durationSeconds: duration,
       })
 
       setStage('uploading')

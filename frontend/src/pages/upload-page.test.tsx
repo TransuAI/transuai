@@ -63,3 +63,13 @@ describe('UploadPage transcription language (轉錄語言)', () => {
     expect(uploadApi.complete).toHaveBeenCalledWith(expect.objectContaining({ transcriptionLanguage: language }))
   })
 })
+
+describe('UploadPage usage limit (用量上限)', () => {
+  it("sends the file's length when asking to upload, so a file that won't fit this month is refused before it's sent", async () => {
+    const user = await chooseFile()
+
+    await user.click(screen.getByRole('button', { name: '開始上傳' }))
+
+    expect(uploadApi.presign).toHaveBeenCalledWith(expect.objectContaining({ durationSeconds: expect.any(Number) }))
+  })
+})

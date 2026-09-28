@@ -50,52 +50,27 @@ function UsageGroup({ title, rows }: { title: string; rows: UsageRow[] }) {
   )
 }
 
-// How much of a 用量上限 (monthly limit) is used: "25.5 / 600 分鐘 · 剩 574.5 分鐘", or used up until next month.
-function limitText(used: string, limit: string, left: string | null) {
-  return `${used} / ${limit} · ${left === null ? '已到上限，下個月 1 日恢復' : `剩 ${left}`}`
+// How much of a 用量上限 (monthly limit) is used: "25.5 分鐘 / 600 分鐘 · 剩 574.5 分鐘", or reached until next month.
+function limitRow(label: string, used: number, limit: number, format: (value: number) => string): UsageRow {
+  return {
+    key: label,
+    label,
+    amount: `${format(used)} / ${format(limit)} · ${used < limit ? `剩 ${format(limit - used)}` : '已到上限，下個月 1 日恢復'}`,
+    callsWithUnknownUsage: 0,
+  }
 }
 
-// The platform pays for transcription and the platform model; when a limit is used up, uploads or the platform model
-// stop until next month (own-key models keep working). Shown for the current month only.
-function LimitsGroup({ usage }: { usage: MonthlyUsage }) {
-  const minutes = usage.transcription.reduce((total, sum) => total + sum.audioSeconds, 0) / 60
+// The platform pays for transcription and the platform model; when a limit is reached, uploads or the platform model
+// stop until next month (own-key models keep working).
+function limitRows(usage: MonthlyUsage): UsageRow[] {
+  const seconds = usage.transcription.reduce((total, sum) => total + sum.audioSeconds, 0)
   const tokens = usage.llm
     .filter((sum) => sum.keySource === 'platform')
     .reduce((total, sum) => total + sum.inputTokens + sum.outputTokens, 0)
-  const { transcriptionMinutes, platformTokens } = usage.limits
-  const rows = [
-    {
-      label: '轉錄',
-      text: limitText(
-        `${minutes.toFixed(1)}`,
-        `${formatCount(transcriptionMinutes)} 分鐘`,
-        minutes < transcriptionMinutes ? `${(transcriptionMinutes - minutes).toFixed(1)} 分鐘` : null,
-      ),
-    },
-    {
-      label: '平台模型',
-      text: limitText(
-        formatCount(tokens),
-        `${formatCount(platformTokens)} tokens`,
-        tokens < platformTokens ? `${formatCount(platformTokens - tokens)} tokens` : null,
-      ),
-    },
+  return [
+    limitRow('轉錄', seconds, usage.limits.transcriptionMinutes * 60, formatMinutes),
+    limitRow('平台模型', tokens, usage.limits.platformTokens, (value) => `${formatCount(value)} tokens`),
   ]
-  return (
-    <div role="group" aria-labelledby="usage-limits-title" className="flex flex-col gap-1.5">
-      <h3 id="usage-limits-title" className="text-xs font-medium text-muted-foreground">
-        用量上限
-      </h3>
-      <ul className="flex flex-col gap-1.5 text-sm">
-        {rows.map((row) => (
-          <li key={row.label} className="flex flex-wrap items-baseline gap-x-3">
-            <span>{row.label}</span>
-            <span className="ml-auto font-mono text-xs text-muted-foreground">{row.text}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
 }
 
 // 用量 (see ai-service CONTEXT.md) over one month, per model: what the user's own provider bills will roughly
@@ -183,7 +158,8 @@ export function MonthlyUsageSection() {
           </Button>
         </div>
       )}
-      {usage && usage.month === currentMonth && <LimitsGroup usage={usage} />}
+      {/* The limits are about this month: what's still allowed until the 1st. */}
+      {usage && usage.month === currentMonth && <UsageGroup title="用量上限" rows={limitRows(usage)} />}
       {isEmpty ? (
         <p className="text-sm text-muted-foreground">這個月沒有用量</p>
       ) : (

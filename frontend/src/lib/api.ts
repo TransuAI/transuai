@@ -42,7 +42,8 @@ export const authApi = {
 }
 
 export const uploadApi = {
-  presign: (params: { fileName: string; fileType: 'AUDIO' | 'VIDEO'; fileSizeBytes: number }) =>
+  // durationSeconds lets the gateway refuse a file that won't fit in this month's 用量上限 before it's sent.
+  presign: (params: { fileName: string; fileType: 'AUDIO' | 'VIDEO'; fileSizeBytes: number; durationSeconds: number }) =>
     apiFetch<PresignResponse>('/uploads/presign', { method: 'POST', body: params }),
 
   complete: (params: {
