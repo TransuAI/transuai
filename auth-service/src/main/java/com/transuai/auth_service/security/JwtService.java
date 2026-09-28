@@ -19,7 +19,7 @@ import io.jsonwebtoken.security.Keys;
 /**
  * 簽發 access/refresh token。access token 只在這裡簽發，驗證交給 Gateway（用同一把 secret
  * 本地驗章，不會每個請求都回頭呼叫這個服務）——這裡只負責驗證自己簽出去、拿來換發新 token 的
- * refresh token（見 {@link #parseRefreshToken}）。
+ * refresh token（見 {@link #parseRefreshToken}）；refresh token 的記錄、輪替與作廢在 {@link RefreshTokens}。
  */
 @Service
 public class JwtService {
@@ -37,14 +37,11 @@ public class JwtService {
         this.key = Keys.hmacShaKeyFor(properties.secret().getBytes(StandardCharsets.UTF_8));
     }
 
-    public record IssuedTokens(String accessToken, String refreshToken) {
+    /** refresh token 裡帶的：誰的、哪一個（jti，對到 refresh_tokens 的一列）。 */
+    public record RefreshClaims(UUID userId, UUID tokenId) {
     }
 
-    public IssuedTokens issueTokens(UUID userId, String email) {
-        return new IssuedTokens(issueAccessToken(userId, email), issueRefreshToken(userId));
-    }
-
-    private String issueAccessToken(UUID userId, String email) {
+    public String issueAccessToken(UUID userId, String email) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(userId.toString())
@@ -56,19 +53,23 @@ public class JwtService {
                 .compact();
     }
 
-    private String issueRefreshToken(UUID userId) {
-        Instant now = Instant.now();
+    /** 簽一個 refresh token；記錄與作廢在 {@link RefreshTokens}。 */
+    public String signRefreshToken(UUID userId, UUID tokenId, Instant expiresAt) {
         return Jwts.builder()
+                .id(tokenId.toString())
                 .subject(userId.toString())
                 .claim(CLAIM_TYPE, TYPE_REFRESH)
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(properties.refreshTokenTtlDays(), ChronoUnit.DAYS)))
+                .issuedAt(new Date())
+                .expiration(Date.from(expiresAt))
                 .signWith(key)
                 .compact();
     }
 
-    /** 驗證 refresh token 簽章/效期/type，回傳 user id。無效一律回 UNAUTHENTICATED，不細分原因。 */
-    public UUID parseRefreshToken(String refreshToken) {
+    /**
+     * 驗證 refresh token 簽章/效期/type，回傳誰的、哪一個。無效一律回 UNAUTHENTICATED，不細分原因；這個版本之前簽的（沒有 jti）也是
+     * 無效——作廢機制上線時所有人要重新登入一次。
+     */
+    public RefreshClaims parseRefreshToken(String refreshToken) {
         Claims claims;
         try {
             claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(refreshToken).getPayload();
@@ -79,9 +80,9 @@ public class JwtService {
             throw Status.UNAUTHENTICATED.withDescription("not a refresh token").asRuntimeException();
         }
         try {
-            return UUID.fromString(claims.getSubject());
-        } catch (IllegalArgumentException e) {
-            throw Status.UNAUTHENTICATED.withDescription("invalid refresh token subject").asRuntimeException();
+            return new RefreshClaims(UUID.fromString(claims.getSubject()), UUID.fromString(claims.getId()));
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw Status.UNAUTHENTICATED.withDescription("invalid refresh token").asRuntimeException();
         }
     }
 }

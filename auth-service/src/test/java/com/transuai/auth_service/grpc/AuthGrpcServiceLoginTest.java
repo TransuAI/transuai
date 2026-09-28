@@ -18,6 +18,7 @@ import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.LoginRequest;
 import com.transuai.auth_service.repository.UserRepository;
 import com.transuai.auth_service.security.JwtService;
+import com.transuai.auth_service.security.RefreshTokens;
 
 import io.grpc.stub.StreamObserver;
 
@@ -32,7 +33,7 @@ class AuthGrpcServiceLoginTest {
         PasswordEncoder encoder = spy(new BCryptPasswordEncoder());
         StreamObserver<AuthResponse> observer = mock(StreamObserver.class);
 
-        new AuthGrpcService(users, encoder, mock(JwtService.class)).login(
+        new AuthGrpcService(users, encoder, mock(JwtService.class), mock(RefreshTokens.class)).login(
                 LoginRequest.newBuilder().setEmail("nobody@example.com").setPassword("guess").build(), observer);
 
         verify(encoder).matches(eq("guess"), argThat(hash -> hash != null && hash.startsWith("$2")));

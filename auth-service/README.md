@@ -21,10 +21,17 @@
   → 驗證通過，解出 user_id → 呼叫下游服務（Upload/Transcription/AI/Auth）時帶 x-user-id metadata
   → 下游服務都不重新驗證 JWT，只信任 Gateway 轉發的 x-user-id（跟 upload-service 相同模式）
 access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）→ Gateway 直接轉發給 AuthService.Refresh
-  → AuthService 驗證 refresh token（自己簽的，自己驗），換發新的一組 access/refresh token
+  → AuthService 驗證 refresh token（自己簽的，自己驗；還要在 refresh_tokens 查得到、沒有作廢），舊的作廢、換發新的一組 access/refresh token
+登出 → POST /auth/logout（帶 refresh_token）→ AuthService.Logout 作廢那一串；登出所有裝置 → POST /auth/logout-all → AuthService.LogoutAllDevices
 ```
 
-`AuthService` 這個 gRPC service 比較特別：`Register` / `Login` / `Refresh` 三支不需要 `x-user-id`（呼叫當下使用者還沒有 token），只有 `GetMe` 需要——所以 `UserIdServerInterceptor` 這裡是**依 method** 而不是整個 service 豁免，跟 upload-service 用整個 service 豁免 `InternalJobService` 不一樣，理由寫在 [`UserIdServerInterceptor`](src/main/java/com/transuai/auth_service/grpc/auth/UserIdServerInterceptor.java) 的註解。
+每個簽出去的 refresh token 在 `refresh_tokens` 有一列（只存 SHA-256 雜湊；JWT 的 `jti` 對到這一列）。同一次登入一路換發出來的屬於
+同一串（family）。換發時舊的作廢（輪替）、同一串簽新的；已經換發過的又被用一次，表示有兩個人拿著同一個 token——視為被盜，整串作廢
+（正主下次換發也會失敗、要重新登入）。例外：剛換發的 10 秒內（`JWT_REFRESH_REUSE_GRACE_SECONDS`）再用一次不算，前端多個分頁共用同一個
+refresh token，幾乎同時換發時第二個拿的是剛被換掉的舊 token。登出作廢那一串；登出所有裝置作廢這位使用者的全部。已簽出的 access token
+不受影響，仍有效到過期（最多 15 分鐘，gateway 本地驗章）。這個機制上線之前簽的 refresh token 沒有 `jti`，換發會失敗，要重新登入一次。
+
+`AuthService` 這個 gRPC service 比較特別：`Register` / `Login` / `Refresh` / `Logout` 四支不需要 `x-user-id`（呼叫當下使用者還沒有 token，或 access token 已經過期；`Logout` 靠 refresh token 本身），`GetMe` 與 `LogoutAllDevices` 需要——所以 `UserIdServerInterceptor` 這裡是**依 method** 而不是整個 service 豁免，跟 upload-service 用整個 service 豁免 `InternalJobService` 不一樣，理由寫在 [`UserIdServerInterceptor`](src/main/java/com/transuai/auth_service/grpc/auth/UserIdServerInterceptor.java) 的註解。
 
 **`app.jwt.secret` 必須跟 gateway 的 `app.jwt.secret` 完全一致**——這是這兩個服務之間唯一的隱性耦合，本機開發共用同一組預設值即可，正式環境要覆蓋成夠長的隨機值時，兩邊要同時改。
 
@@ -89,7 +96,9 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 |---|---|
 | `Register` | 建立帳號，email 已存在回 `ALREADY_EXISTS`；成功直接簽發 token，不用再呼叫一次 `Login` |
 | `Login` | email/password 其中一項錯誤都回 `UNAUTHENTICATED`（不細分，避免帳號列舉）；帳號不存在時也比對一次 bcrypt 雜湊，回應時間跟密碼錯一樣長，不能用時間猜帳號。猜密碼的次數由 gateway 限流 |
-| `Refresh` | 用 refresh token 換發新的 access/refresh token 組合；token 無效、過期、或型別不對（例如誤傳 access token）都回 `UNAUTHENTICATED` |
+| `Refresh` | 用 refresh token 換發新的 access/refresh token 組合，舊的作廢（輪替）；token 無效、過期、型別不對（例如誤傳 access token）、查不到、已經作廢都回 `UNAUTHENTICATED`；已經換發過的又被用一次（超過 10 秒寬限）視為被盜，整串作廢 |
+| `Logout` | 作廢這個 refresh token 所在的那一串；token 無效或已經作廢也回成功 |
+| `LogoutAllDevices` | 依 `x-user-id` 作廢這位使用者所有的 refresh token |
 | `GetMe` | 依 `x-user-id` 查目前使用者資訊，找不到（例如帳號已被刪除）回 `NOT_FOUND` |
 
 ## 環境變數
@@ -102,6 +111,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `JWT_SECRET` | `dev-only-shared-secret-change-me-before-any-real-deployment` | HS256 簽章密鑰，**必須跟 gateway 的 `JWT_SECRET` 一致**；正式環境務必覆蓋 |
 | `JWT_ACCESS_TOKEN_TTL_MINUTES` | `15` | access token 效期 |
 | `JWT_REFRESH_TOKEN_TTL_DAYS` | `7` | refresh token 效期 |
+| `JWT_REFRESH_REUSE_GRACE_SECONDS` | `10` | 已經換發過的 refresh token 在這幾秒內再用一次不算被盜（多個分頁同時換發） |
 
 ## 專案結構
 
@@ -109,7 +119,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 src/main/java/com/transuai/auth_service/
   domain/           User entity
   repository/        Spring Data JPA repository
-  security/           JwtProperties（@ConfigurationProperties）、JwtService（簽發 access/refresh、驗證 refresh）
+  security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）
   config/             SecurityConfig（BCryptPasswordEncoder bean）
   grpc/               AuthGrpcService（4 支 rpc 實作）、UserMapper（domain ↔ proto）
   grpc/auth/          UserIdServerInterceptor（依 method 豁免，見上方「身分模型」）、GrpcAuthContext
@@ -132,6 +142,6 @@ src/main/java/com/transuai/auth_service/
 ## 已知限制 / 待辦
 
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
-- Refresh token 是純 stateless JWT，沒有存 DB，無法個別撤銷（例如使用者登出或換裝置時沒辦法讓舊 refresh token 失效）——對應 [`architecture-design.md`](../architecture-design.md) §7 簡化建議「先做簡單 JWT，不做完整 OAuth2 flow」，要做撤銷需要另開 `refresh_tokens` 表追蹤
-- 沒有帳號刪除、密碼重設、email 驗證等功能，架構文件 §3.1 只列了 register/login/refresh/me 四支，這裡照實作
-- 測試很少：只有 `Login` 的單元測試（`AuthGrpcServiceLoginTest`，帳號不存在也會比對密碼），其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）
+- 過期、作廢的 `refresh_tokens` 不會自動清掉（每次登入、換發多一列），量大了要加定期清理
+- 沒有帳號刪除、密碼重設、email 驗證等功能
+- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出（`RefreshTokenTest`、`RefreshTokenGraceTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）

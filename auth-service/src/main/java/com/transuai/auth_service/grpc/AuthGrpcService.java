@@ -10,12 +10,16 @@ import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.auth.grpc.v1.GetMeRequest;
 import com.transuai.auth.grpc.v1.LoginRequest;
+import com.transuai.auth.grpc.v1.LogoutAllDevicesRequest;
+import com.transuai.auth.grpc.v1.LogoutRequest;
+import com.transuai.auth.grpc.v1.LogoutResponse;
 import com.transuai.auth.grpc.v1.RefreshRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
 import com.transuai.auth.grpc.v1.User;
 import com.transuai.auth_service.grpc.auth.GrpcAuthContext;
 import com.transuai.auth_service.repository.UserRepository;
 import com.transuai.auth_service.security.JwtService;
+import com.transuai.auth_service.security.RefreshTokens;
 
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
@@ -30,6 +34,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final RefreshTokens refreshTokens;
     // 帳號不存在時也拿密碼比對這個雜湊，回應時間才跟「密碼錯」一樣長，不能用來猜哪些 email 註冊過。第一次用到才產生
     // （跟真的密碼用同一個 encoder、同樣的成本）。
     private volatile String unknownUserHash;
@@ -61,7 +66,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
                 .build();
         user = userRepository.save(user);
 
-        responseObserver.onNext(buildAuthResponse(user));
+        responseObserver.onNext(buildAuthResponse(user, refreshTokens.issue(user.getId())));
         responseObserver.onCompleted();
     }
 
@@ -77,21 +82,35 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
             return;
         }
 
-        responseObserver.onNext(buildAuthResponse(user));
+        responseObserver.onNext(buildAuthResponse(user, refreshTokens.issue(user.getId())));
         responseObserver.onCompleted();
     }
 
     @Override
     public void refresh(RefreshRequest request, StreamObserver<AuthResponse> responseObserver) {
-        UUID userId = jwtService.parseRefreshToken(request.getRefreshToken());
-        com.transuai.auth_service.domain.User user = userRepository.findById(userId).orElse(null);
+        RefreshTokens.Exchange exchange = refreshTokens.exchange(request.getRefreshToken());
+        com.transuai.auth_service.domain.User user = userRepository.findById(exchange.userId()).orElse(null);
         if (user == null) {
             responseObserver.onError(
                     Status.UNAUTHENTICATED.withDescription("user no longer exists").asRuntimeException());
             return;
         }
 
-        responseObserver.onNext(buildAuthResponse(user));
+        responseObserver.onNext(buildAuthResponse(user, exchange.refreshToken()));
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void logout(LogoutRequest request, StreamObserver<LogoutResponse> responseObserver) {
+        refreshTokens.logout(request.getRefreshToken());
+        responseObserver.onNext(LogoutResponse.getDefaultInstance());
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void logoutAllDevices(LogoutAllDevicesRequest request, StreamObserver<LogoutResponse> responseObserver) {
+        refreshTokens.logoutAll(GrpcAuthContext.currentUserId());
+        responseObserver.onNext(LogoutResponse.getDefaultInstance());
         responseObserver.onCompleted();
     }
 
@@ -115,11 +134,10 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
         return unknownUserHash;
     }
 
-    private AuthResponse buildAuthResponse(com.transuai.auth_service.domain.User user) {
-        JwtService.IssuedTokens tokens = jwtService.issueTokens(user.getId(), user.getEmail());
+    private AuthResponse buildAuthResponse(com.transuai.auth_service.domain.User user, String refreshToken) {
         return AuthResponse.newBuilder()
-                .setAccessToken(tokens.accessToken())
-                .setRefreshToken(tokens.refreshToken())
+                .setAccessToken(jwtService.issueAccessToken(user.getId(), user.getEmail()))
+                .setRefreshToken(refreshToken)
                 .setUser(UserMapper.toProto(user))
                 .build();
     }

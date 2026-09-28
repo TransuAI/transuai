@@ -17,7 +17,8 @@ import io.grpc.Status;
 /**
  * AuthService 是 Gateway 唯一會在使用者還沒有 token 之前呼叫的服務（Register/Login/Refresh），
  * 所以跟 upload-service 的 UserIdServerInterceptor 不同：這裡不能整個 service 一起豁免，
- * 只有 Register/Login/Refresh 這三支不需要 "x-user-id"；GetMe 已經是「使用者已登入」的查詢，
+ * 只有 Register/Login/Refresh/Logout 這四支不需要 "x-user-id"（Logout 靠 refresh token 本身）；GetMe、LogoutAllDevices
+ * 已經是「使用者已登入」的操作，
  * 一樣信任 Gateway 驗證 JWT 後轉發過來的 "x-user-id"，不重新驗證 JWT。
  *
  * grpc.health.v1.Health / grpc.reflection.v1.ServerReflection 是基礎設施用的內建服務，不需要身分。
@@ -37,7 +38,8 @@ public class UserIdServerInterceptor implements ServerInterceptor {
     private static final Set<String> UNAUTHENTICATED_METHODS = Set.of(
             "transuai.auth.v1.AuthService/Register",
             "transuai.auth.v1.AuthService/Login",
-            "transuai.auth.v1.AuthService/Refresh");
+            "transuai.auth.v1.AuthService/Refresh",
+            "transuai.auth.v1.AuthService/Logout");
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> call, Metadata headers,
