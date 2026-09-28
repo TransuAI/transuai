@@ -19,7 +19,7 @@
 
 ## 前置需求
 
-- 先啟動基礎設施：`cd ../infra && docker compose up -d`（Postgres、RabbitMQ、MinIO；Redis 沒開時逐字稿快取略過，照樣讀資料庫）
+- 先啟動基礎設施：`cd ../infra && docker compose up -d`（Postgres、RabbitMQ、MinIO、Redis；Redis 沒開時逐字稿快取略過，照樣讀資料庫）
 - Upload Service 要跑在 `localhost:9090`（見 [`../upload-service`](../upload-service)），因為要呼叫它的 `InternalJobService.UpdateJobStatus`
 - 一組 Deepgram API Key（[console.deepgram.com](https://console.deepgram.com)，新帳號送 $200 額度、不用綁卡），填進 `.env` 的 `DEEPGRAM_API_KEY`
 
@@ -85,12 +85,15 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 ### 逐字稿快取
 
 `GetTranscript` 讀很多（問答的每一題、出題、會後處理、重新產生摘要、前端），只在編輯時才變，所以做 cache-aside（`app/services/transcript_cache.py`）：
-Redis 的 `transcript:{job_id}` 是一個 hash，存序列化的 `Transcript` 與它的 `revision`，有效 10 分鐘（`TRANSCRIPT_CACHE_TTL_SECONDS`）。
+Redis 的 `transcript:v1:{job_id}` 是一個 hash，存序列化的 `Transcript` 與它的 `revision`，有效 10 分鐘（`TRANSCRIPT_CACHE_TTL_SECONDS`）。
+`v1` 是格式的版本：`Transcript` 的欄位變了就換版本，舊格式的快取不會被讀到。
 
 - 讀：有內容就直接回；沒有才讀資料庫並寫回。找不到的逐字稿不記。
-- 三種編輯（`UpdateSegmentText`、`RenameSpeaker`、`AssignSegmentSpeaker`）真的改了之後（已經寫進資料庫），記下最新的 `revision` 並丟掉內容。
+- 三種編輯（`UpdateSegmentText`、`RenameSpeaker`、`AssignSegmentSpeaker`）真的改了之後（已經寫進資料庫），記下最新的 `revision` 並丟掉內容；
+  pipeline 存檔之後也是（訊息重送時會再存一次）。之後要刪除逐字稿的（例如刪除帳號）也要這樣做。
 - 寫回只在自己讀到的 `revision` 不比記下的舊時才寫（Lua 原子地比較）：編輯之前就開始、晚一步寫回的讀取帶不回舊版，編輯後下一次讀到的一定是新版。
-- Redis 連不上時照樣讀資料庫，只記 log；編輯時連不上的話，舊內容最多留到有效時間結束。
+- Redis 連不上時照樣讀資料庫，只記 log，而且不重試（redis-py 預設重試 10 次，實測連不上時一次要 3.7 秒以上；逾時 0.5 秒）；編輯時
+  連不上的話，舊內容最多留到有效時間結束。
 
 環境變數：`REDIS_HOST`（`localhost`）、`REDIS_PORT`（`6379`）、`REDIS_PASSWORD`（空）、`REDIS_TIMEOUT_SECONDS`（`0.5`）、`TRANSCRIPT_CACHE_TTL_SECONDS`（`600`）。
 
@@ -135,7 +138,7 @@ gRPC 服務本身（`tests/test_transcript_grpc.py`：查詢與啟動 migration�
 Postgres（`transcription_test_db`）與 Redis（隨機 port），跑完自動刪掉，不用先開 `infra` 的 docker compose（只要 Docker 有在跑），絕對不會碰到
 `transcription_db`；用服務啟動時同一套 `init_db()` 跑 migration，再在 process 裡起一個真的 gRPC server 給測試呼叫（參考 upload-service 的 IT 做法）。
 
-其餘 pipeline 測試不需要 infra 或任何 API key——`tests/conftest.py` 的 `mocks` fixture 把 pipeline 會碰到的所有外部 I/O（語音辨識、下載、
+其餘 pipeline 測試不需要 API key（`tests/conftest.py` 一載入就起上面兩個容器，所以跑任何測試都要有 Docker）——`tests/conftest.py` 的 `mocks` fixture 把 pipeline 會碰到的所有外部 I/O（語音辨識、下載、
 抽音軌、gRPC 狀態回報、DB session / 存檔）都 mock 掉，語音辨識直接回傳不綁定廠商的逐字資料，驗證 `process_message()` 這個 seam 本身的邏輯：
 `tests/test_pipeline_segmentation.py` 驗證切片段與講者編號，`tests/test_pipeline_retry.py` 驗證重試分流，
 `tests/test_pipeline_traditional_chinese.py` 驗證存進去的逐字稿有轉成繁體（以及非中文不轉、只換字形不換詞）；
