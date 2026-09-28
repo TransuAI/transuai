@@ -47,11 +47,12 @@ docker compose up -d
 
 啟動後所有基礎設施會掛在同一個名為 `app-network` 的 Docker network 上，供各微服務接入。
 
-compose 裡每個服務都是 `restart: unless-stopped`：`up` 過一次之後，每次開 Docker Desktop 都會自動起來。改用模式二（k8s）時
-用不到這一套，記得停掉（只停容器、資料留在 volume，要用時 `docker compose start`）：
+compose 裡每個服務都是 `restart: unless-stopped`：`up` 過一次之後，每次開 Docker Desktop 都會自動起來。用模式二（k8s）時，
+服務用的是叢集裡的那一套，這一套只剩 **ai-service 的測試**要用（對 `localhost:5432` 的 Postgres 建獨立的 `ai_test_db`），
+其他不用的可以停掉（只停容器、資料留在 volume，要用時 `docker compose start <服務>`）：
 
 ```bash
-docker compose stop
+docker compose stop redis rabbitmq minio
 ```
 
 > Redis 目前沒有任何服務真的在用（保留給未來的 cache/rate limit），開著純粹是佔位，不影響現有功能。
