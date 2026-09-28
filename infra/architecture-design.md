@@ -97,7 +97,8 @@ MQ 事件外互不直接呼叫，也不會有即時跨庫 join。
 ## 3. API 設計
 
 以下都是 **Gateway 對外的 REST API**（實際協定見上方 2 節：Gateway 內部呼叫下游服務一律走 gRPC，
-proto 定義在 `infra/proto/*.proto`）。下游服務本身沒有對外 REST endpoint。
+proto 定義在 `infra/proto/*.proto`）。下游服務本身沒有對外 REST endpoint。所有 API 都經過 gateway 的限流（每位使用者、沒登入的
+每個 IP，花錢的功能另外更嚴），超過回 429，見 `gateway/README.md`「限流」。
 
 ### 3.1 Auth Service
 
