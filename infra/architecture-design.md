@@ -602,8 +602,8 @@ CREATE TABLE export_outputs (
 **實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
 都跟實作一致，`job.failed` 目前由 transcription-service、ai-service 各自在 pipeline 失敗時發送。
 ai-service 消費的每個 queue 各有一組自己的 retry queue（`<queue>.retry.2s`／`.4s`，見 ai-service ADR 0001）。
-Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登入、註冊的計數器，見 `gateway/README.md`「限流」）；之後也放
-cache-aside 的快取（見 `.scratch/pre-launch-hardening`）。
+Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登入、註冊的計數器，見 `gateway/README.md`「限流」）與 cache-aside
+的快取（Job 的擁有者，見 `gateway/README.md`「快取」）；Redis 連不上時兩者都照常服務（限流放行、快取當作沒記住）。
 
 ---
 
