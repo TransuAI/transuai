@@ -133,6 +133,15 @@ class Grounding:
     plausible_due: Callable[[str], bool]  # 這個期限（YYYY-MM-DD）是不是在上傳當天到一年後之間
 
 
+_WEEKDAYS = "一二三四五六日"
+
+
+def relative_dates_rule(uploaded: datetime) -> str:
+    """提示裡的一句：相對日期依錄音上傳的時間（使用者時區）換算。會後處理的 agent 與「約好的會議」共用，換算才一致。"""
+    return (f"相對日期（明天、下週三、兩週後）依錄音上傳時間換算：上傳時間是 {uploaded.isoformat()}"
+            f"（星期{_WEEKDAYS[uploaded.weekday()]}）")
+
+
 def grounding_for(lines: list[tuple[float, str | None, str]], uploaded_day: date) -> Grounding:
     """uploaded_day 是錄音上傳那天（使用者時區）：系統提示也是依上傳時間換算相對日期，期限的下限跟它一致。"""
     starts = [start for start, _speaker, _text in lines]

@@ -351,9 +351,9 @@ def queued(ai_stub, ready, rabbitmq, db_session):
     return Queued(job_id, run.id, json.dumps(message).encode())
 
 
-def work(queued, retry_count=0):
+def work(queued, retry_count=0, transcript=TRANSCRIPT):
     with patch.object(post_meeting, "transcript_client") as transcript_client:
-        transcript_client.get_transcript.return_value = TRANSCRIPT
+        transcript_client.get_transcript.return_value = transcript
         post_meeting.process_post_meeting_requested(queued.message, retry_count=retry_count)
 
 
@@ -1524,7 +1524,7 @@ NEXT_WEDNESDAY = {"title": "搬家確認會議", "date": "2026-11-18", "time": "
 
 
 def test_a_meeting_the_transcript_schedules_is_proposed_as_a_calendar_event(ai_stub, queued, fake_llm, calendar):
-    # qwen3:14b never proposed one inside the agent loop, but gets them right when asked on their own (ADR 0011).
+    # qwen3:14b never proposed one inside the agent loop, but gets them right when asked on their own (ADR 0013).
     fake_llm.reply("好。")
     fake_llm.reply(scheduled(NEXT_WEDNESDAY))
 
@@ -1540,15 +1540,64 @@ def test_a_meeting_the_transcript_schedules_is_proposed_as_a_calendar_event(ai_s
     assert "時間請確認" in arguments["description"]  # only 「下午」 was said: the model's 14:00 is a guess
 
 
-def test_a_time_said_in_the_meeting_is_used_as_is(ai_stub, queued, fake_llm, calendar):
+def said_at_30s(text: str) -> transcription_pb2.Transcript:
+    """TRANSCRIPT with the line at 00:30 saying `text` instead."""
+    return transcription_pb2.Transcript(revision=1, segments=[segment(0.0, "搬家的事大家看一下", "S1"), segment(30.0, text, "S2")],
+                                        speakers=TRANSCRIPT.speakers)
+
+
+@pytest.mark.parametrize("line, time_words, model_time, start", [
+    ("那我們下週三下午三點再開一次會確認", "下午三點", "15:00", "2026-11-18T15:00:00+08:00"),
+    ("那我們下週三下午三點再開一次會確認", "下午三點", "03:00", "2026-11-18T15:00:00+08:00"),  # 「下午」 wins over 03:00
+    ("訂於下週三上午10時召開確認會議", "上午10時", "10:00", "2026-11-18T10:00:00+08:00"),  # formal wording
+    ("訂於下週三下午2時30分召開確認會議", "下午2時30分", "14:30", "2026-11-18T14:30:00+08:00"),
+])
+def test_a_time_said_in_the_meeting_is_used(ai_stub, queued, fake_llm, calendar, line, time_words, model_time, start):
     fake_llm.reply("好。")
+    fake_llm.reply(scheduled({**NEXT_WEDNESDAY, "time": model_time, "time_words": time_words, "quote": line}))
+
+    work(queued, transcript=said_at_30s(line))
+
+    arguments = json.loads(latest(ai_stub, queued).proposals[0].arguments_json)
+    assert arguments["start"] == start
+    assert "時間請確認" not in arguments["description"]
+
+
+def test_a_time_the_transcript_never_says_is_not_trusted(ai_stub, queued, fake_llm, calendar):
+    fake_llm.reply("好。")  # the transcript says only 「下午」
     fake_llm.reply(scheduled({**NEXT_WEDNESDAY, "time": "15:00", "time_words": "下午三點"}))
 
     work(queued)
 
     arguments = json.loads(latest(ai_stub, queued).proposals[0].arguments_json)
-    assert (arguments["start"], arguments["end"]) == ("2026-11-18T15:00:00+08:00", "2026-11-18T16:00:00+08:00")
-    assert "時間請確認" not in arguments["description"]
+    assert (arguments["start"], arguments["end"]) == ("2026-11-18T14:00:00+08:00", "2026-11-18T17:00:00+08:00")
+    assert "時間請確認" in arguments["description"]
+
+
+@pytest.mark.parametrize("time_words, start, end", [
+    ("傍晚", "2026-11-18T17:00:00+08:00", "2026-11-18T19:00:00+08:00"),
+    ("今晚", "2026-11-18T19:00:00+08:00", "2026-11-18T21:00:00+08:00"),
+    ("早上", "2026-11-18T09:00:00+08:00", "2026-11-18T12:00:00+08:00"),
+    (None, "2026-11-18T09:00:00+08:00", "2026-11-18T10:00:00+08:00"),
+])
+def test_only_a_part_of_the_day_gives_that_part_to_confirm(ai_stub, queued, fake_llm, calendar, time_words, start, end):
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled({**NEXT_WEDNESDAY, "time": "10:00", "time_words": time_words}))
+
+    work(queued)
+
+    arguments = json.loads(latest(ai_stub, queued).proposals[0].arguments_json)
+    assert (arguments["start"], arguments["end"]) == (start, end)
+    assert "時間請確認" in arguments["description"]
+
+
+def test_two_meetings_scheduled_on_the_same_day_are_both_proposed(ai_stub, queued, fake_llm, calendar):
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled({**NEXT_WEDNESDAY, "title": "籌備會", "time_words": "上午"}, NEXT_WEDNESDAY))
+
+    work(queued)
+
+    assert [json.loads(p.arguments_json)["summary"] for p in latest(ai_stub, queued).proposals] == ["籌備會", "搬家確認會議"]
 
 
 def test_the_model_is_asked_about_scheduled_meetings_with_the_whole_transcript(queued, fake_llm, calendar):

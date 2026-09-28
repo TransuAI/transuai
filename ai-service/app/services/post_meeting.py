@@ -49,6 +49,7 @@ from app.services.agent_tools import (
     grounding_for,
     job_tools,
     notion_tools,
+    relative_dates_rule,
     result_text,
     tasks_tools,
 )
@@ -75,8 +76,6 @@ _MAX_MALFORMED_TURNS = 2
 _MAX_TOKENS = 4096
 STUCK_REASON = "會後處理逾時，請再試一次"
 PROPOSED = "已記錄為提案，等使用者確認後才會執行"
-_WEEKDAYS = "一二三四五六日"
-_CALENDAR_EVENT = "calendar_event"
 
 
 class NotAvailable(Exception):
@@ -405,7 +404,7 @@ def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[s
 - 期限：會議有講到才填（相對日期照下面的方式換算）；沒講期限就不要填，不要自己設。
 - 依據的錄音時間：用 search_transcript 找到那句話，照抄它前面的「分:秒」；沒找到就不要填，不要用 00:00 或上傳時間代替。
 - 會議紀錄與 email 草稿用自然、平實的台灣繁體中文，像同事寫的會議紀錄，不要官腔。
-- 相對日期（明天、下週三、兩週後）依錄音上傳時間換算：上傳時間是 {uploaded.isoformat()}（星期{_WEEKDAYS[uploaded.weekday()]}），使用者時區是 {run.timezone}。
+- {relative_dates_rule(uploaded)}，使用者時區是 {run.timezone}。
 - 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。{extra_rules}
 - 你總共最多只能呼叫 {MAX_TOOL_CALLS} 次工具（讀取加寫入）、最多 {model_calls} 輪，到了就會被停下。每一輪可以一次呼叫多個工具：同一輪就把要讀的一起讀、要提的案一起提。先讀摘要與章節，真的需要細節才搜尋逐字稿，要留足夠的次數給提案。
 - 做完就直接回覆一段簡短的說明，不要再呼叫工具。"""
@@ -441,19 +440,18 @@ def _service_token(user_id: uuid.UUID, service: str, name: str) -> str:
 
 def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_id: uuid.UUID) -> PostMeetingStatus:
     """先跑 agent（_agent_loop），有日曆工具時再另外問一次會議裡約好的會議、提成行事曆活動（_propose_scheduled_meetings）；
-    兩者合起來最多 MAX_MODEL_CALLS 次 LLM 呼叫、TIME_LIMIT 的時間。"""
+    兩者合起來最多 MAX_MODEL_CALLS 次 LLM 呼叫。agent 過了 TIME_LIMIT 就不再問（那一次呼叫本身不另外限時）。"""
     setup = _service_setup(user_id)
     grounding = grounding_for(content.lines, _uploaded(run).date())
     service_tools = _connected_service_tools(user_id, setup, frozenset({setup.todo_destination}), grounding)
     tools = {tool.name: tool for tool in job_tools(content) + service_tools}
     meter = UsageMeter(user_id, run.job_id, LlmFeature.POST_MEETING)
-    finds_meetings = "calendar_create_event" in tools
+    calendar = tools.get("calendar_create_event")
     deadline = time.monotonic() + TIME_LIMIT.total_seconds()
     status = _agent_loop(run, model, content, setup, tools, meter,
-                         MAX_MODEL_CALLS - 1 if finds_meetings else MAX_MODEL_CALLS, deadline)
-    # Past TIME_LIMIT nothing more is asked, not even this.
-    if finds_meetings and time.monotonic() < deadline:
-        _propose_scheduled_meetings(run, model, content, grounding, meter)
+                         MAX_MODEL_CALLS - 1 if calendar else MAX_MODEL_CALLS, deadline)
+    if calendar and time.monotonic() < deadline:
+        _propose_scheduled_meetings(run, model, content, grounding, meter, calendar)
     return status
 
 
@@ -500,9 +498,10 @@ def _agent_loop(run: PostMeetingRun, model: ChatModel, content: JobContent, setu
 
 
 def _propose_scheduled_meetings(run: PostMeetingRun, model: ChatModel, content: JobContent, grounding: Grounding,
-                                meter: UsageMeter) -> None:
-    """會議裡約好的會議提成行事曆活動（scheduled_meetings）。同一天已經有行事曆活動的提案（agent 這次提的、之前執行過的）
-    就不再提：同一個會議的名稱每次寫法不同，認不出是同一件事。問不到（LLM 呼叫失敗）就算了，agent 的提案照樣保留。"""
+                                meter: UsageMeter, calendar: AgentTool) -> None:
+    """會議裡約好的會議（scheduled_meetings）經由日曆工具提成行事曆活動（跟模型提的一樣檢查參數）。同一天已經有行事曆活動的
+    提案（agent 這次提的、之前執行過的）就不再提：同一個會議的名稱每次寫法不同，認不出是同一件事；這次找到的同一天不同會議
+    都提。問不到（LLM 呼叫失敗）就算了，agent 的提案照樣保留。"""
     _progress(run.id, "正在找會議裡約好的會議…")
     uploaded = _uploaded(run)
     try:
@@ -510,17 +509,14 @@ def _propose_scheduled_meetings(run: PostMeetingRun, model: ChatModel, content: 
     except LlmError as exc:
         logger.warning("post-meeting run %s: asking about scheduled meetings failed: %s", run.id, exc)
         return
-    taken = _in_session(lambda s: {
+    booked_days = _in_session(lambda s: {
         _event_day(p.arguments, uploaded) for p in list_proposals(s, run.id) + created_proposals(s, run.job_id)
-        if p.kind == _CALENDAR_EVENT})
-    for meeting in meetings:
-        if meeting.start.date() in taken:
-            continue
-        taken.add(meeting.start.date())
-        _in_session(lambda s, meeting=meeting: add_proposal(s, run.id, "google_calendar", "calendar_create_event",
-                                                             _CALENDAR_EVENT, meeting.event_arguments()))
-    logger.info("post-meeting run %s: %d scheduled meeting(s) found", run.id, len(meetings))
-
+        if p.kind == calendar.proposal_kind})
+    fresh = [meeting for meeting in meetings if meeting.start.date() not in booked_days]
+    for meeting in dict.fromkeys(fresh):  # the same meeting found twice: once
+        _call_tool(run.id, calendar, calendar.name, json.dumps(meeting.event_arguments(), ensure_ascii=False))
+    logger.info("post-meeting run %s: %d scheduled meeting(s) found, %d on days without a calendar proposal",
+                run.id, len(meetings), len(fresh))
 
 
 def _event_day(arguments: dict, uploaded: datetime) -> date | None:
