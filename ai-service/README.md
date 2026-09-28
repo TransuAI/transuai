@@ -136,6 +136,11 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
   `todos`（每條：內容必填，負責人、期限 YYYY-MM-DD、依據的錄音時間選填）。執行時組成子頁面內容：會議紀錄加一段「## 待辦」，
   待辦去處是 Notion 時是打勾清單（`- [ ]`），是 Google Tasks 時是一般清單；呼叫 `notion-create-pages`，`parent` 是
   `{"type": "page_id", "page_id": …}`。舊的 `notion_create_todo` 提案執行時寫明「這種提案已經不再提供」。
+- **待辦的期限與依據時間要有根據**：本機模型常編（ADR 0011）。提示要求會議沒講期限就不填、依據時間照抄 `search_transcript`
+  結果前面的「分:秒」、沒找到就不填，工具說明裡也不放會被照抄的範例時間；程式另外在模型提案時檢查（`agent_tools.Grounding`）：
+  依據時間附近 3 秒內要有一句話開始、期限要在會議當天到一年後之間，對不到就拿掉（留空讓使用者自己填）。使用者確認時填的值不檢查。
+  提示也要求報告、宣傳、公告類的內容不列成待辦，有日曆工具時要把約好的下次開會提成行事曆活動（qwen3:14b 實測仍然不提，見
+  `.scratch/ai-answer-quality/issues/01`）。
 - 搜尋逐字稿先做正規化比對（全形半形、空白、標點），找不到再用雙字重疊的比例（至少 3/4）：語音辨識常把「3 月 24 日」寫成「3 月 24」。
 - **用哪個模型**：預設模型是自有金鑰的就用它；是平台模型的，用部署設定的會後處理平台模型 `AI_POST_MEETING_PLATFORM_MODEL`
   （HF 路由的模型 ID，可以帶 `:供應商`——同一個模型不是每家供應商都支援工具呼叫，要指定；本機 k8s 設成

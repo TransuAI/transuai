@@ -6,7 +6,7 @@ import re
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -106,6 +106,43 @@ def normalize_text(text: str) -> str:
 
 def _bigrams(text: str) -> set[str]:
     return {text[i:i + 2] for i in range(len(text) - 1)} or {text}
+
+
+# 模型給的「依據的錄音時間」要對得到有人講話的地方：本機模型常填 00:00、上傳時間，或照抄說明裡的範例（ADR 0011）。
+_TIME_TOLERANCE_SECONDS = 3
+
+
+def _seconds(clock: str) -> float | None:
+    """「12:34」或「1:02:03」→ 秒數；不是時間就是 None。"""
+    parts = clock.strip().split(":")
+    if not 2 <= len(parts) <= 3 or not all(part.isdigit() for part in parts):
+        return None
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + int(part)
+    return float(seconds)
+
+
+@dataclass(frozen=True)
+class Grounding:
+    """模型提案時檢查待辦的依據時間與期限：本機模型常編（ADR 0011）——時間填 00:00、上傳時間或範例，期限寫錯年份或早於
+    會議。對不到的就不留（留空讓使用者自己填）。使用者確認的值不檢查，所以執行時不給 Grounding。"""
+
+    spoken: Callable[[str], bool]  # 這個「分:秒」附近有沒有一句話開始
+    plausible_due: Callable[[str], bool]  # 這個期限（YYYY-MM-DD）是不是在會議當天到一年後之間
+
+
+def grounding_for(lines: list[tuple[float, str | None, str]], meeting_day: date) -> Grounding:
+    starts = [start for start, _speaker, _text in lines]
+
+    def spoken(clock: str) -> bool:
+        seconds = _seconds(clock)
+        return seconds is not None and any(abs(start - seconds) <= _TIME_TOLERANCE_SECONDS for start in starts)
+
+    def plausible_due(due: str) -> bool:
+        return meeting_day <= date.fromisoformat(due) <= meeting_day + timedelta(days=366)
+
+    return Grounding(spoken, plausible_due)
 
 
 def search_lines(lines: list[tuple[float, str | None, str]], query: str, *, limit: int = 8) -> list[str]:
@@ -255,7 +292,23 @@ def _task_notes(args: dict[str, Any]) -> str:
     return "\n\n".join(part for part in (header, args.get("notes") or "") if part)
 
 
-def tasks_tools(access_token: Callable[[], str]) -> list[AgentTool]:
+def _grounded_time(args: dict[str, Any], grounding: Grounding | None) -> str | None:
+    """依據的錄音時間；模型提案時（有 grounding）對不到有人講話的地方就不留。"""
+    clock = _optional_text(args, "timestamp")
+    return None if clock is not None and grounding is not None and not grounding.spoken(clock) else clock
+
+
+def _grounded_due(args: dict[str, Any], grounding: Grounding | None) -> str | None:
+    """期限（格式不對 raise ToolArgumentError）；模型提案時（有 grounding）不在會議當天到一年後之間就不留。"""
+    due = _due_argument(args)
+    return None if due is not None and grounding is not None and not grounding.plausible_due(due) else due
+
+
+_TIMESTAMP_RULE = "依據的錄音時間：照抄 search_transcript 結果前面的「分:秒」；沒有找到依據就不要填"
+
+
+def tasks_tools(access_token: Callable[[], str], grounding: Grounding | None = None) -> list[AgentTool]:
+    """grounding：模型提案時檢查依據的時間與期限；執行時（使用者確認的值）不給。"""
     def open_tasks(_args: dict[str, Any]) -> Any:
         try:
             return list_open_tasks(access_token()) or "預設清單裡沒有未完成的待辦"
@@ -263,8 +316,9 @@ def tasks_tools(access_token: Callable[[], str]) -> list[AgentTool]:
             raise ToolFailed(str(exc)) from exc
 
     def todo_proposal(args: dict[str, Any]) -> dict[str, Any]:
-        proposal = {"title": text_argument(args, "title"), "due": _due_argument(args),
-                    **{name: _optional_text(args, name) for name in ("notes", "assignee", "timestamp")}}
+        proposal = {"title": text_argument(args, "title"), "due": _grounded_due(args, grounding),
+                    **{name: _optional_text(args, name) for name in ("notes", "assignee")},
+                    "timestamp": _grounded_time(args, grounding)}
         return {name: value for name, value in proposal.items() if value is not None}
 
     def create(args: dict[str, Any]) -> str:
@@ -277,11 +331,11 @@ def tasks_tools(access_token: Callable[[], str]) -> list[AgentTool]:
         AgentTool("tasks_list_tasks", "（Google Tasks，讀取）列出使用者預設清單裡還沒完成的待辦（標題、期限），避免重複提出。",
                   _object({}, []), ToolKind.READ, "正在查看你的 Google Tasks…", open_tasks),
         AgentTool("tasks_create_task", "（Google Tasks，寫入）在使用者的 Google Tasks 預設清單建立一個待辦。assignee 填負責的講者"
-                  "目前的名字，timestamp 填依據的錄音時間（例如 12:34），due 是期限。只會記成提案，等使用者確認。",
+                  "目前的名字；due 是期限，會議沒講期限就不要填；timestamp 是" + _TIMESTAMP_RULE + "。只會記成提案，等使用者確認。",
                   _object({"title": {"type": "string"}, "notes": {"type": "string", "description": "補充說明"},
                            "assignee": {"type": "string"},
                            "due": {"type": "string", "description": "YYYY-MM-DD，例如 2026-11-20"},
-                           "timestamp": {"type": "string", "description": "依據的錄音時間，例如 12:34"}}, ["title"]),
+                           "timestamp": {"type": "string", "description": _TIMESTAMP_RULE}}, ["title"]),
                   ToolKind.WRITE, "正在整理行動提案…", todo_proposal, service="google_tasks", proposal_kind="google_task",
                   execute=create),
     ]
@@ -290,7 +344,7 @@ def tasks_tools(access_token: Callable[[], str]) -> list[AgentTool]:
 # --- Notion（官方遠端 MCP） ---
 
 
-def _meeting_todos(args: dict[str, Any]) -> list[dict[str, str]]:
+def _meeting_todos(args: dict[str, Any], grounding: Grounding | None = None) -> list[dict[str, str]]:
     """會議紀錄子頁面裡的待辦：每條標題必填，負責人、期限（YYYY-MM-DD）、依據的錄音時間選填；空白的欄位拿掉。"""
     todos = args.get("todos", [])
     if not isinstance(todos, list) or not all(isinstance(todo, dict) for todo in todos):
@@ -298,7 +352,7 @@ def _meeting_todos(args: dict[str, Any]) -> list[dict[str, str]]:
     checked = []
     for todo in todos:
         item = {"title": text_argument(todo, "title"), "assignee": _optional_text(todo, "assignee"),
-                "due": _due_argument(todo), "timestamp": _optional_text(todo, "timestamp")}
+                "due": _grounded_due(todo, grounding), "timestamp": _grounded_time(todo, grounding)}
         checked.append({name: value for name, value in item.items() if value is not None})
     return checked
 
@@ -316,7 +370,7 @@ def meeting_page_content(args: dict[str, Any], *, checkboxes: bool) -> str:
 
 
 def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation | None, *,
-                 todos_as_checkboxes: bool) -> list[AgentTool]:
+                 todos_as_checkboxes: bool, grounding: Grounding | None = None) -> list[AgentTool]:
     """讀取類：搜尋、讀頁面。寫入類只有在使用者指定了會議紀錄位置時才提供，而且一律建在那個頁面底下——模型不能自己挑地方
     寫（見 docs/adr/0009）。todos_as_checkboxes：待辦放在 Notion（打勾清單）還是 Google Tasks（這裡只列清單）。"""
 
@@ -337,7 +391,7 @@ def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation 
     if meetings_page is not None:
         def page_proposal(args: dict[str, Any]) -> dict[str, Any]:
             return {"title": text_argument(args, "title"), "content": text_argument(args, "content"),
-                    "todos": _meeting_todos(args)}
+                    "todos": _meeting_todos(args, grounding)}
 
         def create_page(args: dict[str, Any]) -> str:
             content = meeting_page_content(args, checkboxes=todos_as_checkboxes)
@@ -349,12 +403,13 @@ def notion_tools(access_token: Callable[[], str], meetings_page: NotionLocation 
             "notion_create_meeting_page",
             f"（Notion，寫入）在使用者指定的頁面「{meetings_page.title}」底下，替這場會議建立一頁會議紀錄：content 是會議紀錄"
             "（重點、決議、下一步，Markdown），todos 是這場會議的待辦（每條的負責人填講者目前的名字、期限是 YYYY-MM-DD、"
-            "timestamp 是依據的錄音時間，例如 12:34），會一起寫在這一頁。一場會議只提一頁。只會記成提案，等使用者確認。",
+            "會議沒講期限就不要填 due、timestamp 是" + _TIMESTAMP_RULE + "），會一起寫在這一頁。一場會議只提一頁。"
+            "只會記成提案，等使用者確認。",
             _object({"title": {"type": "string"}, "content": {"type": "string", "description": "會議紀錄，Markdown"},
                      "todos": {"type": "array", "items": _object({
                          "title": {"type": "string"}, "assignee": {"type": "string"},
                          "due": {"type": "string", "description": "YYYY-MM-DD"},
-                         "timestamp": {"type": "string", "description": "依據的錄音時間，例如 12:34"}}, ["title"])}},
+                         "timestamp": {"type": "string", "description": _TIMESTAMP_RULE}}, ["title"])}},
                     ["title", "content"]),
             ToolKind.WRITE, "正在整理行動提案…", page_proposal, service="notion", proposal_kind="notion_page",
             execute=create_page))

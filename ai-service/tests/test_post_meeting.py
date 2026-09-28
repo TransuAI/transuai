@@ -996,7 +996,7 @@ def test_without_a_meetings_page_the_agent_gets_no_notion_writes(queued, fake_ll
     assert "notion_create_meeting_page" not in offered
 
 
-MEETING_TODOS = [{"title": "聯繫搬家公司", "assignee": "金萊", "due": "2026-11-20", "timestamp": "12:34"},
+MEETING_TODOS = [{"title": "聯繫搬家公司", "assignee": "金萊", "due": "2026-11-20", "timestamp": "00:30"},
                  {"title": "整理停車位調查"}]
 
 
@@ -1040,7 +1040,7 @@ def test_a_confirmed_notion_page_is_written_under_the_chosen_page_with_its_todos
     assert call["parent"] == {"type": "page_id", "page_id": "1f2e3d4c-5b6a-4788-9900-aabbccddeeff"}
     assert call["pages"] == [{"properties": {"title": "搬家會議紀錄（定稿）"}, "content": (
         "內容\n\n## 待辦\n"
-        "- [ ] 聯繫搬家公司（負責人：王經理；期限：2026-11-20；依據：錄音 12:34）\n"
+        "- [ ] 聯繫搬家公司（負責人：王經理；期限：2026-11-20；依據：錄音 00:30）\n"
         "- [ ] 整理停車位調查\n"
         "- [ ] 訂餐廳")}]
     assert (done.status, done.result_url) == (ai_pb2.PROPOSAL_STATUS_DONE, "https://app.notion.com/p/new1")
@@ -1091,7 +1091,7 @@ def test_a_todo_in_the_notion_page_needs_a_title_and_a_real_due_date(ai_stub, qu
 
 # --- Google Tasks 與待辦去處 ---
 
-TODO = {"title": "聯繫搬家公司", "notes": "問三家的報價", "assignee": "金萊", "due": "2026-11-20", "timestamp": "12:34"}
+TODO = {"title": "聯繫搬家公司", "notes": "問三家的報價", "assignee": "金萊", "due": "2026-11-20", "timestamp": "00:30"}
 
 
 def test_todos_go_to_google_tasks_until_the_user_chooses_otherwise(ai_stub, ready):
@@ -1181,7 +1181,7 @@ def test_a_confirmed_todo_is_created_in_google_tasks_with_owner_and_timestamp_in
     [done] = execute(ai_stub, queued, [(proposal.id, {**TODO, "assignee": "王經理"})]).proposals
 
     [created] = tasks.created()
-    assert created == {"title": "聯繫搬家公司", "notes": "負責人：王經理\n依據：錄音 12:34\n\n問三家的報價",
+    assert created == {"title": "聯繫搬家公司", "notes": "負責人：王經理\n依據：錄音 00:30\n\n問三家的報價",
                        "due": "2026-11-20T00:00:00.000Z"}
     assert (done.status, done.result_url) == (ai_pb2.PROPOSAL_STATUS_DONE, "https://tasks.google.com/task/t-1")
 
@@ -1401,3 +1401,97 @@ def test_what_was_created_before_fingerprints_were_recorded_is_still_recognised(
 
     [again] = latest(ai_stub, queued).proposals
     assert again.previously_created
+
+
+
+# --- 不編期限與依據的時間（ai-answer-quality #01） ---
+
+
+def test_the_tools_offer_no_example_time_the_model_could_copy(ai_stub, queued, fake_llm, calendar, notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_GOOGLE_TASKS)
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    assert "12:34" not in json.dumps(fake_llm.bodies()[0]["tools"], ensure_ascii=False)
+
+
+def test_the_system_prompt_asks_for_dates_and_times_only_with_grounds_and_for_the_next_meeting(queued, fake_llm, calendar):
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    system = fake_llm.bodies()[0]["messages"][0]["content"]
+    assert "沒講期限就不要填" in system
+    assert "search_transcript" in system and "照抄" in system  # times come from what the search found
+    assert "下次開會" in system and "calendar_create_event" in system
+    assert "宣傳" in system  # announcements aren't todos
+
+
+def test_a_todo_time_that_matches_nothing_said_is_dropped(ai_stub, queued, fake_llm, calendar, tasks):
+    fake_llm.reply_tool_calls([
+        ("tasks_create_task", {"title": "聯繫搬家公司", "timestamp": "00:31"}),  # within a few seconds of what was said
+        ("tasks_create_task", {"title": "訂餐廳", "timestamp": "12:34"}),  # nothing was said then
+    ])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    near, invented = latest(ai_stub, queued).proposals
+    assert json.loads(near.arguments_json)["timestamp"] == "00:31"
+    assert "timestamp" not in json.loads(invented.arguments_json)
+
+
+def test_a_notion_page_todo_time_that_matches_nothing_said_is_dropped(ai_stub, queued, fake_llm, calendar, notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "內容", "todos": [
+        {"title": "聯繫搬家公司", "timestamp": "01:00"}, {"title": "訂餐廳", "timestamp": "00:00:00"},
+        {"title": "買便當", "timestamp": "45:00"}]})])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    [page] = latest(ai_stub, queued).proposals
+    assert [todo.get("timestamp") for todo in json.loads(page.arguments_json)["todos"]] == ["01:00", "00:00:00", None]
+
+
+def test_a_time_the_user_types_in_is_kept_when_carried_out(ai_stub, queued, fake_llm, calendar, tasks):
+    fake_llm.reply_tool_calls([("tasks_create_task", {"title": "訂餐廳"})])
+    fake_llm.reply("好。")
+    work(queued)
+    [proposal] = latest(ai_stub, queued).proposals
+
+    execute(ai_stub, queued, [(proposal.id, {"title": "訂餐廳", "timestamp": "12:34"})])
+
+    assert "依據：錄音 12:34" in tasks.created()[0]["notes"]  # the user's own reading isn't second-guessed
+
+
+def test_a_due_date_before_the_meeting_or_years_after_it_is_dropped(ai_stub, queued, fake_llm, calendar, tasks):
+    # The recording was uploaded 2026-11-11 (UPLOADED).
+    fake_llm.reply_tool_calls([
+        ("tasks_create_task", {"title": "聯繫搬家公司", "due": "2026-11-20"}),
+        ("tasks_create_task", {"title": "統計物品", "due": "2026-11-10"}),  # before the meeting
+        ("tasks_create_task", {"title": "確認會議時程", "due": "2024-03-24"}),  # a year the model made up
+        ("tasks_create_task", {"title": "年度檢討", "due": "2028-01-15"}),  # more than a year later
+    ])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    dues = [json.loads(p.arguments_json).get("due") for p in latest(ai_stub, queued).proposals]
+    assert dues == ["2026-11-20", None, None, None]
+
+
+def test_a_notion_page_todo_due_date_before_the_meeting_is_dropped(ai_stub, queued, fake_llm, calendar, notion_mcp):
+    link_notion()
+    save_settings(ai_stub, MEETINGS_PAGE, ai_pb2.TODO_DESTINATION_NOTION)
+    fake_llm.reply_tool_calls([("notion_create_meeting_page", {"title": "搬家會議紀錄", "content": "內容", "todos": [
+        {"title": "聯繫搬家公司", "due": "2026-11-20"}, {"title": "統計物品", "due": "2026-11-10"}]})])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    [page] = latest(ai_stub, queued).proposals
+    assert [todo.get("due") for todo in json.loads(page.arguments_json)["todos"]] == ["2026-11-20", None]
