@@ -601,7 +601,7 @@ CREATE TABLE export_outputs (
 **實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
 都跟實作一致，`job.failed` 目前由 transcription-service、ai-service 各自在 pipeline 失敗時發送。
 ai-service 消費的每個 queue 各有一組自己的 retry queue（`<queue>.retry.2s`／`.4s`，見 ai-service ADR 0001）。
-Redis 不當訊息佇列，改用在 gateway 的限流（登入、註冊的計數器，見 `gateway/README.md`「限流」）；之後也放
+Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登入、註冊的計數器，見 `gateway/README.md`「限流」）；之後也放
 cache-aside 的快取（見 `.scratch/pre-launch-hardening`）。
 
 ---
@@ -640,7 +640,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 |---|---|---|---|
 | **後端服務託管**（core-service / transcription-service / ai-service） | **Render** | 每月 750 小時免費 Web Service（512MB RAM、0.1 CPU） | 15 分鐘無流量會自動休眠，冷啟動約 30-60 秒；免費層不支援水平擴展、無 SSH/shell 存取；僅適合 MVP 測試，非正式生產環境 |
 | **PostgreSQL + 向量資料庫** | **Supabase** | 免費層 500MB 儲存空間；pgvector 在所有方案（含免費）都開放使用 | 超過 500MB 需升級付費方案；免費層資料庫有閒置自動暫停機制，需注意喚醒延遲 |
-| **Redis**（gateway 限流計數，之後放快取；訊息佇列實際用 RabbitMQ） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；每次登入、註冊都要幾個指令，之後的全站限流與快取每個請求都會用到，要留意用量 |
+| **Redis**（gateway 限流計數，之後放快取；訊息佇列實際用 RabbitMQ） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；限流讓每個 API 請求都要 1～2 個指令（登入、註冊更多），之後的快取也是，要留意用量 |
 | **物件儲存**（音訊/影片檔案） | **Cloudflare R2** | 10GB 儲存空間、每月 100 萬次操作 | 超過額度另計費；免費層無 CDN 加速額外保證，大流量下載需注意頻寬成本 |
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
 | **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
