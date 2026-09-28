@@ -7,6 +7,9 @@ metadata:
   name: app-config
   namespace: transuai
 data:
+  # 執行環境：production 時每個服務啟動前檢查密鑰（見 02-secret.yaml），並關掉 Swagger、gRPC reflection 等開發用的東西。
+  APP_ENV: "development"
+
   # Postgres
   DB_HOST: "postgres"
   DB_PORT: "5432"

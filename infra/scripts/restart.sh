@@ -1,5 +1,5 @@
 #!/bin/sh
-# 改了 infra/k8s/01-configmap.yaml 或 02-secret.yaml 之後用這個：套用最新設定，
+# 改了 infra/k8s/01-configmap.yaml（或用 kubectl patch 改了 secret）之後用這個：套用最新的 configmap，
 # 重啟指定的 deployment 讓它重新讀一次環境變數（k8s 的 ConfigMap/Secret 改了不會自動讓
 # 正在跑的 pod 感知到，一定要 rollout restart）。
 #
@@ -26,8 +26,14 @@ fi
 
 ensure_context
 
-echo "== 套用 configmap / secret =="
-kubectl apply -f "$K8S_DIR/01-configmap.yaml" -f "$K8S_DIR/02-secret.yaml"
+echo "== 套用 configmap =="
+kubectl apply -f "$K8S_DIR/01-configmap.yaml"
+# secret 只在還沒有時建立：02-secret.yaml 裡真的金鑰是空的，再 apply 會把 kubectl patch 進去的蓋成空字串
+#（KEY_ENCRYPTION_KEY 沒了，加密存起來的自有金鑰與 OAuth 權杖就解不開）。要改 secret 用 kubectl patch 只改那一個 key。
+if ! kubectl -n "$NAMESPACE" get secret app-secrets >/dev/null 2>&1; then
+    echo "== 建立 secret =="
+    kubectl apply -f "$K8S_DIR/02-secret.yaml"
+fi
 
 for service in $services; do
     case " $all_services " in

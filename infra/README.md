@@ -187,7 +187,7 @@ kubectl -n transuai rollout restart deployment/auth-service
 |---|---|
 | `forward.sh` | 一次開好前端開發要用的 port-forward：gateway `8080`、notification-service `8085`、minio `19000`。前景執行，`Ctrl-C` 全部關閉；對應 pod 重啟過的話連線會斷，重跑即可 |
 | `rebuild.sh <service>...` / `--all` | 改了程式碼後用：build image -> `kind load` -> `rollout restart` |
-| `restart.sh <service>...` / `--all` | 改了 `k8s/01-configmap.yaml` 或 `02-secret.yaml` 後用：重新 apply 設定並重啟，讓 pod 重新讀環境變數（只改程式碼用 `rebuild.sh`，不是這支） |
+| `restart.sh <service>...` / `--all` | 改了 `k8s/01-configmap.yaml`（或用 `kubectl patch` 改了 secret）後用：重新 apply configmap 並重啟，讓 pod 重新讀環境變數。**不會**重新 apply `02-secret.yaml`（只在 secret 還不存在時建立）——裡面真的金鑰是空的，重新 apply 會把 patch 進去的蓋掉 |
 | `status.sh` | 快速看目前 context / nodes / pods / 正在跑的 port-forward |
 | `ollama.sh up` / `pull` / `status` / `down` | 本機的平台模型伺服器：用 Docker 跑 Ollama（用 GPU），下載設定用到的模型；見下面「平台模型跑在本機（Ollama）」 |
 
