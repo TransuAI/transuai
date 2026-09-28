@@ -15,6 +15,7 @@ import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.ratelimit.CostlyFeature;
+import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.QuizAttemptRequestDto;
 import com.transuai.gateway.web.dto.QuizAttemptResultDto;
 import com.transuai.gateway.web.dto.QuizDto;
@@ -39,6 +40,7 @@ public class QuizController {
 
     private final AiServiceGrpc.AiServiceBlockingStub aiServiceStub;
     private final JobOwnershipGuard jobOwnershipGuard;
+    private final UsageLimitGuard usageLimitGuard;
 
     // 每次都多一份新的測驗（舊的保留）；回傳「產生中」的測驗，不含題目。題數不是 5、10、20 回 400。
     @CostlyFeature("quiz")
@@ -50,6 +52,7 @@ public class QuizController {
         if (request == null || request.questionCount() == null) {
             throw new IllegalArgumentException("questionCount is required"); // → 400 via GrpcExceptionAdvice
         }
+        usageLimitGuard.requirePlatformTokensLeft(userId);
         return toDto(aiServiceStub.requestQuiz(RequestQuizRequest.newBuilder()
                 .setJobId(jobId)
                 .setUserId(userId.toString())

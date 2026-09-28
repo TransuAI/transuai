@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.transuai.gateway.ratelimit.RateLimitedException;
+import com.transuai.gateway.usage.UsageLimitReachedException;
 import com.transuai.gateway.web.dto.ErrorResponse;
 
 import io.grpc.Status;
@@ -45,6 +46,13 @@ public class GrpcExceptionAdvice {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()))
                 .body(new ErrorResponse("RATE_LIMITED", e.getMessage()));
+    }
+
+    @ExceptionHandler(UsageLimitReachedException.class)
+    public ResponseEntity<ErrorResponse> handleUsageLimitReached(UsageLimitReachedException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()))
+                .body(new ErrorResponse("USAGE_LIMIT_REACHED", e.getMessage()));
     }
 
     // 例如 fileType 傳了 FileType enum 沒有的字串（FileType.valueOf 直接丟這個），

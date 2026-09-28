@@ -17,6 +17,7 @@ import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.UploadMapper;
 import com.transuai.gateway.ratelimit.CostlyFeature;
+import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.CompleteUploadRequestDto;
 import com.transuai.gateway.web.dto.JobDto;
 import com.transuai.gateway.web.dto.JobListResponseDto;
@@ -45,9 +46,12 @@ public class UploadController {
 
         private final UploadServiceGrpc.UploadServiceBlockingStub uploadServiceStub;
 
+        private final UsageLimitGuard usageLimitGuard;
+
         @CostlyFeature("upload-url")
         @PostMapping("/uploads/presign")
         public PresignResponseDto presign(@CurrentUserId UUID userId, @RequestBody PresignRequestDto request) {
+                usageLimitGuard.requireTranscriptionLeft(userId);
                 GetPresignedUploadUrlResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                                                 .setFileName(request.fileName())
@@ -61,6 +65,7 @@ public class UploadController {
         @CostlyFeature("upload")
         @PostMapping("/uploads/complete")
         public JobDto completeUpload(@CurrentUserId UUID userId, @RequestBody CompleteUploadRequestDto request) {
+                usageLimitGuard.requireTranscriptionLeft(userId);
                 Job job = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .completeUpload(CompleteUploadRequest.newBuilder()
                                                 .setStoragePath(request.storagePath())

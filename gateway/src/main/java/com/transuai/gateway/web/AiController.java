@@ -21,6 +21,7 @@ import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.ratelimit.CostlyFeature;
+import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.ChapterDto;
 import com.transuai.gateway.web.dto.QaTurnDto;
 import com.transuai.gateway.web.dto.QuestionRequestDto;
@@ -58,6 +59,7 @@ public class AiController {
     // 目前第二個踩到的地方）。這裡只是把幾個基本型別（String/List<Double>）序列化成 JSON
     // 字串塞進 SSE data 欄位，不需要專案自訂的 Jackson module，自己 new 最單純、最穩。
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final UsageLimitGuard usageLimitGuard;
 
     @GetMapping("/summary/{jobId}")
     public SummaryDto getSummary(@CurrentUserId UUID userId, @PathVariable String jobId) {
@@ -73,6 +75,7 @@ public class AiController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public SummaryDto regenerateSummary(@CurrentUserId UUID userId, @PathVariable String jobId) {
         jobOwnershipGuard.check(userId, jobId);
+        usageLimitGuard.requirePlatformTokensLeft(userId);
         return toDto(aiServiceStub.requestRegeneration(RequestRegenerationRequest.newBuilder()
                 .setJobId(jobId)
                 .setUserId(userId.toString())
@@ -119,6 +122,7 @@ public class AiController {
     public SseEmitter askQuestion(@CurrentUserId UUID userId, @PathVariable String jobId,
             @RequestBody QuestionRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
+        usageLimitGuard.requirePlatformTokensLeft(userId, request.model());
 
         AskQuestionRequest.Builder askRequest = AskQuestionRequest.newBuilder()
                 .setJobId(jobId)

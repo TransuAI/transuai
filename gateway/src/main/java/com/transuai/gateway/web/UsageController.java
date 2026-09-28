@@ -1,9 +1,6 @@
 package com.transuai.gateway.web;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.time.YearMonth;
-import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.List;
@@ -18,6 +15,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
+import com.transuai.gateway.usage.MonthlyUsage;
+import com.transuai.gateway.usage.UsageLimits;
 import com.transuai.gateway.web.dto.JobUsageDto;
 import com.transuai.gateway.web.dto.LlmUsageSumDto;
 import com.transuai.gateway.web.dto.MonthlyUsageDto;
@@ -29,10 +28,8 @@ import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.ListJobLlmUsageRequest;
 import transuai.ai.v1.Ai.LlmUsage;
 import transuai.ai.v1.Ai.LlmUsageSum;
-import transuai.ai.v1.Ai.SumUserLlmUsageRequest;
 import transuai.ai.v1.AiServiceGrpc;
 import transuai.transcription.v1.Transcription.ListJobTranscriptionUsageRequest;
-import transuai.transcription.v1.Transcription.SumUserTranscriptionUsageRequest;
 import transuai.transcription.v1.Transcription.TranscriptionUsage;
 import transuai.transcription.v1.Transcription.TranscriptionUsageSum;
 import transuai.transcription.v1.TranscriptionServiceGrpc;
@@ -43,12 +40,11 @@ import transuai.transcription.v1.TranscriptionServiceGrpc;
 @RequiredArgsConstructor
 public class UsageController {
 
-    // 「某個月」依台灣時間切：使用者看到的月份跟他的月曆一致。
-    private static final ZoneId USAGE_ZONE = ZoneId.of("Asia/Taipei");
-
     private final AiServiceGrpc.AiServiceBlockingStub aiServiceStub;
     private final TranscriptionServiceGrpc.TranscriptionServiceBlockingStub transcriptionServiceStub;
     private final JobOwnershipGuard jobOwnershipGuard;
+    private final MonthlyUsage monthlyUsage;
+    private final UsageLimits limits;
 
     @GetMapping("/jobs/{jobId}/usage")
     public JobUsageDto getJobUsage(@CurrentUserId UUID userId, @PathVariable String jobId) {
@@ -71,29 +67,13 @@ public class UsageController {
     @GetMapping("/me/usage")
     public MonthlyUsageDto getMonthlyUsage(@CurrentUserId UUID userId,
             @RequestParam(required = false) String month) {
-        YearMonth yearMonth = month == null ? YearMonth.now(Clock.system(USAGE_ZONE)) : parseMonth(month);
-        Instant start = yearMonth.atDay(1).atStartOfDay(USAGE_ZONE).toInstant();
-        Instant end = yearMonth.plusMonths(1).atDay(1).atStartOfDay(USAGE_ZONE).toInstant();
-
-        List<LlmUsageSumDto> llm = aiServiceStub
-                .sumUserLlmUsage(SumUserLlmUsageRequest.newBuilder()
-                        .setUserId(userId.toString())
-                        .setStart(GrpcTimestamps.fromInstant(start))
-                        .setEnd(GrpcTimestamps.fromInstant(end))
-                        .build())
-                .getSumsList().stream()
+        YearMonth yearMonth = month == null ? MonthlyUsage.thisMonth() : parseMonth(month);
+        List<LlmUsageSumDto> llm = monthlyUsage.llm(userId, yearMonth).stream().map(UsageController::toDto).toList();
+        List<TranscriptionUsageSumDto> transcription = monthlyUsage.transcription(userId, yearMonth).stream()
                 .map(UsageController::toDto)
                 .toList();
-        List<TranscriptionUsageSumDto> transcription = transcriptionServiceStub
-                .sumUserTranscriptionUsage(SumUserTranscriptionUsageRequest.newBuilder()
-                        .setUserId(userId.toString())
-                        .setStart(GrpcTimestamps.fromInstant(start))
-                        .setEnd(GrpcTimestamps.fromInstant(end))
-                        .build())
-                .getSumsList().stream()
-                .map(UsageController::toDto)
-                .toList();
-        return new MonthlyUsageDto(yearMonth.toString(), llm, transcription);
+        return new MonthlyUsageDto(yearMonth.toString(), llm, transcription,
+                new MonthlyUsageDto.UsageLimitsDto(limits.transcriptionMinutes(), limits.platformTokens()));
     }
 
     private static YearMonth parseMonth(String month) {

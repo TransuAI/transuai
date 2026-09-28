@@ -114,7 +114,7 @@ docker compose up -d
 | `GET` | `/me/connections/{service}/authorize` | 回傳 `{ authorizeUrl }`，前端把使用者轉過去（不是 302：前端的 JWT 在 header 裡，瀏覽器轉址帶不過來），同時設一個 10 分鐘的 HttpOnly、SameSite=Lax cookie（`transuai_oauth_binding`，隨機值；ai-service 只存雜湊），把這次授權綁定在這個瀏覽器；回呼網址用 `OAUTH_CALLBACK_BASE_URL`。不支援的服務回 400，伺服器沒設定 Google OAuth client 回 409，連不上 Notion 回 503；轉給 `StartConnection` |
 | `GET` | `/oauth/{service}/callback` | Google / Notion 的回呼，**不需要 JWT**（使用者由 `state` 認出來，而且要帶回開始連結時的 cookie——別人的授權網址在使用者瀏覽器裡按同意也連不到使用者的帳號上；用完就清掉 cookie）；轉給 `CompleteConnection`，成功轉址到 `{FRONTEND_URL}/settings?connected={service}`、失敗到 `?connection_failed={service}`（原因只記 log） |
 | `DELETE` | `/me/connections/{service}` | 中斷連結：向對方撤銷授權並刪除權杖，回 `{ revoked }`（撤銷失敗時權杖照樣刪除，`revoked` 是 false）；轉給 `DeleteConnection` |
-| `GET` | `/me/usage?month=YYYY-MM` | 登入者某個月的用量：`{ month, llm: [{ provider, model, keySource, inputTokens, outputTokens, calls, callsWithUnknownUsage }], transcription: [{ provider, model, audioSeconds, calls, callsWithUnknownUsage }] }`。月份依台灣時間（`Asia/Taipei`）切成時間範圍，省略就是這個月，格式不對回 400；數字是已知的加總，`callsWithUnknownUsage` 是沒回報用量的呼叫次數。分別轉給 ai-service 的 `SumUserLlmUsage` 與 transcription-service 的 `SumUserTranscriptionUsage` |
+| `GET` | `/me/usage?month=YYYY-MM` | 登入者某個月的用量：`{ month, llm: [{ provider, model, keySource, inputTokens, outputTokens, calls, callsWithUnknownUsage }], transcription: [{ provider, model, audioSeconds, calls, callsWithUnknownUsage }], limits: { transcriptionMinutes, platformTokens } }`（`limits` 是每月的用量上限，見「每月用量上限」）。月份依台灣時間（`Asia/Taipei`）切成時間範圍，省略就是這個月，格式不對回 400；數字是已知的加總，`callsWithUnknownUsage` 是沒回報用量的呼叫次數。分別轉給 ai-service 的 `SumUserLlmUsage` 與 transcription-service 的 `SumUserTranscriptionUsage` |
 | `POST` | `/qa/{jobId}` | RAG 問答（含最近 5 輪對話記憶），body `{ "question": string, "model"?: { provider, model } }`（`model` 只用在這一次提問，省略就用預設模型；用不到的模型回 400），回傳 `text/event-stream`（SSE，見下方「問答 streaming」一節）；還沒有 embedding（pipeline 沒跑完）在串流開始前就回 404，不會是 SSE error event |
 
 #### 問答 streaming
@@ -168,6 +168,20 @@ docker compose up -d
 
 登入與註冊沒給 email 或密碼回 400（在限流與 gRPC 之前擋下）。
 
+### 每月用量上限
+
+平台付錢的部分，每位使用者每月（台灣時間）有**用量上限**（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)「用量上限」，`usage/`）：
+
+| 上限 | 預設 | 到了之後 |
+|---|---|---|
+| 轉錄分鐘數 | 600 分鐘（`USAGE_LIMIT_TRANSCRIPTION_MINUTES`） | `POST /uploads/presign`、`POST /uploads/complete` 回 429（先在取得上傳網址時擋，不讓人傳完 1GB 才被拒） |
+| 平台模型的 token（輸入加輸出） | 2,000,000（`USAGE_LIMIT_PLATFORM_TOKENS`） | 要用平台模型的問答、產生測驗、重新產生摘要、開始會後處理回 429；自有金鑰的模型照常可以用（問答這次指定的模型優先，否則看預設模型） |
+
+用量是 `/me/usage` 同一份加總（`usage/MonthlyUsage`：LLM 向 ai-service 的 `SumUserLlmUsage`、轉錄向 transcription-service 的
+`SumUserTranscriptionUsage`，自有金鑰的 LLM 用量不算），在送出之前檢查（`usage/UsageLimitGuard`）。回 `429`，body 是
+`{ "error": "USAGE_LIMIT_REACHED", "message": "這個月的轉錄已經到用量上限（600 分鐘），下個月 1 日恢復" }`，`Retry-After` 是到下個月
+1 日的秒數。已經在跑的不受影響（剛上傳、還在轉錄的照樣轉錄完；上傳時自動產生的摘要與章節照樣產生），所以最後一次可能超過一點。
+
 ### 錯誤格式
 
 下游 gRPC 呼叫失敗時（`GrpcExceptionAdvice`），統一轉成：
@@ -192,6 +206,7 @@ docker compose up -d
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / 空 | 限流用的 Redis（k8s 裡 `REDIS_PORT` 一定要設，否則會被 k8s 自動注入的 `tcp://…` 蓋掉） |
 | `REDIS_TIMEOUT` / `REDIS_CONNECT_TIMEOUT` | `500ms` | Redis 慢或連不上時多久放棄（放棄就放行） |
 | `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`、`RATE_LIMIT_PER_USER`、`RATE_LIMIT_PER_ADDRESS`、`RATE_LIMIT_UPLOAD_URL`、`RATE_LIMIT_UPLOAD`、`RATE_LIMIT_QUESTION`、`RATE_LIMIT_QUIZ`、`RATE_LIMIT_REGENERATE`、`RATE_LIMIT_POST_MEETING`、`RATE_LIMIT_PROVIDER_KEY`、`RATE_LIMIT_TRANSCRIPT_EDIT`、`RATE_LIMIT_LINKED_SERVICE`（與各自的 `_WINDOW`） | 見「限流」的表 | 限流的上限與時間長度 |
+| `USAGE_LIMIT_TRANSCRIPTION_MINUTES` / `USAGE_LIMIT_PLATFORM_TOKENS` | `600` / `2000000` | 每月用量上限，見「每月用量上限」 |
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
 
 ## 專案結構
@@ -205,6 +220,7 @@ src/main/java/com/transuai/gateway/
                        ProviderKeyController、ConnectionController、PostMeetingController
   web/dto/            REST 用的 JSON DTO（跟 proto message 分開，不直接把 protobuf 型別序列化給前端）
   web/advice/         GrpcExceptionAdvice（StatusRuntimeException → HTTP status + JSON error body；RateLimitedException → 429）
+  usage/              MonthlyUsage（某個月的用量，向 ai-service 與 transcription-service 查）、UsageLimits、UsageLimitGuard、UsageLimitReachedException
   ratelimit/          RateLimiter（Redis 固定視窗計數器，連不上放行）、RateLimitProperties、AuthRateLimits（登入與註冊）、
                        ApiRateLimits（所有 API 與花錢的功能）、CostlyFeature（標在 controller 方法上）、RateLimitedException
   grpc/               GrpcMetadataSupport（組 x-user-id metadata）、JobOwnershipGuard（Transcription/AI 端點的 ownership 檢查）、
@@ -215,7 +231,7 @@ src/main/java/com/transuai/gateway/
 
 - **Transcription / AI 這幾個端點的 ownership 檢查多一趟 gRPC 呼叫**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 現在會在轉發前先呼叫 `upload-service` 的 `GetJob` 確認 ownership（`JobOwnershipGuard`，別人的 job 回 404），每個請求因此多一趟內部 gRPC 往返——量大的話可以考慮快取，MVP 階段先不做
 - 多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
-- 限流是短時間的頻率；每月用量上限（轉錄分鐘數、平台模型 token）還沒做，見 `.scratch/pre-launch-hardening` 的 04
+- 每月用量上限只看已記錄的用量：一次上傳的長度在轉錄完成前不知道，最後一次上傳可能讓這個月超過上限一點
 - JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
 - 測試只涵蓋限流（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
