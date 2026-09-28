@@ -57,7 +57,7 @@ Notification Service 消費訊息
 
 | 服務 | 職責 | 技術棧 | 對外/對內 |
 |---|---|---|---|
-| **API Gateway** | 統一入口、JWT 本地驗證、REST↔gRPC 轉譯、限流 | Spring Boot（Web MVC）+ gRPC Client + Redis（限流計數） | 對外 |
+| **API Gateway** | 統一入口、JWT 本地驗證、REST↔gRPC 轉譯、限流 | Spring Boot（Web MVC）+ gRPC Client + Redis（限流計數、快取） | 對外 |
 | **Auth Service** | 使用者註冊/登入、JWT 簽發與刷新 | Spring Boot + gRPC Server | 對內（僅供 Gateway 呼叫） |
 | **Upload Service** | 檔案上傳、產生 presigned URL、Job 建立與狀態管理 | Spring Boot + gRPC Server | 對內（僅供 Gateway / 下游服務呼叫） |
 | **Transcription Service** | 抽音軌（moviepy/ffmpeg）、呼叫 Deepgram 轉錄與講者分離、逐字稿產出與儲存 | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
@@ -88,7 +88,7 @@ MQ 事件外互不直接呼叫，也不會有即時跨庫 join。
 > ownership 邏輯。實際的「只能存取自己的 job」檢查現在收斂在 Gateway 這一層：轉發
 > `GetTranscript`/`GetSummary`/`ListChapters`/`AskQuestion` 前，Gateway 會先呼叫 upload-service 的 `GetJob`
 > 確認這個 job 是不是目前使用者的（`gateway/src/main/java/.../grpc/JobOwnershipGuard.java`），
-> 不是就回 404，不會再往下游打。代價是每個請求多一趟內部 gRPC 往返。這個檢查只存在於走 Gateway
+> 不是就回 404，不會再往下游打。確認過的擁有者記在 Redis（cache-aside），之後的請求不用再跑這一趟內部 gRPC 往返。這個檢查只存在於走 Gateway
 > 的路徑——如果之後有服務直接繞過 Gateway 打 transcription-service/ai-service，還是能查到任意
 > job，這種情境目前假設不存在（下游服務只監聽 cluster 內部網路）。
 
@@ -120,7 +120,7 @@ auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user
 ### 3.2 Upload Service
 
 ```
-POST   /uploads/presign         取得物件儲存的 presigned upload URL（尚未建立 Job）
+POST   /uploads/presign         取得物件儲存的 presigned upload URL（尚未建立 Job；帶檔案長度，先檢查每月用量上限）
 POST   /uploads/complete        前端上傳完成後呼叫，建立 Job record 並發送 transcription.requested 事件；
                                  body 的 transcriptionLanguage 是轉錄語言（zh-TW 預設 / en / auto）
 GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊
@@ -620,7 +620,7 @@ Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登
 | 關聯式資料庫 | PostgreSQL（各服務獨立 schema，Java 用 Hibernate `ddl-auto=update`；Python 服務用 SQLAlchemy + Alembic migration） |
 | 向量資料庫 | pgvector（`ai_db.embeddings`，`BAAI/bge-m3` 1024 維，已在用） |
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
-| 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 改用在 gateway 的限流） |
+| 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 改用在 gateway 的限流與快取） |
 | ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體；ai-service 也用它把整段寫成簡體的問答回答與測驗轉成繁體（本機小模型偶爾會） |
 | LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型（問答可以臨時換成別的模型）：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型預設是 HF Inference Providers 的 OpenAI 相容路由（`PLATFORM_LLM_BASE_URL` 可以改指向任何 OpenAI 相容的伺服器：本機開發用 Docker 跑的 Ollama，一般生成與會後處理都用 `qwen3:14b`（見 `ai-service/docs/adr/0011-local-post-meeting-model-qwen3-14b.md`），上雲可以用自架 vLLM 或其他託管 API，見 `infra/README.md`）（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
@@ -641,7 +641,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 |---|---|---|---|
 | **後端服務託管**（core-service / transcription-service / ai-service） | **Render** | 每月 750 小時免費 Web Service（512MB RAM、0.1 CPU） | 15 分鐘無流量會自動休眠，冷啟動約 30-60 秒；免費層不支援水平擴展、無 SSH/shell 存取；僅適合 MVP 測試，非正式生產環境 |
 | **PostgreSQL + 向量資料庫** | **Supabase** | 免費層 500MB 儲存空間；pgvector 在所有方案（含免費）都開放使用 | 超過 500MB 需升級付費方案；免費層資料庫有閒置自動暫停機制，需注意喚醒延遲 |
-| **Redis**（gateway 限流計數，之後放快取；訊息佇列實際用 RabbitMQ） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；限流讓每個 API 請求都要 1～2 個指令（登入、註冊更多），之後的快取也是，要留意用量 |
+| **Redis**（gateway 的限流計數與快取；訊息佇列實際用 RabbitMQ） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；限流讓每個 API 請求都要 1～2 個指令（登入、註冊更多），每個 Job 的請求再加 1 個查快取，要留意用量 |
 | **物件儲存**（音訊/影片檔案） | **Cloudflare R2** | 10GB 儲存空間、每月 100 萬次操作 | 超過額度另計費；免費層無 CDN 加速額外保證，大流量下載需注意頻寬成本 |
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
 | **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
