@@ -96,6 +96,16 @@ app/
     connection_manager.py            依 jobId 分組管理目前連線的 WebSocket client，供 broadcast 用
 ```
 
+## 正式環境（`APP_ENV=production`）
+
+`APP_ENV` 預設是 `development`；設成 `production`時：
+
+- 啟動前檢查密鑰（`app/core/production.py`）：`RABBITMQ_PASSWORD` 沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
+  或少於 12 字元，就不啟動，錯誤訊息列出是哪幾個環境變數。
+- API 文件（`/docs`、`/redoc`、`/openapi.json`）不對外（`app/main.py` 的 `create_app`）。
+
+開發環境都不檢查、照舊開著。見 `.scratch/pre-launch-hardening/issues/07`。
+
 ## 已知限制 / 待辦
 
 - 連線狀態純 in-memory,服務重啟或多副本部署（水平擴展）時,連線表不會同步——重啟後所有 client 要
