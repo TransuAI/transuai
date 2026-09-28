@@ -28,6 +28,9 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
+          # 記憶體上限：放的都是有效時間的東西（限流計數、快取），滿了就淘汰最久沒用的——快取回源、限流計數被淘汰時暫時放寬一點，
+          # 都不影響功能。一份長會議的逐字稿快取約 1～2MB。
+          args: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
           ports:
             - containerPort: 6379
           readinessProbe:

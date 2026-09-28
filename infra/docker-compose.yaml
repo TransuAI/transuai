@@ -33,6 +33,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: redis
+    # 跟 k8s/11-redis.yaml 一樣：記憶體上限，滿了淘汰最久沒用的（都是有效時間的限流計數與快取）。
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     restart: unless-stopped
     ports:
       - "6379:6379"
