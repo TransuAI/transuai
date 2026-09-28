@@ -35,9 +35,13 @@ def _looks_simplified(text: str) -> bool:
     return simplified > traditional
 
 
+def _to_taiwan_glyphs(text: str) -> str:
+    return _converter("s2tw").convert(text)
+
+
 def to_traditional(text: str) -> str:
     """整段是簡體就轉成繁體，否則原樣回傳。"""
-    return _converter("s2tw").convert(text) if text and _looks_simplified(text) else text
+    return _to_taiwan_glyphs(text) if text and _looks_simplified(text) else text
 
 
 class TraditionalStream:
@@ -50,7 +54,7 @@ class TraditionalStream:
 
     def feed(self, delta: str) -> str:
         if self._convert is not None:
-            return _converter("s2tw").convert(delta) if self._convert else delta
+            return _to_taiwan_glyphs(delta) if self._convert else delta
         self._pending += delta
         if sum(1 for ch in self._pending if _is_chinese_character(ch)) < _DECIDE_AFTER_CHINESE_CHARACTERS:
             return ""
@@ -62,4 +66,4 @@ class TraditionalStream:
     def _decide(self) -> str:
         self._convert = _looks_simplified(self._pending)
         text, self._pending = self._pending, ""
-        return _converter("s2tw").convert(text) if self._convert else text
+        return _to_taiwan_glyphs(text) if self._convert else text

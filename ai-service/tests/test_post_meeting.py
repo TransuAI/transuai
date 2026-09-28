@@ -1454,7 +1454,19 @@ def test_a_notion_page_todo_time_that_matches_nothing_said_is_dropped(ai_stub, q
     work(queued)
 
     [page] = latest(ai_stub, queued).proposals
-    assert [todo.get("timestamp") for todo in json.loads(page.arguments_json)["todos"]] == ["01:00", "00:00:00", None]
+    assert [todo.get("timestamp") for todo in json.loads(page.arguments_json)["todos"]] == ["01:00", None, None]
+
+
+def test_a_todo_time_of_00_00_is_dropped_even_though_the_recording_starts_with_speech(
+        ai_stub, queued, fake_llm, calendar, tasks):
+    # A local model fills in 00:00 when it has no grounds (ADR 0011); the first line starting at 0 s mustn't let it through.
+    fake_llm.reply_tool_calls([("tasks_create_task", {"title": "聯繫搬家公司", "timestamp": "00:00"})])
+    fake_llm.reply("好。")
+
+    work(queued)
+
+    [proposal] = latest(ai_stub, queued).proposals
+    assert "timestamp" not in json.loads(proposal.arguments_json)
 
 
 def test_a_time_the_user_types_in_is_kept_when_carried_out(ai_stub, queued, fake_llm, calendar, tasks):

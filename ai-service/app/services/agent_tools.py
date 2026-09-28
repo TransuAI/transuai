@@ -15,6 +15,7 @@ from app.services.notion import NotionError, call_tool, url_of
 from app.services.post_meeting_settings import NotionLocation
 from app.services.google_calendar import CalendarError, create_event, list_events
 from app.services.google_tasks import TasksError, create_task, list_open_tasks
+from app.services.segment_times import clock
 
 
 class ToolKind(StrEnum):
@@ -93,11 +94,6 @@ class JobContent:
     speakers: list[str]
 
 
-def _clock(seconds: float) -> str:
-    minutes, secs = divmod(int(seconds), 60)
-    return f"{minutes:02d}:{secs:02d}"
-
-
 def normalize_text(text: str) -> str:
     """比對用：全形轉半形、小寫、去掉空白與標點。"""
     folded = unicodedata.normalize("NFKC", text).lower()
@@ -112,9 +108,9 @@ def _bigrams(text: str) -> set[str]:
 _TIME_TOLERANCE_SECONDS = 3
 
 
-def _seconds(clock: str) -> float | None:
+def _seconds(shown: str) -> float | None:
     """「12:34」或「1:02:03」→ 秒數；不是時間就是 None。"""
-    parts = clock.strip().split(":")
+    parts = shown.strip().split(":")
     if not 2 <= len(parts) <= 3 or not all(part.isdigit() for part in parts):
         return None
     seconds = 0
@@ -128,21 +124,23 @@ class Grounding:
     """模型提案時檢查待辦的依據時間與期限：本機模型常編（ADR 0011）——時間填 00:00、上傳時間或範例，期限寫錯年份或早於
     會議。對不到的就不留（留空讓使用者自己填）。使用者確認的值不檢查，所以執行時不給 Grounding。"""
 
-    spoken: Callable[[str], bool]  # 這個「分:秒」附近有沒有一句話開始
-    plausible_due: Callable[[str], bool]  # 這個期限（YYYY-MM-DD）是不是在會議當天到一年後之間
+    said_near: Callable[[str], bool]  # 這個「分:秒」附近有沒有一句話開始（00:00 不算）
+    plausible_due: Callable[[str], bool]  # 這個期限（YYYY-MM-DD）是不是在上傳當天到一年後之間
 
 
-def grounding_for(lines: list[tuple[float, str | None, str]], meeting_day: date) -> Grounding:
+def grounding_for(lines: list[tuple[float, str | None, str]], uploaded_day: date) -> Grounding:
+    """uploaded_day 是錄音上傳那天（使用者時區）：系統提示也是依上傳時間換算相對日期，期限的下限跟它一致。"""
     starts = [start for start, _speaker, _text in lines]
 
-    def spoken(clock: str) -> bool:
-        seconds = _seconds(clock)
-        return seconds is not None and any(abs(start - seconds) <= _TIME_TOLERANCE_SECONDS for start in starts)
+    def said_near(shown: str) -> bool:
+        seconds = _seconds(shown)
+        # 00:00 是模型沒有依據時的預設值；錄音第一句剛好從 0 秒開始也不能讓它過。
+        return bool(seconds) and any(abs(start - seconds) <= _TIME_TOLERANCE_SECONDS for start in starts)
 
     def plausible_due(due: str) -> bool:
-        return meeting_day <= date.fromisoformat(due) <= meeting_day + timedelta(days=366)
+        return uploaded_day <= date.fromisoformat(due) <= uploaded_day + timedelta(days=366)
 
-    return Grounding(spoken, plausible_due)
+    return Grounding(said_near, plausible_due)
 
 
 def search_lines(lines: list[tuple[float, str | None, str]], query: str, *, limit: int = 8) -> list[str]:
@@ -159,7 +157,7 @@ def search_lines(lines: list[tuple[float, str | None, str]], query: str, *, limi
         if score >= 0.75:
             scored.append((score, start, speaker, text))
     scored.sort(key=lambda item: (-item[0], item[1]))
-    return [f"[{_clock(start)}] {speaker + '：' if speaker else ''}{text}" for _, start, speaker, text in scored[:limit]]
+    return [f"[{clock(start)}] {speaker + '：' if speaker else ''}{text}" for _, start, speaker, text in scored[:limit]]
 
 
 def job_tools(content: JobContent) -> list[AgentTool]:
@@ -170,7 +168,7 @@ def job_tools(content: JobContent) -> list[AgentTool]:
         AgentTool("get_summary", "讀這場會議的摘要。", _object({}, []), ToolKind.READ, "正在閱讀摘要…",
                   lambda _args: content.summary or "還沒有摘要"),
         AgentTool("get_chapters", "讀這場會議的章節（標題與開始時間）。", _object({}, []), ToolKind.READ, "正在閱讀章節…",
-                  lambda _args: [{"title": title, "start": _clock(start)} for title, start in content.chapters]),
+                  lambda _args: [{"title": title, "start": clock(start)} for title, start in content.chapters]),
         AgentTool("search_transcript", "用關鍵字搜尋逐字稿片段，回傳符合的片段（時間、講者、文字）。逐字稿是語音辨識的結果，"
                   "可能有錯字。", _object({"query": {"type": "string", "description": "關鍵字，可以用空白分隔多個"}}, ["query"]),
                   ToolKind.READ, "正在搜尋逐字稿…", search),
@@ -294,12 +292,12 @@ def _task_notes(args: dict[str, Any]) -> str:
 
 def _grounded_time(args: dict[str, Any], grounding: Grounding | None) -> str | None:
     """依據的錄音時間；模型提案時（有 grounding）對不到有人講話的地方就不留。"""
-    clock = _optional_text(args, "timestamp")
-    return None if clock is not None and grounding is not None and not grounding.spoken(clock) else clock
+    shown = _optional_text(args, "timestamp")
+    return None if shown is not None and grounding is not None and not grounding.said_near(shown) else shown
 
 
 def _grounded_due(args: dict[str, Any], grounding: Grounding | None) -> str | None:
-    """期限（格式不對 raise ToolArgumentError）；模型提案時（有 grounding）不在會議當天到一年後之間就不留。"""
+    """期限（格式不對 raise ToolArgumentError）；模型提案時（有 grounding）不在上傳當天到一年後之間就不留。"""
     due = _due_argument(args)
     return None if due is not None and grounding is not None and not grounding.plausible_due(due) else due
 

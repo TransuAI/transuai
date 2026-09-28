@@ -39,17 +39,17 @@ from app.repositories.summary_repository import find_by_job_id as find_summary
 from app.services import connections
 from app.services.agent_tools import (
     AgentTool,
+    Grounding,
     JobContent,
     ToolArgumentError,
     ToolFailed,
     ToolKind,
     calendar_tools,
     gmail_tools,
+    grounding_for,
     job_tools,
     notion_tools,
     result_text,
-    Grounding,
-    grounding_for,
     tasks_tools,
 )
 from app.services.default_models import get_default_model, resolve_chat_model
@@ -383,9 +383,14 @@ def _already_created(job_id: uuid.UUID) -> str:
     return "\n- 這個 Job 之前的會後處理已經建立過這些事項，不要再提一次：" + "".join(f"\n  - {line}" for line in created)
 
 
+def _uploaded(run: PostMeetingRun) -> datetime:
+    """錄音上傳的時間，換成使用者的時區：相對日期的換算與期限的檢查都以它為準。"""
+    return run.uploaded_at.astimezone(ZoneInfo(run.timezone))
+
+
 def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str], extra_rules: str) -> str:
     """extra_rules：外部服務的規則與這個 Job 已經建立過的事項，每條一行、開頭換行。"""
-    uploaded = run.uploaded_at.astimezone(ZoneInfo(run.timezone))
+    uploaded = _uploaded(run)
     speakers = "、".join(content.speakers) if len(content.speakers) >= 2 else "（只有一位講者，或沒有講者資訊）"
     # 本機模型從來不提行事曆活動，連會議明講「3 月 24 日開會」都漏掉（ADR 0011）；只在有日曆工具時提醒。
     next_meeting_rule = ("\n- 會議有講到下次開會（或其他約好的會議時間）時，要用 calendar_create_event 提出行事曆活動。"
@@ -438,9 +443,8 @@ def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_
     MAX_TOOL_CALLS 次（同一輪平行呼叫超過的部分不執行）、問了模型 MAX_MODEL_CALLS 輪或超過 TIME_LIMIT 就停下，已經產生的提案
     保留（最後一輪提的案也保留，只是不再問模型）。"""
     setup = _service_setup(user_id)
-    meeting_day = run.uploaded_at.astimezone(ZoneInfo(run.timezone)).date()
     service_tools = _connected_service_tools(user_id, setup, frozenset({setup.todo_destination}),
-                                             grounding_for(content.lines, meeting_day))
+                                             grounding_for(content.lines, _uploaded(run).date()))
     tools = {tool.name: tool for tool in job_tools(content) + service_tools}
     schemas = [tool.schema() for tool in tools.values()]
     writes = [tool.name for tool in tools.values() if tool.kind == ToolKind.WRITE]

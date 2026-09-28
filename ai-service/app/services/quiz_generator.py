@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 from dataclasses import dataclass
 
 from app.models import QuestionKind
@@ -90,7 +91,10 @@ def _question(item: object, position: int, segment_starts: dict[str, float]) -> 
             # bool is an int in Python; true/false isn't an option's position.
             if isinstance(answer, bool) or not isinstance(answer, int) or not 0 <= answer < len(options):
                 raise QuizFormatError(f"第 {position} 題的正確答案不在選項裡")
-            kind, correct_option = QuestionKind.MULTIPLE_CHOICE, answer
+            # 本機模型的正確答案多半放在第一、二個（實測），自己洗牌讓位置分散。
+            order = random.sample(range(len(options)), len(options))
+            options, correct_option = [options[i] for i in order], order.index(answer)
+            kind = QuestionKind.MULTIPLE_CHOICE
         case QuestionKind.TRUE_FALSE:
             if not isinstance(answer, bool):
                 raise QuizFormatError(f"第 {position} 題的正確答案不是 true 或 false")

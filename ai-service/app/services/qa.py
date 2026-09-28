@@ -13,9 +13,9 @@ from app.repositories.summary_repository import find_by_job_id as find_summary
 from app.services.embedder import embed_query
 from app.services.default_models import resolve_chat_model, resolve_requested_chat_model
 from app.services.llm_client import ChatModel, chat, stream_chat
-from app.services.segment_times import time_key
-from app.services.traditional_chinese import TraditionalStream
+from app.services.segment_times import clock, time_key
 from app.services.speaker_context import speaker_names_by_segment_time, with_speaker_name
+from app.services.traditional_chinese import TraditionalStream
 from app.services.transcript_client import transcript_client
 from app.services.usage_meter import LlmFeature, UsageMeter
 
@@ -75,14 +75,6 @@ class NoEmbeddingsError(Exception):
     """這個 job 還沒有任何 embedding（pipeline 還沒跑完，或逐字稿沒有分段）。"""
 
 
-def _clock(seconds: float) -> str:
-    """給人看的時間：12:34，一小時以上是 1:02:03。"""
-    total = int(seconds)
-    hours, rest = divmod(total, 3600)
-    minutes, secs = divmod(rest, 60)
-    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
-
-
 def _overview(session: Session, job_id: uuid.UUID) -> str:
     """整段內容的摘要與章節（有的話）；概括性的問題靠它們回答。"""
     summary = find_summary(session, job_id)
@@ -91,7 +83,7 @@ def _overview(session: Session, job_id: uuid.UUID) -> str:
     if summary is not None and summary.summary_text:
         parts.append(f"## 整段內容的摘要\n{summary.summary_text}\n\n")
     if chapters:
-        parts.append("## 章節\n" + "\n".join(f"[{_clock(float(c.start_time))}] {c.title}" for c in chapters) + "\n\n")
+        parts.append("## 章節\n" + "\n".join(f"[{clock(float(c.start_time))}] {c.title}" for c in chapters) + "\n\n")
     return "".join(parts)
 
 
@@ -157,7 +149,7 @@ def stream_answer(
 
     speaker_by_time = _current_speaker_names_by_time(job_id)
     context = "\n\n".join(
-        f"[{_clock(float(chunk.start_time))}] "
+        f"[{clock(float(chunk.start_time))}] "
         + with_speaker_name(chunk.chunk_text, speaker_by_time.get(time_key(chunk.start_time, chunk.end_time)))
         for chunk in chunks
     )

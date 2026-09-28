@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.db import new_session
 from app.models import DefaultModel, Quiz, QuizAttempt
 from app.proto_gen import ai_pb2, transcription_pb2
-from app.services import quizzes, usage_meter
+from app.services import quiz_generator, quizzes, usage_meter
 from app.services.retry import RetryableMessageError
 
 USER = uuid.UUID("00000000-0000-0000-0000-00000000c0de")
@@ -195,9 +195,10 @@ def test_a_generated_quiz_is_saved_with_its_questions_revision_and_model(ai_stub
         ai_pb2.QUIZ_STATUS_COMPLETED, 4, "platform", "Qwen/Qwen3.5-9B")
     assert quiz.HasField("completed_at")
     first, second = quiz.questions[0], quiz.questions[1]
-    assert (first.kind, first.prompt, list(first.options), first.correct_option, first.explanation,
+    assert (first.kind, first.prompt, sorted(first.options), first.options[first.correct_option], first.explanation,
             list(first.source_timestamps)) == (
-        "multiple_choice", "光能被什麼吸收？", ["粒線體", "葉綠體", "細胞核", "液泡"], 1, "講者說葉綠體吸收光能。", [20.5])
+        "multiple_choice", "光能被什麼吸收？", sorted(["粒線體", "葉綠體", "細胞核", "液泡"]), "葉綠體", "講者說葉綠體吸收光能。",
+        [20.5])
     assert (second.kind, list(second.options), second.correct_option) == ("true_false", ["是", "否"], 0)
     assert quiz.questions[3].correct_option == 1  # false → 「否」
     assert len(quiz.questions) == 5
@@ -260,6 +261,19 @@ def test_a_quiz_written_in_simplified_chinese_is_saved_in_traditional(ai_stub, r
 
     first = get_quiz(ai_stub, requested).questions[0]
     assert (first.prompt, first.explanation) == ("光能被什麼吸收？", "講者說葉綠體吸收光能。")
+
+
+def test_the_right_option_lands_in_different_positions(ai_stub, db_session, rabbitmq, fake_llm):
+    # A local model put most right answers first or second; the options are shuffled, not left in the model's order.
+    quiz = request_quiz(ai_stub, uuid.uuid4(), question_count=20)
+    [(_, message)] = published(rabbitmq.channel)
+    fake_llm.reply(json.dumps([multiple_choice(answer=1)] * 20))
+
+    generate(json.dumps(message).encode())
+
+    questions = ai_stub.GetQuiz(ai_pb2.GetQuizRequest(job_id=quiz.job_id, quiz_id=quiz.id)).questions
+    assert {question.options[question.correct_option] for question in questions} == {"葉綠體"}
+    assert len({question.correct_option for question in questions}) > 1
 
 
 def test_timestamps_that_are_not_the_start_of_a_segment_are_dropped(ai_stub, requested, fake_llm):
@@ -357,9 +371,11 @@ def test_a_message_delivered_again_after_the_quiz_is_done_changes_nothing(ai_stu
 
 @pytest.fixture
 def completed(ai_stub, requested, fake_llm):
-    """The requested quiz, generated: correct options are 1, 0, 1, 1, 1 (see five_questions)."""
+    """The requested quiz, generated: correct options are 1, 0, 1, 1, 1 (see five_questions; options kept in the model's order
+    rather than shuffled)."""
     fake_llm.reply(five_questions())
-    generate(requested.message)
+    with patch.object(quiz_generator.random, "sample", lambda population, k: list(population)):
+        generate(requested.message)
     return requested
 
 
