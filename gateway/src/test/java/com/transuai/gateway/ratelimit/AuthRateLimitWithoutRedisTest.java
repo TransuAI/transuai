@@ -13,14 +13,13 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
-import com.transuai.auth.grpc.v1.User;
 
 /** Redis 連不上時限流放行（fail-open）：Redis 故障不能把所有人擋在登入頁外面。 */
 @SpringBootTest(properties = {
         "spring.data.redis.port=1", "spring.data.redis.timeout=300ms", "spring.data.redis.connect-timeout=300ms",
         "app.rate-limit.login.limit=1", "app.rate-limit.login.window=15m",
+        "app.rate-limit.register.limit=1", "app.rate-limit.register.window=1h",
 })
 @AutoConfigureMockMvc
 class AuthRateLimitWithoutRedisTest {
@@ -32,15 +31,16 @@ class AuthRateLimitWithoutRedisTest {
     private AuthServiceGrpc.AuthServiceBlockingStub authServiceStub;
 
     @Test
-    void signingInStillWorksWhenRedisIsDown() throws Exception {
-        when(authServiceStub.login(any())).thenReturn(AuthResponse.newBuilder()
-                .setUser(User.newBuilder().setId("00000000-0000-0000-0000-000000000001").setEmail("a@example.com"))
-                .build());
+    void signingInAndUpStillWorkWhenRedisIsDown() throws Exception {
+        when(authServiceStub.login(any())).thenReturn(AuthRateLimitTest.signedIn("a@example.com"));
+        when(authServiceStub.register(any())).thenReturn(AuthRateLimitTest.signedIn("a@example.com"));
 
-        for (int i = 0; i < 3; i++) {  // past the limit of 1
-            mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"email\":\"a@example.com\",\"password\":\"whatever\"}"))
-                    .andExpect(status().isOk());
+        for (int i = 0; i < 3; i++) {  // 超過上限的 1 次
+            for (String path : new String[] {"/auth/login", "/auth/register"}) {
+                mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"a@example.com\",\"password\":\"whatever\"}"))
+                        .andExpect(status().isOk());
+            }
         }
     }
 }

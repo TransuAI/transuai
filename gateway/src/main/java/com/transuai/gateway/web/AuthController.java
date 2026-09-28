@@ -24,8 +24,6 @@ import com.transuai.gateway.web.dto.RefreshRequestDto;
 import com.transuai.gateway.web.dto.RegisterRequestDto;
 import com.transuai.gateway.web.dto.UserDto;
 
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
 import jakarta.servlet.http.HttpServletRequest;
 
 import lombok.RequiredArgsConstructor;
@@ -40,11 +38,12 @@ public class AuthController {
     private final AuthServiceGrpc.AuthServiceBlockingStub authServiceStub;
     private final AuthRateLimits rateLimits;
 
-    // 限流用的 IP 是 getRemoteAddr()：正式環境在反向代理後面時，靠 server.forward-headers-strategy（見 application.properties）
-    // 從代理設的 X-Forwarded-For 取得真正的來源。
+    // 限流用的 IP 是 getRemoteAddr()，預設就是直接連進來的位址（不看使用者可以自己填的 X-Forwarded-For；在反向代理後面時
+    // 怎麼設定見 gateway README「限流」）。
     @PostMapping("/register")
-    public AuthResponseDto register(@RequestBody RegisterRequestDto request, HttpServletRequest http) {
-        rateLimits.beforeRegister(http.getRemoteAddr());
+    public AuthResponseDto register(@RequestBody RegisterRequestDto request, HttpServletRequest servletRequest) {
+        requireCredentials(request.email(), request.password());
+        rateLimits.beforeRegister(servletRequest.getRemoteAddr());
         AuthResponse response = authServiceStub.register(RegisterRequest.newBuilder()
                 .setEmail(request.email())
                 .setPassword(request.password())
@@ -54,22 +53,13 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public AuthResponseDto login(@RequestBody LoginRequestDto request, HttpServletRequest http) {
-        String address = http.getRemoteAddr();
-        rateLimits.beforeLogin(address, request.email());
-        AuthResponse response;
-        try {
-            response = authServiceStub.login(LoginRequest.newBuilder()
-                    .setEmail(request.email())
-                    .setPassword(request.password())
-                    .build());
-        } catch (StatusRuntimeException e) {
-            if (e.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
-                rateLimits.loginFailed(address, request.email());
-            }
-            throw e;
-        }
-        rateLimits.loginSucceeded(address, request.email());
+    public AuthResponseDto login(@RequestBody LoginRequestDto request, HttpServletRequest servletRequest) {
+        requireCredentials(request.email(), request.password());
+        AuthResponse response = rateLimits.login(servletRequest.getRemoteAddr(), request.email(),
+                () -> authServiceStub.login(LoginRequest.newBuilder()
+                        .setEmail(request.email())
+                        .setPassword(request.password())
+                        .build()));
         return toDto(response);
     }
 
@@ -86,6 +76,13 @@ public class AuthController {
         User user = GrpcMetadataSupport.withUserId(authServiceStub, userId)
                 .getMe(GetMeRequest.newBuilder().build());
         return toDto(user);
+    }
+
+    // 沒給 email 或密碼：在限流與 gRPC 之前擋下（protobuf 的欄位不能是 null）。
+    private static void requireCredentials(String email, String password) {
+        if (email == null || password == null) {
+            throw new IllegalArgumentException("email and password are required");
+        }
     }
 
     private static AuthResponseDto toDto(AuthResponse response) {

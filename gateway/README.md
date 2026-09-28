@@ -135,19 +135,23 @@ docker compose up -d
 ### 限流
 
 計數器存在 Redis（gateway 有多個副本時共用），固定視窗：每個鍵第一次計數時開始一段時間，時間到就重算（`ratelimit/RateLimiter`，
-一個 Lua script 做 `INCR` + 第一次時 `PEXPIRE`）。超過回 `429`，`Retry-After` 是還要等幾秒，body 是
+計數與設定過期時間在同一個 Lua script 裡；鍵不知為何沒有過期時間時也補上，不會永遠擋著）。超過回 `429`，`Retry-After` 是還要等幾秒，body 是
 `{ "error": "RATE_LIMITED", "message": "嘗試太多次，請 N 分鐘後再試" }`。**Redis 連不上時放行並記 log**（fail-open）：Redis 故障不能把所有人
 擋在外面。
 
 | 限制 | 預設 | 說明 |
 |---|---|---|
-| 登入失敗 | 同一個 IP 對同一個 email，15 分鐘 5 次 | 猜密碼；到了之後連正確的密碼也擋到時間過去；登入成功就重算。email 跟 auth-service 一樣去空白、轉小寫，Redis 的鍵只放雜湊（看不到 email） |
+| 登入失敗 | 同一個 IP 對同一個 email，15 分鐘 5 次 | 猜密碼。每次嘗試**先**計成一次失敗再送去 auth-service（同時送出的請求也只放得進 5 次），登入成功就清掉，auth-service 沒回答（例如 503）就退回；到了上限連正確的密碼也擋到時間過去。email 跟 auth-service 一樣去空白、轉小寫（`Locale.ROOT`），Redis 的鍵只放雜湊（看不到 email） |
 | 登入 | 同一個 IP，15 分鐘 20 次 | 不分 email，換 email 猜也擋得到 |
 | 註冊 | 同一個 IP，每小時 5 次 | |
 
-來源 IP 是 `request.getRemoteAddr()`。正式環境在反向代理後面時靠 `server.forward-headers-strategy=native`：Tomcat 只在直接連進來的是
-內部網路位址（代理）時採用 `X-Forwarded-For`，所以**代理一定要覆寫這個標頭**（不是附加），否則使用者可以自己填 IP 繞過限流。本機經過
-Vite proxy 或 `kubectl port-forward` 時所有請求都是同一個 IP。
+來源 IP 是 `request.getRemoteAddr()`，預設（`FORWARD_HEADERS_STRATEGY=none`）就是直接連進來的位址，**不看 `X-Forwarded-For`**——那是
+使用者可以自己填的，信了就能每次換一個假 IP 無限猜密碼（`ForwardedAddressTest` 用真的 Tomcat 驗證）。正式環境在反向代理後面時設
+`FORWARD_HEADERS_STRATEGY=native`，並把 `TRUSTED_PROXIES` 設成**那個代理**位址的正規表示式：Tomcat 從 `X-Forwarded-For` 的右邊往左讀、
+跳過信任的代理，第一個不是代理的就是來源（代理照常附加這個標頭即可）；沒設 `TRUSTED_PROXIES` 就一個代理都不信。gateway 不能繞過代理
+直接對外。本機經過 Vite proxy、`kubectl port-forward` 或 NodePort 時，所有請求都是同一個 IP（每個 IP 的上限等於大家共用）。
+
+登入與註冊沒給 email 或密碼回 400（在限流與 gRPC 之前擋下）。
 
 ### 錯誤格式
 
@@ -173,7 +177,7 @@ Vite proxy 或 `kubectl port-forward` 時所有請求都是同一個 IP。
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / 空 | 限流用的 Redis（k8s 裡 `REDIS_PORT` 一定要設，否則會被 k8s 自動注入的 `tcp://…` 蓋掉） |
 | `REDIS_TIMEOUT` / `REDIS_CONNECT_TIMEOUT` | `500ms` | Redis 慢或連不上時多久放棄（放棄就放行） |
 | `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`（與各自的 `_WINDOW`） | `5`/`15m`、`20`/`15m`、`5`/`1h` | 限流的上限與時間長度，見「限流」 |
-| `FORWARD_HEADERS_STRATEGY` | `native` | 取得來源 IP 的方式，見「限流」 |
+| `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
 
 ## 專案結構
 

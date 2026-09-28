@@ -1,13 +1,15 @@
 package com.transuai.gateway.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -22,6 +24,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
@@ -69,33 +72,26 @@ class AuthRateLimitTest {
 
     @Test
     void aFewWrongPasswordsForAnEmailBlockFurtherTries() throws Exception {
-        for (int i = 0; i < 3; i++) {
-            login("1.1.1.1", "a@example.com", "wrong").andExpect(status().isUnauthorized());
-        }
+        failLogins(3);
 
-        login("1.1.1.1", "a@example.com", PASSWORD)  // even the right password, until the window passes
+        login("1.1.1.1", "a@example.com", PASSWORD)  // 連正確的密碼也擋，直到時間過去
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.error").value("RATE_LIMITED"))
                 .andExpect(result -> assertThat(Long.parseLong(result.getResponse().getHeader("Retry-After")))
                         .isBetween(1L, 15 * 60L));
-        verify(authServiceStub, times(3)).login(any());  // the blocked try never reaches auth-service
+        verify(authServiceStub, times(3)).login(any());  // 被擋下的那次沒有送到 auth-service
     }
 
     @Test
     void theMessageSaysWhenToTryAgain() throws Exception {
-        for (int i = 0; i < 3; i++) {
-            login("1.1.1.1", "a@example.com", "wrong");
-        }
+        failLogins(3);
 
-        login("1.1.1.1", "a@example.com", "wrong").andExpect(jsonPath("$.message").value(
-                org.hamcrest.Matchers.containsString("分鐘後再試")));
+        login("1.1.1.1", "a@example.com", "wrong").andExpect(jsonPath("$.message").value(containsString("分鐘後再試")));
     }
 
     @Test
     void theBlockIsForThatEmailFromThatAddressOnly() throws Exception {
-        for (int i = 0; i < 3; i++) {
-            login("1.1.1.1", "a@example.com", "wrong");
-        }
+        failLogins(3);
 
         login("1.1.1.1", "b@example.com", PASSWORD).andExpect(status().isOk());
         login("2.2.2.2", "a@example.com", PASSWORD).andExpect(status().isOk());
@@ -103,9 +99,7 @@ class AuthRateLimitTest {
 
     @Test
     void theEmailIsMatchedTheWayAuthServiceMatchesIt() throws Exception {
-        for (int i = 0; i < 3; i++) {
-            login("1.1.1.1", "a@example.com", "wrong");
-        }
+        failLogins(3);
 
         login("1.1.1.1", " A@Example.com ", PASSWORD).andExpect(status().isTooManyRequests());
     }
@@ -146,23 +140,75 @@ class AuthRateLimitTest {
         assertThat(redis.keys("*")).isNotEmpty().noneMatch(key -> key.contains("secret-person"));
     }
 
+    @Test
+    void triesSentAllAtOnceStillOnlyGetTheAllowedNumberOfGuesses() throws Exception {
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(8);
+        try {
+            java.util.List<java.util.concurrent.Future<?>> tries = new java.util.ArrayList<>();
+            for (int i = 0; i < 8; i++) {  // 每個 IP 上限 5 次、每個 email 3 次
+                tries.add(pool.submit(() -> login("1.1.1.1", "a@example.com", "wrong")));
+            }
+            for (java.util.concurrent.Future<?> attempt : tries) {
+                attempt.get();
+            }
+        } finally {
+            pool.shutdown();
+        }
+
+        verify(authServiceStub, times(3)).login(any());
+    }
+
+    @Test
+    void aTryThatAuthServiceCouldNotAnswerIsNotCountedAsAWrongPassword() throws Exception {
+        doThrow(Status.UNAVAILABLE.asRuntimeException()).when(authServiceStub).login(any());
+        for (int i = 0; i < 3; i++) {
+            login("1.1.1.1", "a@example.com", PASSWORD).andExpect(status().isServiceUnavailable());
+        }
+        doReturn(signedIn("a@example.com")).when(authServiceStub).login(any());
+
+        login("1.1.1.1", "a@example.com", PASSWORD).andExpect(status().isOk());
+    }
+
+    @Test
+    void aCounterThatLostItsExpiryStillExpires() throws Exception {
+        redis.opsForValue().set("rate-limit:login:ip:1.1.1.1", "100");  // 沒有過期時間的計數（例如寫到一半失敗留下的）
+
+        login("1.1.1.1", "a@example.com", PASSWORD).andExpect(status().isTooManyRequests());
+
+        assertThat(redis.getExpire("rate-limit:login:ip:1.1.1.1")).isPositive();
+    }
+
+    @Test
+    void aSignInWithoutAnEmailIsABadRequest() throws Exception {
+        mvc.perform(MockMvcRequestBuilders.post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"password\":\"x\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    /** 同一個 IP 對 a@example.com 打錯密碼 n 次。 */
+    private void failLogins(int times) throws Exception {
+        for (int i = 0; i < times; i++) {
+            login("1.1.1.1", "a@example.com", "wrong").andExpect(status().isUnauthorized());
+        }
+    }
+
     private ResultActions login(String address, String email, String password) throws Exception {
-        return mvc.perform(post("/auth/login").with(request -> {
+        return post(address, "/auth/login", email, password);
+    }
+
+    private ResultActions register(String address, String email) throws Exception {
+        return post(address, "/auth/register", email, PASSWORD);
+    }
+
+    private ResultActions post(String address, String path, String email, String password) throws Exception {
+        return mvc.perform(MockMvcRequestBuilders.post(path).with(request -> {
             request.setRemoteAddr(address);
             return request;
         }).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, password)));
     }
 
-    private ResultActions register(String address, String email) throws Exception {
-        return mvc.perform(post("/auth/register").with(request -> {
-            request.setRemoteAddr(address);
-            return request;
-        }).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, PASSWORD)));
-    }
-
-    private static AuthResponse signedIn(String email) {
+    static AuthResponse signedIn(String email) {
         return AuthResponse.newBuilder().setAccessToken("access").setRefreshToken("refresh")
                 .setUser(User.newBuilder().setId("00000000-0000-0000-0000-000000000001").setEmail(email.trim()))
                 .build();
