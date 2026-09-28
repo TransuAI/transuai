@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pika import BlockingConnection
@@ -59,6 +59,7 @@ from app.services.proposal_identity import describe, fingerprint
 from app.services.llm_client import PLATFORM, ChatModel, LlmError, LlmErrorReason, chat_with_tools, platform_chat_model
 from app.services.regeneration import STUCK_AFTER
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
+from app.services.scheduled_meetings import find_scheduled_meetings
 from app.services.speaker_context import speaker_names, spoken_segments
 from app.services.transcript_client import transcript_client
 from app.services.usage_meter import LlmFeature, UsageMeter
@@ -66,7 +67,8 @@ from app.services.usage_meter import LlmFeature, UsageMeter
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_CALLS = 15
-# 最多問模型幾輪（每一輪一次 LLM 呼叫；參數格式錯誤時的重問也算）：控制一次會後處理的費用與額度。
+# 一次會後處理最多問模型幾次（agent 每一輪一次，參數格式錯誤時的重問也算；有日曆工具時最後一次留給「會議裡約好的
+# 會議」）：控制一次會後處理的費用與額度。
 MAX_MODEL_CALLS = 10
 TIME_LIMIT = timedelta(minutes=2)
 _MAX_MALFORMED_TURNS = 2
@@ -74,6 +76,7 @@ _MAX_TOKENS = 4096
 STUCK_REASON = "會後處理逾時，請再試一次"
 PROPOSED = "已記錄為提案，等使用者確認後才會執行"
 _WEEKDAYS = "一二三四五六日"
+_CALENDAR_EVENT = "calendar_event"
 
 
 class NotAvailable(Exception):
@@ -388,13 +391,11 @@ def _uploaded(run: PostMeetingRun) -> datetime:
     return run.uploaded_at.astimezone(ZoneInfo(run.timezone))
 
 
-def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str], extra_rules: str) -> str:
-    """extra_rules：外部服務的規則與這個 Job 已經建立過的事項，每條一行、開頭換行。"""
+def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[str], extra_rules: str,
+                   model_calls: int) -> str:
+    """extra_rules：外部服務的規則與這個 Job 已經建立過的事項，每條一行、開頭換行。model_calls：agent 最多幾輪。"""
     uploaded = _uploaded(run)
     speakers = "、".join(content.speakers) if len(content.speakers) >= 2 else "（只有一位講者，或沒有講者資訊）"
-    # 本機模型從來不提行事曆活動，連會議明講「3 月 24 日開會」都漏掉（ADR 0011）；只在有日曆工具時提醒。
-    next_meeting_rule = ("\n- 會議有講到下次開會（或其他約好的會議時間）時，要用 calendar_create_event 提出行事曆活動。"
-                         if "calendar_create_event" in write_tools else "")
     return f"""你是會後處理助手：讀這場會議（一段錄音的逐字稿、摘要、章節），查使用者連結的服務（例如行事曆），把會後該做的事整理成「行動提案」，交給使用者確認。
 
 規則：
@@ -402,11 +403,11 @@ def _system_prompt(run: PostMeetingRun, content: JobContent, write_tools: list[s
 - 寫入類工具（{"、".join(write_tools) or "目前沒有"}）不會真的執行，只會記成提案，等使用者確認；同一件事只提一次。
 - 只提會議裡真的談到、有根據，而且是有人答應要做、或被指派的事；報告、宣傳、公告類的內容（活動宣傳、政策說明、進度報告）不是待辦。
 - 期限：會議有講到才填（相對日期照下面的方式換算）；沒講期限就不要填，不要自己設。
-- 依據的錄音時間：用 search_transcript 找到那句話，照抄它前面的「分:秒」；沒找到就不要填，不要用 00:00 或上傳時間代替。{next_meeting_rule}
+- 依據的錄音時間：用 search_transcript 找到那句話，照抄它前面的「分:秒」；沒找到就不要填，不要用 00:00 或上傳時間代替。
 - 會議紀錄與 email 草稿用自然、平實的台灣繁體中文，像同事寫的會議紀錄，不要官腔。
 - 相對日期（明天、下週三、兩週後）依錄音上傳時間換算：上傳時間是 {uploaded.isoformat()}（星期{_WEEKDAYS[uploaded.weekday()]}），使用者時區是 {run.timezone}。
 - 講者目前的名字：{speakers}。逐字稿是語音辨識的結果，可能有錯字。{extra_rules}
-- 你總共最多只能呼叫 {MAX_TOOL_CALLS} 次工具（讀取加寫入）、最多 {MAX_MODEL_CALLS} 輪，到了就會被停下。每一輪可以一次呼叫多個工具：同一輪就把要讀的一起讀、要提的案一起提。先讀摘要與章節，真的需要細節才搜尋逐字稿，要留足夠的次數給提案。
+- 你總共最多只能呼叫 {MAX_TOOL_CALLS} 次工具（讀取加寫入）、最多 {model_calls} 輪，到了就會被停下。每一輪可以一次呼叫多個工具：同一輪就把要讀的一起讀、要提的案一起提。先讀摘要與章節，真的需要細節才搜尋逐字稿，要留足夠的次數給提案。
 - 做完就直接回覆一段簡短的說明，不要再呼叫工具。"""
 
 
@@ -439,23 +440,38 @@ def _service_token(user_id: uuid.UUID, service: str, name: str) -> str:
 
 
 def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_id: uuid.UUID) -> PostMeetingStatus:
-    """模型每一輪可以呼叫工具：讀取類真的執行、結果回給模型；寫入類驗證參數後記成提案。模型說結束就完成；工具呼叫到
-    MAX_TOOL_CALLS 次（同一輪平行呼叫超過的部分不執行）、問了模型 MAX_MODEL_CALLS 輪或超過 TIME_LIMIT 就停下，已經產生的提案
-    保留（最後一輪提的案也保留，只是不再問模型）。"""
+    """先跑 agent（_agent_loop），有日曆工具時再另外問一次會議裡約好的會議、提成行事曆活動（_propose_scheduled_meetings）；
+    兩者合起來最多 MAX_MODEL_CALLS 次 LLM 呼叫、TIME_LIMIT 的時間。"""
     setup = _service_setup(user_id)
-    service_tools = _connected_service_tools(user_id, setup, frozenset({setup.todo_destination}),
-                                             grounding_for(content.lines, _uploaded(run).date()))
+    grounding = grounding_for(content.lines, _uploaded(run).date())
+    service_tools = _connected_service_tools(user_id, setup, frozenset({setup.todo_destination}), grounding)
     tools = {tool.name: tool for tool in job_tools(content) + service_tools}
+    meter = UsageMeter(user_id, run.job_id, LlmFeature.POST_MEETING)
+    finds_meetings = "calendar_create_event" in tools
+    deadline = time.monotonic() + TIME_LIMIT.total_seconds()
+    status = _agent_loop(run, model, content, setup, tools, meter,
+                         MAX_MODEL_CALLS - 1 if finds_meetings else MAX_MODEL_CALLS, deadline)
+    # Past TIME_LIMIT nothing more is asked, not even this.
+    if finds_meetings and time.monotonic() < deadline:
+        _propose_scheduled_meetings(run, model, content, grounding, meter)
+    return status
+
+
+def _agent_loop(run: PostMeetingRun, model: ChatModel, content: JobContent, setup: _ServiceSetup,
+                tools: dict[str, AgentTool], meter: UsageMeter, max_model_calls: int,
+                deadline: float) -> PostMeetingStatus:
+    """模型每一輪可以呼叫工具：讀取類真的執行、結果回給模型；寫入類驗證參數後記成提案。模型說結束就完成；工具呼叫到
+    MAX_TOOL_CALLS 次（同一輪平行呼叫超過的部分不執行）、問了模型 max_model_calls 輪或過了 deadline（time.monotonic()）就停下，已經產生的提案
+    保留（最後一輪提的案也保留，只是不再問模型）。"""
     schemas = [tool.schema() for tool in tools.values()]
     writes = [tool.name for tool in tools.values() if tool.kind == ToolKind.WRITE]
     extra_rules = _service_rules(setup) + _already_created(run.job_id)
-    messages: list[dict] = [{"role": "system", "content": _system_prompt(run, content, writes, extra_rules)},
-                            {"role": "user", "content": "請幫我處理這場會議的會後事項。"}]
-    meter = UsageMeter(user_id, run.job_id, LlmFeature.POST_MEETING)
-    deadline = time.monotonic() + TIME_LIMIT.total_seconds()
+    messages: list[dict] = [
+        {"role": "system", "content": _system_prompt(run, content, writes, extra_rules, max_model_calls)},
+        {"role": "user", "content": "請幫我處理這場會議的會後事項。"}]
     calls = malformed = model_calls = 0
     while True:
-        if model_calls >= MAX_MODEL_CALLS or (messages[-1]["role"] != "user" and time.monotonic() >= deadline):
+        if model_calls >= max_model_calls or (messages[-1]["role"] != "user" and time.monotonic() >= deadline):
             return PostMeetingStatus.LIMIT_REACHED
         model_calls += 1
         _progress(run.id, "正在思考下一步…")
@@ -481,6 +497,38 @@ def _run_agent(run: PostMeetingRun, model: ChatModel, content: JobContent, user_
             messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
         if calls >= MAX_TOOL_CALLS or time.monotonic() >= deadline:
             return PostMeetingStatus.LIMIT_REACHED
+
+
+def _propose_scheduled_meetings(run: PostMeetingRun, model: ChatModel, content: JobContent, grounding: Grounding,
+                                meter: UsageMeter) -> None:
+    """會議裡約好的會議提成行事曆活動（scheduled_meetings）。同一天已經有行事曆活動的提案（agent 這次提的、之前執行過的）
+    就不再提：同一個會議的名稱每次寫法不同，認不出是同一件事。問不到（LLM 呼叫失敗）就算了，agent 的提案照樣保留。"""
+    _progress(run.id, "正在找會議裡約好的會議…")
+    uploaded = _uploaded(run)
+    try:
+        meetings = find_scheduled_meetings(model, content, uploaded, grounding, meter=meter)
+    except LlmError as exc:
+        logger.warning("post-meeting run %s: asking about scheduled meetings failed: %s", run.id, exc)
+        return
+    taken = _in_session(lambda s: {
+        _event_day(p.arguments, uploaded) for p in list_proposals(s, run.id) + created_proposals(s, run.job_id)
+        if p.kind == _CALENDAR_EVENT})
+    for meeting in meetings:
+        if meeting.start.date() in taken:
+            continue
+        taken.add(meeting.start.date())
+        _in_session(lambda s, meeting=meeting: add_proposal(s, run.id, "google_calendar", "calendar_create_event",
+                                                             _CALENDAR_EVENT, meeting.event_arguments()))
+    logger.info("post-meeting run %s: %d scheduled meeting(s) found", run.id, len(meetings))
+
+
+
+def _event_day(arguments: dict, uploaded: datetime) -> date | None:
+    """行事曆活動提案在使用者時區的日期；看不懂就是 None。"""
+    try:
+        return datetime.fromisoformat(str(arguments.get("start")).replace("Z", "+00:00")).astimezone(uploaded.tzinfo).date()
+    except ValueError:
+        return None
 
 
 def _call_tool(run_id: uuid.UUID, tool: AgentTool | None, name: str, arguments: str) -> str:

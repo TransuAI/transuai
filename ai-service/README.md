@@ -112,9 +112,10 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
       讀取類工具（讀摘要、讀章節、搜尋逐字稿、列出講者、查行事曆、看 Google Tasks 未完成的待辦、搜尋與讀取 Notion）真的執行，結果回給模型；
       寫入類工具（建立行事曆活動、建立 Gmail 草稿、建立待辦（Google Tasks 或 Notion）、建立 Notion 會議紀錄頁）檢查參數後存成 action_proposals（服務、工具、種類、參數），回給模型「已記錄為提案」；
       每一步把進度文字寫進紀錄，每次工具呼叫記一行 log（工具與結果的種類：ok／沒有找到／錯誤／proposal，不記內容）；模型說結束就 COMPLETED
-  → 工具呼叫到 15 次、問了模型 10 輪（每輪一次 LLM 呼叫，參數格式錯誤的重問也算）或超過 2 分鐘 → LIMIT_REACHED，保留已經
-    產生的提案（第 10 輪提的案也保留，只是不再問模型）；每次呼叫模型前與每個工具呼叫前都檢查，超過的工具呼叫不執行、回給模型
+  → 工具呼叫到 15 次、問了模型 9 輪（每輪一次 LLM 呼叫，參數格式錯誤的重問也算；沒有日曆工具時 10 輪）或超過 2 分鐘 → LIMIT_REACHED，保留已經
+    產生的提案（最後一輪提的案也保留，只是不再問模型）；每次呼叫模型前與每個工具呼叫前都檢查，超過的工具呼叫不執行、回給模型
     「未執行」（對話保持完整）。單一次模型呼叫本身沒有另外限時。系統提示告訴模型這兩個上限，並要它同一輪一次呼叫多個工具
+  → 有日曆工具、還沒超過 2 分鐘時，另外問模型一次「會議裡約好了哪些會議」（第 10 次 LLM 呼叫，見下面「約好的會議」）
 ```
 
 - 工具在 `app/services/agent_tools.py`，每個是一份設定（說明、參數、讀取類或寫入類、進度文字）；每個外部服務是一組工具
@@ -140,8 +141,12 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
   結果前面的「分:秒」、沒找到就不填，工具說明裡也不放會被照抄的範例時間；程式另外在模型提案時檢查（`agent_tools.Grounding`）：
   依據時間附近 3 秒內要有一句話開始（`00:00` 一律不算：那是模型沒依據時的預設值，錄音第一句從 0 秒開始也不能讓它過）、期限要在
   錄音上傳當天到一年後之間（系統提示也是依上傳時間換算相對日期），對不到就拿掉（留空讓使用者自己填）。使用者確認時填的值不檢查。
-  提示也要求報告、宣傳、公告類的內容不列成待辦，有日曆工具時要把約好的下次開會提成行事曆活動（qwen3:14b 實測仍然不提，見
-  `.scratch/ai-answer-quality/issues/01`）。
+  提示也要求報告、宣傳、公告類的內容不列成待辦。
+- **約好的會議**（`app/services/scheduled_meetings.py`，ADR 0013）：agent 跑完後，把整份逐字稿（每行「[分:秒] 講者：文字」）交給
+  模型，問與會者約好、之後要一起開的會議（公告給民眾的活動、期限、已經開過的不算），回 JSON；由程式提成行事曆活動，不靠 agent
+  （qwen3:14b 在 agent 迴圈裡從來不提）。日期要在上傳當天到一年後之間；會議講了幾點才用那個時間（一小時），只講了「上午／下午…」
+  用那個時段、沒講就上午九點，說明裡請使用者確認時間；說明附上那句話與它的錄音時間（對不到有人講話的地方就不附）。同一天已經有
+  行事曆活動的提案（agent 這次提的、之前執行過的）就不再提。回覆看不懂就當沒有，呼叫失敗也不影響 agent 的提案。
 - 搜尋逐字稿先做正規化比對（全形半形、空白、標點），找不到再用雙字重疊的比例（至少 3/4）：語音辨識常把「3 月 24 日」寫成「3 月 24」。
 - **用哪個模型**：預設模型是自有金鑰的就用它；是平台模型的，用部署設定的會後處理平台模型 `AI_POST_MEETING_PLATFORM_MODEL`
   （HF 路由的模型 ID，可以帶 `:供應商`——同一個模型不是每家供應商都支援工具呼叫，要指定；本機 k8s 設成
@@ -364,6 +369,7 @@ app/
     regeneration.py                  RequestRegeneration（排入自己的 queue）與消費 summary.regeneration.requested：重新產生摘要與章節
     quizzes.py                       RequestQuiz（排入自己的 queue）與消費 quiz.requested：產生測驗、失敗與卡住的判斷；作答的計分與保存
     post_meeting.py                  會後處理：能不能跑、RequestPostMeeting（排入自己的 queue）、消費 post_meeting.requested 的 agent 迴圈、執行與重試行動提案
+    scheduled_meetings.py            會後處理的「約好的會議」：問模型會議裡約好的會議，整理成行事曆活動的提案參數
     agent_tools.py                   會後處理 agent 的工具設定（讀取類／寫入類）：內部工具、Google 日曆、Gmail、Google Tasks 工具、Notion 工具、逐字稿的模糊搜尋
     google_calendar.py               Google Calendar API（列出行程、建立活動）
     gmail.py                         Gmail API（只有建立草稿，回傳打開草稿的網址）

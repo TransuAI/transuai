@@ -418,7 +418,7 @@ def test_the_system_prompt_sets_the_ground_rules(queued, fake_llm, calendar):
     assert "2026-11-11T18:00:00+08:00" in system and "Asia/Taipei" in system  # upload time, in the user's zone
     assert "王經理" in system and "金萊" in system
     assert "15" in system  # the tool-call budget
-    assert "10 輪" in system  # the model-call budget
+    assert "9 輪" in system  # the agent's share of the model-call budget (the last call finds scheduled meetings)
 
 
 def test_the_run_shows_what_it_is_doing(ai_stub, queued, fake_llm, calendar):
@@ -471,13 +471,15 @@ def test_it_stops_at_15_tool_calls_and_keeps_its_proposals(ai_stub, queued, fake
     run = latest(ai_stub, queued)
     assert run.status == ai_pb2.POST_MEETING_STATUS_LIMIT_REACHED
     assert len(run.proposals) == 1
-    assert len(fake_llm.requests) == 2  # stopped without asking the model again
+    assert len(fake_llm.requests) == 3  # the agent isn't asked again; only the question about scheduled meetings follows
 
 
 def test_it_asks_the_model_at_most_10_times_and_keeps_the_last_turns_proposals(ai_stub, queued, fake_llm, calendar):
-    for _ in range(9):
+    # 9 agent turns, then the one question about scheduled meetings.
+    for _ in range(8):
         fake_llm.reply_tool_calls([("list_speakers", {})])
-    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])  # the 10th turn still proposes
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])  # the 9th turn still proposes
+    fake_llm.reply(scheduled())
 
     work(queued)
 
@@ -488,10 +490,11 @@ def test_it_asks_the_model_at_most_10_times_and_keeps_the_last_turns_proposals(a
 
 
 def test_asking_again_after_unparseable_tool_calls_counts_as_a_model_call(ai_stub, queued, fake_llm, calendar):
-    for _ in range(8):
+    for _ in range(7):
         fake_llm.reply_tool_calls([("list_speakers", {})])
     fake_llm.fail(400, {"message": "Failed to parse tool call arguments as JSON", "code": "tool_use_failed"})
     fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])
+    fake_llm.reply(scheduled())
 
     work(queued)
 
@@ -548,7 +551,8 @@ def test_every_model_call_is_recorded_as_post_meeting_usage(queued, fake_llm, ca
 
     records = [c.args[0] for c in save_llm_usage.call_args_list]
     assert [(r.feature, r.user_id, r.provider, r.input_tokens) for r in records] == [
-        ("post_meeting", USER, "openai", 900), ("post_meeting", USER, "openai", 1200)]
+        ("post_meeting", USER, "openai", 900), ("post_meeting", USER, "openai", 1200),
+        ("post_meeting", USER, "openai", 12)]  # the question about scheduled meetings
 
 
 def test_a_transient_failure_asks_for_a_retry_and_starts_over(ai_stub, queued, fake_llm, calendar):
@@ -604,7 +608,7 @@ def test_a_message_for_a_run_that_is_no_longer_going_is_dropped(ai_stub, queued,
 
     work(queued)  # delivered again
 
-    assert len(fake_llm.requests) == 1
+    assert len(fake_llm.requests) == 2  # the agent's turn and the question about scheduled meetings, both from the first
 
 
 
@@ -1335,7 +1339,7 @@ def test_the_agent_is_told_what_this_job_already_created(ai_stub, queued, fake_l
 
     work(second)
 
-    system = fake_llm.bodies()[-1]["messages"][0]["content"]
+    system = [body for body in fake_llm.bodies() if "tools" in body][-1]["messages"][0]["content"]  # the agent's
     assert "已經建立過" in system
     assert "搬家確認會議" in system and "聯繫搬家公司" in system
 
@@ -1417,7 +1421,7 @@ def test_the_tools_offer_no_example_time_the_model_could_copy(ai_stub, queued, f
     assert "12:34" not in json.dumps(fake_llm.bodies()[0]["tools"], ensure_ascii=False)
 
 
-def test_the_system_prompt_asks_for_dates_and_times_only_with_grounds_and_for_the_next_meeting(queued, fake_llm, calendar):
+def test_the_system_prompt_asks_for_dates_and_times_only_with_grounds(queued, fake_llm, calendar):
     fake_llm.reply("好。")
 
     work(queued)
@@ -1425,7 +1429,6 @@ def test_the_system_prompt_asks_for_dates_and_times_only_with_grounds_and_for_th
     system = fake_llm.bodies()[0]["messages"][0]["content"]
     assert "沒講期限就不要填" in system
     assert "search_transcript" in system and "照抄" in system  # times come from what the search found
-    assert "下次開會" in system and "calendar_create_event" in system
     assert "宣傳" in system  # announcements aren't todos
 
 
@@ -1507,3 +1510,126 @@ def test_a_notion_page_todo_due_date_before_the_meeting_is_dropped(ai_stub, queu
 
     [page] = latest(ai_stub, queued).proposals
     assert [todo.get("due") for todo in json.loads(page.arguments_json)["todos"]] == ["2026-11-20", None]
+
+
+# --- 會議裡約好的會議：agent 之後另外問一次，程式提成行事曆活動 ---
+
+
+def scheduled(*meetings: dict) -> str:
+    return json.dumps({"meetings": list(meetings)}, ensure_ascii=False)
+
+
+NEXT_WEDNESDAY = {"title": "搬家確認會議", "date": "2026-11-18", "time": "14:00", "time_words": "下週三下午",
+                  "timestamp": "00:30", "quote": "那我們下週三下午再開一次會確認"}
+
+
+def test_a_meeting_the_transcript_schedules_is_proposed_as_a_calendar_event(ai_stub, queued, fake_llm, calendar):
+    # qwen3:14b never proposed one inside the agent loop, but gets them right when asked on their own (ADR 0011).
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled(NEXT_WEDNESDAY))
+
+    work(queued)
+
+    run = latest(ai_stub, queued)
+    assert run.status == ai_pb2.POST_MEETING_STATUS_COMPLETED
+    [event] = run.proposals
+    arguments = json.loads(event.arguments_json)
+    assert (event.kind, arguments["summary"], arguments["start"], arguments["end"]) == (
+        "calendar_event", "搬家確認會議", "2026-11-18T14:00:00+08:00", "2026-11-18T17:00:00+08:00")
+    assert "錄音 00:30" in arguments["description"] and "那我們下週三下午再開一次會確認" in arguments["description"]
+    assert "時間請確認" in arguments["description"]  # only 「下午」 was said: the model's 14:00 is a guess
+
+
+def test_a_time_said_in_the_meeting_is_used_as_is(ai_stub, queued, fake_llm, calendar):
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled({**NEXT_WEDNESDAY, "time": "15:00", "time_words": "下午三點"}))
+
+    work(queued)
+
+    arguments = json.loads(latest(ai_stub, queued).proposals[0].arguments_json)
+    assert (arguments["start"], arguments["end"]) == ("2026-11-18T15:00:00+08:00", "2026-11-18T16:00:00+08:00")
+    assert "時間請確認" not in arguments["description"]
+
+
+def test_the_model_is_asked_about_scheduled_meetings_with_the_whole_transcript(queued, fake_llm, calendar):
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled())
+
+    work(queued)
+
+    check = fake_llm.bodies()[-1]
+    assert "tools" not in check
+    prompt = check["messages"][-1]["content"]
+    assert "[00:30] 金萊：那我們下週三下午再開一次會確認" in prompt
+    assert "2026-11-11T18:00:00+08:00" in prompt  # relative dates count from the upload time, like the agent's
+    assert "公告" in prompt  # announcements to the public aren't meetings the attendees agreed on
+
+
+def test_a_scheduled_meeting_on_a_day_the_agent_already_proposed_is_not_proposed_again(ai_stub, queued, fake_llm,
+                                                                                       calendar):
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])  # 2026-11-18
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled(NEXT_WEDNESDAY))
+
+    work(queued)
+
+    [event] = latest(ai_stub, queued).proposals
+    assert json.loads(event.arguments_json)["summary"] == NEXT_MEETING["summary"]
+
+
+def test_a_scheduled_meeting_an_earlier_run_created_is_not_proposed_again(ai_stub, queued, fake_llm, calendar,
+                                                                          rabbitmq):
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled(NEXT_WEDNESDAY))
+    work(queued)
+    [event] = latest(ai_stub, queued).proposals
+    execute(ai_stub, queued, [(event.id, json.loads(event.arguments_json))])
+    second = run_again(ai_stub, queued, rabbitmq)
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled({**NEXT_WEDNESDAY, "title": "確認搬家"}))  # named differently this time
+
+    work(second)
+
+    assert list(latest(ai_stub, queued).proposals) == []
+
+
+def test_a_scheduled_meeting_before_the_upload_or_years_after_it_is_not_proposed(ai_stub, queued, fake_llm, calendar):
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled({**NEXT_WEDNESDAY, "date": "2026-11-08"}, {**NEXT_WEDNESDAY, "date": "2029-11-18"}))
+
+    work(queued)
+
+    assert list(latest(ai_stub, queued).proposals) == []
+
+
+def test_a_scheduled_meeting_keeps_its_time_in_the_recording_only_if_something_was_said_then(ai_stub, queued,
+                                                                                            fake_llm, calendar):
+    fake_llm.reply("好。")
+    fake_llm.reply(scheduled({**NEXT_WEDNESDAY, "timestamp": "12:34"}))
+
+    work(queued)
+
+    description = json.loads(latest(ai_stub, queued).proposals[0].arguments_json)["description"]
+    assert "錄音" not in description and "那我們下週三下午再開一次會確認" in description
+
+
+@pytest.mark.parametrize("reply", ["沒有約會議。", scheduled({"title": "少了日期"}), json.dumps({"meetings": "none"})])
+def test_a_scheduled_meeting_reply_that_makes_no_sense_proposes_nothing(ai_stub, queued, fake_llm, calendar, reply):
+    fake_llm.reply("好。")
+    fake_llm.reply(reply)
+
+    work(queued)
+
+    run = latest(ai_stub, queued)
+    assert (run.status, list(run.proposals)) == (ai_pb2.POST_MEETING_STATUS_COMPLETED, [])
+
+
+def test_failing_to_ask_about_scheduled_meetings_keeps_the_agents_proposals(ai_stub, queued, fake_llm, calendar):
+    fake_llm.reply_tool_calls([("calendar_create_event", NEXT_MEETING)])
+    fake_llm.reply("好。")
+    fake_llm.fail(400)
+
+    work(queued)
+
+    run = latest(ai_stub, queued)
+    assert (run.status, len(run.proposals)) == (ai_pb2.POST_MEETING_STATUS_COMPLETED, 1)

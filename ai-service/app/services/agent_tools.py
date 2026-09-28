@@ -94,6 +94,11 @@ class JobContent:
     speakers: list[str]
 
 
+def timed_line(start: float, speaker: str | None, text: str) -> str:
+    """給模型看的一句話：「[分:秒] 講者：文字」；模型照抄前面的時間當依據。"""
+    return f"[{clock(start)}] {speaker + '：' if speaker else ''}{text}"
+
+
 def normalize_text(text: str) -> str:
     """比對用：全形轉半形、小寫、去掉空白與標點。"""
     folded = unicodedata.normalize("NFKC", text).lower()
@@ -157,7 +162,7 @@ def search_lines(lines: list[tuple[float, str | None, str]], query: str, *, limi
         if score >= 0.75:
             scored.append((score, start, speaker, text))
     scored.sort(key=lambda item: (-item[0], item[1]))
-    return [f"[{clock(start)}] {speaker + '：' if speaker else ''}{text}" for _, start, speaker, text in scored[:limit]]
+    return [timed_line(start, speaker, text) for _, start, speaker, text in scored[:limit]]
 
 
 def job_tools(content: JobContent) -> list[AgentTool]:
