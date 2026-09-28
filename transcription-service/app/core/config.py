@@ -31,6 +31,13 @@ class Settings(BaseSettings):
 
     upload_service_grpc_target: str = "localhost:9090"
 
+    # 逐字稿的快取（cache-aside，見 app/services/transcript_cache.py）。Redis 連不上時照樣讀資料庫。
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str = ""
+    redis_timeout_seconds: float = 0.5
+    transcript_cache_ttl_seconds: int = 600
+
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-3"
     # 固定指定語言而不是讓 Deepgram 自動偵測：自動偵測的中文走的是通用模型，輸出簡體、錯字也明顯較多（見 ADR 0001）。

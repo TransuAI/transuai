@@ -16,6 +16,7 @@ dependencies = [
     "protobuf>=7.35.1",
     "psycopg2-binary>=2.9.12",
     "pydantic-settings>=2.15.0",
+    "redis>=8.1.0",
     "sqlalchemy>=2.0.51",
 ]
 
@@ -23,6 +24,7 @@ dependencies = [
 dev = [
     "grpcio-tools>=1.83.0",
     "pytest>=9.1.1",
+    "testcontainers[postgres,redis]>=4.15.0",
 ]
 
 [tool.pytest.ini_options]

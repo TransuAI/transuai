@@ -1,3 +1,4 @@
+import atexit
 import json
 import os
 import uuid
@@ -7,14 +8,31 @@ from unittest.mock import MagicMock, patch
 
 import grpc
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from testcontainers.community.postgres import PostgresContainer
+from testcontainers.community.redis import RedisContainer
 
-# Tests that touch the database (the gRPC servicer tests) use their own database on the dev
-# Postgres from infra's docker compose — never the real transcription_db. Environment variables
-# win over .env in pydantic-settings, and app.core.config reads them at import time, so this has
-# to be set before anything under app/ is imported.
+# Tests that touch the database (the gRPC servicer tests) and the transcript cache get a throwaway
+# Postgres and Redis that testcontainers starts for this test run and removes afterwards — never the
+# real transcription_db, and nothing to start by hand (Docker has to be running). Environment
+# variables win over .env in pydantic-settings, and app.core.config reads them at import time, so
+# this has to happen before anything under app/ is imported.
 TEST_DB_NAME = "transcription_test_db"
-os.environ["DB_NAME"] = TEST_DB_NAME
+_postgres = PostgresContainer("pgvector/pgvector:pg16", username="test", password="test", dbname=TEST_DB_NAME)
+_postgres.start()
+atexit.register(_postgres.stop)
+_redis = RedisContainer("redis:7-alpine")
+_redis.start()
+atexit.register(_redis.stop)
+os.environ |= {
+    "DB_HOST": _postgres.get_container_host_ip(),
+    "DB_PORT": str(_postgres.get_exposed_port(5432)),
+    "DB_USER": "test",
+    "DB_PASSWORD": "test",
+    "DB_NAME": TEST_DB_NAME,
+    "REDIS_HOST": _redis.get_container_host_ip(),
+    "REDIS_PORT": str(_redis.get_exposed_port(6379)),
+}
 
 from app.controllers.transcript_controller import TranscriptController  # noqa: E402
 from app.core.config import settings  # noqa: E402
@@ -98,14 +116,8 @@ def _reset_schema():
 
 @pytest.fixture(scope="session")
 def test_database():
-    """A clean test database, (re)created per test session, with the schema set up the same way
-    the service does it at startup (init_db)."""
-    admin = create_engine(settings.database_url.rsplit("/", 1)[0] + "/postgres", isolation_level="AUTOCOMMIT")
-    with admin.connect() as conn:
-        if not conn.scalar(text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": TEST_DB_NAME}):
-            conn.execute(text(f'CREATE DATABASE "{TEST_DB_NAME}"'))
-    admin.dispose()
-
+    """A clean test database with the schema set up the same way the service does it at startup
+    (init_db)."""
     _reset_schema()
     init_db()
     yield engine
@@ -145,3 +157,9 @@ def transcription_stub(test_database):
     yield transcription_pb2_grpc.TranscriptionServiceStub(channel)
     channel.close()
     server.stop(grace=None)
+
+
+@pytest.fixture(autouse=True)
+def empty_cache():
+    """Every test starts with an empty transcript cache."""
+    _redis.get_client().flushall()

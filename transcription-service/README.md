@@ -15,10 +15,11 @@
 | 資料庫        | PostgreSQL（`transcription_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級                        |
 | 物件儲存      | S3 相容 API（`boto3`，本機開發打 MinIO）                                                                                                         |
 | 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務）                                                 |
+| 快取          | Redis（`redis-py`）：`GetTranscript` 的 cache-aside，見下方「逐字稿快取」；連不上時照樣讀資料庫                                                    |
 
 ## 前置需求
 
-- 先啟動基礎設施：`cd ../infra && docker compose up -d`
+- 先啟動基礎設施：`cd ../infra && docker compose up -d`（Postgres、RabbitMQ、MinIO；Redis 沒開時逐字稿快取略過，照樣讀資料庫）
 - Upload Service 要跑在 `localhost:9090`（見 [`../upload-service`](../upload-service)），因為要呼叫它的 `InternalJobService.UpdateJobStatus`
 - 一組 Deepgram API Key（[console.deepgram.com](https://console.deepgram.com)，新帳號送 $200 額度、不用綁卡），填進 `.env` 的 `DEEPGRAM_API_KEY`
 
@@ -81,6 +82,18 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
 
+### 逐字稿快取
+
+`GetTranscript` 讀很多（問答的每一題、出題、會後處理、重新產生摘要、前端），只在編輯時才變，所以做 cache-aside（`app/services/transcript_cache.py`）：
+Redis 的 `transcript:{job_id}` 是一個 hash，存序列化的 `Transcript` 與它的 `revision`，有效 10 分鐘（`TRANSCRIPT_CACHE_TTL_SECONDS`）。
+
+- 讀：有內容就直接回；沒有才讀資料庫並寫回。找不到的逐字稿不記。
+- 三種編輯（`UpdateSegmentText`、`RenameSpeaker`、`AssignSegmentSpeaker`）真的改了之後（已經寫進資料庫），記下最新的 `revision` 並丟掉內容。
+- 寫回只在自己讀到的 `revision` 不比記下的舊時才寫（Lua 原子地比較）：編輯之前就開始、晚一步寫回的讀取帶不回舊版，編輯後下一次讀到的一定是新版。
+- Redis 連不上時照樣讀資料庫，只記 log；編輯時連不上的話，舊內容最多留到有效時間結束。
+
+環境變數：`REDIS_HOST`（`localhost`）、`REDIS_PORT`（`6379`）、`REDIS_PASSWORD`（空）、`REDIS_TIMEOUT_SECONDS`（`0.5`）、`TRANSCRIPT_CACHE_TTL_SECONDS`（`600`）。
+
 ### 測試方式
 
 跟 upload-service 一樣，用 Postman 開 gRPC 分頁連 `localhost:8083`（plaintext，記得關閉 TLS），靠 reflection 自動列出 method；或用 grpcurl：
@@ -117,10 +130,10 @@ uv run pytest
 
 用 pytest，mocking 只用標準庫的 `unittest.mock`。
 
-gRPC 服務本身（`tests/test_transcript_grpc.py`：查詢與啟動 migration；`tests/test_segment_editing.py`：編輯片段；`tests/test_speaker_editing.py`：替講者命名、改片段的講者）是對**真的 Postgres** 測：需要先 `cd ../infra && docker compose up -d`，
-fixture 會在同一個 Postgres 上建（或清空重建）一個獨立的 `transcription_test_db`，用服務啟動時同一套
-`init_db()` 跑 migration，再在 process 裡起一個真的 gRPC server 給測試呼叫（參考 upload-service 的 IT 做法）；
-絕對不會碰到 `transcription_db`。
+gRPC 服務本身（`tests/test_transcript_grpc.py`：查詢與啟動 migration；`tests/test_segment_editing.py`：編輯片段；`tests/test_speaker_editing.py`：替講者命名、改片段的講者；
+`tests/test_transcript_cache.py`：逐字稿快取）是對**真的 Postgres 與 Redis** 測：`tests/conftest.py` 用 Testcontainers 在測試開始時起用完即丟的
+Postgres（`transcription_test_db`）與 Redis（隨機 port），跑完自動刪掉，不用先開 `infra` 的 docker compose（只要 Docker 有在跑），絕對不會碰到
+`transcription_db`；用服務啟動時同一套 `init_db()` 跑 migration，再在 process 裡起一個真的 gRPC server 給測試呼叫（參考 upload-service 的 IT 做法）。
 
 其餘 pipeline 測試不需要 infra 或任何 API key——`tests/conftest.py` 的 `mocks` fixture 把 pipeline 會碰到的所有外部 I/O（語音辨識、下載、
 抽音軌、gRPC 狀態回報、DB session / 存檔）都 mock 掉，語音辨識直接回傳不綁定廠商的逐字資料，驗證 `process_message()` 這個 seam 本身的邏輯：
@@ -171,6 +184,7 @@ app/
     traditional_chinese.py                中文逐字稿轉繁體（OpenCC s2tw），pipeline 在切片段與存檔之間呼叫
     job_status_client.py                  gRPC client，呼叫 Upload Service 的 UpdateJobStatus
     event_publisher.py                     發送 transcription.completed / job.failed（pipeline 用，走 consumer 的連線）
+    transcript_cache.py                    逐字稿的 cache-aside（Redis，帶 revision；見「逐字稿快取」）
     edit_events.py                         編輯後發送 transcript.edited { jobId }：gRPC handler 自己開短連線，失敗做 3 次小型重試，仍失敗記 TRANSCRIPTION_SERVICE_TRANSCRIPT_EDITED_EVENT_LOST 但編輯照樣成功
   repositories/
     transcript_repository.py               transcription_db 存取（transcripts / transcript_segments / speakers）
