@@ -216,6 +216,7 @@ Job id 是 UUID、不會重用，標記在有效時間內直接回 404。有效�
 
 | 變數 | 預設值 | 說明 |
 |---|---|---|
+| `APP_ENV` | `development` | `production` 時檢查密鑰並關掉開發用的東西，見「正式環境」 |
 | `JWT_SECRET` | `dev-only-shared-secret-change-me-before-any-real-deployment` | HS256 驗章密鑰，**必須跟 auth-service 的 `JWT_SECRET` 一致** |
 | `AUTH_SERVICE_GRPC_TARGET` | `localhost:9091` | auth-service |
 | `UPLOAD_SERVICE_GRPC_TARGET` | `localhost:9090` | upload-service |
@@ -249,6 +250,16 @@ src/main/java/com/transuai/gateway/
   grpc/               GrpcMetadataSupport（組 x-user-id metadata）、JobOwnershipGuard（Transcription/AI 端點的 ownership 檢查）、
                        GrpcTimestamps、GrpcStrings（空字串 → null）、UploadMapper（proto ↔ DTO）
 ```
+
+## 正式環境（`APP_ENV=production`）
+
+`APP_ENV` 預設是 `development`；設成 `production`（Java 服務用 `spring.profiles.active=${APP_ENV:development}`，就是 `production` profile）時：
+
+- 啟動前檢查密鑰（`config/ProductionSecretsCheck`）：`JWT_SECRET`（至少 32 字元）、`REDIS_PASSWORD` 沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
+  或少於 12 字元，就不啟動，錯誤訊息列出是哪幾個環境變數。
+- API 文件（Swagger UI、`/v3/api-docs`）不對外（`application-production.properties`）。
+
+開發環境都不檢查、照舊開著。見 `.scratch/pre-launch-hardening/issues/07`。
 
 ## 已知限制 / 待辦
 
