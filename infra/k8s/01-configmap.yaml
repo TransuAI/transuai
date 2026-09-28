@@ -68,7 +68,7 @@ data:
   OAUTH_CALLBACK_BASE_URL: "http://localhost:5173/api"
   FRONTEND_URL: "http://localhost:5173"
 
-  # gateway 的限流計數器放在 Redis（見 gateway README「限流」）。REDIS_PORT 一定要寫：Service 叫 redis，k8s 會自動注入
+  # Redis：gateway 的限流與快取、transcription-service 的逐字稿快取（見各自 README）。REDIS_PORT 一定要寫：Service 叫 redis，k8s 會自動注入
   # REDIS_PORT=tcp://<ip>:6379（跟 RABBITMQ_PORT 一樣），這裡的值蓋掉它。
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
