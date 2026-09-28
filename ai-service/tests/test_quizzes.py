@@ -221,6 +221,47 @@ def test_with_several_speakers_each_line_carries_the_speakers_name(requested, fa
     assert "[0.0] 主持人：你怎麼看預算\n[3.0] 王小明：我主張砍一成" in fake_llm.bodies()[0]["messages"][-1]["content"]
 
 
+def test_the_questions_are_asked_for_on_the_key_points_across_the_whole_content(requested, fake_llm):
+    fake_llm.reply(five_questions())
+
+    generate(requested.message)
+
+    instructions = fake_llm.bodies()[0]["messages"][-1]["content"].split("[0.0]")[0]
+    assert "知識類" in instructions and "會議" in instructions and "故事" in instructions  # questions fit the content
+    assert "從頭到尾" in instructions  # a local model asked everything from the first few minutes
+    assert "只有一個選項是對的" in instructions  # it once offered two right answers
+    assert "錯字" in instructions  # nor about words the speech recognition got wrong
+
+
+def test_the_questions_are_asked_for_in_plain_words_without_times_or_internal_terms(requested, fake_llm):
+    fake_llm.reply(five_questions())
+
+    generate(requested.message)
+
+    instructions = fake_llm.bodies()[0]["messages"][-1]["content"].split("[0.0]")[0]
+    assert "不要提到「逐字稿」" in instructions  # a local model wrote 「根據逐字稿」「在 [138.6] 這一節」
+    assert "解說" in instructions and "為什麼" in instructions
+
+
+def test_about_half_the_true_false_questions_are_asked_to_be_false(requested, fake_llm):
+    fake_llm.reply(five_questions())
+
+    generate(requested.message)
+
+    assert "一半" in fake_llm.bodies()[0]["messages"][-1]["content"]  # a local model made all 30 of them true
+
+
+def test_a_quiz_written_in_simplified_chinese_is_saved_in_traditional(ai_stub, requested, fake_llm):
+    simplified_true_false = {**true_false(), "question": "今天讲的是光合作用。", "explanation": "开场就说了。"}
+    fake_llm.reply(json.dumps([{**multiple_choice(), "question": "光能被什么吸收？", "explanation": "讲者说叶绿体吸收光能。"}]
+                              + [simplified_true_false] * 4, ensure_ascii=False))
+
+    generate(requested.message)
+
+    first = get_quiz(ai_stub, requested).questions[0]
+    assert (first.prompt, first.explanation) == ("光能被什麼吸收？", "講者說葉綠體吸收光能。")
+
+
 def test_timestamps_that_are_not_the_start_of_a_segment_are_dropped(ai_stub, requested, fake_llm):
     # 12.3 is the cleared segment's start (as the model saw times), 99 matches nothing, 20.5 is fine.
     fake_llm.reply(five_questions(timestamps=(12.3, 99.0, 20.5, 0.0)))

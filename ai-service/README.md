@@ -219,10 +219,17 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
   → 新增一份 status = GENERATING 的測驗並存好，再排入 quiz.requested { quizId, jobId, userId }（publisher confirms、短 timeout；排入失敗就把它刪掉，什麼都不留）
 消費 quiz.requested { quizId, jobId, userId }
   → GetTranscript（revision R）→ 每行「[開始時間] 文字」，排除已清空片段、兩位以上講者時帶名稱（同章節）
-  → 用 userId 的預設模型出題，要求回 JSON 陣列 → 驗證（題數、題型、選擇題 4 個選項、正確答案在選項內、題目與解說不是空的）
+  → 用 userId 的預設模型出題，要求回 JSON 陣列（出題的要求見下）→ 整份回覆是簡體時轉成繁體（同問答，只看整份、不逐題判斷）
+  → 驗證（題數、題型、選擇題 4 個選項、正確答案在選項內、題目與解說不是空的）
   → 時間戳只留對得到某個片段開始時間的（依模型看到的、取到小數一位的時間比對，存片段真正的開始時間）
   → 題目與 status = COMPLETED、source_revision = R、產生的模型一起寫入（只寫還在 GENERATING 的：訊息重送或已經完成的不會再出題）
 ```
+
+出題的要求（內容不一定是會議，也可能是知識類影片、節目或動畫）：先看出是什麼樣的內容再考重點——知識類考觀念與原因、會議考決定與
+分工、故事考情節與角色；依時間把內容分成題數那麼多段、每段一題，不集中在開頭；不考冷僻細節、不拿辨識錯字出題；選擇題只有一個
+對的選項、錯誤選項像真的；是非題約一半答案是「否」；題目與解說用自然的台灣繁體中文，不提「逐字稿」「片段」或秒數，解說說明為什麼、
+提到誰說的用講者名稱。這些是依本機 `qwen3:14b` 的實測訂的（改前：是非題全是「是」、題目寫「在 [138.6] 這一節」、只考「誰說了什麼」、
+題目集中在前幾分鐘）。
 
 模型回傳的格式不對是永久性失敗（不重試，`status = FAILED` 並附原因）；暫時性失敗走訊息層級重試（`quiz.requested.retry.2s`／`.4s`），
 用完就是 FAILED。自有金鑰不能用時直接失敗並附原因，不改用平台模型。GENERATING 超過 5 分鐘視為卡住，`ListQuizzes` / `GetQuiz`

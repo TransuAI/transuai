@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from app.models import QuestionKind
 from app.services.chapter_generator import TimedLine, format_timed_lines, parse_json_reply
 from app.services.llm_client import ChatModel, UsageSink, chat
+from app.services.traditional_chinese import to_traditional
 
 logger = logging.getLogger(__name__)
 
@@ -13,15 +14,30 @@ _MULTIPLE_CHOICE_OPTION_COUNT = 4
 _MAX_TOKENS = 8192
 
 _PROMPT_TEMPLATE = (
-    "你是一個出題助手。以下是一段錄音的逐字稿，每行開頭是該片段的開始時間（秒），多人對話時標了講者名稱。\n"
-    "請依整段內容出 {count} 題繁體中文測驗，選擇題與是非題混合，題目要能從逐字稿找到答案；"
-    "多人對話時可以考「誰說了什麼」。\n"
+    "你要替使用者上傳的一段內容（可能是會議、YouTube 影片、課程、訪談、節目或動畫等）出 {count} 題測驗，讓看完的人檢查自己"
+    "有沒有抓到重點。選擇題與是非題混合。內容在最後，每行開頭是那句話的開始時間（秒），多人對話時標了講者名稱。\n"
+    "出什麼題：\n"
+    "- 先看出這是什麼樣的內容，再考它的重點：知識類（課程、解說、節目）考觀念、原因與比較；會議考做了哪些決定、誰負責什麼、"
+    "為什麼這樣決定；故事（動畫、劇）考情節、角色與他們的動機。\n"
+    "- 題目平均分布在內容的從頭到尾：依時間把內容大致分成 {count} 段，每段出一題，照時間順序排列；每題考不同的事。\n"
+    "- 不考冷僻的細節（某句話的原文、只出現一次的數字）；「誰說的」只在那個人的立場或分工是重點時才考。\n"
+    "- 內容是語音辨識的結果，可能有錯字：看起來不通順的詞不要拿來出題，題目裡寫校正後的字。\n"
+    "- 選擇題只有一個選項是對的，其他選項照內容來看明確是錯的，但要像真的：跟正確答案同類、長度相近；不要用「以上皆是」"
+    "「以上皆非」「沒有人提到」。\n"
+    "- 是非題大約一半的答案是 false：把內容裡的一個關鍵事實改錯（人、數字、原因、結果），不要只加「不」字；題目用肯定句，"
+    "不要用「沒有」「並未」出題（「並未提到…」答「否」很難懂）。\n"
+    "怎麼寫：\n"
+    "- 用台灣慣用、自然的繁體中文，題目簡短清楚；內容是外語時用中文出題，必要時在括號裡留原文的關鍵詞。\n"
+    "- 直接問內容本身：題目、選項、解說都不要提到「逐字稿」「片段」「錄音」「第幾秒」或時間；題目不要加「內容中提到」"
+    "「根據內容」「影片中表示」這類開頭，直接問那件事。\n"
+    "- 解說一兩句，跟答案一致：說明為什麼是這個答案（是非題說清楚哪裡對、哪裡錯），提到誰說的就用他的講者名稱；"
+    "外語內容用中文轉述，不要引用整句原文。\n"
     "只回傳 JSON 陣列，不要 Markdown code fence、不要其他文字，恰好 {count} 個元素，每個元素是下列其中一種：\n"
     '選擇題 {{"type": "multiple_choice", "question": string, "options": [4 個 string], '
     '"answer": 正確選項的位置（0 到 3）, "explanation": string, "timestamps": [number]}}\n'
     '是非題 {{"type": "true_false", "question": string, "answer": true 或 false, "explanation": string, '
     '"timestamps": [number]}}\n'
-    "timestamps 是答案依據的片段開始時間，照抄逐字稿行首的數字。\n\n{transcript}"
+    "timestamps 是答案依據的那幾句話的開始時間，照抄行首的數字。\n\n{transcript}"
 )
 
 
@@ -48,7 +64,7 @@ def generate_quiz(
     prompt = _PROMPT_TEMPLATE.format(count=question_count, transcript=format_timed_lines(lines))
     result = chat(model, [{"role": "user", "content": prompt}], max_tokens=_MAX_TOKENS, meter=meter)
     try:
-        items = parse_json_reply(result.text or "")
+        items = parse_json_reply(to_traditional(result.text or ""))
     except json.JSONDecodeError as exc:
         raise QuizFormatError("不是 JSON") from exc
     if not isinstance(items, list) or len(items) != question_count:
