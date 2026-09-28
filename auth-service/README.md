@@ -96,6 +96,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 
 | 變數 | 預設值 | 說明 |
 |---|---|---|
+| `APP_ENV` | `development` | `production` 時檢查密鑰並關掉開發用的東西，見「正式環境」 |
 | `DB_HOST` / `DB_PORT` | `localhost` / `5432` | Postgres |
 | `DB_USER` / `DB_PASSWORD` | `admin` / `0000` | Postgres 帳密 |
 | `JWT_SECRET` | `dev-only-shared-secret-change-me-before-any-real-deployment` | HS256 簽章密鑰，**必須跟 gateway 的 `JWT_SECRET` 一致**；正式環境務必覆蓋 |
@@ -117,6 +118,16 @@ src/main/java/com/transuai/auth_service/
                        （不像其他 rpc 都用 responseObserver.onError()），不放行的話會被最下面的
                        Exception catch-all 吃掉、錯誤地降級成 INTERNAL（開發時實測踩到這個坑）
 ```
+
+## 正式環境（`APP_ENV=production`）
+
+`APP_ENV` 預設是 `development`；設成 `production`（Java 服務用 `spring.profiles.active=${APP_ENV:development}`，就是 `production` profile）時：
+
+- 啟動前檢查密鑰（`config/ProductionSecretsCheck`）：`JWT_SECRET`（至少 32 字元）、`DB_PASSWORD` 沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
+  或少於 12 字元，就不啟動，錯誤訊息列出是哪幾個環境變數。
+- gRPC reflection 關掉（`application-production.properties`）。
+
+開發環境都不檢查、照舊開著。見 `.scratch/pre-launch-hardening/issues/07`。
 
 ## 已知限制 / 待辦
 
