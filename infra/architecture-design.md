@@ -57,7 +57,7 @@ Notification Service 消費訊息
 
 | 服務 | 職責 | 技術棧 | 對外/對內 |
 |---|---|---|---|
-| **API Gateway** | 統一入口、JWT 本地驗證、REST↔gRPC 轉譯 | Spring Boot（Web MVC）+ gRPC Client | 對外 |
+| **API Gateway** | 統一入口、JWT 本地驗證、REST↔gRPC 轉譯、限流 | Spring Boot（Web MVC）+ gRPC Client + Redis（限流計數） | 對外 |
 | **Auth Service** | 使用者註冊/登入、JWT 簽發與刷新 | Spring Boot + gRPC Server | 對內（僅供 Gateway 呼叫） |
 | **Upload Service** | 檔案上傳、產生 presigned URL、Job 建立與狀態管理 | Spring Boot + gRPC Server | 對內（僅供 Gateway / 下游服務呼叫） |
 | **Transcription Service** | 抽音軌（moviepy/ffmpeg）、呼叫 Deepgram 轉錄與講者分離、逐字稿產出與儲存 | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
@@ -102,8 +102,8 @@ proto 定義在 `infra/proto/*.proto`）。下游服務本身沒有對外 REST e
 ### 3.1 Auth Service
 
 ```
-POST   /auth/register          註冊（email 已存在回 409/ALREADY_EXISTS，成功直接簽發 token，不用再呼叫一次 login）
-POST   /auth/login             登入，回傳 access/refresh token（email/password 任一錯誤都回 401，不細分以避免帳號列舉）
+POST   /auth/register          註冊（email 已存在回 409/ALREADY_EXISTS，成功直接簽發 token，不用再呼叫一次 login；同一個 IP 註冊太多次回 429）
+POST   /auth/login             登入，回傳 access/refresh token（email/password 任一錯誤都回 401，不細分以避免帳號列舉；猜密碼太多次回 429，見 gateway README「限流」）
 POST   /auth/refresh           用 refresh token 換發新的 access/refresh token 組合
 GET    /auth/me                取得目前使用者資訊（需帶 access token）
 ```
@@ -639,7 +639,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 |---|---|---|---|
 | **後端服務託管**（core-service / transcription-service / ai-service） | **Render** | 每月 750 小時免費 Web Service（512MB RAM、0.1 CPU） | 15 分鐘無流量會自動休眠，冷啟動約 30-60 秒；免費層不支援水平擴展、無 SSH/shell 存取；僅適合 MVP 測試，非正式生產環境 |
 | **PostgreSQL + 向量資料庫** | **Supabase** | 免費層 500MB 儲存空間；pgvector 在所有方案（含免費）都開放使用 | 超過 500MB 需升級付費方案；免費層資料庫有閒置自動暫停機制，需注意喚醒延遲 |
-| **訊息佇列**（Redis） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；高頻率輪詢（如 worker 的 BRPOP loop）會快速消耗指令額度，MVP 階段要留意用量 |
+| **Redis**（gateway 限流計數，之後放快取；訊息佇列實際用 RabbitMQ） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；每次登入、註冊都要幾個指令，之後的全站限流與快取每個請求都會用到，要留意用量 |
 | **物件儲存**（音訊/影片檔案） | **Cloudflare R2** | 10GB 儲存空間、每月 100 萬次操作 | 超過額度另計費；免費層無 CDN 加速額外保證，大流量下載需注意頻寬成本 |
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
 | **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
