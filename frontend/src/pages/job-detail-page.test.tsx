@@ -175,6 +175,20 @@ describe('JobDetailPage status branches', () => {
     expect(screen.queryByText('Studio')).not.toBeInTheDocument()
   })
 
+  it('shows a failure to load the job as one toast that later failures replace, not a new one every poll', async () => {
+    const { toast } = await import('sonner')
+    const error = vi.spyOn(toast, 'error')
+    vi.mocked(jobsApi.get).mockRejectedValue(
+      new ApiError(429, { error: 'RATE_LIMITED', message: '使用得太頻繁，請 1 分鐘後再試' }),
+    )
+
+    renderJobDetail()
+
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith('使用得太頻繁，請 1 分鐘後再試', expect.objectContaining({ id: expect.any(String) })),
+    )
+  })
+
   it('shows the failure reason for a FAILED job', async () => {
     vi.mocked(jobsApi.get).mockResolvedValue({
       ...baseJob,

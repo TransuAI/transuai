@@ -99,7 +99,7 @@ src/
       connected-accounts-section.tsx 已連結的帳號:Google、Notion 各一列(已連結 / 已失效「請重新連結」/ 未連結);連結時向後端要授權網址再把使用者轉過去(lib/navigation.ts),回來時依網址的 ?connected= / ?connection_failed= 提示結果後清掉;中斷連結先確認,沒能通知對方撤銷時提示使用者自己去移除
       monthly-usage-section.tsx 本月用量:依模型加總,分平台模型 / 自有金鑰 / 轉錄三組(token 數與次數、轉錄分鐘數;有用量未知的呼叫會註明未計入);打開時是伺服器決定的這個月(台灣時間),可以往前看上個月、再回來;第一次載入失敗時可以重試
       provider-keys-section.tsx 自有金鑰:OpenAI / Anthropic / Google Gemini / OpenRouter 各一列,存入(後端先向廠商驗證,失敗顯示原因並保留輸入)、替換、刪除(先確認;預設模型正在用它時提示已改回平台模型);存入後只顯示末四碼
-    job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked;自動跟隨的狀態也在這層;版面切換重新掛載 media element 時用 use-playback-continuity 接著播)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
+    job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback;載入失敗的提示用固定 id,輪詢一直失敗(例如被限流 429)時換掉同一個提示,不會每 4 秒疊一個)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked;自動跟隨的狀態也在這層;版面切換重新掛載 media element 時用 use-playback-continuity 接著播)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
     job-detail/
       export-menu.tsx          工作區頂列的「匯出」下拉選單(桌面 / 手機都有):下載各格式(報告可勾選是否包含問答紀錄)、每份已完成的測驗一項(選了才載入題目,轉成測驗 Markdown)、複製逐字稿 / 摘要(以上全部在瀏覽器產生),以及下載原始檔(向 Gateway 要 `media-url?download=true` 的附件 URL)
       completed-workspace.tsx  COMPLETED 的三欄工作區(桌面 grid / 手機 Sheet,確保同時只有一個 media element:桌面在來源欄、手機在迷你播放器;來源 Sheet 打開時聚焦 Sheet 本身而非搜尋框;標了 data-consumes-escape 的控制項(有內容的搜尋框、片段編輯器)按 Esc 做自己的事,不會關 Sheet)

@@ -50,7 +50,8 @@ export function JobDetailPage() {
       const data = await jobsApi.get(jobId)
       setJob(data)
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '無法載入 Job')
+      // 同一個 id：輪詢每 4 秒失敗一次（例如被限流）時換掉同一個提示，不要一直疊新的。
+      toast.error(err instanceof ApiError ? err.message : '無法載入 Job', { id: `load-job-${jobId}` })
     } finally {
       setIsLoadingJob(false)
     }
