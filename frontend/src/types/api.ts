@@ -201,11 +201,19 @@ export interface TranscriptionUsageSum {
   callsWithUnknownUsage: number
 }
 
-/** A user's usage over one month (YYYY-MM, Taiwan time). */
+/** Each user's monthly limits on what the platform pays for; own keys aren't limited. */
+export interface UsageLimits {
+  transcriptionMinutes: number
+  /** Input plus output tokens on the platform model. */
+  platformTokens: number
+}
+
+/** A user's usage over one month (YYYY-MM, Taiwan time), with the monthly limits. */
 export interface MonthlyUsage {
   month: string
   llm: LlmUsageSum[]
   transcription: TranscriptionUsageSum[]
+  limits: UsageLimits
 }
 
 /** One question of a 測驗 (quiz). */

@@ -34,7 +34,7 @@ beforeEach(() => {
     openrouterCustom: false,
   })
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platform)
-  vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2026-09', llm: [], transcription: [] })
+  vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2026-09', limits, llm: [], transcription: [] })
   vi.mocked(connectionsApi.list).mockResolvedValue([
     { service: 'google', status: 'NOT_CONNECTED', connectedAt: null },
     { service: 'notion', status: 'NOT_CONNECTED', connectedAt: null },
@@ -192,6 +192,8 @@ describe('SettingsPage default model (預設模型)', () => {
   })
 })
 
+const limits = { transcriptionMinutes: 600, platformTokens: 2000000 }
+
 describe('SettingsPage monthly usage (本月用量)', () => {
   const llmSum = (provider: string, model: string, keySource: string, inputTokens: number, outputTokens: number, calls: number, callsWithUnknownUsage = 0) =>
     ({ provider, model, keySource, inputTokens, outputTokens, calls, callsWithUnknownUsage })
@@ -203,7 +205,7 @@ describe('SettingsPage monthly usage (本月用量)', () => {
 
   it("shows this month's usage per model, keeping the platform model, own keys and transcription apart", async () => {
     vi.mocked(usageApi.getMonthly).mockResolvedValue({
-      month: '2026-09',
+      month: '2026-09', limits,
       llm: [
         llmSum('openai', 'gpt-5', 'own_key', 12000, 3400, 8),
         llmSum('platform', 'Qwen/Qwen3.5-9B', 'platform', 5300, 700, 4),
@@ -225,9 +227,34 @@ describe('SettingsPage monthly usage (本月用量)', () => {
     expect(within(transcriptionGroup).getByText('25.5 分鐘 · 3 次')).toBeInTheDocument()
   })
 
+  it("shows how much of this month's limits is used and left", async () => {
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({
+      month: '2026-09', limits,
+      llm: [llmSum('platform', 'Qwen/Qwen3.5-9B', 'platform', 5300, 700, 4), llmSum('openai', 'gpt-5', 'own_key', 9000, 1000, 2)],
+      transcription: [{ provider: 'deepgram', model: 'nova-3', audioSeconds: 1530, calls: 3, callsWithUnknownUsage: 0 }],
+    })
+    const section = await renderUsage()
+
+    const limitsGroup = await within(section).findByRole('group', { name: '用量上限' })
+    expect(within(limitsGroup).getByText('25.5 / 600 分鐘 · 剩 574.5 分鐘')).toBeInTheDocument()
+    // own keys don't count toward the platform model's limit
+    expect(within(limitsGroup).getByText('6,000 / 2,000,000 tokens · 剩 1,994,000 tokens')).toBeInTheDocument()
+  })
+
+  it('says when a limit is used up and when it comes back', async () => {
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({
+      month: '2026-09', limits, llm: [],
+      transcription: [{ provider: 'deepgram', model: 'nova-3', audioSeconds: 36300, calls: 40, callsWithUnknownUsage: 0 }],
+    })
+    const section = await renderUsage()
+
+    const limitsGroup = await within(section).findByRole('group', { name: '用量上限' })
+    expect(within(limitsGroup).getByText('605.0 / 600 分鐘 · 已到上限，下個月 1 日恢復')).toBeInTheDocument()
+  })
+
   it('says when some calls of a model had no reported usage', async () => {
     vi.mocked(usageApi.getMonthly).mockResolvedValue({
-      month: '2026-09',
+      month: '2026-09', limits,
       llm: [llmSum('platform', 'Qwen/Qwen3.5-9B', 'platform', 300, 40, 3, 1)],
       transcription: [],
     })
@@ -243,7 +270,7 @@ describe('SettingsPage monthly usage (本月用量)', () => {
     expect(within(section).getByRole('button', { name: '下個月' })).toBeDisabled()
 
     vi.mocked(usageApi.getMonthly).mockResolvedValue({
-      month: '2026-08',
+      month: '2026-08', limits,
       llm: [llmSum('platform', 'Qwen/Qwen3.5-9B', 'platform', 10, 1, 1)],
       transcription: [],
     })
@@ -253,7 +280,7 @@ describe('SettingsPage monthly usage (本月用量)', () => {
     expect(await within(section).findByText('2026 年 8 月')).toBeInTheDocument()
     expect(within(section).getByText('輸入 10 · 輸出 1 tokens · 1 次')).toBeInTheDocument()
 
-    vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2026-09', llm: [], transcription: [] })
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2026-09', limits, llm: [], transcription: [] })
     await user.click(within(section).getByRole('button', { name: '下個月' }))
 
     expect(usageApi.getMonthly).toHaveBeenLastCalledWith('2026-09')
@@ -279,7 +306,7 @@ describe('SettingsPage monthly usage (本月用量)', () => {
 
   it('crosses into the previous year', async () => {
     const user = userEvent.setup()
-    vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2027-01', llm: [], transcription: [] })
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({ month: '2027-01', limits, llm: [], transcription: [] })
     const section = await renderUsage()
     await within(section).findByText('2027 年 1 月')
 

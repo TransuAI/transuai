@@ -97,7 +97,7 @@ src/
       default-model-section.tsx 預設模型:平台模型與有金鑰的廠商的模型(單選),有 OpenRouter 金鑰時可輸入模型 ID;換模型不會重做既有內容
       post-meeting-settings-section.tsx 會後處理的設定:Notion 會議紀錄位置(每場會議在這個頁面底下新增一頁,含會議紀錄和待辦清單;說明去哪裡複製連結,不用另外分享;改過的網址儲存時後端先向 Notion 確認是頁面,不行就顯示原因;顯示目前的頁面標題)、待辦放在 Notion 會議紀錄裡(打勾清單)或 Google Tasks(選 Notion 又沒填位置時提醒)
       connected-accounts-section.tsx 已連結的帳號:Google、Notion 各一列(已連結 / 已失效「請重新連結」/ 未連結);連結時向後端要授權網址再把使用者轉過去(lib/navigation.ts),回來時依網址的 ?connected= / ?connection_failed= 提示結果後清掉;中斷連結先確認,沒能通知對方撤銷時提示使用者自己去移除
-      monthly-usage-section.tsx 本月用量:依模型加總,分平台模型 / 自有金鑰 / 轉錄三組(token 數與次數、轉錄分鐘數;有用量未知的呼叫會註明未計入);打開時是伺服器決定的這個月(台灣時間),可以往前看上個月、再回來;第一次載入失敗時可以重試
+      monthly-usage-section.tsx 本月用量:這個月先列用量上限(轉錄分鐘數、平台模型 token 的已用 / 上限 · 剩多少,到了顯示「已到上限,下個月 1 日恢復」;自有金鑰不算);依模型加總,分平台模型 / 自有金鑰 / 轉錄三組(token 數與次數、轉錄分鐘數;有用量未知的呼叫會註明未計入);打開時是伺服器決定的這個月(台灣時間),可以往前看上個月、再回來;第一次載入失敗時可以重試
       provider-keys-section.tsx 自有金鑰:OpenAI / Anthropic / Google Gemini / OpenRouter 各一列,存入(後端先向廠商驗證,失敗顯示原因並保留輸入)、替換、刪除(先確認;預設模型正在用它時提示已改回平台模型);存入後只顯示末四碼
     job-detail-page.tsx     Job 狀態(WebSocket 即時更新 + 輪詢 fallback;載入失敗的提示用固定 id,輪詢一直失敗(例如被限流 429)時換掉同一個提示,不會每 4 秒疊一個)、逐字稿(播放時高亮目前片段,聽 media element 的 timeupdate/seeked;自動跟隨的狀態也在這層;版面切換重新掛載 media element 時用 use-playback-continuity 接著播)、AI 摘要、問答(樂觀顯示 + streaming,見 job-detail/chat-pane.tsx)
     job-detail/
