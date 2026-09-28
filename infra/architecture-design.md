@@ -229,7 +229,8 @@ GET    /oauth/{service}/callback        Google / Notion 的回呼（不需要 JW
                                          前端設定頁 ?connected= 或 ?connection_failed=
 DELETE /me/connections/{service}        中斷連結：向對方撤銷授權並刪除權杖，回 { revoked }
 GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省略就是這個月）的用量：LLM 依模型與金鑰來源、轉錄依模型加總；
-                                         Gateway 把月份換成時間範圍，向兩個服務分別查詢
+                                         Gateway 把月份換成時間範圍，向兩個服務分別查詢；附上每月的用量上限（轉錄分鐘數、
+                                         平台模型 token）。到了上限時，上傳與要用平台模型的 AI 功能回 429，見 gateway README
 ```
 
 都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`GetPostMeeting`/`RequestPostMeeting`/`ExecuteProposals`/`RetryProposal`/`GetPostMeetingSettings`/`UpdatePostMeetingSettings`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
