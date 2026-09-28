@@ -55,7 +55,9 @@ data:
   PLATFORM_LLM_BASE_URL: "http://host.docker.internal:11434/v1"
   PLATFORM_LLM_API_KEY: "ollama"
   PLATFORM_LLM_EXTRA_BODY: '{"reasoning_effort": "none"}'
-  AI_HF_CHAT_MODEL: "qwen3.5:9b"
+  # 一般生成（摘要、章節、問答）跟會後處理用同一個 qwen3:14b：問答實測比 qwen3.5:9b 簡潔、少加油添醋，而且 16GB 只放一個模型
+  # 就不用來回換出（ai-service/docs/adr/0011）。
+  AI_HF_CHAT_MODEL: "qwen3:14b"
   # 會後處理的平台模型（ai-service/docs/adr/0008）：有設定時，預設模型是平台模型的使用者也能跑會後處理；空字串就是不提供。
   # 本機用 qwen3:14b：實測三個候選裡唯一穩定提案的（ai-service/docs/adr/0011）。
   AI_POST_MEETING_PLATFORM_MODEL: "qwen3:14b"

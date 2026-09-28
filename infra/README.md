@@ -196,10 +196,10 @@ ai-service 的平台模型（摘要、章節、問答、會後處理）可以指
 ```
 
 - 需要 NVIDIA 顯示卡，而且 Docker Desktop 能用 GPU（`docker run --rm --gpus all ubuntu:24.04 nvidia-smi` 看得到顯示卡）。
-- 第一次會下載 Ollama 的映像檔（約 9GB）與模型（`qwen3.5:9b` 6.6GB、`qwen3:14b` 9.3GB），模型存在 Docker volume
+- 第一次會下載 Ollama 的映像檔（約 9GB）與模型（`qwen3:14b` 9.3GB），模型存在 Docker volume
   `transuai-ollama-models`，之後不用重新下載；容器設成 Docker 重開後自動啟動。
 - pod 經由 `http://host.docker.internal:11434/v1` 連到它。改了 `01-configmap.yaml` 要跑 `./scripts/restart.sh ai-service`。
-- 第一次呼叫某個模型要先載入顯示卡（約 1 分鐘）；一般生成與會後處理用不同模型時，16GB 放不下兩個，換模型時會再載入一次。
+- 第一次呼叫要先把模型載入顯示卡（約 1 分鐘），之後 30 分鐘內都在；摘要、問答、會後處理都用同一個 `qwen3:14b`，不用換模型。
 - 切回 HF：照 `01-configmap.yaml` 裡平台模型那段的說明改四個值，再 `./scripts/restart.sh ai-service`。
 
 ### 重置環境

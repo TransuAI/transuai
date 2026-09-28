@@ -13,9 +13,9 @@ set -eu
 CONTAINER=transuai-ollama
 VOLUME=transuai-ollama-models
 PORT=11434
-# 一般生成（摘要、章節、問答）與會後處理用的模型；要跟 01-configmap.yaml 的 AI_HF_CHAT_MODEL、
-# AI_POST_MEETING_PLATFORM_MODEL 一致。
-MODELS="qwen3.5:9b qwen3:14b"
+# 平台模型用的模型；要跟 01-configmap.yaml 的 AI_HF_CHAT_MODEL、AI_POST_MEETING_PLATFORM_MODEL 一致（兩個都是 qwen3:14b，
+# 見 ai-service/docs/adr/0011）。
+MODELS="qwen3:14b"
 
 up() {
     if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
