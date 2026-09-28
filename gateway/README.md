@@ -26,7 +26,7 @@
   → controller 呼叫下游 gRPC 服務時，需要身分的（Auth/Upload）透過 GrpcMetadataSupport 帶 x-user-id metadata
   → Transcription/AI 這兩個服務的 rpc 本身不驗證 x-user-id（見下方「已知限制」），呼叫時不帶，
     改由 Gateway 自己先用 JobOwnershipGuard 呼叫 upload-service 的 GetJob 確認 job 擁有者
-access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token，這裡不解析，原樣轉發給 AuthService.Refresh）
+access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token，這裡不解析，原樣轉發給 AuthService.Refresh；舊的隨即作廢，見 auth-service README）
 ```
 
 **`app.jwt.secret` 必須跟 auth-service 的完全一致**——本機開發共用同一組預設值即可，正式環境要覆蓋成夠長的隨機值時兩邊要同時改（少於 32 bytes 會被 HS256 直接拒絕，啟動時就炸）。
@@ -61,6 +61,8 @@ docker compose up -d
 |---|---|---|
 | `POST` | `/auth/register` | 註冊，不需要 token |
 | `POST` | `/auth/login` | 登入，不需要 token |
+| `POST` | `/auth/logout` | 登出：body `{ refreshToken }`，作廢這個 refresh token 所在的那一串，回 `204`；不需要 `Authorization`（access token 可能已經過期），token 無效也回 `204` |
+| `POST` | `/auth/logout-all` | 登出所有裝置：作廢登入者所有的 refresh token，回 `204`，需要 `Authorization`；已簽出的 access token 仍有效到過期（最多 15 分鐘） |
 | `POST` | `/auth/refresh` | 用 refresh token 換發新的 access/refresh token，不需要 `Authorization` header（refresh token 本身就是憑證） |
 | `GET` | `/auth/me` | 取得目前使用者資訊，需要 `Authorization: Bearer <access_token>` |
 
@@ -266,7 +268,7 @@ src/main/java/com/transuai/gateway/
 - **Transcription / AI 這幾個端點的 ownership 檢查在 Gateway**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 在轉發前先確認 ownership（`JobOwnershipGuard`，別人的 job 回 404）：擁有者記在 Redis（見「快取」），沒記住時才呼叫 `upload-service` 的 `GetJob`
 - 多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
 - 每月用量上限用的是已記錄的用量加上這次檔案的長度（前端量的，可能不準）：排隊中、還沒轉錄完的檔案還沒算進去，可能超過上限一點（見「每月用量上限」）
-- JWT 沒有做「登出」或「撤銷」機制——refresh token 是純 stateless JWT，撤銷需要 auth-service 那邊先加 `refresh_tokens` 表（見 [`../auth-service/README.md`](../auth-service/README.md) 已知限制）
+- access token 在 gateway 本地驗章，登出後仍有效到過期（最多 15 分鐘）；要立即失效得每個請求回頭問 auth-service，目前不做
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
 - 測試只涵蓋限流、每月用量上限與快取（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
   要有 Docker）；其他端點仍靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）

@@ -2,16 +2,20 @@ package com.transuai.gateway.web;
 
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.auth.grpc.v1.GetMeRequest;
 import com.transuai.auth.grpc.v1.LoginRequest;
+import com.transuai.auth.grpc.v1.LogoutAllDevicesRequest;
+import com.transuai.auth.grpc.v1.LogoutRequest;
 import com.transuai.auth.grpc.v1.RefreshRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
 import com.transuai.auth.grpc.v1.User;
@@ -69,6 +73,23 @@ public class AuthController {
                 .setRefreshToken(request.refreshToken())
                 .build());
         return toDto(response);
+    }
+
+    // 登出：作廢這個 refresh token 所在的那一串（auth-service 的 Logout）；不需要 access token，無效的 token 也回成功。
+    @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logout(@RequestBody RefreshRequestDto request) {
+        authServiceStub.logout(LogoutRequest.newBuilder()
+                .setRefreshToken(request.refreshToken() == null ? "" : request.refreshToken())
+                .build());
+    }
+
+    // 登出所有裝置：作廢這位使用者所有的 refresh token。已簽出的 access token 仍有效到過期（最多 15 分鐘）。
+    @PostMapping("/logout-all")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logoutAllDevices(@CurrentUserId UUID userId) {
+        GrpcMetadataSupport.withUserId(authServiceStub, userId)
+                .logoutAllDevices(LogoutAllDevicesRequest.getDefaultInstance());
     }
 
     @GetMapping("/me")

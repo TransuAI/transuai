@@ -40,8 +40,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
 
-    // Register/Login/Refresh 呼叫時使用者還沒有 token，這三條路徑不驗證。
-    private static final Set<String> PUBLIC_PATHS = Set.of("/auth/register", "/auth/login", "/auth/refresh");
+    // Register/Login/Refresh 呼叫時使用者還沒有 token，Logout 靠 refresh token 本身（access token 可能已經過期），這四條路徑不驗證。
+    private static final Set<String> PUBLIC_PATHS = Set.of("/auth/register", "/auth/login", "/auth/refresh", "/auth/logout");
     // Google / Notion 把瀏覽器轉回來時不會帶我們的 token；使用者由 state 與綁定瀏覽器的 cookie 認出來（見 ConnectionController）。
     private static final Pattern OAUTH_CALLBACK = Pattern.compile("/oauth/[^/]+/callback");
 
