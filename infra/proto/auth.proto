@@ -18,11 +18,19 @@ service AuthService {
   // email/password 其中一項錯誤都回 UNAUTHENTICATED（不細分，避免帳號列舉）。
   rpc Login(LoginRequest) returns (AuthResponse);
 
-  // 用 refresh token 換發新的 access/refresh token 組合。refresh token 無效或過期回 UNAUTHENTICATED。
+  // 用 refresh token 換發新的 access/refresh token 組合，舊的 refresh token 隨即作廢（輪替）。無效、過期、已經作廢回
+  // UNAUTHENTICATED；已經換發過的 token 再被用一次（超過短暫的寬限，給同時換發的多個分頁）視為被盜，整串作廢。
   rpc Refresh(RefreshRequest) returns (AuthResponse);
 
   // 依 x-user-id 查目前使用者資訊，找不到（例如帳號已被刪除）回 NOT_FOUND。
   rpc GetMe(GetMeRequest) returns (User);
+
+  // 登出：作廢這個 refresh token 所在的那一串（同一次登入一路換發出來的）。不需要 x-user-id，refresh token 本身就是憑證；
+  // token 無效或已經作廢也回成功（登出本來就是要它不能用）。
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+
+  // 登出所有裝置：作廢這位使用者所有的 refresh token（需要 x-user-id）。已簽出的 access token 仍有效到過期（最多 15 分鐘）。
+  rpc LogoutAllDevices(LogoutAllDevicesRequest) returns (LogoutResponse);
 }
 
 message RegisterRequest {
@@ -54,4 +62,14 @@ message User {
   string email = 2;
   string display_name = 3;
   google.protobuf.Timestamp created_at = 4;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+message LogoutAllDevicesRequest {
+}
+
+message LogoutResponse {
 }

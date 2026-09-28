@@ -74,7 +74,7 @@ Notification Service 消費訊息
 
 每個服務各自擁有獨立 schema，不可直接跨服務查表：
 
-- `auth_db`：使用者帳號（目前只有 `users` 一張表，JWT 是 stateless，沒有 refresh token 儲存表）
+- `auth_db`：使用者帳號與簽出去的 refresh token（`users`、`refresh_tokens`：只存雜湊，用來輪替與作廢）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
 - `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` 十六張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
@@ -105,16 +105,17 @@ proto 定義在 `infra/proto/*.proto`）。下游服務本身沒有對外 REST e
 ```
 POST   /auth/register          註冊（email 已存在回 409/ALREADY_EXISTS，成功直接簽發 token，不用再呼叫一次 login；同一個 IP 註冊太多次回 429）
 POST   /auth/login             登入，回傳 access/refresh token（email/password 任一錯誤都回 401，不細分以避免帳號列舉；猜密碼太多次回 429，見 gateway README「限流」）
-POST   /auth/refresh           用 refresh token 換發新的 access/refresh token 組合
+POST   /auth/refresh           用 refresh token 換發新的 access/refresh token 組合（舊的作廢；已換發過的再被用視為被盜，整串作廢）
+POST   /auth/logout            登出：作廢這個 refresh token 所在的那一串（不需要 access token）
+POST   /auth/logout-all        登出所有裝置：作廢登入者所有的 refresh token
 GET    /auth/me                取得目前使用者資訊（需帶 access token）
 ```
 
 **JWT 機制**：HMAC（HS256/HS384，視 secret 長度而定）簽章，`JWT_SECRET` 由 auth-service 與
 gateway 共用同一把。access token 15 分鐘、refresh token 7 天過期（皆可透過
-`app.jwt.access-token-ttl-minutes` / `app.jwt.refresh-token-ttl-days` 覆蓋）。**是 stateless
-JWT，沒有 server-side 的 revocation list**——auth-service 不儲存 refresh token，`/auth/refresh`
-純粹是驗證簽章/過期時間/`type=refresh` claim 後重新簽發，代表 refresh token 洩漏或使用者「登出」
-都無法讓舊 token 失效，只能等它自然過期。Gateway 收到請求後在本地驗證 access token（不會回頭呼叫
+`app.jwt.access-token-ttl-minutes` / `app.jwt.refresh-token-ttl-days` 覆蓋）。refresh token 記在 auth-service 的
+`refresh_tokens`（只存雜湊）：每次換發輪替、登出作廢，已經換發過的又被用一次視為被盜、整串作廢（見 `auth-service/README.md`）。
+access token 仍是 stateless，登出後有效到過期（最多 15 分鐘）。Gateway 收到請求後在本地驗證 access token（不會回頭呼叫
 auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user-id` 轉發給下游服務。
 
 ### 3.2 Upload Service
@@ -283,8 +284,9 @@ CREATE TABLE users (
 );
 ```
 
-只有這一張表，**沒有 refresh token 儲存表**——如 3.1 所述，refresh 是 stateless JWT 驗證，
-不需要查表。
+另外有 `refresh_tokens`（Hibernate 依 entity 建表）：每個簽出去的 refresh token 一列——`id`（JWT 的 `jti`）、`user_id`、
+`family_id`（同一次登入一路換發出來的）、`token_hash`（SHA-256）、`expires_at`、`created_at`、`revoked_at`、
+`revoked_reason`（`ROTATED` / `LOGGED_OUT` / `REUSED`）。
 
 ### 4.2 upload_db
 
@@ -670,7 +672,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
 4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、測驗）、複製、下載原始檔）混為一談
-5. **Auth**：簡單 stateless JWT（HS256，access 15 分鐘/refresh 7 天，無 revocation list），不做完整 OAuth2 flow
+5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
 7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。用量已記錄（每一次 LLM 呼叫與轉錄都記在使用者與 Job 名下，Job 工作區逐筆列出、設定頁看得到每月依模型加總）；每位使用者每月有用量上限（轉錄分鐘數、平台模型 token，見 `gateway/README.md`「每月用量上限」），用量告警仍是缺口
 8. **正式環境的設定**：每個服務讀 `APP_ENV`（預設 `development`）；`production` 時啟動前檢查自己的密鑰（沒設、還是開發用預設值、或太短就不啟動，並說出是哪幾個環境變數），並關掉開發用的東西（gRPC reflection、gateway 與 notification-service 的 API 文件）。要換掉哪些值見 `infra/k8s/02-secret.yaml`，Redis 在正式環境要設密碼（`REDIS_PASSWORD`）。
