@@ -21,6 +21,7 @@ import com.transuai.upload_service.domain.TranscriptionLanguage;
 import com.transuai.upload_service.event.JobEventPublisher;
 import com.transuai.upload_service.event.TranscriptionRequestedEvent;
 import com.transuai.upload_service.grpc.auth.GrpcAuthContext;
+import com.transuai.upload_service.repository.JobNoteRepository;
 import com.transuai.upload_service.repository.JobRepository;
 import com.transuai.upload_service.service.StorageService;
 
@@ -44,6 +45,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
 
     private final StorageService storageService;
     private final JobRepository jobRepository;
+    private final JobNoteRepository noteRepository;
     private final JobEventPublisher jobEventPublisher;
     private final UploadLimitsProperties uploadLimitsProperties;
 
@@ -262,6 +264,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
         } catch (RuntimeException e) {
             log.warn("failed to delete storage object {} for job {}", job.getStoragePath(), job.getId(), e);
         }
+        noteRepository.deleteByJobId(job.getId());  // 筆記屬於 Job，一起刪
         jobRepository.delete(job);
 
         responseObserver.onNext(Empty.getDefaultInstance());

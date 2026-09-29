@@ -70,7 +70,16 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/upl
 | `GetJob` | 查詢單一 Job，強制 ownership 檢查（別人的 Job 回 `NOT_FOUND`） |
 | `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md`。`as_attachment=true` 時 URL 會覆寫回應的 `Content-Disposition` 為 attachment、檔名＝Job 原始檔名（RFC 6266 ASCII 備援＋RFC 5987 UTF-8），供前端「匯出 → 下載原始檔」 |
 | `ListJobs` | 分頁查詢目前使用者的所有 Job |
-| `DeleteJob` | 刪除 Job record 與物件儲存檔案 |
+| `DeleteJob` | 刪除 Job record、它的筆記與物件儲存檔案 |
+
+`NoteService`（`transuai.upload.v1`）—— **筆記**（見 `CONTEXT.md`「筆記」「書籤」），跟 `UploadService` 一樣需要 `x-user-id`：Job 不是這位使用者的、或筆記不屬於這個 Job，一律 `NOT_FOUND`。資料在 `job_notes`：
+
+| RPC | 說明 |
+|---|---|
+| `ListNotes` | 一個 Job 的筆記，依時間排序（沒有時間的在最後），同一個時間依建立順序 |
+| `CreateNote` | 新增：時間（秒，可以沒有）、文字（最多 2,000 字）、來源（`manual` 預設、`qa` 從問答存的）；時間與文字不能都沒有、時間不能是負的或超過錄音長度（知道長度時）、一個 Job 最多 500 則，不符合回 `INVALID_ARGUMENT` |
+| `UpdateNote` | 只改文字；清空文字只在筆記有時間時可以（變成書籤） |
+| `DeleteNote` | 刪除一則 |
 
 Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCRIBED → SUMMARIZING → COMPLETED`（任一階段可轉 `FAILED`）。Upload Service 只會把新建的 Job 寫成 `UPLOADED`；`UPLOADED` 之後的每一步轉換都是由下游服務透過 `InternalJobService.UpdateJobStatus` 回寫。
 
@@ -118,17 +127,17 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 ./gradlew test
 ```
 
-`UploadGrpcServiceIT` 是涵蓋全部 5 支 rpc 的整合測試（`@SpringBootTest` + in-process gRPC transport），會**直接連本機真實的 Postgres / RabbitMQ / MinIO**（沒有 mock），所以跑測試前一樣要先 `docker compose up -d` 把 infra 開著。
+`UploadGrpcServiceIT` 是涵蓋全部 5 支 rpc 的整合測試（筆記另有 `NoteGrpcServiceIT`、AI 回寫另有 `InternalJobGrpcServiceIT`）（`@SpringBootTest` + in-process gRPC transport），會**直接連本機真實的 Postgres / RabbitMQ / MinIO**（沒有 mock），所以跑測試前一樣要先 `docker compose up -d` 把 infra 開著。
 
 ## 專案結構
 
 ```
 src/main/java/com/transuai/upload_service/
-  domain/          Job entity、FileType / JobStatus enum（狀態機）
+  domain/          Job entity、FileType / JobStatus enum（狀態機）、JobCategory（類型清單）、JobNoteEntity（筆記）
   repository/       Spring Data JPA repository
   service/          StorageService（S3 presign / head / delete）
   event/            JobEventPublisher 抽象 + RabbitMQ 實作（發送 transcription.requested）
-  grpc/             UploadGrpcService（5 支 rpc 實作）、InternalJobGrpcService（UpdateJobStatus、SetSuggestedDetails）、JobMapper（domain ↔ proto）
+  grpc/             UploadGrpcService（5 支 rpc 實作）、NoteGrpcService（筆記）、InternalJobGrpcService（UpdateJobStatus、SetSuggestedDetails）、JobMapper（domain ↔ proto）
   grpc/auth/        UserIdServerInterceptor（解析 x-user-id metadata）、GrpcAuthContext
   grpc/advice/      GrpcExceptionAdvice（非預期例外 → 安全的 gRPC Status，避免內部細節外洩）
   config/           StorageConfig / RabbitConfig 與對應的 @ConfigurationProperties
