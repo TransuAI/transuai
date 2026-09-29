@@ -50,6 +50,13 @@ service AiService {
   // user_id 不合法、或沒給 start / end 回 INVALID_ARGUMENT；沒有用量回空列表。
   rpc SumUserLlmUsage(SumUserLlmUsageRequest) returns (SumUserLlmUsageResponse);
 
+  // 網路搜尋的用量（見 ai-service/CONTEXT.md「用量」）：問答每查一次網路記一筆（成功或失敗）。一個 Job 的每一筆，依時間升冪；
+  // job_id 不合法回 INVALID_ARGUMENT，沒有紀錄回空列表。不驗證使用者，Gateway 已經做過 ownership 檢查。
+  rpc ListJobWebSearches(ListJobWebSearchesRequest) returns (ListJobWebSearchesResponse);
+  // 一位使用者在 [start, end) 之間查了幾次網路（成功與失敗分開算；用量上限只算成功的）。user_id 不合法、或沒給 start / end
+  // 回 INVALID_ARGUMENT。
+  rpc CountUserWebSearches(CountUserWebSearchesRequest) returns (CountUserWebSearchesResponse);
+
   // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
   // job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
@@ -451,6 +458,33 @@ message LlmUsageSum {
 }
 
 // 一次 LLM 呼叫的用量。
+message ListJobWebSearchesRequest {
+  string job_id = 1;
+}
+
+message ListJobWebSearchesResponse {
+  repeated WebSearchUsage records = 1;
+}
+
+// 一次網路搜尋（平台付費）。
+message WebSearchUsage {
+  // 搜尋服務，例如 "tavily"
+  string provider = 1;
+  bool succeeded = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message CountUserWebSearchesRequest {
+  string user_id = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
+}
+
+message CountUserWebSearchesResponse {
+  int64 succeeded = 1;
+  int64 failed = 2;
+}
+
 message LlmUsage {
   // summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting
   string feature = 1;

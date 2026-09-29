@@ -223,8 +223,8 @@ GET    /me/provider-keys                自有金鑰列表（只有廠商、末�
 PUT    /me/provider-keys/{provider}     存入或替換自有金鑰，body { "key": string }；先向廠商驗證，無效回 400（附原因）、
                                          廠商暫時連不上回 503、伺服器沒設定加密主金鑰回 409，都不會存
 DELETE /me/provider-keys/{provider}     刪除自有金鑰，回 { deleted, defaultModelReset }（預設模型正在用它時改回平台模型）
-GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫與轉錄，依時間排序，附總計）；Gateway 向
-                                         ai-service（LLM）與 transcription-service（轉錄）分別查詢再合併
+GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫、轉錄與網路搜尋，依時間排序，附總計）；Gateway 向
+                                         ai-service（LLM、網路搜尋）與 transcription-service（轉錄）分別查詢再合併
 GET    /me/connections                  已連結的帳號：Google、Notion 各自的狀態（已連結、已失效、未連結）與連結時間
 GET    /me/connections/{service}/authorize  回傳 { authorizeUrl }，前端把使用者轉過去連結（前端的 JWT 在 header 裡，
                                          瀏覽器轉址帶不過來，所以不是 302）；同時設 HttpOnly cookie 把這次授權綁定在這個瀏覽器
@@ -232,8 +232,9 @@ GET    /oauth/{service}/callback        Google / Notion 的回呼（不需要 JW
                                          前端設定頁 ?connected= 或 ?connection_failed=
 DELETE /me/connections/{service}        中斷連結：向對方撤銷授權並刪除權杖，回 { revoked }
 GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省略就是這個月）的用量：LLM 依模型與金鑰來源、轉錄依模型加總；
-                                         Gateway 把月份換成時間範圍，向兩個服務分別查詢；附上每月的用量上限（轉錄分鐘數、
-                                         平台模型 token）。到了上限時，上傳與要用平台模型的 AI 功能回 429，見 gateway README
+                                         Gateway 把月份換成時間範圍，向兩個服務分別查詢；網路搜尋成功 / 失敗各幾次；附上每月的
+                                         用量上限（轉錄分鐘數、平台模型 token、網路搜尋次數）。到了上限時，上傳、要用平台模型的
+                                         AI 功能、查網路的問答回 429，見 gateway README
 ```
 
 都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`GetPostMeeting`/`RequestPostMeeting`/`ExecuteProposals`/`RetryProposal`/`GetPostMeetingSettings`/`UpdatePostMeetingSettings`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
@@ -433,6 +434,18 @@ CREATE TABLE llm_usage (
 );
 CREATE INDEX ix_llm_usage_job_id ON llm_usage(job_id);
 CREATE INDEX ix_llm_usage_user_id ON llm_usage(user_id);
+
+-- 網路搜尋的用量：問答每查一次網路一筆（量是次數，不是 token，所以不放在 llm_usage）；每月上限只算成功的
+CREATE TABLE web_search_usage (
+    id UUID PRIMARY KEY,
+    user_id UUID,                           -- 提問者
+    job_id UUID NOT NULL,
+    provider VARCHAR(32) NOT NULL,          -- 搜尋服務，例如 tavily
+    succeeded BOOLEAN NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_web_search_usage_job_id ON web_search_usage(job_id);
+CREATE INDEX ix_web_search_usage_user_id ON web_search_usage(user_id);
 
 -- 自有金鑰：每位使用者每個廠商一把，AES-256-GCM 加密（主金鑰在環境變數 KEY_ENCRYPTION_KEY，不在資料庫），
 -- 見 ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md
@@ -654,7 +667,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
 | **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
 | **LLM（摘要/章節分段/問答，ai-service）** | **HF Inference Providers** | 依 provider 而定，沒有像 Groq 那樣公開逐模型的固定數字 | 免費額度會隨政策調整而變動，需定期查閱官方文件確認當下額度；特定模型是否有 provider 承載也會隨時間變動，換模型前建議先查（見 `ai-service/README.md` 已知限制） |
-| **網路搜尋（ai-service，問答「查網路」）** | **Tavily** | 整個平台每月 1,000 credits（一般搜尋 1 credit／次），不用綁卡；之後 US$0.008／credit | 額度是整個平台共用，不是每位使用者；每人每月的搜尋次數上限見 `.scratch/qa-web-search` 的 02 |
+| **網路搜尋（ai-service，問答「查網路」）** | **Tavily** | 整個平台每月 1,000 credits（一般搜尋 1 credit／次），不用綁卡；之後 US$0.008／credit | 額度是整個平台共用，不是每位使用者；每人每月的搜尋次數有用量上限（預設 30 次，只算成功的，見 gateway README「每月用量上限」） |
 | **Embedding（ai-service）** | **HF Inference Providers** | 依 provider 而定，一般有免費額度，無需信用卡即可申請 | 特定模型是否有 provider 承載會隨時間變動，需留意 |
 
 **額度風險提醒**
