@@ -103,6 +103,8 @@ docker compose up -d
 | `POST` | `/jobs/{jobId}/post-meeting/{runId}/execute` | 執行勾選的行動提案，body `{ "proposals": [{ "proposalId": "...", "arguments": { ... } }] }`（`arguments` 是使用者確認、可能改過的最終參數），回傳整份紀錄（`latestRun` 的形狀），每個提案帶 `status`（`PROPOSED` / `DONE` / `FAILED`）、`resultUrl`、`failureReason`；沒列出的不執行，已建立的不再執行。還在跑回 409，提案不屬於這份紀錄回 400，紀錄不屬於這個 Job 回 404。轉給 `ExecuteProposals` |
 | `POST` | `/jobs/{jobId}/post-meeting/{runId}/proposals/{proposalId}/retry` | 用同樣的最終參數重試一個失敗的提案，回傳整份紀錄；不是失敗的回 409。轉給 `RetryProposal` |
 | `GET` | `/qa/{jobId}` | 取得這個 job 的完整問答紀錄（依時間升冪），回傳 `[{ question, answer, sourceTimestamps, createdAt, modelProvider, model, webSearch, webSources }]`（`model` 是回答的模型，記錄模型之前的是 `null`；`webSearch` 是這一題有沒有查網路，`webSources` 是 `[{ title, url }]`，順序就是回答裡 [n] 的編號，搜尋失敗時是空的）；一個 job 只有一段連續對話，沒有獨立的 conversation/thread（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)） |
+| `GET` | `/jobs/{jobId}/speaker-suggestions` | 講者名字建議：`[{ speakerLabel, name, evidenceStartTime, evidenceText, status }]`（status：`pending` / `applied` / `dismissed`），先過 ownership；轉給 ai-service 的 `ListSpeakerSuggestions` |
+| `PUT` | `/jobs/{jobId}/speaker-suggestions/{label}` | 把建議標成已套用或忽略，body `{ "status": "applied" \| "dismissed" }`（套用時前端先呼叫改名，再呼叫這支）；其他 status 回 400、這位講者沒有建議回 404 |
 | `GET` | `/ai/models` | 可以選的模型：`{ models: [{ provider, model, supportsTools }], openrouterCustom, webSearch }`（`webSearch`：這個部署的問答能不能查網路），平台模型加上有自有金鑰的廠商整理好的清單；轉給 `ListAvailableModels` |
 | `GET` | `/me/default-model` | 目前的預設模型 `{ provider, model, supportsTools }`（沒選過就是平台模型）；轉給 `GetDefaultModel` |
 | `PUT` | `/me/default-model` | 設定預設模型，body `{ provider, model }`（`provider` 是 `platform` 時 `model` 可省略）；清單外的模型回 400、沒有那個廠商的自有金鑰回 409、OpenRouter 查不到回 503；轉給 `SetDefaultModel` |
