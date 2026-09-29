@@ -126,10 +126,11 @@ docker compose exec rabbitmq rabbitmqctl list_queues
 5. 等待所有 StatefulSet/Deployment 就緒（Postgres/RabbitMQ/MinIO 第一次起會比較慢，`minio-init` job 要等它們先起來才會 complete）。
 6. 把 `DEEPGRAM_API_KEY` / `HF_API_KEY` 從各自服務的 `.env` 補進 k8s secret、產生一把 `KEY_ENCRYPTION_KEY`，並重啟對應服務（secret 套用時預設留白，避免 API key 進版控）：
    ```bash
-   kubectl -n transuai patch secret app-secrets --type merge -p \
-     "{\"stringData\":{\"DEEPGRAM_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^DEEPGRAM_API_KEY= ../transcription-service/.env)")\"}}"
-   kubectl -n transuai patch secret app-secrets --type merge -p \
-     "{\"stringData\":{\"HF_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^HF_API_KEY= ../ai-service/.env)")\"}}"
+   # 在 infra/ 目錄下執行。.env 找不到、或那個 key 是空的，就停下來不 patch（不會把空字串寫進 secret）。
+   key=$(grep -m1 '^DEEPGRAM_API_KEY=' ../transcription-service/.env | cut -d= -f2-) && [ -n "$key" ] && \
+     kubectl -n transuai patch secret app-secrets --type merge -p "{\"stringData\":{\"DEEPGRAM_API_KEY\":\"$key\"}}"
+   key=$(grep -m1 '^HF_API_KEY=' ../ai-service/.env | cut -d= -f2-) && [ -n "$key" ] && \
+     kubectl -n transuai patch secret app-secrets --type merge -p "{\"stringData\":{\"HF_API_KEY\":\"$key\"}}"
    kubectl -n transuai patch secret app-secrets --type merge -p \
      "{\"stringData\":{\"KEY_ENCRYPTION_KEY\":\"$(openssl rand -base64 32)\"}}"
    kubectl -n transuai rollout restart deployment transcription-service ai-service
@@ -149,8 +150,9 @@ docker compose exec rabbitmq rabbitmqctl list_queues
 8. （要讓問答能「查網路」才需要）到 [tavily.com](https://tavily.com) 申請一把 API key（平台付費，免費方案整個平台每月 1,000 次
    搜尋），補進 secret 後重啟 ai-service；沒設定時問答照常，只是不能查網路、前端不顯示開關：
    ```bash
-   kubectl -n transuai patch secret app-secrets --type merge -p \
-     "{\"stringData\":{\"TAVILY_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^TAVILY_API_KEY= ../ai-service/.env)")\"}}"
+   # 在 infra/ 目錄下執行；.env 找不到或 key 是空的就停下來不 patch。
+   key=$(grep -m1 '^TAVILY_API_KEY=' ../ai-service/.env | cut -d= -f2-) && [ -n "$key" ] && \
+     kubectl -n transuai patch secret app-secrets --type merge -p "{\"stringData\":{\"TAVILY_API_KEY\":\"$key\"}}"
    kubectl -n transuai rollout restart deployment ai-service
    ```
 
