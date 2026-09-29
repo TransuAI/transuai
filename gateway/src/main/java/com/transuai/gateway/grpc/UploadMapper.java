@@ -22,6 +22,8 @@ public final class UploadMapper {
                 GrpcTimestamps.toInstant(job.getCreatedAt()),
                 GrpcTimestamps.toInstant(job.getUpdatedAt()),
                 // 這個欄位之前建立的 Job 是空字串：那時一律用中文轉錄。
-                job.getTranscriptionLanguage().isEmpty() ? "zh-TW" : job.getTranscriptionLanguage());
+                job.getTranscriptionLanguage().isEmpty() ? "zh-TW" : job.getTranscriptionLanguage(),
+                GrpcStrings.emptyToNull(job.getTitle()),
+                GrpcStrings.emptyToNull(job.getCategory()));
     }
 }

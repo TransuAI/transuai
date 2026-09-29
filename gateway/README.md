@@ -72,7 +72,7 @@ docker compose up -d
 |---|---|---|
 | `POST` | `/uploads/presign` | 取得物件儲存的 presigned upload URL；body 帶 `durationSeconds`（檔案長度，檢查每月用量上限用，可省略） |
 | `POST` | `/uploads/complete` | 前端上傳完成後呼叫，建立 Job；body 的 `transcriptionLanguage` 是轉錄語言 `zh-TW`（中文，省略時的預設）/ `en` / `auto`（自動偵測中英文），回傳的 Job 也帶這個欄位（之前建立的 Job 是 `zh-TW`） |
-| `GET` | `/jobs/{jobId}` | 查詢單一 Job（`upload-service` 會做 ownership 檢查，別人的 job 回 404） |
+| `GET` | `/jobs/{jobId}` | 查詢單一 Job（`upload-service` 會做 ownership 檢查，別人的 job 回 404）；Job 帶 `title`（標題，沒有是 `null`，前端改顯示檔名）與 `category`（類型：`meeting` / `lecture` / `interview` / `podcast` / `video` / `other`，還沒判斷是 `null`），列表也一樣 |
 | `GET` | `/jobs/{jobId}/media-url?download=` | 取得該 Job 媒體檔案的 presigned 播放 URL（`upload-service` 做 ownership 檢查），見 `../docs/adr/0002-presigned-get-url-for-media-playback.md`；`download=true` 時改拿「以附件方式下載、存成原始檔名」的 URL（轉成 `GetPresignedDownloadUrl` 的 `as_attachment`） |
 | `GET` | `/jobs?page=&pageSize=` | 分頁查詢目前使用者的所有 Job |
 | `DELETE` | `/jobs/{jobId}` | 刪除 Job，成功回 `204 No Content`（前端 `apiFetchVoid` 依此判斷不去 parse body，別再改回預設的 200） |
