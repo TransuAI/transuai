@@ -5,12 +5,14 @@ import {
   buildExportContent,
   markdownReportFormat,
   toMarkdownReport,
+  toNotesMarkdown,
   toQuizMarkdown,
   toPlainText,
   toSrt,
   toTimestampedText,
   toVtt,
   type ExportContent,
+  type ExportNote,
   type ExportSegment,
 } from '@/lib/export-formats'
 
@@ -175,6 +177,7 @@ describe('toMarkdownReport', () => {
       { title: '預算', startTime: 400 },
     ],
     qaHistory: [],
+    notes: [],
   }
 
   it("heads the report with the job's title when it has one, keeping the file name", () => {
@@ -264,8 +267,40 @@ describe('toMarkdownReport', () => {
   it('leaves the Q&A history out of the report unless asked to include it', () => {
     const withQa = { ...content, qaHistory: [{ question: '問?', answer: '答', sourceTimestamps: [] }] }
 
-    expect(markdownReportFormat({ includeQa: false }).render(withQa)).not.toContain('## 問答紀錄')
-    expect(markdownReportFormat({ includeQa: true }).render(withQa)).toContain('## 問答紀錄')
+    expect(markdownReportFormat({ includeQa: false, includeNotes: false }).render(withQa)).not.toContain('## 問答紀錄')
+    expect(markdownReportFormat({ includeQa: true, includeNotes: false }).render(withQa)).toContain('## 問答紀錄')
+  })
+
+  const notes: ExportNote[] = [
+    { timeSeconds: 400, text: '預算要回去確認' },
+    { timeSeconds: 3725, text: '' },
+    { timeSeconds: null, text: '整體心得：\n下次先看報價' },
+  ]
+
+  it('puts the notes after the chapters, by time, a bookmark as such and multi-line text kept in its item', () => {
+    const report = toMarkdownReport({ ...content, notes })
+
+    expect(report).toContain(
+      '## 章節\n\n- [00:00] 開場\n- [06:40] 預算\n\n## 筆記\n\n' +
+        '- [06:40] 預算要回去確認\n- [1:02:05] （書籤）\n- 整體心得：\n  下次先看報價\n\n## 逐字稿\n',
+    )
+  })
+
+  it('leaves the notes out of the report unless asked to include them', () => {
+    expect(markdownReportFormat({ includeQa: false, includeNotes: false }).render({ ...content, notes })).not.toContain('## 筆記')
+    expect(markdownReportFormat({ includeQa: false, includeNotes: true }).render({ ...content, notes })).toContain('## 筆記')
+  })
+})
+
+describe('toNotesMarkdown', () => {
+  it('writes the notes on their own, headed by the title', () => {
+    const markdown = toNotesMarkdown({
+      fileName: '週會.m4a',
+      title: '產品週會',
+      notes: [{ timeSeconds: 12, text: '這裡很重要' }, { timeSeconds: null, text: '心得' }],
+    })
+
+    expect(markdown).toBe(['# 產品週會：筆記', '', '- 檔名：週會.m4a', '', '- [00:12] 這裡很重要', '- 心得', ''].join('\n'))
   })
 })
 
@@ -281,6 +316,7 @@ describe('buildExportContent', () => {
         { question: '還在串流', answer: '答…', sourceTimestamps: [], status: 'streaming' },
         { question: '失敗的', answer: '', sourceTimestamps: [], status: 'error' },
       ],
+      notes: [],
     })
 
     expect(content.qaHistory.map((turn) => turn.question)).toEqual(['完成的'])
@@ -294,9 +330,26 @@ describe('buildExportContent', () => {
       summary: null,
       chapters: [],
       qaHistory: [{ question: '查了', answer: '答 [1]', sourceTimestamps: [], status: 'done', webSearch: true, webSources: [pgvector] }],
+      notes: [],
     })
 
     expect(content.qaHistory[0]).toMatchObject({ webSearch: true, webSources: [pgvector] })
+  })
+
+  it('carries the notes in their order: by time, unpinned ones last', () => {
+    const note = (noteId: string, timeSeconds: number | null, text: string) => ({
+      noteId, jobId: 'job-1', timeSeconds, text, source: 'manual' as const, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    })
+    const content = buildExportContent({
+      job: { jobId: 'job-1', userId: 'u', fileName: 'a.mp3', fileType: 'AUDIO', fileSizeBytes: 1, storagePath: 'p', durationSeconds: 1, status: 'COMPLETED', errorReason: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', transcriptionLanguage: 'zh-TW' },
+      transcript: null,
+      summary: null,
+      chapters: [],
+      qaHistory: [],
+      notes: [note('n1', null, '心得'), note('n2', 30, '後'), note('n3', 5, '前')],
+    })
+
+    expect(content.notes).toEqual([{ timeSeconds: 5, text: '前' }, { timeSeconds: 30, text: '後' }, { timeSeconds: null, text: '心得' }])
   })
 })
 

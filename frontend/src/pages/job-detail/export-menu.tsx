@@ -8,6 +8,7 @@ import {
   buildExportContent,
   exportFileName,
   markdownReportFormat,
+  NOTES_MARKDOWN_FORMAT,
   PLAIN_TEXT_FORMAT,
   QUIZ_MARKDOWN,
   SRT_FORMAT,
@@ -37,7 +38,8 @@ const TRANSCRIPT_FORMATS: ExportFormat[] = [PLAIN_TEXT_FORMAT, TIMESTAMPED_TEXT_
 export function ExportMenu({ source, quizzes }: { source: ExportSource; quizzes: Quiz[] }) {
   const hasTranscript = source.transcript !== null
   const [reportIncludesQa, setReportIncludesQa] = useState(false)
-  const reportFormat = markdownReportFormat({ includeQa: reportIncludesQa })
+  const [reportIncludesNotes, setReportIncludesNotes] = useState(false)
+  const reportFormat = markdownReportFormat({ includeQa: reportIncludesQa, includeNotes: reportIncludesNotes })
   const download = (format: ExportFormat) => {
     const content = buildExportContent(source)
     downloadTextFile({
@@ -103,6 +105,16 @@ export function ExportMenu({ source, quizzes }: { source: ExportSource; quizzes:
         >
           報告包含問答紀錄
         </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={reportIncludesNotes}
+          onCheckedChange={(checked) => setReportIncludesNotes(checked === true)}
+          onSelect={(event) => event.preventDefault()}
+        >
+          報告包含筆記
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuItem disabled={source.notes.length === 0} onSelect={() => download(NOTES_MARKDOWN_FORMAT)}>
+          {NOTES_MARKDOWN_FORMAT.label}
+        </DropdownMenuItem>
         {doneQuizzes.length > 0 && (
           <>
             <DropdownMenuSeparator />

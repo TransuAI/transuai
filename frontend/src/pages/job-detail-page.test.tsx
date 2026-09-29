@@ -2145,6 +2145,39 @@ describe('JobDetailPage export menu', () => {
     expect(await downloads[1].blob?.text()).toContain('## 問答紀錄\n\n### 第三句在說什麼?\n\n在說第三句\n\n引用：[00:13]\n')
   })
 
+  it('downloads the notes on their own, and puts them in the report when asked', async () => {
+    const user = userEvent.setup()
+    const downloads = captureDownloads()
+    vi.mocked(notesApi.list).mockResolvedValue([
+      { noteId: 'n1', jobId: 'job-1', timeSeconds: 8, text: '第二句要確認', source: 'manual', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+    ])
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載筆記（Markdown）' }))
+
+    expect(downloads[0].fileName).toBe('interview-筆記.md')
+    expect(await downloads[0].blob?.text()).toContain('- [00:08] 第二句要確認\n')
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載報告（Markdown）' }))
+    expect(await downloads[1].blob?.text()).not.toContain('## 筆記')
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: '報告包含筆記' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載報告（Markdown）' }))
+    expect(await downloads[2].blob?.text()).toContain('## 筆記\n\n- [00:08] 第二句要確認\n')
+  })
+
+  it('offers no notes download while there are no notes', async () => {
+    const user = userEvent.setup()
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+
+    expect(await screen.findByRole('menuitem', { name: '下載筆記（Markdown）' })).toHaveAttribute('aria-disabled', 'true')
+  })
+
   it('downloads the original media file through an attachment URL from the Gateway', async () => {
     const user = userEvent.setup()
     const opened: { href: string; download: string }[] = []

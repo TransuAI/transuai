@@ -1,6 +1,7 @@
 import { speakerNameLookup } from '@/lib/speakers'
+import { sortNotes } from '@/lib/notes'
 import { isSummaryStale } from '@/lib/staleness'
-import type { Chapter, Job, QuizQuestion, Summary, Transcript, WebSource } from '@/types/api'
+import type { Chapter, Job, Note, QuizQuestion, Summary, Transcript, WebSource } from '@/types/api'
 
 // 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
 // 這裡只負責「內容長什麼樣」，下載 / 複製由呼叫端處理。
@@ -25,6 +26,14 @@ export interface ExportContent {
   summary: { text: string; isStale: boolean } | null
   chapters: { title: string; startTime: number }[]
   qaHistory: ExportQaTurn[]
+  /** 筆記, by time with the unpinned ones last. */
+  notes: ExportNote[]
+}
+
+/** A 筆記 in an export: its time (null when not pinned to one) and text (empty for a 書籤). */
+export interface ExportNote {
+  timeSeconds: number | null
+  text: string
 }
 
 /** One Q&A turn in an export: the answer, its recording timestamps and, when it searched the web (查網路), its web sources. */
@@ -43,10 +52,11 @@ export interface ExportSource {
   chapters: Chapter[]
   /** Q&A turns as shown in the Chat pane; a turn with a status other than 'done' is left out. */
   qaHistory: (ExportQaTurn & { status?: string })[]
+  notes: Note[]
 }
 
 export function buildExportContent(source: ExportSource): ExportContent {
-  const { job, transcript, summary, chapters, qaHistory } = source
+  const { job, transcript, summary, chapters, qaHistory, notes } = source
   const speakerName = speakerNameLookup(transcript?.speakers ?? [])
   return {
     fileName: job.fileName,
@@ -72,6 +82,7 @@ export function buildExportContent(source: ExportSource): ExportContent {
         webSearch,
         webSources,
       })),
+    notes: sortNotes(notes).map(({ timeSeconds, text }) => ({ timeSeconds, text })),
   }
 }
 
@@ -183,7 +194,32 @@ function markdownLinkText(title: string) {
   return title.replace(/[[\]]/g, (bracket) => `\\${bracket}`)
 }
 
-// Markdown 報告：標題、長度與建立時間、摘要、章節、逐字稿，最後是（有的話）問答紀錄。每一節都是一
+// 筆記的 Markdown 清單：一則一項，有時間的前面是 [時間]，書籤寫成（書籤）；多行的文字縮排留在同一項裡。
+function notesList(notes: ExportNote[]): string {
+  return notes
+    .map((note) => {
+      const text = note.text ? note.text.replace(/\n/g, '\n  ') : '（書籤）'
+      return note.timeSeconds !== null ? `- [${formatClock(note.timeSeconds)}] ${text}` : `- ${text}`
+    })
+    .join('\n')
+}
+
+// 單獨匯出的筆記：標題（沒有就檔名），有標題時列出檔名，然後是筆記清單。
+export function toNotesMarkdown(content: Pick<ExportContent, 'fileName' | 'title' | 'notes'>): string {
+  const blocks: string[] = [`# ${content.title || content.fileName}：筆記`]
+  if (content.title) blocks.push(`- 檔名：${content.fileName}`)
+  blocks.push(content.notes.length > 0 ? notesList(content.notes) : '尚無筆記')
+  return blocks.join('\n\n') + '\n'
+}
+
+export const NOTES_MARKDOWN_FORMAT: ExportFormat = {
+  label: '下載筆記（Markdown）',
+  fileSuffix: '-筆記.md',
+  mimeType: 'text/markdown',
+  render: toNotesMarkdown,
+}
+
+// Markdown 報告：標題、長度與建立時間、摘要、章節、（有的話）筆記、逐字稿，最後是（有的話）問答紀錄。每一節都是一
 // 個個以空行分隔的段落——Markdown 會把連續的行併成一段，所以逐字稿每個片段之間也空一行（行的內容
 // 跟含時間戳 TXT 相同，只是多了空行）。
 export function toMarkdownReport(content: ExportContent): string {
@@ -207,6 +243,10 @@ export function toMarkdownReport(content: ExportContent): string {
       ? content.chapters.map((chapter) => `- [${formatClock(chapter.startTime)}] ${chapter.title}`).join('\n')
       : '尚無章節',
   )
+
+  if (content.notes.length > 0) {
+    blocks.push('## 筆記', notesList(content.notes))
+  }
 
   blocks.push('## 逐字稿')
   const transcriptLines = textFormatLines(content.segments, timestampPrefix)
@@ -300,13 +340,14 @@ export const TIMESTAMPED_TEXT_FORMAT: ExportFormat = {
   render: (content) => toTimestampedText(content.segments),
 }
 
-// The Q&A history only goes into the report when the user opts in (it may not be meant for sharing).
-export function markdownReportFormat({ includeQa }: { includeQa: boolean }): ExportFormat {
+// The Q&A history and the notes only go into the report when the user opts in (they may not be meant for sharing).
+export function markdownReportFormat({ includeQa, includeNotes }: { includeQa: boolean; includeNotes: boolean }): ExportFormat {
   return {
     label: '下載報告（Markdown）',
     fileSuffix: '-報告.md',
     mimeType: 'text/markdown',
-    render: (content) => toMarkdownReport(includeQa ? content : { ...content, qaHistory: [] }),
+    render: (content) =>
+      toMarkdownReport({ ...content, qaHistory: includeQa ? content.qaHistory : [], notes: includeNotes ? content.notes : [] }),
   }
 }
 
