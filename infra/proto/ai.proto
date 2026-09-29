@@ -57,6 +57,14 @@ service AiService {
   // 回 INVALID_ARGUMENT。
   rpc CountUserWebSearches(CountUserWebSearchesRequest) returns (CountUserWebSearchesResponse);
 
+  // 講者名字建議（見 ai-service/CONTEXT.md）：pipeline 依錄音裡明確講出的話替還沒改名的講者提出的名字，附依據的原話與時間。
+  // 列出一個 Job 的全部建議（任何狀態；前端只顯示 pending）。job_id 不合法回 INVALID_ARGUMENT，沒有建議回空列表。
+  // 不驗證使用者，Gateway 已經做過 ownership 檢查。
+  rpc ListSpeakerSuggestions(ListSpeakerSuggestionsRequest) returns (ListSpeakerSuggestionsResponse);
+  // 把一個建議標成 applied（使用者套用了，改名本身走 transcription-service 的 RenameSpeaker）或 dismissed（忽略，不再顯示）。
+  // status 不是這兩個、job_id 不合法回 INVALID_ARGUMENT；這個 Job 沒有這位講者的建議回 NOT_FOUND。
+  rpc SetSpeakerSuggestionStatus(SetSpeakerSuggestionStatusRequest) returns (SpeakerSuggestion);
+
   // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
   // job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
@@ -458,6 +466,31 @@ message LlmUsageSum {
 }
 
 // 一次 LLM 呼叫的用量。
+message ListSpeakerSuggestionsRequest {
+  string job_id = 1;
+}
+
+message ListSpeakerSuggestionsResponse {
+  repeated SpeakerSuggestion suggestions = 1;
+}
+
+// 一位講者的名字建議：依據是錄音裡某一句明確講出身分的話（例如自我介紹）。
+message SpeakerSuggestion {
+  string speaker_label = 1;
+  string name = 2;
+  // 依據的片段開始時間（秒）與原文。
+  double evidence_start_time = 3;
+  string evidence_text = 4;
+  // pending / applied / dismissed
+  string status = 5;
+}
+
+message SetSpeakerSuggestionStatusRequest {
+  string job_id = 1;
+  string speaker_label = 2;
+  string status = 3;
+}
+
 message ListJobWebSearchesRequest {
   string job_id = 1;
 }

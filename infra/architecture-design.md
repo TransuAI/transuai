@@ -30,6 +30,7 @@ AI Service 消費訊息
   → 呼叫 HF Inference Providers 依片段時間戳切章節
   → 呼叫 HF Inference Providers 把逐字稿片段轉成向量，存進 embeddings（供之後 RAG 問答用）
   → 依摘要與章節替 Job 取標題、判斷類型，回寫 Upload Service（失敗只記 log，不影響 Job）
+  → 兩位以上講者時，依錄音裡明確講出的話替講者提名字建議（程式驗證後存進 speaker_name_suggestions；失敗只記 log）
   → 更新 Job status: summarizing → completed
   → 發送訊息「處理完成」到 MQ
 
@@ -225,6 +226,8 @@ GET    /me/provider-keys                自有金鑰列表（只有廠商、末�
 PUT    /me/provider-keys/{provider}     存入或替換自有金鑰，body { "key": string }；先向廠商驗證，無效回 400（附原因）、
                                          廠商暫時連不上回 503、伺服器沒設定加密主金鑰回 409，都不會存
 DELETE /me/provider-keys/{provider}     刪除自有金鑰，回 { deleted, defaultModelReset }（預設模型正在用它時改回平台模型）
+GET    /jobs/{jobId}/speaker-suggestions  講者名字建議：[{ speakerLabel, name, evidenceStartTime, evidenceText, status }]
+PUT    /jobs/{jobId}/speaker-suggestions/{label}  標成 applied（前端先改名）或 dismissed，body { "status" }
 GET    /jobs/{jobId}/usage              這個 Job 的用量（每一次 LLM 呼叫、轉錄與網路搜尋，依時間排序，附總計）；Gateway 向
                                          ai-service（LLM、網路搜尋）與 transcription-service（轉錄）分別查詢再合併
 GET    /me/connections                  已連結的帳號：Google、Notion 各自的狀態（已連結、已失效、未連結）與連結時間
@@ -440,6 +443,20 @@ CREATE TABLE llm_usage (
 );
 CREATE INDEX ix_llm_usage_job_id ON llm_usage(job_id);
 CREATE INDEX ix_llm_usage_user_id ON llm_usage(user_id);
+
+-- 講者名字建議：錄音裡明確講出身分的話（自我介紹、介紹下一位）給講者的名字與依據；使用者套用才改名（ai-service CONTEXT.md）
+CREATE TABLE speaker_name_suggestions (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL,
+    speaker_label VARCHAR(32) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    evidence_start_time NUMERIC(10,2) NOT NULL, -- 依據那句話的片段開始時間
+    evidence_text TEXT NOT NULL,
+    status VARCHAR(16) NOT NULL,            -- pending / applied / dismissed
+    position INT NOT NULL,                  -- 講者順序，列出時照這個排
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_speaker_name_suggestions_job_id ON speaker_name_suggestions(job_id);
 
 -- 網路搜尋的用量：問答每查一次網路一筆（量是次數，不是 token，所以不放在 llm_usage）；每月上限只算成功的
 CREATE TABLE web_search_usage (
