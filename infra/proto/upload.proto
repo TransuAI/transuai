@@ -32,6 +32,11 @@ service UploadService {
 
   // 刪除 Job 與相關儲存物件。
   rpc DeleteJob(DeleteJobRequest) returns (google.protobuf.Empty);
+
+  // 使用者修改標題與類型（見 upload-service CONTEXT.md「標題」「類型」）。沒帶的欄位不動；帶了的欄位記為使用者設定過，
+  // AI（SetSuggestedDetails）之後不會再寫。標題空字串＝沒有標題（顯示檔名），仍算使用者設定過。
+  // 標題超過 100 字、類型不在清單內回 INVALID_ARGUMENT；不是自己的 Job 回 NOT_FOUND。
+  rpc UpdateJob(UpdateJobRequest) returns (Job);
 }
 
 // InternalJobService 僅供內部服務（Transcription Service / AI Service 等 pipeline 下游）呼叫，
@@ -190,6 +195,12 @@ message ListJobsResponse {
 
 message DeleteJobRequest {
   string job_id = 1;
+}
+
+message UpdateJobRequest {
+  string job_id = 1;
+  optional string title = 2;
+  optional string category = 3;
 }
 
 message UpdateJobStatusRequest {

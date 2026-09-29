@@ -126,7 +126,8 @@ auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user
 POST   /uploads/presign         取得物件儲存的 presigned upload URL（尚未建立 Job；帶檔案長度，先檢查每月用量上限）
 POST   /uploads/complete        前端上傳完成後呼叫，建立 Job record 並發送 transcription.requested 事件；
                                  body 的 transcriptionLanguage 是轉錄語言（zh-TW 預設 / en / auto）
-GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊
+GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊（含標題、類型）
+PATCH  /jobs/{jobId}            使用者改標題／類型 { title?, category? }；改過的欄位 AI 之後不會再寫（upload-service 的 UpdateJob）
 GET    /jobs/{jobId}/media-url  取得該 Job 媒體檔案的 presigned 播放 URL（見 docs/adr/0002-presigned-get-url-for-media-playback.md）；
                                   query download=true 時改給「以附件方式下載、存成原始檔名」的 URL（前端匯出 → 下載原始檔）
 GET    /jobs                    查詢使用者所有 Job（分頁，query: page, pageSize）
