@@ -5,6 +5,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -25,6 +26,7 @@ import com.transuai.gateway.web.dto.JobListResponseDto;
 import com.transuai.gateway.web.dto.MediaUrlDto;
 import com.transuai.gateway.web.dto.PresignRequestDto;
 import com.transuai.gateway.web.dto.PresignResponseDto;
+import com.transuai.gateway.web.dto.UpdateJobRequestDto;
 import com.transuai.upload.grpc.v1.CompleteUploadRequest;
 import com.transuai.upload.grpc.v1.DeleteJobRequest;
 import com.transuai.upload.grpc.v1.FileType;
@@ -36,6 +38,7 @@ import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
 import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.ListJobsRequest;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
+import com.transuai.upload.grpc.v1.UpdateJobRequest;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import lombok.RequiredArgsConstructor;
@@ -84,6 +87,21 @@ public class UploadController {
         public JobDto getJob(@CurrentUserId UUID userId, @PathVariable String jobId) {
                 Job job = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .getJob(GetJobRequest.newBuilder().setJobId(jobId).build());
+                return UploadMapper.toDto(job);
+        }
+
+        // 使用者改標題／類型（見 upload-service CONTEXT.md）：改過的欄位 AI 之後不會再寫。ownership 由 upload-service 依 x-user-id 檢查。
+        @PatchMapping("/jobs/{jobId}")
+        public JobDto updateJob(@CurrentUserId UUID userId, @PathVariable String jobId,
+                        @RequestBody UpdateJobRequestDto request) {
+                UpdateJobRequest.Builder update = UpdateJobRequest.newBuilder().setJobId(jobId);
+                if (request.title() != null) {
+                        update.setTitle(request.title());
+                }
+                if (request.category() != null) {
+                        update.setCategory(request.category());
+                }
+                Job job = GrpcMetadataSupport.withUserId(uploadServiceStub, userId).updateJob(update.build());
                 return UploadMapper.toDto(job);
         }
 
