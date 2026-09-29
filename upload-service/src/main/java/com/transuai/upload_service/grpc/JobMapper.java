@@ -69,6 +69,12 @@ public final class JobMapper {
         if (job.getTranscriptionLanguage() != null) {
             builder.setTranscriptionLanguage(job.getTranscriptionLanguage());
         }
+        if (job.getTitle() != null) {
+            builder.setTitle(job.getTitle());
+        }
+        if (job.getCategory() != null) {
+            builder.setCategory(job.getCategory());
+        }
         return builder.build();
     }
 }

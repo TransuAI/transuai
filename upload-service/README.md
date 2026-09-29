@@ -79,6 +79,7 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 | RPC | 說明 |
 |---|---|
 | `UpdateJobStatus` | 依 `job_id` 更新 Job 狀態，可選帶 `error_reason`（轉 `FAILED` 時使用） |
+| `SetSuggestedDetails` | AI 依內容建議的**標題**與**類型**（見 `CONTEXT.md`；ai-service 的 pipeline 在摘要之後、回寫 COMPLETED 之前呼叫）：使用者改過的欄位（`title_set_by_user` / `category_set_by_user`）不動、空字串的欄位不動、標題截到 100 字；類型不在清單回 `INVALID_ARGUMENT`，`job_id` 格式不對回 `INVALID_ARGUMENT`、找不到回 `NOT_FOUND` |
 
 ### 上傳大小限制
 
@@ -127,7 +128,7 @@ src/main/java/com/transuai/upload_service/
   repository/       Spring Data JPA repository
   service/          StorageService（S3 presign / head / delete）
   event/            JobEventPublisher 抽象 + RabbitMQ 實作（發送 transcription.requested）
-  grpc/             UploadGrpcService（5 支 rpc 實作）、InternalJobGrpcService（UpdateJobStatus）、JobMapper（domain ↔ proto）
+  grpc/             UploadGrpcService（5 支 rpc 實作）、InternalJobGrpcService（UpdateJobStatus、SetSuggestedDetails）、JobMapper（domain ↔ proto）
   grpc/auth/        UserIdServerInterceptor（解析 x-user-id metadata）、GrpcAuthContext
   grpc/advice/      GrpcExceptionAdvice（非預期例外 → 安全的 gRPC Status，避免內部細節外洩）
   config/           StorageConfig / RabbitConfig 與對應的 @ConfigurationProperties
@@ -149,3 +150,5 @@ src/main/java/com/transuai/upload_service/
 - Upload Service 不驗證 JWT，完全信任呼叫端轉發的 `x-user-id` metadata —— 前提是網路層保證只有 Gateway 能直接打到這個服務的 9090 port
 - 「下載原始檔」靠 presigned URL 帶 `response-content-disposition` 覆寫回應標頭；MinIO 支援（整合測試有驗證），正式環境規劃的 Cloudflare R2 是否支援這個覆寫參數，上雲前要實測確認——不支援的話，前端點「下載原始檔」會在同一分頁直接打開媒體網址、離開 app，而不是下載
 - 刪除 Job 時只清 Upload Service 自己的資料（DB row + 物件儲存），不會連帶清除其他服務的逐字稿/embedding（見 [`architecture-design.md`](../architecture-design.md) 第 8 節待確認事項）
+
+- gRPC 服務裡丟出的 `StatusRuntimeException`（例如 `job_id` 格式不對的 `INVALID_ARGUMENT`、找不到的 `NOT_FOUND`）照它自己的 status 回給呼叫端（`GrpcExceptionAdvice`）；之前會被最後的 catch-all 變成 `INTERNAL`。

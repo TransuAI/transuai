@@ -64,6 +64,21 @@ public class JobEntity {
     @Column(name = "transcription_language", length = 10)
     private String transcriptionLanguage;
 
+    // 標題（見 CONTEXT.md「標題」）：AI 依內容取的，或使用者改的；null 是沒有標題（顯示檔名）。
+    @Column(name = "title", length = 100)
+    private String title;
+
+    // 類型（JobCategory）；null 是還沒判斷。
+    @Column(name = "category", length = 20)
+    private String category;
+
+    // 使用者改過就是 true：AI 之後不會再寫這個欄位（包括使用者把標題清空）。舊的列是 null，當成 false。
+    @Column(name = "title_set_by_user")
+    private Boolean titleSetByUser;
+
+    @Column(name = "category_set_by_user")
+    private Boolean categorySetByUser;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default

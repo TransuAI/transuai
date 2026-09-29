@@ -6,6 +6,7 @@ import org.springframework.grpc.server.advice.GrpcAdvice;
 import org.springframework.grpc.server.advice.GrpcExceptionHandler;
 
 import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.core.exception.SdkException;
 
@@ -37,6 +38,13 @@ public class GrpcExceptionAdvice {
     public Status handleAmqpException(AmqpException e) {
         log.error("message queue error while handling gRPC call", e);
         return Status.UNAVAILABLE.withDescription("message queue temporarily unavailable").withCause(e);
+    }
+
+    // A status the code chose on purpose (e.g. INVALID_ARGUMENT for a bad job_id, NOT_FOUND for an unknown job) goes back as
+    // it is; without this the catch-all below would turn it into INTERNAL.
+    @GrpcExceptionHandler(StatusRuntimeException.class)
+    public Status handleStatus(StatusRuntimeException e) {
+        return e.getStatus();
     }
 
     @GrpcExceptionHandler(Exception.class)

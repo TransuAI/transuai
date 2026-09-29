@@ -22,8 +22,10 @@ import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
 import com.transuai.upload.grpc.v1.InternalJobServiceGrpc;
 import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.JobStatus;
+import com.transuai.upload.grpc.v1.SetSuggestedDetailsRequest;
 import com.transuai.upload.grpc.v1.UpdateJobStatusRequest;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
+import com.transuai.upload_service.domain.JobEntity;
 import com.transuai.upload_service.repository.JobRepository;
 
 import io.grpc.CallOptions;
@@ -109,6 +111,62 @@ class InternalJobGrpcServiceIT {
                 .build()))
                 .isInstanceOfSatisfying(StatusRuntimeException.class,
                         e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
+    @Test
+    void setSuggestedDetails_givesTheJobATitleAndACategory() throws Exception {
+        Job job = createJob(UUID.randomUUID(), "REC_0012.m4a");
+
+        Job updated = internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("產品週會：上傳失敗與轉錄重試").setCategory("meeting").build());
+
+        assertThat(updated.getTitle()).isEqualTo("產品週會：上傳失敗與轉錄重試");
+        assertThat(updated.getCategory()).isEqualTo("meeting");
+        assertThat(updated.getFileName()).isEqualTo("REC_0012.m4a"); // the file name stays as it was
+    }
+
+    @Test
+    void setSuggestedDetails_leavesWhatTheUserSetAlone() throws Exception {
+        Job job = createJob(UUID.randomUUID(), "REC_0012.m4a");
+        JobEntity entity = jobRepository.findById(UUID.fromString(job.getJobId())).orElseThrow();
+        entity.setTitle("我自己取的標題");
+        entity.setTitleSetByUser(true);
+        jobRepository.save(entity);
+
+        Job updated = internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("AI 的標題").setCategory("lecture").build());
+
+        assertThat(updated.getTitle()).isEqualTo("我自己取的標題");
+        assertThat(updated.getCategory()).isEqualTo("lecture"); // the category was still the AI's to set
+    }
+
+    @Test
+    void setSuggestedDetails_leavesABlankFieldAsItWas() throws Exception {
+        Job job = createJob(UUID.randomUUID(), "REC_0012.m4a");
+
+        Job updated = internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setCategory("interview").build());
+
+        assertThat(updated.getTitle()).isEmpty();
+        assertThat(updated.getCategory()).isEqualTo("interview");
+    }
+
+    @Test
+    void setSuggestedDetails_refusesACategoryNotOnTheList() throws Exception {
+        Job job = createJob(UUID.randomUUID(), "REC_0012.m4a");
+
+        assertThatThrownBy(() -> internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("t").setCategory("anime").build()))
+                .isInstanceOfSatisfying(StatusRuntimeException.class,
+                        e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
+    @Test
+    void setSuggestedDetails_returnsNotFound_forUnknownJobId() {
+        assertThatThrownBy(() -> internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(UUID.randomUUID().toString()).setTitle("t").build()))
+                .isInstanceOfSatisfying(StatusRuntimeException.class,
+                        e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.NOT_FOUND));
     }
 
     private Job createJob(UUID userId, String fileName) throws Exception {
