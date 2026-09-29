@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, postMeetingApi, qaApi, quizApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
+import { chapterApi, jobsApi, modelsApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
 import type { Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
@@ -15,6 +15,7 @@ vi.mock('@/lib/api', () => ({
       .mockResolvedValue({ downloadUrl: 'https://media.example.com/uploads/interview.mp3', expiresAt: '2026-01-01T01:00:00Z' }),
   },
   transcriptApi: { get: vi.fn(), updateSegmentText: vi.fn(), renameSpeaker: vi.fn(), assignSegmentSpeaker: vi.fn() },
+  speakerSuggestionsApi: { list: vi.fn(), setStatus: vi.fn() },
   summaryApi: { get: vi.fn(), regenerate: vi.fn() },
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
@@ -44,6 +45,7 @@ beforeEach(() => {
   vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false })
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platformModel)
   vi.mocked(quizApi.list).mockResolvedValue([])
+  vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([])
   vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], earlierRuns: [], latestRun: null })
 })
 
@@ -1013,6 +1015,105 @@ describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
     await user.click(await screen.findByRole('menuitem', { name: '下載字幕（SRT）' }))
 
     expect(await exported?.text()).toContain('00:00:04,000 --> 00:00:06,000\n講者 2：大家好\n')
+  })
+})
+
+describe('JobDetailPage speaker name suggestions (講者名字建議, COMPLETED)', () => {
+  const panel = () => screen.getByRole('list', { name: '講者' })
+  const suggestionFor = (label: string, name: string) => ({
+    speakerLabel: label, name, evidenceStartTime: 4, evidenceText: `大家好，我是${name}`, status: 'pending' as const,
+  })
+  // Both speakers still have their default names.
+  const unnamed: Transcript = {
+    ...multiSpeakerTranscript,
+    speakers: [{ label: 'S1', displayName: '講者 1', displayOrder: 1 }, { label: 'S2', displayName: '講者 2', displayOrder: 2 }],
+  }
+  const renamedTo = (label: string, name: string) => ({
+    speaker: { label, displayName: name, displayOrder: label === 'S1' ? 1 : 2 }, revision: 1,
+  })
+
+  it('suggests a name with the line it comes from, which plays when its time is clicked', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([suggestionFor('S2', '李大華')])
+    await renderCompletedJob(multiSpeakerTranscript)
+
+    const suggestion = await screen.findByRole('group', { name: '講者 2 可能是 李大華' })
+    expect(suggestion).toHaveTextContent('大家好，我是李大華')
+    await user.click(within(suggestion).getByRole('button', { name: '0:04' }))
+    expect((document.querySelector('audio') as HTMLMediaElement).currentTime).toBe(4)
+  })
+
+  it('renames the speaker when a suggestion is applied, and marks it applied', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([suggestionFor('S2', '李大華')])
+    vi.mocked(transcriptApi.renameSpeaker).mockResolvedValue(renamedTo('S2', '李大華'))
+    vi.mocked(speakerSuggestionsApi.setStatus).mockResolvedValue({ ...suggestionFor('S2', '李大華'), status: 'applied' })
+    await renderCompletedJob(multiSpeakerTranscript)
+
+    await user.click(within(await screen.findByRole('group', { name: '講者 2 可能是 李大華' })).getByRole('button', { name: '套用' }))
+
+    expect(transcriptApi.renameSpeaker).toHaveBeenCalledWith('job-1', 'S2', '李大華')
+    expect(speakerSuggestionsApi.setStatus).toHaveBeenCalledWith('job-1', 'S2', 'applied')
+    expect(await within(panel()).findByRole('button', { name: '改名：李大華' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: /可能是/ })).not.toBeInTheDocument()
+  })
+
+  it('stops suggesting once the suggestion is dismissed', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([suggestionFor('S2', '李大華')])
+    vi.mocked(speakerSuggestionsApi.setStatus).mockResolvedValue({ ...suggestionFor('S2', '李大華'), status: 'dismissed' })
+    await renderCompletedJob(multiSpeakerTranscript)
+
+    await user.click(within(await screen.findByRole('group', { name: '講者 2 可能是 李大華' })).getByRole('button', { name: '忽略' }))
+
+    expect(speakerSuggestionsApi.setStatus).toHaveBeenCalledWith('job-1', 'S2', 'dismissed')
+    expect(screen.queryByRole('group', { name: /可能是/ })).not.toBeInTheDocument()
+    expect(transcriptApi.renameSpeaker).not.toHaveBeenCalled()
+  })
+
+  it('applies every suggestion at once, keeping any that fails to apply', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([suggestionFor('S1', '王小明'), suggestionFor('S2', '李大華')])
+    vi.mocked(transcriptApi.renameSpeaker).mockImplementation(async (_jobId, label, name) => {
+      if (label === 'S2') throw new Error('network')
+      return renamedTo(label, name)
+    })
+    vi.mocked(speakerSuggestionsApi.setStatus).mockResolvedValue({ ...suggestionFor('S1', '王小明'), status: 'applied' })
+    await renderCompletedJob(unnamed)
+
+    await user.click(await screen.findByRole('button', { name: '全部套用（2）' }))
+
+    expect(await within(panel()).findByRole('button', { name: '改名：王小明' })).toBeInTheDocument()
+    expect(speakerSuggestionsApi.setStatus).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('group', { name: '講者 2 可能是 李大華' })).toBeInTheDocument()
+    expect(await screen.findByText('套用失敗：講者 2')).toBeInTheDocument()
+  })
+
+  it('does not suggest anything for a speaker the user already named, or a suggestion already dealt with', async () => {
+    stubDesktopLayout()
+    vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([
+      suggestionFor('S1', '王小明'), // S1 is already 主持人
+      { ...suggestionFor('S2', '李大華'), status: 'dismissed' },
+    ])
+    await renderCompletedJob(multiSpeakerTranscript)
+    await screen.findByRole('list', { name: '講者' })
+
+    await waitFor(() => expect(speakerSuggestionsApi.list).toHaveBeenCalled())
+    expect(screen.queryByRole('group', { name: /可能是/ })).not.toBeInTheDocument()
+  })
+
+  it('suggests inside the Source Sheet too (narrow viewport)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([suggestionFor('S2', '李大華')])
+    await renderCompletedJob(multiSpeakerTranscript)
+
+    await user.click(screen.getByRole('button', { name: '來源' }))
+
+    expect(await within(await screen.findByRole('dialog')).findByRole('group', { name: '講者 2 可能是 李大華' })).toBeInTheDocument()
   })
 })
 

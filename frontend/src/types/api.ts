@@ -101,6 +101,15 @@ export interface SegmentUpdate {
   revision: number
 }
 
+/** 講者名字建議: a name the recording itself gives a speaker, with the line that says so. */
+export interface SpeakerSuggestion {
+  speakerLabel: string
+  name: string
+  evidenceStartTime: number
+  evidenceText: string
+  status: 'pending' | 'applied' | 'dismissed'
+}
+
 export interface SpeakerUpdate {
   speaker: Speaker
   revision: number

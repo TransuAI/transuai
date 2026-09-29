@@ -5,7 +5,7 @@ import { formatBytes, formatDuration, formatShortDateTime } from '@/lib/media'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { SpeakerPanel } from '@/pages/job-detail/speaker-panel'
+import { SpeakerPanel, type SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
 import { TranscriptView } from '@/pages/job-detail/transcript-view'
 import { cn } from '@/lib/utils'
 import type { Job, SpeakerAssignment, Transcript } from '@/types/api'
@@ -21,6 +21,7 @@ interface SourcePaneProps {
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onRenameSpeaker: (label: string, name: string) => Promise<void>
+  speakerSuggestions: SpeakerSuggestionActions
   onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
   /** Folds the pane into a rail (desktop grid only). */
   onCollapse?: () => void
@@ -37,6 +38,7 @@ export function SourcePane({
   onSeek,
   onSaveSegmentText,
   onRenameSpeaker,
+  speakerSuggestions,
   onAssignSpeaker,
   onCollapse,
   className,
@@ -70,7 +72,13 @@ export function SourcePane({
       </div>
       {transcript && (
         <div className="border-b px-4 py-3 empty:hidden">
-          <SpeakerPanel transcript={transcript} onRename={onRenameSpeaker} />
+          <SpeakerPanel
+            transcript={transcript}
+            onRename={onRenameSpeaker}
+            suggestions={speakerSuggestions}
+            onSeek={onSeek}
+            mediaAvailable={mediaAvailable}
+          />
         </div>
       )}
       <div className="min-h-0 flex-1 px-4 pt-3">

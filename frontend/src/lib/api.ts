@@ -26,6 +26,7 @@ import type {
   SegmentSpeakerUpdate,
   SegmentUpdate,
   SpeakerAssignment,
+  SpeakerSuggestion,
   SpeakerUpdate,
   Summary,
   Transcript,
@@ -107,6 +108,16 @@ export const transcriptApi = {
     apiFetch<SegmentSpeakerUpdate>(`/transcripts/${jobId}/segments/${segmentId}/speaker`, {
       method: 'PUT',
       body: assignment,
+    }),
+}
+
+// 講者名字建議：pipeline 依錄音裡明確講出的話提的名字。套用＝前端先用 transcriptApi.renameSpeaker 改名，再標成 applied。
+export const speakerSuggestionsApi = {
+  list: (jobId: string) => apiFetch<SpeakerSuggestion[]>(`/jobs/${jobId}/speaker-suggestions`),
+  setStatus: (jobId: string, speakerLabel: string, status: 'applied' | 'dismissed') =>
+    apiFetch<SpeakerSuggestion>(`/jobs/${jobId}/speaker-suggestions/${encodeURIComponent(speakerLabel)}`, {
+      method: 'PUT',
+      body: { status },
     }),
 }
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft } from 'lucide-react'
-import { chapterApi, jobsApi, modelsApi, qaApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
+import { chapterApi, jobsApi, modelsApi, qaApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { findCurrentSegmentIndex } from '@/lib/current-segment'
 import { formatBytes, formatDuration } from '@/lib/media'
@@ -20,7 +20,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { CompletedWorkspace } from '@/pages/job-detail/completed-workspace'
 import type { QaEntry } from '@/pages/job-detail/chat-pane'
-import type { Chapter, Job, JobStatusEvent, JobUsage, ModelChoice, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
+import type { Chapter, Job, JobStatusEvent, JobUsage, ModelChoice, SpeakerAssignment, SpeakerSuggestion, Summary, Transcript } from '@/types/api'
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -35,6 +36,7 @@ export function JobDetailPage() {
   const [defaultModel, setDefaultModel] = useState<ModelChoice | null>(null)
   const [selectedModel, setSelectedModel] = useState<ModelChoice | null>(null)
   const [qaHistory, setQaHistory] = useState<QaEntry[]>([])
+  const [speakerSuggestions, setSpeakerSuggestions] = useState<SpeakerSuggestion[]>([])
   // 查網路: offered only when the deployment can search; once switched on it stays on for the next questions on this page.
   const [webSearchAvailable, setWebSearchAvailable] = useState(false)
   const [webSearch, setWebSearch] = useState(false)
@@ -148,6 +150,8 @@ export function JobDetailPage() {
     if (!jobId || !jobStatus) return
     if (jobStatus === 'COMPLETED') {
       summaryApi.get(jobId).then(setSummary).catch(() => setSummary(null))
+      // Nice to have: without them the speakers just keep their numbers.
+      speakerSuggestionsApi.list(jobId).then(setSpeakerSuggestions).catch(() => setSpeakerSuggestions([]))
       chapterApi.list(jobId).then(setChapters).catch(() => setChapters([]))
       usageApi.getJobUsage(jobId).then(setUsage).catch(() => setUsage(null))
       Promise.all([modelsApi.available(), modelsApi.getDefault()])
@@ -226,6 +230,32 @@ export function JobDetailPage() {
   }
 
   // 替講者命名也是一次編輯：用回應的講者跟版本號更新逐字稿，失敗時讓錯誤往外拋給改名的輸入框。
+  // 講者名字建議: applying one is the usual rename, then the suggestion is marked applied. A suggestion whose speaker was renamed
+  // is hidden either way, so failing to mark it only logs. The toast names the speaker by the name shown before the rename.
+  const markSuggestion = (label: string, status: 'applied' | 'dismissed') => {
+    setSpeakerSuggestions((prev) => prev.map((s) => (s.speakerLabel === label ? { ...s, status } : s)))
+    if (jobId) speakerSuggestionsApi.setStatus(jobId, label, status).catch(() => {})
+  }
+  const applySuggestion = async (suggestion: SpeakerSuggestion) => {
+    const shownAs = transcript?.speakers.find((s) => s.label === suggestion.speakerLabel)?.displayName ?? suggestion.speakerLabel
+    try {
+      await handleRenameSpeaker(suggestion.speakerLabel, suggestion.name)
+    } catch {
+      toast.error(`套用失敗：${shownAs}`)
+      return
+    }
+    markSuggestion(suggestion.speakerLabel, 'applied')
+  }
+  const speakerSuggestionActions: SpeakerSuggestionActions = {
+    suggestions: speakerSuggestions,
+    apply: applySuggestion,
+    dismiss: (label) => markSuggestion(label, 'dismissed'),
+    // One at a time: each rename is an edit with its own revision.
+    applyAll: async (pending) => {
+      for (const suggestion of pending) await applySuggestion(suggestion)
+    },
+  }
+
   const handleRenameSpeaker = async (label: string, name: string) => {
     if (!jobId) return
     const { speaker, revision } = await transcriptApi.renameSpeaker(jobId, label, name)
@@ -417,6 +447,7 @@ export function JobDetailPage() {
       onSeek={seekTo}
       onSaveSegmentText={handleSaveSegmentText}
       onRenameSpeaker={handleRenameSpeaker}
+      speakerSuggestions={speakerSuggestionActions}
       onAssignSpeaker={handleAssignSpeaker}
       onRegenerateSummary={regeneration.regenerate}
       isRegeneratingSummary={regeneration.isRegenerating}

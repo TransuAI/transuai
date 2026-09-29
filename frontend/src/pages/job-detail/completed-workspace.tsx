@@ -7,6 +7,7 @@ import { isSummaryStale } from '@/lib/staleness'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { SourcePane } from '@/pages/job-detail/source-pane'
+import type { SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
 import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
 import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
@@ -39,6 +40,7 @@ interface CompletedWorkspaceProps {
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onRenameSpeaker: (label: string, name: string) => Promise<void>
+  speakerSuggestions: SpeakerSuggestionActions
   onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
   onRegenerateSummary: () => void
   isRegeneratingSummary: boolean
@@ -126,6 +128,7 @@ export function CompletedWorkspace({
   onSeek,
   onSaveSegmentText,
   onRenameSpeaker,
+  speakerSuggestions,
   onAssignSpeaker,
   onRegenerateSummary,
   isRegeneratingSummary,
@@ -173,6 +176,7 @@ export function CompletedWorkspace({
     onSeek,
     onSaveSegmentText,
     onRenameSpeaker,
+    speakerSuggestions,
     onAssignSpeaker,
   }
   const desktopPlayer =

@@ -17,6 +17,7 @@ const FEATURE_LABELS: Record<string, string> = {
   transcription: '轉錄',
   web_search: '網路搜尋',
   job_title: '標題',
+  speaker_names: '講者名字建議',
 }
 
 function tokens(value: number) {
