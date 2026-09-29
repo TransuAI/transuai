@@ -11,7 +11,7 @@ import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
 import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
-import { StudioPane } from '@/pages/job-detail/studio-pane'
+import { StudioPane, type StudioTool } from '@/pages/job-detail/studio-pane'
 import { cn } from '@/lib/utils'
 import type { Chapter, ConfirmedProposal, Job, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
@@ -143,6 +143,8 @@ export function CompletedWorkspace({
   // Desktop only: a folded pane stays mounted (hidden) so the player in the Source pane keeps playing.
   const [sourceCollapsed, setSourceCollapsed] = useState(false)
   const [studioCollapsed, setStudioCollapsed] = useState(false)
+  // The Studio tool on show (null: the tiles), shared by the grid and the Sheet so closing either keeps the place.
+  const [studioTool, setStudioTool] = useState<StudioTool | null>(null)
 
   if (isDesktop !== lastIsDesktop) {
     setLastIsDesktop(isDesktop)
@@ -172,6 +174,8 @@ export function CompletedWorkspace({
     ))
   const renderStudioPane = (desktop: { onCollapse: () => void; className?: string } | null) => (
     <StudioPane
+      tool={studioTool}
+      onToolChange={setStudioTool}
       onCollapse={desktop?.onCollapse}
       className={desktop?.className}
       summary={summary}

@@ -119,6 +119,13 @@ async function renderCompletedJob(
   return view
 }
 
+// The Studio shows its tools as tiles; a tool's content is only on screen once its tile is opened.
+async function openStudioTool(name: string) {
+  const back = screen.queryByRole('button', { name: '返回 Studio' })
+  if (back) fireEvent.click(back)
+  fireEvent.click(await screen.findByRole('button', { name }))
+}
+
 function stubDesktopLayout() {
   return vi.spyOn(window, 'matchMedia').mockImplementation(
     (query) =>
@@ -236,8 +243,10 @@ describe('JobDetailPage Source/Studio Sheets (COMPLETED, narrow viewport)', () =
     expect(screen.queryByText('這是摘要內容')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Studio' }))
-
+    await openStudioTool('AI 摘要')
     expect(await screen.findByText('這是摘要內容')).toBeInTheDocument()
+
+    await openStudioTool('章節')
     expect(screen.getByText('開場')).toBeInTheDocument()
   })
 })
@@ -246,6 +255,33 @@ describe('JobDetailPage Source/Studio Sheets (COMPLETED, narrow viewport)', () =
 // the chapter list aren't on screen together with the Chat pane. These tests force the
 // desktop layout, where Source/Chat/Studio render inline simultaneously, to exercise the
 // carried-over ask -> history -> citation-seek and segment/chapter-seek behavior.
+describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
+  it('shows each tool as a tile saying where it stands, without the tools themselves', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob()
+
+    const tiles = within(await screen.findByRole('list', { name: 'Studio 功能' })).getAllByRole('button')
+    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '測驗還沒', '會後處理', '用量尚無'])
+    expect(screen.getByRole('button', { name: '章節' })).toHaveAccessibleDescription('1 個章節')
+    expect(screen.queryByRole('button', { name: '0:12開場' })).not.toBeInTheDocument()
+  })
+
+  it('opens a tool, and goes back to the tiles with the focus on the tool it came from', async () => {
+    stubDesktopLayout()
+    const user = userEvent.setup()
+    await renderCompletedJob()
+
+    await user.click(await screen.findByRole('button', { name: '章節' }))
+    expect(screen.getByRole('button', { name: '0:12開場' })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Studio 功能' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回 Studio' })).toHaveFocus()
+
+    await user.click(screen.getByRole('button', { name: '返回 Studio' }))
+    expect(screen.getByRole('list', { name: 'Studio 功能' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '章節' })).toHaveFocus()
+  })
+})
+
 describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
   it('asks a question, appends it to history, and seeks the media player from a citation timestamp', async () => {
     const matchMediaSpy = stubDesktopLayout()
@@ -321,6 +357,7 @@ describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
     const user = userEvent.setup()
 
     await renderCompletedJob()
+    await openStudioTool('章節')
     await user.click(await screen.findByRole('button', { name: '0:12開場' }))
 
     const audio = document.querySelector('audio')
@@ -492,6 +529,7 @@ describe('JobDetailPage auto-follow (COMPLETED, desktop layout)', () => {
   ])('resumes auto-follow when the user jumps to %s', async (_what, buttonName) => {
     const user = userEvent.setup()
     await renderPlayingAt(9)
+    await openStudioTool('章節')
     fireEvent.wheel(screen.getByText('第一句'))
 
     await user.click(screen.getByRole('button', { name: buttonName }))
@@ -1257,6 +1295,7 @@ describe('JobDetailPage summary model (COMPLETED, desktop layout)', () => {
   it('says which model made the summary', async () => {
     stubDesktopLayout()
     await renderCompletedJob()
+    await openStudioTool('AI 摘要')
 
     expect(await screen.findByText('由 gpt-5-mini 產生')).toBeInTheDocument()
   })
@@ -1269,8 +1308,9 @@ describe('JobDetailPage summary model (COMPLETED, desktop layout)', () => {
     vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
     vi.mocked(qaApi.history).mockResolvedValue([])
     renderJobDetail()
+    await openStudioTool('AI 摘要')
 
-    expect(await screen.findByText('這是摘要內容')).toBeInTheDocument()
+    expect(await screen.findByText('這是摘要內容', { selector: 'p' })).toBeInTheDocument()
     expect(screen.queryByText(/產生$/)).not.toBeInTheDocument()
   })
 })
@@ -1293,16 +1333,51 @@ describe('JobDetailPage usage (COMPLETED, desktop layout)', () => {
     totals: { inputTokens: 3800, outputTokens: 240, audioSeconds: 0 },
   }
   const usageSection = () => screen.getByRole('region', { name: '用量' })
+  const byFeature = () => within(usageSection()).getAllByRole('listitem')
 
-  it("lists every call made for the job, with the job's totals", async () => {
+  async function renderUsage(jobUsage?: JobUsage) {
     stubDesktopLayout()
-    vi.mocked(usageApi.getJobUsage).mockResolvedValue(usage)
+    if (jobUsage) vi.mocked(usageApi.getJobUsage).mockResolvedValue(jobUsage)
     await renderCompletedJob()
+    await openStudioTool('用量')
+  }
 
-    const section = await screen.findByRole('region', { name: '用量' })
-    expect(section).toHaveTextContent('輸入 3,800 tokens')
-    expect(section).toHaveTextContent('輸出 240 tokens')
-    const rows = within(section).getAllByRole('listitem')
+  // Every single call is behind a button: a job with many questions easily has dozens.
+  function showEveryCall() {
+    fireEvent.click(within(usageSection()).getByRole('button', { name: /每一次呼叫/ }))
+    return within(screen.getByRole('list', { name: '每一次呼叫' })).getAllByRole('listitem')
+  }
+
+  it("shows the job's totals and what each feature used, not every call", async () => {
+    await renderUsage(usage)
+
+    await within(usageSection()).findByText('3,800')
+    expect(usageSection()).toHaveTextContent('輸入 tokens3,800')
+    expect(usageSection()).toHaveTextContent('輸出 tokens240')
+    expect(byFeature().map((row) => row.textContent)).toEqual([
+      '摘要1 次3,240 tokens',
+      '章節1 次—',
+      '問答1 次 · 1 次失敗800 tokens',
+    ])
+    expect(screen.queryByRole('list', { name: '每一次呼叫' })).not.toBeInTheDocument()
+  })
+
+  it('adds up the calls of the same feature', async () => {
+    await renderUsage({
+      records: [llmRecord('qa_answer', 1000, 100), llmRecord('qa_answer', 2000, 200)],
+      totals: { inputTokens: 3000, outputTokens: 300, audioSeconds: 0 },
+    })
+
+    expect(await within(usageSection()).findByText('2 次')).toBeInTheDocument()
+    expect(byFeature()).toHaveLength(1)
+    expect(byFeature()[0]).toHaveTextContent('3,300 tokens')
+  })
+
+  it('lists every call on request', async () => {
+    await renderUsage(usage)
+    await within(usageSection()).findByText('3,800')
+
+    const rows = showEveryCall()
     expect(rows[0]).toHaveTextContent('摘要')
     expect(rows[0]).toHaveTextContent('Qwen/Qwen3.5-9B')
     expect(rows[0]).toHaveTextContent('3,000 → 240 tokens')
@@ -1313,58 +1388,50 @@ describe('JobDetailPage usage (COMPLETED, desktop layout)', () => {
   })
 
   it('shows a known number even when the other one is unknown, and marks totals that leave some out', async () => {
-    stubDesktopLayout()
-    vi.mocked(usageApi.getJobUsage).mockResolvedValue({
+    await renderUsage({
       records: [llmRecord('summary', 3000, null)],
       totals: { inputTokens: 3000, outputTokens: 0, audioSeconds: 0 },
     })
-    await renderCompletedJob()
 
-    const section = await screen.findByRole('region', { name: '用量' })
-    expect(within(section).getByRole('listitem')).toHaveTextContent('3,000 → — tokens')
-    expect(section).toHaveTextContent('部分用量未知')
+    expect(await within(usageSection()).findByText('部分用量未知，未計入總計')).toBeInTheDocument()
+    expect(showEveryCall()[0]).toHaveTextContent('3,000 → — tokens')
   })
 
   it('shows the transcription in minutes alongside the model calls', async () => {
-    stubDesktopLayout()
-    vi.mocked(usageApi.getJobUsage).mockResolvedValue({
+    await renderUsage({
       records: [
         { ...llmRecord('transcription', null, null), kind: 'transcription', provider: 'deepgram', model: 'nova-3', audioSeconds: 1836 },
         llmRecord('summary', 3000, 240),
       ],
       totals: { inputTokens: 3000, outputTokens: 240, audioSeconds: 1836 },
     })
-    await renderCompletedJob()
 
-    const section = await screen.findByRole('region', { name: '用量' })
-    expect(within(section).getAllByRole('listitem')[0]).toHaveTextContent('轉錄nova-330.6 分鐘')
-    expect(section).toHaveTextContent('轉錄 30.6 分鐘')
-    expect(section).not.toHaveTextContent('部分用量未知')
+    await within(usageSection()).findByText('3,000')
+    expect(usageSection()).toHaveTextContent('轉錄30.6 分鐘')
+    expect(byFeature()[0]).toHaveTextContent('轉錄1 次30.6 分鐘')
+    expect(usageSection()).not.toHaveTextContent('部分用量未知')
+    expect(showEveryCall()[0]).toHaveTextContent('轉錄nova-330.6 分鐘')
   })
 
   it('shows a failed transcription with unknown minutes as a dash', async () => {
-    stubDesktopLayout()
-    vi.mocked(usageApi.getJobUsage).mockResolvedValue({
+    await renderUsage({
       records: [{ ...llmRecord('transcription', null, null, false), kind: 'transcription', provider: 'deepgram', model: 'nova-3' }],
       totals: { inputTokens: 0, outputTokens: 0, audioSeconds: 0 },
     })
-    await renderCompletedJob()
 
-    const row = within(await screen.findByRole('region', { name: '用量' })).getByRole('listitem')
-    expect(row).toHaveTextContent('轉錄nova-3—失敗')
+    await within(usageSection()).findByText('部分用量未知，未計入總計')
+    expect(showEveryCall()[0]).toHaveTextContent('轉錄nova-3—失敗')
   })
 
   it('says so when nothing has been used yet', async () => {
-    stubDesktopLayout()
-    await renderCompletedJob()
+    await renderUsage()
 
     expect(await within(usageSection()).findByText('尚無用量紀錄')).toBeInTheDocument()
   })
 
   it('reloads the usage once an answer has finished', async () => {
     const user = userEvent.setup()
-    stubDesktopLayout()
-    await renderCompletedJob()
+    await renderUsage()
     vi.mocked(qaApi.ask).mockImplementation(async (_jobId, _question, handlers) => {
       handlers.onDelta('答案')
     })
@@ -1372,7 +1439,7 @@ describe('JobDetailPage usage (COMPLETED, desktop layout)', () => {
 
     await user.type(screen.getByPlaceholderText('針對這個內容提問...'), '預算怎麼分配？{Enter}')
 
-    expect(await within(usageSection()).findByText('3,000 → 240 tokens')).toBeInTheDocument()
+    expect(await within(usageSection()).findByText('3,240 tokens')).toBeInTheDocument()
   })
 })
 
@@ -1889,6 +1956,7 @@ describe('JobDetailPage regenerating the summary and chapters (COMPLETED, deskto
     vi.mocked(qaApi.history).mockResolvedValue([])
     renderJobDetail()
     await screen.findByText('第一句')
+    await openStudioTool('AI 摘要')
     return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
   }
 
@@ -1909,13 +1977,14 @@ describe('JobDetailPage regenerating the summary and chapters (COMPLETED, deskto
 
     expect(summaryApi.regenerate).toHaveBeenCalledWith('job-1')
     expect(screen.getByText('重新產生中…')).toBeInTheDocument()
-    expect(screen.getByText('這是摘要內容')).toBeInTheDocument() // the old content stays meanwhile
+    expect(screen.getByText('這是摘要內容', { selector: 'p' })).toBeInTheDocument() // the old content stays meanwhile
 
     await vi.advanceTimersByTimeAsync(3000)
 
-    expect(await screen.findByText('重新產生的摘要')).toBeInTheDocument()
-    expect(screen.getByText('新章節')).toBeInTheDocument()
+    expect(await screen.findByText('重新產生的摘要', { selector: 'p' })).toBeInTheDocument()
     expect(screen.queryByText('逐字稿已修改，摘要與章節可能過時')).not.toBeInTheDocument()
+    await openStudioTool('章節')
+    expect(screen.getByText('新章節')).toBeInTheDocument()
   })
 
   it('keeps the old content and says so when the regeneration fails', async () => {
@@ -1927,7 +1996,7 @@ describe('JobDetailPage regenerating the summary and chapters (COMPLETED, deskto
     await vi.advanceTimersByTimeAsync(3000)
 
     expect(await screen.findByText('重新產生失敗')).toBeInTheDocument()
-    expect(screen.getByText('這是摘要內容')).toBeInTheDocument()
+    expect(screen.getByText('這是摘要內容', { selector: 'p' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新產生摘要與章節' })).toBeEnabled()
   })
 
@@ -1947,7 +2016,9 @@ describe('JobDetailPage regenerating the summary and chapters (COMPLETED, deskto
     await user.click(await screen.findByRole('button', { name: '重新產生摘要與章節' }))
     await vi.advanceTimersByTimeAsync(3000)
 
-    expect(await within(screen.getByRole('region', { name: '用量' })).findByText('重新產生摘要')).toBeInTheDocument()
+    await waitFor(() => expect(usageApi.getJobUsage).toHaveBeenCalledTimes(2))
+    await openStudioTool('用量')
+    expect(await within(screen.getByRole('list', { name: '依功能' })).findByText('重新產生摘要')).toBeInTheDocument()
   })
 
   it('keeps waiting for a regeneration that was already running when the page opened', async () => {
@@ -1981,7 +2052,8 @@ describe('JobDetailPage regenerating the summary and chapters (COMPLETED, deskto
     await user.click(await screen.findByRole('button', { name: '重新產生摘要與章節' }))
     await vi.advanceTimersByTimeAsync(3000)
 
-    expect(await screen.findByText('重新產生的摘要')).toBeInTheDocument()
+    expect(await screen.findByText('重新產生的摘要', { selector: 'p' })).toBeInTheDocument()
+    await openStudioTool('章節')
     expect(screen.getByText('開場')).toBeInTheDocument()
   })
 })
@@ -2017,7 +2089,7 @@ describe('JobDetailPage quizzes (測驗)', () => {
   async function renderQuizzes() {
     stubDesktopLayout()
     await renderCompletedJob()
-    await screen.findByRole('region', { name: '測驗' })
+    await openStudioTool('測驗')
     return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
   }
 
@@ -2134,6 +2206,7 @@ describe('JobDetailPage quizzes (測驗)', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
 
     await user.click(screen.getByRole('button', { name: 'Studio' }))
+    await openStudioTool('測驗')
 
     const card = await screen.findByRole('region', { name: '測驗' })
     expect(await within(card).findByRole('listitem')).toHaveTextContent('由 Qwen/Qwen3.5-9B 產生')
@@ -2179,6 +2252,7 @@ describe('JobDetailPage taking a quiz (作答)', () => {
     stubDesktopLayout()
     await renderCompletedJob()
     const user = userEvent.setup()
+    await openStudioTool('測驗')
     const card = await screen.findByRole('region', { name: '測驗' })
     await user.click(await within(card).findByRole('button', { name: '作答' }))
     return { user, dialog: await screen.findByRole('dialog') }
@@ -2271,6 +2345,7 @@ describe('JobDetailPage taking a quiz (作答)', () => {
     await renderCompletedJob()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Studio' }))
+    await openStudioTool('測驗')
     const card = await screen.findByRole('region', { name: '測驗' })
 
     await user.click(await within(card).findByRole('button', { name: '作答' }))
@@ -2295,6 +2370,7 @@ describe('JobDetailPage quiz staleness and export', () => {
     stubDesktopLayout()
     vi.mocked(quizApi.list).mockResolvedValue([doneQuiz, { ...doneQuiz, id: 'quiz-old', sourceRevision: 0 }])
     await renderCompletedJob({ ...mockTranscript, revision: 1 }, [], {})
+    await openStudioTool('測驗')
     const card = await screen.findByRole('region', { name: '測驗' })
 
     const items = await within(card).findAllByRole('listitem')
@@ -2309,6 +2385,7 @@ describe('JobDetailPage quiz staleness and export', () => {
     stubDesktopLayout()
     vi.mocked(quizApi.list).mockResolvedValue([{ ...doneQuiz, sourceRevision: 1 }])
     await renderCompletedJob({ ...mockTranscript, revision: 1 })
+    await openStudioTool('測驗')
     const card = await screen.findByRole('region', { name: '測驗' })
 
     await within(card).findByRole('listitem')
@@ -2330,6 +2407,7 @@ describe('JobDetailPage quiz staleness and export', () => {
     vi.mocked(quizApi.get).mockResolvedValue({ ...doneQuiz, questionCount: 1, questions: quizQuestions })
     await renderCompletedJob()
     const user = userEvent.setup()
+    await openStudioTool('測驗')
     await within(await screen.findByRole('region', { name: '測驗' })).findAllByRole('listitem')
 
     await user.click(screen.getByRole('button', { name: '匯出' }))
@@ -2394,6 +2472,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
   async function renderCard() {
     stubDesktopLayout()
     await renderCompletedJob()
+    await openStudioTool('會後處理')
     await screen.findByRole('region', { name: '會後處理' })
     return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
   }
