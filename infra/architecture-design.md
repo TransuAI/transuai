@@ -213,7 +213,8 @@ GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄�
 POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string, "model"?: { provider, model },
                                          "webSearch"?: boolean }（model 只用在這一次提問，省略就用預設模型；webSearch 為 true 時這一題
                                          也用 Tavily 查一次網路，見 ai-service ADR 0014），回傳 text/event-stream（SSE，逐字串流，含一個
-                                         說明由哪個模型回答的 model event；查了網路時多一個 web_sources event），不是一次性 JSON
+                                         說明由哪個模型回答的 model event；查了網路時多一個 web_sources event；回答過程的每一步是
+                                         step event：理解問題、在內容裡找段落、查網路、撰寫回答），不是一次性 JSON
 GET    /ai/models                       可以選的模型：平台模型，加上有自有金鑰的廠商整理好的清單（標示能不能呼叫工具）；
                                          有 OpenRouter 金鑰時可以自己輸入模型 ID（openrouterCustom）；問答能不能查網路（webSearch）
 GET    /me/default-model                目前的預設模型（沒選過就是平台模型）

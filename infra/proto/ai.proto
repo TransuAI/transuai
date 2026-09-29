@@ -545,7 +545,7 @@ message AskQuestionRequest {
 
 message AskQuestionChunk {
   oneof payload {
-    // 檢索完成後、生成答案文字之前送出恰好一次。回答依據的逐字稿片段起始時間，
+    // 檢索完成後、生成答案文字之前送出恰好一次（前面可能有 step）。回答依據的逐字稿片段起始時間，
     // 供前端做時間戳跳轉；沒有特定排序保證。
     SourceTimestamps sources = 1;
     // 答案文字的其中一段 token/片段，依生成順序送出，前端接到就直接 append 顯示。
@@ -558,7 +558,20 @@ message AskQuestionChunk {
     // 只有這一題真的查了網路（web_search 且有設定搜尋服務）時送出恰好一次，在 sources 之後、answered_by 之前：放進回答依據的
     // 網路來源，順序就是回答裡 [1]、[2] 的編號。搜尋失敗時 sources 是空的、failed 是 true，回答照樣只根據這段內容產生。
     WebSources web_sources = 5;
+    // 回答過程中正在做的一步（見 AnswerStep），可以在任何其他 chunk 之前送出；同一個 id 會送好幾次（進行中 → 完成或失敗）。
+    // 「這個 Job 還沒有內容」（NOT_FOUND）與「用不到的模型」（INVALID_ARGUMENT）一定在送出任何 chunk（包括步驟）之前發生。
+    AnswerStep step = 6;
   }
+}
+
+// 回答過程的一步，給使用者看現在做到哪（id：understand 理解問題、retrieve 在內容裡找段落、search 查網路、answer 撰寫回答）。
+// label 與 detail 是給人看的文字（例如「在內容裡找相關的段落」「找到 5 段」）。
+message AnswerStep {
+  string id = 1;
+  string label = 2;
+  // running / done / failed
+  string state = 3;
+  string detail = 4;
 }
 
 // 網路搜尋的一筆結果：回答依據的一個網頁。
