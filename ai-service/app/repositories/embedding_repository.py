@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Embedding
@@ -24,6 +24,11 @@ def save_embeddings(
     session.add_all(rows)
     session.commit()
     return rows
+
+
+def has_embeddings(session: Session, job_id: uuid.UUID) -> bool:
+    """這個 job 有沒有任何 embedding（pipeline 跑完、逐字稿有分段）。"""
+    return bool(session.scalar(select(exists().where(Embedding.job_id == job_id))))
 
 
 def find_similar(

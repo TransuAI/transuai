@@ -1,4 +1,5 @@
 import json
+import itertools
 import logging
 import uuid
 from collections.abc import Sequence
@@ -70,7 +71,7 @@ from app.services.notion import NotionUnreachable
 from app.repositories.web_search_usage_repository import count_user_web_searches, list_job_web_searches
 from app.services.web_search import WebSearchResult
 from app.services.web_search import is_available as web_search_available
-from app.services.qa import NoEmbeddingsError, stream_answer
+from app.services.qa import AnswerStep, NoEmbeddingsError, stream_answer
 from app.services.quizzes import (
     InvalidAnswers,
     InvalidQuestionCount,
@@ -193,12 +194,12 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             chunks = stream_answer(session, job_id, question, user_id=user_id, requested_model=requested_model,
                                    web_search=request.web_search)
 
-            # 第一個 yield 保證是 sources（見 qa.stream_answer），在這之前發生的任何錯誤都還
-            # 沒有送出任何 chunk：NoEmbeddingsError 是結構性的（這個 job 現在就是沒有 embedding），
-            # 維持跟之前一樣的 NOT_FOUND abort；其他例外（改寫/檢索呼叫失敗）視為這輪問答本身
-            # 失敗，改用 error chunk 讓 stream 正常結束，不寫 qa_history。
+            # 「這個 job 還沒有內容」與「用不到的模型」一定發生在第一個 yield 之前（見 qa.stream_answer）：那時還沒送出任何
+            # chunk，NoEmbeddingsError 維持 NOT_FOUND、ModelNotAvailable 維持 INVALID_ARGUMENT 的 abort，Gateway 才能回一般的
+            # 404／400。之後的任何例外（改寫、檢索、搜尋、生成失敗）視為這輪問答本身失敗，改用 error chunk 讓 stream 正常結束，
+            # 不寫 qa_history。
             try:
-                kind, source_timestamps = next(chunks)
+                first = next(chunks)
             except NoEmbeddingsError:
                 _abort(context, grpc.StatusCode.NOT_FOUND,
                        "no transcript content available for this job yet")
@@ -208,27 +209,31 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                 logger.exception("failed to prepare answer for job %s", job_id)
                 yield ai_pb2.AskQuestionChunk(error=_stream_error_message(exc))
                 return
-            assert kind == "sources"
-            yield ai_pb2.AskQuestionChunk(
-                sources=ai_pb2.SourceTimestamps(source_timestamps=source_timestamps))
 
+            source_timestamps: list[float] = []
             answer_parts: list[str] = []
             answered_by: tuple[str, str] = ("", "")
             web: WebSearchResult | None = None
             try:
-                for kind, payload in chunks:
-                    if isinstance(payload, WebSearchResult):
+                for kind, payload in itertools.chain([first], chunks):
+                    if isinstance(payload, AnswerStep):
+                        yield ai_pb2.AskQuestionChunk(step=ai_pb2.AnswerStep(
+                            id=payload.id, label=payload.label, state=payload.state, detail=payload.detail))
+                    elif isinstance(payload, WebSearchResult):
                         web = payload
                         yield ai_pb2.AskQuestionChunk(web_sources=ai_pb2.WebSources(
                             sources=[ai_pb2.WebSource(title=s.title, url=s.url) for s in web.sources], failed=web.failed))
-                        continue
-                    if kind == "answered_by":
+                    elif kind == "sources":
+                        source_timestamps = payload  # type: ignore[assignment]
+                        yield ai_pb2.AskQuestionChunk(
+                            sources=ai_pb2.SourceTimestamps(source_timestamps=source_timestamps))
+                    elif kind == "answered_by":
                         answered_by = payload  # type: ignore[assignment]
                         yield ai_pb2.AskQuestionChunk(
                             answered_by=ai_pb2.ModelChoice(provider=answered_by[0], model=answered_by[1]))
-                        continue
-                    answer_parts.append(payload)  # type: ignore[arg-type]
-                    yield ai_pb2.AskQuestionChunk(delta=payload)  # type: ignore[arg-type]
+                    else:
+                        answer_parts.append(payload)  # type: ignore[arg-type]
+                        yield ai_pb2.AskQuestionChunk(delta=payload)  # type: ignore[arg-type]
             except Exception as exc:
                 logger.exception("answer streaming failed mid-flight for job %s", job_id)
                 yield ai_pb2.AskQuestionChunk(error=_stream_error_message(exc))

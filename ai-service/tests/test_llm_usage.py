@@ -192,9 +192,9 @@ def test_an_answer_abandoned_part_way_is_recorded_as_failed(fake_llm, saved_usag
     fake_llm.stream(["這場會議主要在談工程團隊的關鍵指標，決定把月會拆成四個部門各自的檢討，", "並且改用新的指標。", "後面還有。"])
 
     with answering(uuid.uuid4()) as events:
-        next(events)  # sources
-        next(events)  # answered_by
-        next(events)  # first text
+        for kind, _ in events:  # steps, sources, answered_by… up to the first text
+            if kind == "delta":
+                break
         events.close()
 
     assert [(r.feature, r.succeeded) for r in saved_usage] == [("qa_answer", False)]

@@ -31,8 +31,9 @@ def asking(requested_model=None, history=()):
         patch.object(qa, "transcript_client") as transcript_client,
     ):
         transcript_client.get_transcript.return_value = TRANSCRIPT
-        yield qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "預算怎麼分？", user_id=USER,
-                               requested_model=requested_model)
+        # The answer's steps (見 test_qa_web_search) aren't what these tests are about.
+        yield (event for event in qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "預算怎麼分？", user_id=USER,
+                                                   requested_model=requested_model) if event[0] != "step")
 
 
 def test_a_question_can_be_answered_by_another_model_just_this_once(ai_stub, db_session, providers, fake_llm):

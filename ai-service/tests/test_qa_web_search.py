@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import grpc
 import pytest
 from mcp.server.mcpserver import MCPServer
 
@@ -61,7 +62,7 @@ def ask(fake_llm):
     """Asks one question; returns the streamed events and the system prompt the (fake) model answered from."""
 
     def _ask(*, web_search: bool, history=(), summary: str | None = None, search_query: str = "pgvector 是什麼",
-             searches: bool | None = None):
+             searches: bool | None = None, with_steps: bool = False):
         if web_search if searches is None else searches:
             fake_llm.reply(search_query)  # the search query the model writes from the question
         fake_llm.stream(["pgvector 是 Postgres 的向量檢索擴充 [1]。"])
@@ -71,11 +72,15 @@ def ask(fake_llm):
             patch.object(qa, "find_chapters", return_value=[]),
             patch.object(qa, "embed_query", return_value=[0.1]),
             patch.object(qa, "find_similar", return_value=[PASSAGE]),
+            patch.object(qa, "has_embeddings", return_value=True),
             patch.object(qa, "transcript_client") as transcript_client,
         ):
             transcript_client.get_transcript.return_value = TRANSCRIPT
             events = list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "他們說的 pgvector 是什麼？",
                                            user_id=None, web_search=web_search))
+        # The steps (ticket 04) have tests of their own; the rest look at what else is streamed.
+        if not with_steps:
+            events = [event for event in events if event[0] != "step"]
         return events, fake_llm.bodies()[-1]["messages"][0]["content"]
 
     return _ask
@@ -177,16 +182,18 @@ def retrieval():
     with (
         patch.object(qa, "embed_query", return_value=[0.1]),
         patch.object(qa, "find_similar", return_value=[PASSAGE]),
+        patch.object(qa, "has_embeddings", return_value=True),
         patch.object(qa, "transcript_client") as transcript_client,
     ):
         transcript_client.get_transcript.return_value = TRANSCRIPT
         yield
 
 
-def ask_over_grpc(ai_stub, job_id: uuid.UUID, *, web_search: bool) -> list:
+def ask_over_grpc(ai_stub, job_id: uuid.UUID, *, web_search: bool, with_steps: bool = False) -> list:
     with retrieval():
-        return list(ai_stub.AskQuestion(ai_pb2.AskQuestionRequest(
+        chunks = list(ai_stub.AskQuestion(ai_pb2.AskQuestionRequest(
             job_id=str(job_id), user_id=str(USER), question="他們說的 pgvector 是什麼？", web_search=web_search)))
+    return chunks if with_steps else [chunk for chunk in chunks if chunk.WhichOneof("payload") != "step"]
 
 
 def test_the_web_sources_are_streamed_and_kept_with_the_question(ai_stub, db_session, fake_llm, tavily):
@@ -300,3 +307,98 @@ def test_a_question_that_does_not_search_records_no_search(ai_stub, db_session, 
     ask_over_grpc(ai_stub, job_id, web_search=False)
 
     assert list(ai_stub.ListJobWebSearches(ai_pb2.ListJobWebSearchesRequest(job_id=str(job_id))).records) == []
+
+
+# --- 回答的步驟（ticket 04）：一邊做一邊送出，前端顯示現在做到哪 ---
+
+def step_trail(events) -> list[str]:
+    """Every event in order, a step written as step:<id>:<state>."""
+    return [f"step:{payload.id}:{payload.state}" if kind == "step" else kind for kind, payload in events]
+
+
+def steps(events) -> list[tuple[str, str, str]]:
+    return [(payload.id, payload.state, payload.detail) for kind, payload in events if kind == "step"]
+
+
+def test_each_step_of_the_answer_is_reported_as_it_happens(ask, tavily):
+    tavily.found(("pgvector", "https://github.com/pgvector/pgvector", "Open-source vector similarity search"),
+                 ("Supabase", "https://supabase.com/docs/pgvector", "Embeddings"))
+
+    events, _ = ask(web_search=True, with_steps=True)
+
+    assert step_trail(events) == [
+        "step:retrieve:running", "step:retrieve:done", "sources",
+        "step:search:running", "step:search:running", "step:search:done", "web_sources",
+        "answered_by", "step:answer:running", "delta", "step:answer:done",
+    ]
+    assert steps(events) == [
+        ("retrieve", "running", ""),
+        ("retrieve", "done", "找到 1 段"),
+        ("search", "running", ""),
+        ("search", "running", "搜尋「pgvector 是什麼」"),
+        ("search", "done", "搜尋「pgvector 是什麼」· 找到 2 個網頁"),
+        ("answer", "running", ""),
+        ("answer", "done", ""),
+    ]
+    labels = {payload.id: payload.label for kind, payload in events if kind == "step"}
+    assert labels == {"retrieve": "在內容裡找相關的段落", "search": "查網路", "answer": "撰寫回答"}
+
+
+def test_a_failed_search_is_reported_as_a_failed_step(ask, tavily):
+    tavily.error = RuntimeError("down")
+
+    events, _ = ask(web_search=True, with_steps=True)
+
+    assert ("search", "failed", "搜尋「pgvector 是什麼」· 沒查到，只根據內容回答") in steps(events)
+    assert ("answer", "done", "") in steps(events)
+
+
+def test_a_follow_up_is_first_understood_in_light_of_the_earlier_turns(ask, tavily, fake_llm):
+    fake_llm.reply("他們要換成什麼資料庫？")  # the rewrite for retrieval
+    history = [SimpleNamespace(question="他們要換成什麼資料庫？", answer="換成 pgvector。")]
+
+    events, _ = ask(web_search=False, history=history, with_steps=True)
+
+    assert step_trail(events)[:3] == ["step:understand:running", "step:understand:done", "step:retrieve:running"]
+    assert {payload.label for kind, payload in events if kind == "step" and payload.id == "understand"} == {"理解問題"}
+
+
+def test_without_web_search_there_is_no_search_step(ask, tavily):
+    events, _ = ask(web_search=False, with_steps=True)
+
+    assert step_trail(events) == [
+        "step:retrieve:running", "step:retrieve:done", "sources", "answered_by",
+        "step:answer:running", "delta", "step:answer:done",
+    ]
+
+
+def test_a_job_with_no_content_yet_is_refused_before_any_step_is_sent(ai_stub, db_session):
+    chunks = ai_stub.AskQuestion(ai_pb2.AskQuestionRequest(
+        job_id=str(uuid.uuid4()), user_id=str(USER), question="這在講什麼？"))
+
+    with pytest.raises(grpc.RpcError) as error:
+        next(chunks)
+
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_the_steps_are_streamed_over_grpc_and_the_question_is_still_kept(ai_stub, db_session, fake_llm, tavily):
+    fake_llm.stream(["內容裡提到要改用 pgvector。"])
+    job_id = uuid.uuid4()
+
+    chunks = ask_over_grpc(ai_stub, job_id, web_search=False, with_steps=True)
+
+    assert [chunk.WhichOneof("payload") for chunk in chunks][:3] == ["step", "step", "sources"]
+    assert (chunks[0].step.id, chunks[0].step.state, chunks[0].step.label) == ("retrieve", "running", "在內容裡找相關的段落")
+    assert len(ai_stub.ListQaHistory(ai_pb2.ListQaHistoryRequest(job_id=str(job_id))).turns) == 1
+
+
+def test_the_search_query_is_written_knowing_todays_date(ask, tavily, fake_llm):
+    # 「今年」「最近」 only mean something with a date; the model on its own guesses a year from its training.
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    ask(web_search=True)
+
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat()
+    assert f"今天是 {today}" in fake_llm.bodies()[0]["messages"][0]["content"]

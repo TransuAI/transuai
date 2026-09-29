@@ -577,18 +577,32 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., question: _Optional[str] = ..., model: _Optional[_Union[ModelChoice, _Mapping]] = ..., web_search: _Optional[bool] = ...) -> None: ...
 
 class AskQuestionChunk(_message.Message):
-    __slots__ = ("sources", "delta", "error", "answered_by", "web_sources")
+    __slots__ = ("sources", "delta", "error", "answered_by", "web_sources", "step")
     SOURCES_FIELD_NUMBER: _ClassVar[int]
     DELTA_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
     ANSWERED_BY_FIELD_NUMBER: _ClassVar[int]
     WEB_SOURCES_FIELD_NUMBER: _ClassVar[int]
+    STEP_FIELD_NUMBER: _ClassVar[int]
     sources: SourceTimestamps
     delta: str
     error: str
     answered_by: ModelChoice
     web_sources: WebSources
-    def __init__(self, sources: _Optional[_Union[SourceTimestamps, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ..., answered_by: _Optional[_Union[ModelChoice, _Mapping]] = ..., web_sources: _Optional[_Union[WebSources, _Mapping]] = ...) -> None: ...
+    step: AnswerStep
+    def __init__(self, sources: _Optional[_Union[SourceTimestamps, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ..., answered_by: _Optional[_Union[ModelChoice, _Mapping]] = ..., web_sources: _Optional[_Union[WebSources, _Mapping]] = ..., step: _Optional[_Union[AnswerStep, _Mapping]] = ...) -> None: ...
+
+class AnswerStep(_message.Message):
+    __slots__ = ("id", "label", "state", "detail")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    LABEL_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    DETAIL_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    label: str
+    state: str
+    detail: str
+    def __init__(self, id: _Optional[str] = ..., label: _Optional[str] = ..., state: _Optional[str] = ..., detail: _Optional[str] = ...) -> None: ...
 
 class WebSource(_message.Message):
     __slots__ = ("title", "url")
