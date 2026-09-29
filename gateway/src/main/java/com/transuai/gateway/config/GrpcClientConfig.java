@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.upload.grpc.v1.NoteServiceGrpc;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.grpc.ManagedChannel;
@@ -53,6 +54,12 @@ public class GrpcClientConfig {
     @Bean
     public UploadServiceGrpc.UploadServiceBlockingStub uploadServiceStub(ManagedChannel uploadServiceChannel) {
         return UploadServiceGrpc.newBlockingStub(uploadServiceChannel);
+    }
+
+    // 筆記（upload-service 的 NoteService）跟 Job 在同一個服務、同一條連線。
+    @Bean
+    public NoteServiceGrpc.NoteServiceBlockingStub noteServiceStub(ManagedChannel uploadServiceChannel) {
+        return NoteServiceGrpc.newBlockingStub(uploadServiceChannel);
     }
 
     @Bean

@@ -75,7 +75,11 @@ docker compose up -d
 | `GET` | `/jobs/{jobId}` | 查詢單一 Job（`upload-service` 會做 ownership 檢查，別人的 job 回 404）；Job 帶 `title`（標題，沒有是 `null`，前端改顯示檔名）與 `category`（類型：`meeting` / `lecture` / `interview` / `podcast` / `video` / `other`，還沒判斷是 `null`），列表也一樣 |
 | `GET` | `/jobs/{jobId}/media-url?download=` | 取得該 Job 媒體檔案的 presigned 播放 URL（`upload-service` 做 ownership 檢查），見 `../docs/adr/0002-presigned-get-url-for-media-playback.md`；`download=true` 時改拿「以附件方式下載、存成原始檔名」的 URL（轉成 `GetPresignedDownloadUrl` 的 `as_attachment`） |
 | `GET` | `/jobs?page=&pageSize=` | 分頁查詢目前使用者的所有 Job |
-| `DELETE` | `/jobs/{jobId}` | 刪除 Job，成功回 `204 No Content`（前端 `apiFetchVoid` 依此判斷不去 parse body，別再改回預設的 200） |
+| `DELETE` | `/jobs/{jobId}` | 刪除 Job（連同它的筆記），成功回 `204 No Content`（前端 `apiFetchVoid` 依此判斷不去 parse body，別再改回預設的 200） |
+| `GET` | `/jobs/{jobId}/notes` | 筆記（`NoteController` → upload-service 的 `NoteService`，ownership 由 upload-service 依 `x-user-id` 檢查，別人的 Job 回 404）：`[{ noteId, jobId, timeSeconds, text, source, createdAt, updatedAt }]`，依時間排序、沒有時間（`timeSeconds: null`）的在最後；`source` 是 `manual` 或 `qa` |
+| `POST` | `/jobs/{jobId}/notes` | 新增筆記，body `{ timeSeconds?, text?, source? }`；時間與文字都沒有、文字超過 2,000 字、時間超出錄音、超過 500 則回 400 |
+| `PATCH` | `/jobs/{jobId}/notes/{noteId}` | 改筆記的文字，body `{ text }`（沒有時間的筆記不能清空，回 400） |
+| `DELETE` | `/jobs/{jobId}/notes/{noteId}` | 刪除一則筆記，回 `204` |
 
 ### Transcription（`TranscriptionController` → `transcription-service`）—— 需要登入，Gateway 用 `JobOwnershipGuard` 做 ownership 檢查
 
