@@ -1,9 +1,11 @@
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import QaHistory
+from app.services.web_search import WebSource
 
 
 def find_by_job_id(session: Session, job_id: uuid.UUID) -> list[QaHistory]:
@@ -29,6 +31,8 @@ def save_qa(
     source_timestamps: list[float],
     *,
     model: tuple[str, str],
+    web_search: bool = False,
+    web_sources: Sequence[WebSource] = (),
 ) -> QaHistory:
     qa = QaHistory(
         job_id=job_id,
@@ -38,6 +42,8 @@ def save_qa(
         model_provider=model[0],
         model=model[1],
         source_timestamps=source_timestamps,
+        web_search=web_search,
+        web_sources=[{"title": source.title, "url": source.url} for source in web_sources],
     )
     session.add(qa)
     session.commit()

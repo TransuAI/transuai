@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
 
+    # 問答「查網路」用的 Tavily 金鑰（平台付費，見 app/services/web_search.py）。沒設定時這個功能關閉，前端不顯示開關。
+    tavily_api_key: str = ""
+
     grpc_port: int = 8084
 
     @property

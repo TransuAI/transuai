@@ -523,28 +523,48 @@ class ListChaptersResponse(_message.Message):
     def __init__(self, chapters: _Optional[_Iterable[_Union[Chapter, _Mapping]]] = ...) -> None: ...
 
 class AskQuestionRequest(_message.Message):
-    __slots__ = ("job_id", "user_id", "question", "model")
+    __slots__ = ("job_id", "user_id", "question", "model", "web_search")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     MODEL_FIELD_NUMBER: _ClassVar[int]
+    WEB_SEARCH_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     user_id: str
     question: str
     model: ModelChoice
-    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., question: _Optional[str] = ..., model: _Optional[_Union[ModelChoice, _Mapping]] = ...) -> None: ...
+    web_search: bool
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., question: _Optional[str] = ..., model: _Optional[_Union[ModelChoice, _Mapping]] = ..., web_search: _Optional[bool] = ...) -> None: ...
 
 class AskQuestionChunk(_message.Message):
-    __slots__ = ("sources", "delta", "error", "answered_by")
+    __slots__ = ("sources", "delta", "error", "answered_by", "web_sources")
     SOURCES_FIELD_NUMBER: _ClassVar[int]
     DELTA_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
     ANSWERED_BY_FIELD_NUMBER: _ClassVar[int]
+    WEB_SOURCES_FIELD_NUMBER: _ClassVar[int]
     sources: SourceTimestamps
     delta: str
     error: str
     answered_by: ModelChoice
-    def __init__(self, sources: _Optional[_Union[SourceTimestamps, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ..., answered_by: _Optional[_Union[ModelChoice, _Mapping]] = ...) -> None: ...
+    web_sources: WebSources
+    def __init__(self, sources: _Optional[_Union[SourceTimestamps, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ..., answered_by: _Optional[_Union[ModelChoice, _Mapping]] = ..., web_sources: _Optional[_Union[WebSources, _Mapping]] = ...) -> None: ...
+
+class WebSource(_message.Message):
+    __slots__ = ("title", "url")
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    URL_FIELD_NUMBER: _ClassVar[int]
+    title: str
+    url: str
+    def __init__(self, title: _Optional[str] = ..., url: _Optional[str] = ...) -> None: ...
+
+class WebSources(_message.Message):
+    __slots__ = ("sources", "failed")
+    SOURCES_FIELD_NUMBER: _ClassVar[int]
+    FAILED_FIELD_NUMBER: _ClassVar[int]
+    sources: _containers.RepeatedCompositeFieldContainer[WebSource]
+    failed: bool
+    def __init__(self, sources: _Optional[_Iterable[_Union[WebSource, _Mapping]]] = ..., failed: _Optional[bool] = ...) -> None: ...
 
 class SourceTimestamps(_message.Message):
     __slots__ = ("source_timestamps",)
@@ -559,20 +579,24 @@ class ListQaHistoryRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ...) -> None: ...
 
 class QaTurn(_message.Message):
-    __slots__ = ("question", "answer", "source_timestamps", "created_at", "model_provider", "model")
+    __slots__ = ("question", "answer", "source_timestamps", "created_at", "model_provider", "model", "web_search", "web_sources")
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     ANSWER_FIELD_NUMBER: _ClassVar[int]
     SOURCE_TIMESTAMPS_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
     MODEL_FIELD_NUMBER: _ClassVar[int]
+    WEB_SEARCH_FIELD_NUMBER: _ClassVar[int]
+    WEB_SOURCES_FIELD_NUMBER: _ClassVar[int]
     question: str
     answer: str
     source_timestamps: _containers.RepeatedScalarFieldContainer[float]
     created_at: _timestamp_pb2.Timestamp
     model_provider: str
     model: str
-    def __init__(self, question: _Optional[str] = ..., answer: _Optional[str] = ..., source_timestamps: _Optional[_Iterable[float]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ...) -> None: ...
+    web_search: bool
+    web_sources: _containers.RepeatedCompositeFieldContainer[WebSource]
+    def __init__(self, question: _Optional[str] = ..., answer: _Optional[str] = ..., source_timestamps: _Optional[_Iterable[float]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., web_search: _Optional[bool] = ..., web_sources: _Optional[_Iterable[_Union[WebSource, _Mapping]]] = ...) -> None: ...
 
 class ListQaHistoryResponse(_message.Message):
     __slots__ = ("turns",)
@@ -623,12 +647,14 @@ class ListAvailableModelsRequest(_message.Message):
     def __init__(self, user_id: _Optional[str] = ...) -> None: ...
 
 class ListAvailableModelsResponse(_message.Message):
-    __slots__ = ("models", "openrouter_custom")
+    __slots__ = ("models", "openrouter_custom", "web_search")
     MODELS_FIELD_NUMBER: _ClassVar[int]
     OPENROUTER_CUSTOM_FIELD_NUMBER: _ClassVar[int]
+    WEB_SEARCH_FIELD_NUMBER: _ClassVar[int]
     models: _containers.RepeatedCompositeFieldContainer[ModelChoice]
     openrouter_custom: bool
-    def __init__(self, models: _Optional[_Iterable[_Union[ModelChoice, _Mapping]]] = ..., openrouter_custom: _Optional[bool] = ...) -> None: ...
+    web_search: bool
+    def __init__(self, models: _Optional[_Iterable[_Union[ModelChoice, _Mapping]]] = ..., openrouter_custom: _Optional[bool] = ..., web_search: _Optional[bool] = ...) -> None: ...
 
 class ModelChoice(_message.Message):
     __slots__ = ("provider", "model", "supports_tools")

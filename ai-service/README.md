@@ -19,7 +19,7 @@
 | 摘要 | 平台模型（預設 `Qwen/Qwen3.5-9B`，可用 `AI_HF_CHAT_MODEL` 換模型），把逐字稿全文丟給模型產生摘要；兩位以上講者時改成每行「名稱：文字」（見下方「講者」） |
 | 章節分段 | 同一個平台模型，把逐字稿片段（含時間戳，兩位以上講者時每行 `[開始時間] 名稱：文字`）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
 | Embedding | HF Inference Providers 的 `BAAI/bge-m3`（1024 維，query/document 對稱，不用加任何 instruction 前綴）：pipeline 內把逐字稿分段轉成向量存進 `embeddings` |
-| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個平台模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段；給模型的內容是**整段內容的摘要與章節**（概括性的問題靠它們回答）加上這 5 段原話（時間寫成「分:秒」），連同最近 5 輪對話歷史，用 `stream=True` 逐字串流生成回答（[ADR 0012](docs/adr/0012-qa-answers-from-summary-chapters-and-passages.md)）。提示要求的口吻：像剛看完這段內容的朋友在說明，先講結論、簡潔平實，不提「逐字稿」「片段」，稱呼跟著內容走（會議、影片、課程…）。回答整段是簡體時轉成繁體（`traditional_chinese.py`，已經是繁體的不動）。兩位以上講者時原話每行帶講者**目前的**名稱（回答當下呼叫 `GetTranscript` 取得） |
+| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個平台模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段；給模型的內容是**整段內容的摘要與章節**（概括性的問題靠它們回答）加上這 5 段原話（時間寫成「分:秒」），連同最近 5 輪對話歷史，用 `stream=True` 逐字串流生成回答（[ADR 0012](docs/adr/0012-qa-answers-from-summary-chapters-and-passages.md)）。提示要求的口吻：像剛看完這段內容的朋友在說明，先講結論、簡潔平實，不提「逐字稿」「片段」，稱呼跟著內容走（會議、影片、課程…）。回答整段是簡體時轉成繁體（`traditional_chinese.py`，已經是繁體的不動）。兩位以上講者時原話每行帶講者**目前的**名稱（回答當下呼叫 `GetTranscript` 取得）。提問時打開「查網路」的話，先把問題寫成一句搜尋查詢（參考摘要與對話紀錄把「他說的那個…」補成具體名詞；只有這句送出），用 Tavily 的遠端 MCP 查一次（`web_search.py`，最多 5 筆、每筆約 600 字、8 秒逾時），結果放在原話之後的「網路搜尋結果」，要求回答標 [n]、不把網路資料說成內容裡講的；搜尋失敗照樣只根據內容回答（[ADR 0014](docs/adr/0014-qa-web-search-by-the-system.md)） |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
 | 向量儲存 | PostgreSQL + `pgvector` extension（`Vector(1024)` 欄位，cosine distance 查詢，沒有建 ivfflat 索引——見已知限制） |
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級 |
@@ -32,6 +32,7 @@
 - Transcription Service 要跑在 `localhost:8083`（見 [`../transcription-service`](../transcription-service)），因為要呼叫它的 `TranscriptionService.GetTranscript`
 - 一組 HF Inference API Key（[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)，建立 fine-grained token 時勾選「Make calls to Inference Providers」），填進 `.env` 的 `HF_API_KEY`——embedding 跟摘要/章節分段/RAG 問答共用同一把
 - 沒填的話服務照樣能啟動（health check 正常），但實際消費到訊息、呼叫 HF 時會失敗，Job 會被標成 `FAILED`
+- 要讓問答能「查網路」才需要：`.env` 的 `TAVILY_API_KEY`（[tavily.com](https://tavily.com) 的 API key，平台付費；沒設定時這個功能關閉，前端不顯示開關）
 - 要連結 Google 帳號才需要：`.env` 的 `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`（Google Cloud Console 的「網頁應用程式」
   OAuth client，重新導向 URI 是 `http://localhost:5173/api/oauth/google/callback`，見 [`../infra/README.md`](../infra/README.md)）
 
@@ -272,7 +273,7 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 | `RequestRegeneration` | 摘要與章節過時後要求重新產生（帶 `user_id`：要求的使用者，用量記在他名下）：狀態設 RUNNING、排入 `summary.regeneration.requested` 後立即回傳目前的摘要；已在跑（5 分鐘內）不重複排入；沒有摘要回 `NOT_FOUND`，排入失敗回 `UNAVAILABLE`（狀態不變） |
 | `GetSummary` | 依 `job_id` 取得摘要、`source_revision`（依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時）與 `regeneration_status`，`job_id` 不合法回 `INVALID_ARGUMENT`，找不到回 `NOT_FOUND` |
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
-| `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、`answered_by` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`，模型呼叫失敗時訊息點出廠商與原因）。可以帶 `model` 臨時換模型（只用在這一次，必須是提問者用得到的：平台模型、有金鑰的廠商整理好的清單，或他目前的預設模型；否則在送出任何 chunk 前回 `INVALID_ARGUMENT`），不帶就用預設模型；問題改寫與回答用同一個模型，`qa_history` 記錄回答的模型。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，用來記錄 `qa_history`、決定用誰的預設模型與自有金鑰，不重新驗證 |
+| `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: `sources` 恰好一次、帶 `web_search` 而且有設定 `TAVILY_API_KEY` 時 `web_sources` 恰好一次（網路來源，順序是回答裡 [n] 的編號；搜尋失敗是空的、`failed` 為 true）、`answered_by` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`，模型呼叫失敗時訊息點出廠商與原因）。可以帶 `model` 臨時換模型（只用在這一次，必須是提問者用得到的：平台模型、有金鑰的廠商整理好的清單，或他目前的預設模型；否則在送出任何 chunk 前回 `INVALID_ARGUMENT`），不帶就用預設模型；問題改寫與回答用同一個模型，`qa_history` 記錄回答的模型、有沒有查網路與網路來源。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk 送出之前；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，用來記錄 `qa_history`、決定用誰的預設模型與自有金鑰，不重新驗證 |
 | `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
 | `RequestQuiz` | 要求產生一份測驗（帶 `user_id`：要求的使用者，用他的預設模型、用量記在他名下）：新增 GENERATING 的測驗、排入 `quiz.requested` 後立即回傳（不含題目）；每次都是新的一份。題數不是 5、10、20 或 ID 不合法回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
 | `ListQuizzes` | 一個 Job 的所有測驗（新的在前）：題數、狀態（GENERATING 超過 5 分鐘回報成 FAILED）、失敗原因、依據的逐字稿 revision、產生的模型、要求與完成時間、最佳成績（`best_correct_count`：所有作答裡答對最多的題數，沒作答過不設定）；不含題目 |
@@ -290,8 +291,8 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 | `SubmitQuizAttempt` | 送出一次作答（依題目順序、每題一個選項位置）：計分、存進 `quiz_attempts`，回傳答對題數與每題的選擇、正確選項、對錯、解說；同一份測驗可以重做，每次都保存。題數不對或選項超出範圍回 `INVALID_ARGUMENT`，還沒產生完成回 `FAILED_PRECONDITION`，不屬於這個 `job_id` 回 `NOT_FOUND` |
 | `SumUserLlmUsage` | 一位使用者在 `[start, end)` 之間的 LLM 用量，依廠商、模型、金鑰來源加總：輸入 / 輸出 token（已知數字的加總）、呼叫次數（失敗也算）、廠商沒回報 token 的次數；Gateway 把「某個月」換成時間範圍。`user_id` 不合法或沒給 `start` / `end` 回 `INVALID_ARGUMENT`，沒有用量回空列表 |
 | `SaveProviderKey` / `DeleteProviderKey` / `ListProviderKeys` | 自有金鑰（見上方「自有金鑰」）：存入或替換（先向廠商驗證，通過才加密存下，回傳末四碼；廠商不在清單、金鑰是空的或無效回 `INVALID_ARGUMENT` 附原因，廠商暫時連不上回 `UNAVAILABLE`，沒設定主金鑰回 `FAILED_PRECONDITION`）、刪除（沒有這把回 `deleted=false`；預設模型正在用它時一起改回平台模型，`default_model_reset=true`）、列出（只有末四碼） |
-| `ListAvailableModels` / `GetDefaultModel` / `SetDefaultModel` | 預設模型（見上方「預設模型」）：可以選的模型、目前的預設模型、設定預設模型（沒有那個廠商的自有金鑰回 `FAILED_PRECONDITION`，清單外的模型或 OpenRouter 上不存在回 `INVALID_ARGUMENT`，OpenRouter 查不到回 `UNAVAILABLE`） |
-| `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪；每則帶回答的 `model_provider` / `model`，記錄模型之前的是空字串），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
+| `ListAvailableModels` / `GetDefaultModel` / `SetDefaultModel` | 預設模型（見上方「預設模型」）：可以選的模型（附 `web_search`：這個部署的問答能不能查網路）、目前的預設模型、設定預設模型（沒有那個廠商的自有金鑰回 `FAILED_PRECONDITION`，清單外的模型或 OpenRouter 上不存在回 `INVALID_ARGUMENT`，OpenRouter 查不到回 `UNAVAILABLE`） |
+| `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪；每則帶回答的 `model_provider` / `model`，記錄模型之前的是空字串；`web_search` 與 `web_sources`），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService`、transcription-service 的 `TranscriptionService` 一樣只信任內部網路呼叫。
 
@@ -344,7 +345,8 @@ Docker 有在跑；每次多約幾秒啟動時間。
 生成類呼叫（摘要、章節、問答）的廠商邊界用 `tests/conftest.py` 的 **假 AI 廠商**（`fake_llm` fixture）：在 HTTP 層用
 `httpx2.MockTransport` 假裝成 OpenAI 相容的廠商（`openai` SDK 3.x 底層是 `httpx2`），錄下送出的請求、回傳指定的內容／串流／
 token 用量／錯誤，真正的 client 程式碼都會被執行到。`tests/test_llm_client.py` 用它驗證送出的請求、用量解析與錯誤分類，
-`tests/test_qa.py` 用它驗證問答交給模型的上下文。
+`tests/test_qa.py` 用它驗證問答交給模型的上下文；`tests/test_qa_web_search.py` 另外把 Tavily 換成程式內的假 MCP server
+（跟 Notion 的測試一樣），驗證查網路的串流、搜尋查詢、失敗與逾時、問答紀錄。
 
 Mock 一定要 patch 在 `app/services/pipeline.py`「使用端」import 進來的名稱（例如 `pipeline.summarize`、`pipeline.job_status_client`），不是「定義端」的原始模組（例如 `app.services.summarizer.summarize`）——`unittest.mock.patch` 只替換掉 name binding，patch 定義端不會影響 pipeline.py 實際呼叫到的是誰。
 
@@ -389,7 +391,8 @@ app/
     summarizer.py                       摘要（呼叫 llm_client）
     chapter_generator.py                 章節分段（呼叫 llm_client）
     embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
-    qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（摘要、章節、相關的原話，多位講者時帶講者目前的名稱）+ 對話歷史 → streaming 生成回答（整段是簡體時轉繁體）
+    qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（摘要、章節、相關的原話，多位講者時帶講者目前的名稱；查網路時加上網路搜尋結果）+ 對話歷史 → streaming 生成回答（整段是簡體時轉繁體）
+    web_search.py                        問答的網路搜尋：Tavily 遠端 MCP 的 client（金鑰放 Authorization header；解析結果、截短內容、逾時）
     traditional_chinese.py               模型輸出的繁體保險：整段是簡體才用 OpenCC s2tw 轉（已經是繁體的不動），串流時先看開頭一小段再決定
     providers.py                         自有金鑰支援的廠商（固定清單）：OpenAI 相容網址、驗證金鑰用的查詢 API
     key_encryption.py                    自有金鑰與已連結帳號權杖的 AES-256-GCM 加密；主金鑰來自 KEY_ENCRYPTION_KEY

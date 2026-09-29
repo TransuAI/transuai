@@ -67,6 +67,8 @@ from app.services.post_meeting_settings import (
     save_settings,
 )
 from app.services.notion import NotionUnreachable
+from app.services.web_search import WebSearchResult
+from app.services.web_search import is_available as web_search_available
 from app.services.qa import NoEmbeddingsError, stream_answer
 from app.services.quizzes import (
     InvalidAnswers,
@@ -187,7 +189,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
 
         session = new_session()
         try:
-            chunks = stream_answer(session, job_id, question, user_id=user_id, requested_model=requested_model)
+            chunks = stream_answer(session, job_id, question, user_id=user_id, requested_model=requested_model,
+                                   web_search=request.web_search)
 
             # 第一個 yield 保證是 sources（見 qa.stream_answer），在這之前發生的任何錯誤都還
             # 沒有送出任何 chunk：NoEmbeddingsError 是結構性的（這個 job 現在就是沒有 embedding），
@@ -210,8 +213,14 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
 
             answer_parts: list[str] = []
             answered_by: tuple[str, str] = ("", "")
+            web: WebSearchResult | None = None
             try:
                 for kind, payload in chunks:
+                    if isinstance(payload, WebSearchResult):
+                        web = payload
+                        yield ai_pb2.AskQuestionChunk(web_sources=ai_pb2.WebSources(
+                            sources=[ai_pb2.WebSource(title=s.title, url=s.url) for s in web.sources], failed=web.failed))
+                        continue
                     if kind == "answered_by":
                         answered_by = payload  # type: ignore[assignment]
                         yield ai_pb2.AskQuestionChunk(
@@ -224,7 +233,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                 yield ai_pb2.AskQuestionChunk(error=_stream_error_message(exc))
                 return
 
-            save_qa(session, job_id, user_id, question, "".join(answer_parts), source_timestamps, model=answered_by)
+            save_qa(session, job_id, user_id, question, "".join(answer_parts), source_timestamps, model=answered_by,
+                    web_search=web is not None, web_sources=web.sources if web else [])
         finally:
             session.close()
 
@@ -247,6 +257,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                     created_at=created_at,
                     model_provider=turn.model_provider or "",
                     model=turn.model or "",
+                    web_search=turn.web_search,
+                    web_sources=[ai_pb2.WebSource(title=s["title"], url=s["url"]) for s in turn.web_sources],
                 ))
             return ai_pb2.ListQaHistoryResponse(turns=turns)
         finally:
@@ -324,7 +336,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         user_id = _parse_user_id(request.user_id, context)
         models, openrouter_custom = available_models(user_id)
         return ai_pb2.ListAvailableModelsResponse(
-            models=[_model_choice_to_proto(model) for model in models], openrouter_custom=openrouter_custom)
+            models=[_model_choice_to_proto(model) for model in models], openrouter_custom=openrouter_custom,
+            web_search=web_search_available())
 
     def GetDefaultModel(self, request, context):
         return _model_choice_to_proto(get_default_model(_parse_user_id(request.user_id, context)))
