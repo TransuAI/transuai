@@ -64,10 +64,10 @@ public class JobEntity {
     @Column(name = "transcription_language", length = 10)
     private String transcriptionLanguage;
 
-    // 標題（見 CONTEXT.md「標題」）：AI 依內容取的，或使用者改的；null 是沒有標題（顯示檔名）。
     // 標題的上限；AI 取的標題本來就短得多（ai-service 截到 40 字）。
     public static final int MAX_TITLE_LENGTH = 100;
 
+    // 標題（見 CONTEXT.md「標題」）：AI 依內容取的，或使用者改的；null 是沒有標題（顯示檔名）。
     @Column(name = "title", length = MAX_TITLE_LENGTH)
     private String title;
 
