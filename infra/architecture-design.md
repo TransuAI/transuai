@@ -130,7 +130,7 @@ GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊（含標�
 PATCH  /jobs/{jobId}            使用者改標題／類型 { title?, category? }；改過的欄位 AI 之後不會再寫（upload-service 的 UpdateJob）
 GET    /jobs/{jobId}/media-url  取得該 Job 媒體檔案的 presigned 播放 URL（見 docs/adr/0002-presigned-get-url-for-media-playback.md）；
                                   query download=true 時改給「以附件方式下載、存成原始檔名」的 URL（前端匯出 → 下載原始檔）
-GET    /jobs                    查詢使用者所有 Job（分頁，query: page, pageSize）
+GET    /jobs                    查詢使用者的 Job（分頁，query: page（從 1 開始）, pageSize, query（標題或檔名包含，不分大小寫）, category）
 DELETE /jobs/{jobId}            刪除 Job 與相關資料（包括筆記）
 GET    /jobs/{jobId}/notes      筆記（依時間排序，沒有時間的在最後）；POST 新增 { timeSeconds?, text?, source? }，
                                 PATCH /jobs/{jobId}/notes/{noteId} 改文字，DELETE 刪除（upload-service 的 NoteService）

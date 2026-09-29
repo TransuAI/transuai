@@ -27,7 +27,8 @@ service UploadService {
   // 原始檔名），供「匯出 → 下載原始檔」使用；預設 false 是給播放器 inline 讀取。
   rpc GetPresignedDownloadUrl(GetPresignedDownloadUrlRequest) returns (GetPresignedDownloadUrlResponse);
 
-  // 查詢使用者所有 Job（分頁）。
+  // 查詢使用者所有 Job（分頁，新的在前）。可以用 query 找標題或檔名包含它的（不分大小寫，% 與 _ 照字面比對），
+  // 用 category 只看某個類型（不在清單回 INVALID_ARGUMENT）；空字串＝不篩。total_count 跟著條件算。
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
 
   // 刪除 Job 與相關儲存物件。
@@ -184,6 +185,8 @@ message GetPresignedDownloadUrlResponse {
 message ListJobsRequest {
   int32 page = 1;
   int32 page_size = 2;
+  string query = 3;
+  string category = 4;
 }
 
 message ListJobsResponse {
