@@ -71,6 +71,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/upl
 | `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md`。`as_attachment=true` 時 URL 會覆寫回應的 `Content-Disposition` 為 attachment、檔名＝Job 原始檔名（RFC 6266 ASCII 備援＋RFC 5987 UTF-8），供前端「匯出 → 下載原始檔」 |
 | `ListJobs` | 分頁查詢目前使用者的所有 Job |
 | `DeleteJob` | 刪除 Job record、它的筆記與物件儲存檔案 |
+| `UpdateJob` | 使用者改**標題**與**類型**（見 `CONTEXT.md`）：只改有帶的欄位（`optional`），帶了的記為使用者設定過（`*_set_by_user`），`SetSuggestedDetails` 之後不會再寫；標題去頭尾空白、空字串＝清空（顯示檔名，仍算設定過）；標題超過 100 字或類型不在清單回 `INVALID_ARGUMENT`，別人的 Job 回 `NOT_FOUND` |
 
 `NoteService`（`transuai.upload.v1`）—— **筆記**（見 `CONTEXT.md`「筆記」「書籤」），跟 `UploadService` 一樣需要 `x-user-id`：Job 不是這位使用者的、或筆記不屬於這個 Job，一律 `NOT_FOUND`。資料在 `job_notes`：
 
@@ -137,7 +138,7 @@ src/main/java/com/transuai/upload_service/
   repository/       Spring Data JPA repository
   service/          StorageService（S3 presign / head / delete）
   event/            JobEventPublisher 抽象 + RabbitMQ 實作（發送 transcription.requested）
-  grpc/             UploadGrpcService（5 支 rpc 實作）、NoteGrpcService（筆記）、InternalJobGrpcService（UpdateJobStatus、SetSuggestedDetails）、JobMapper（domain ↔ proto）
+  grpc/             UploadGrpcService（6 支 rpc 實作）、NoteGrpcService（筆記）、InternalJobGrpcService（UpdateJobStatus、SetSuggestedDetails）、JobMapper（domain ↔ proto）
   grpc/auth/        UserIdServerInterceptor（解析 x-user-id metadata）、GrpcAuthContext
   grpc/advice/      GrpcExceptionAdvice（非預期例外 → 安全的 gRPC Status，避免內部細節外洩）
   config/           StorageConfig / RabbitConfig 與對應的 @ConfigurationProperties

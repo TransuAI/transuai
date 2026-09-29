@@ -25,10 +25,13 @@ import com.transuai.upload.grpc.v1.GetJobRequest;
 import com.transuai.upload.grpc.v1.GetPresignedDownloadUrlRequest;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlRequest;
 import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
+import com.transuai.upload.grpc.v1.InternalJobServiceGrpc;
 import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.JobStatus;
 import com.transuai.upload.grpc.v1.ListJobsRequest;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
+import com.transuai.upload.grpc.v1.SetSuggestedDetailsRequest;
+import com.transuai.upload.grpc.v1.UpdateJobRequest;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 import com.transuai.upload_service.config.MqProperties;
 import com.transuai.upload_service.repository.JobRepository;
@@ -199,6 +202,76 @@ class UploadGrpcServiceIT {
     }
 
     @Test
+    void updateJob_setsTheTitleAndCategoryTheUserChose_andTheAiNoLongerWritesThem() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job job = createJob(userId, "REC_0012.m4a");
+
+        Job updated = stubFor(userId).updateJob(UpdateJobRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("  產品週會  ").setCategory("meeting").build());
+        assertThat(updated.getTitle()).isEqualTo("產品週會");
+        assertThat(updated.getCategory()).isEqualTo("meeting");
+
+        Job afterAi = internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("AI 取的標題").setCategory("lecture").build());
+        assertThat(afterAi.getTitle()).isEqualTo("產品週會");
+        assertThat(afterAi.getCategory()).isEqualTo("meeting");
+    }
+
+    @Test
+    void updateJob_leavesAFieldItDoesNotCarryAlone_soTheAiCanStillWriteIt() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job job = createJob(userId, "REC_0012.m4a");
+
+        stubFor(userId).updateJob(UpdateJobRequest.newBuilder().setJobId(job.getJobId()).setCategory("lecture").build());
+        Job afterAi = internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("線性代數第三講").setCategory("meeting").build());
+
+        assertThat(afterAi.getTitle()).isEqualTo("線性代數第三講");
+        assertThat(afterAi.getCategory()).isEqualTo("lecture");
+    }
+
+    @Test
+    void updateJob_clearingTheTitleMeansNoTitle_andTheAiDoesNotFillItAgain() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job job = createJob(userId, "REC_0012.m4a");
+        internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("AI 取的標題").build());
+
+        Job cleared = stubFor(userId).updateJob(UpdateJobRequest.newBuilder().setJobId(job.getJobId()).setTitle(" ").build());
+        assertThat(cleared.getTitle()).isEmpty();
+
+        Job afterAi = internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("又一個標題").build());
+        assertThat(afterAi.getTitle()).isEmpty();
+    }
+
+    @Test
+    void updateJob_refusesATooLongTitleOrAnUnknownCategory() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job job = createJob(userId, "REC_0012.m4a");
+
+        assertThatThrownBy(() -> stubFor(userId).updateJob(UpdateJobRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("字".repeat(101)).build()))
+                .isInstanceOfSatisfying(StatusRuntimeException.class,
+                        e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT));
+        assertThatThrownBy(() -> stubFor(userId).updateJob(UpdateJobRequest.newBuilder()
+                .setJobId(job.getJobId()).setCategory("party").build()))
+                .isInstanceOfSatisfying(StatusRuntimeException.class,
+                        e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT));
+        assertThat(stubFor(userId).getJob(GetJobRequest.newBuilder().setJobId(job.getJobId()).build()).getTitle()).isEmpty();
+    }
+
+    @Test
+    void updateJob_returnsNotFound_whenJobBelongsToAnotherUser() throws Exception {
+        Job job = createJob(UUID.randomUUID(), "REC_0012.m4a");
+
+        assertThatThrownBy(() -> stubFor(UUID.randomUUID()).updateJob(UpdateJobRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle("偷改").build()))
+                .isInstanceOfSatisfying(StatusRuntimeException.class,
+                        e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.NOT_FOUND));
+    }
+
+    @Test
     void deleteJob_removesJobAndStorageObject() throws Exception {
         UUID userId = UUID.randomUUID();
         Job job = createJob(userId, "delete-me.mp3");
@@ -269,6 +342,10 @@ class UploadGrpcServiceIT {
                 .build());
         createdJobIds.add(UUID.fromString(job.getJobId()));
         return job;
+    }
+
+    private InternalJobServiceGrpc.InternalJobServiceBlockingStub internalStub() {
+        return InternalJobServiceGrpc.newBlockingStub(channelFactory.createChannel("upload-service"));
     }
 
     private UploadServiceGrpc.UploadServiceBlockingStub stubFor(UUID userId) {

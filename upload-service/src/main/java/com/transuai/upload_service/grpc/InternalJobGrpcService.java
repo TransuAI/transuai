@@ -21,9 +21,6 @@ import org.springframework.grpc.server.service.GrpcService;
 @RequiredArgsConstructor
 public class InternalJobGrpcService extends InternalJobServiceGrpc.InternalJobServiceImplBase {
 
-    // 跟 jobs.title 欄位一樣長；AI 取的標題本來就短得多（ai-service 截到 40 字）。
-    static final int MAX_TITLE_LENGTH = 100;
-
     private final JobRepository jobRepository;
 
     @Override
@@ -51,7 +48,7 @@ public class InternalJobGrpcService extends InternalJobServiceGrpc.InternalJobSe
 
         String title = request.getTitle().strip();
         if (!title.isEmpty() && !Boolean.TRUE.equals(job.getTitleSetByUser())) {
-            job.setTitle(title.length() > MAX_TITLE_LENGTH ? title.substring(0, MAX_TITLE_LENGTH) : title);
+            job.setTitle(title.length() > JobEntity.MAX_TITLE_LENGTH ? title.substring(0, JobEntity.MAX_TITLE_LENGTH) : title);
         }
         if (!category.isBlank() && !Boolean.TRUE.equals(job.getCategorySetByUser())) {
             job.setCategory(category);

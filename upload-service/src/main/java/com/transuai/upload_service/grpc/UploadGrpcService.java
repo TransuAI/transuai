@@ -14,8 +14,10 @@ import com.transuai.upload.grpc.v1.GetPresignedUploadUrlResponse;
 import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.ListJobsRequest;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
+import com.transuai.upload.grpc.v1.UpdateJobRequest;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 import com.transuai.upload_service.config.UploadLimitsProperties;
+import com.transuai.upload_service.domain.JobCategory;
 import com.transuai.upload_service.domain.JobEntity;
 import com.transuai.upload_service.domain.TranscriptionLanguage;
 import com.transuai.upload_service.event.JobEventPublisher;
@@ -231,6 +233,46 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
         result.getContent().forEach(job -> builder.addJobs(JobMapper.toProto(job)));
 
         responseObserver.onNext(builder.build());
+        responseObserver.onCompleted();
+    }
+
+    // 使用者改標題／類型（見 CONTEXT.md「標題」「類型」）：帶了的欄位記為使用者設定過，AI 之後不會再寫。
+    @Override
+    public void updateJob(UpdateJobRequest request, StreamObserver<Job> responseObserver) {
+        String title = request.hasTitle() ? request.getTitle().strip() : null;
+        if (title != null && title.length() > JobEntity.MAX_TITLE_LENGTH) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("title must be at most %d characters".formatted(JobEntity.MAX_TITLE_LENGTH))
+                    .asRuntimeException());
+            return;
+        }
+        if (request.hasCategory() && !JobCategory.isKnown(request.getCategory())) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("unknown category: " + request.getCategory()).asRuntimeException());
+            return;
+        }
+        UUID userId = GrpcAuthContext.currentUserId();
+        UUID jobId = parseJobId(request.getJobId(), responseObserver);
+        if (jobId == null) {
+            return;
+        }
+        JobEntity job = jobRepository.findByIdAndUserId(jobId, userId).orElse(null);
+        if (job == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("job not found").asRuntimeException());
+            return;
+        }
+
+        if (title != null) {
+            job.setTitle(title.isEmpty() ? null : title);  // 清空＝沒有標題，顯示檔名
+            job.setTitleSetByUser(true);
+        }
+        if (request.hasCategory()) {
+            job.setCategory(request.getCategory());
+            job.setCategorySetByUser(true);
+        }
+        job = jobRepository.save(job);
+
+        responseObserver.onNext(JobMapper.toProto(job));
         responseObserver.onCompleted();
     }
 
