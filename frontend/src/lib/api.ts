@@ -8,6 +8,7 @@ import type {
   ConfirmedProposal,
   Connection,
   Job,
+  JobCategory,
   JobListResponse,
   JobUpdate,
   JobUsage,
@@ -69,10 +70,13 @@ export const uploadApi = {
 }
 
 export const jobsApi = {
-  list: (params: { page?: number; pageSize?: number } = {}) => {
+  // page 從 1 開始。query：標題或檔名包含它的；category：只看某個類型。
+  list: (params: { page?: number; pageSize?: number; query?: string; category?: JobCategory } = {}) => {
     const query = new URLSearchParams()
     if (params.page !== undefined) query.set('page', String(params.page))
     if (params.pageSize !== undefined) query.set('pageSize', String(params.pageSize))
+    if (params.query) query.set('query', params.query)
+    if (params.category) query.set('category', params.category)
     const qs = query.toString()
     return apiFetch<JobListResponse>(`/jobs${qs ? `?${qs}` : ''}`)
   },
