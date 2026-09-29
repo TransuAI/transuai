@@ -51,6 +51,57 @@ message SetSuggestedDetailsRequest {
   string category = 3;
 }
 
+// 筆記（見 upload-service CONTEXT.md「筆記」）：使用者在 Job 裡記下的一段文字，可以釘在錄音的某個時間點（只有時間、沒有文字的是書籤）。
+// 跟 UploadService 一樣需要 x-user-id：Job 不是這位使用者的、或筆記不屬於這個 Job，一律 NOT_FOUND。刪除 Job 時筆記一起刪。
+service NoteService {
+  // 依時間排序（沒有時間的在最後），同一個時間依建立順序。
+  rpc ListNotes(ListNotesRequest) returns (ListNotesResponse);
+  // 時間與文字不能都是空的；文字最多 2,000 字；時間不能是負的、不能超過錄音長度（知道長度時）；source 是 manual（預設）或 qa；
+  // 一個 Job 最多 500 則。不符合回 INVALID_ARGUMENT。
+  rpc CreateNote(CreateNoteRequest) returns (Note);
+  // 只改文字；清空文字只在筆記有時間時可以（變成書籤）。
+  rpc UpdateNote(UpdateNoteRequest) returns (Note);
+  rpc DeleteNote(DeleteNoteRequest) returns (google.protobuf.Empty);
+}
+
+message Note {
+  string note_id = 1;
+  string job_id = 2;
+  // 釘在錄音的哪個時間（秒）；沒有就是沒釘。
+  optional double time_seconds = 3;
+  string text = 4;
+  // manual（使用者寫的）或 qa（從問答存的）
+  string source = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message ListNotesRequest {
+  string job_id = 1;
+}
+
+message ListNotesResponse {
+  repeated Note notes = 1;
+}
+
+message CreateNoteRequest {
+  string job_id = 1;
+  optional double time_seconds = 2;
+  string text = 3;
+  string source = 4;
+}
+
+message UpdateNoteRequest {
+  string job_id = 1;
+  string note_id = 2;
+  string text = 3;
+}
+
+message DeleteNoteRequest {
+  string job_id = 1;
+  string note_id = 2;
+}
+
 enum FileType {
   FILE_TYPE_UNSPECIFIED = 0;
   AUDIO = 1;

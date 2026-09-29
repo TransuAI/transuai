@@ -130,7 +130,9 @@ GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊
 GET    /jobs/{jobId}/media-url  取得該 Job 媒體檔案的 presigned 播放 URL（見 docs/adr/0002-presigned-get-url-for-media-playback.md）；
                                   query download=true 時改給「以附件方式下載、存成原始檔名」的 URL（前端匯出 → 下載原始檔）
 GET    /jobs                    查詢使用者所有 Job（分頁，query: page, pageSize）
-DELETE /jobs/{jobId}            刪除 Job 與相關資料
+DELETE /jobs/{jobId}            刪除 Job 與相關資料（包括筆記）
+GET    /jobs/{jobId}/notes      筆記（依時間排序，沒有時間的在最後）；POST 新增 { timeSeconds?, text?, source? }，
+                                PATCH /jobs/{jobId}/notes/{noteId} 改文字，DELETE 刪除（upload-service 的 NoteService）
 ```
 
 Job 狀態機：
@@ -320,6 +322,19 @@ CREATE TABLE jobs (
 
 CREATE INDEX idx_jobs_user_id ON jobs(user_id);
 CREATE INDEX idx_jobs_status ON jobs(status);
+
+-- 筆記（upload-service CONTEXT.md）：釘在錄音某個時間（或不釘）的一段文字；只有時間沒有文字的是書籤。刪除 Job 時一起刪。
+CREATE TABLE job_notes (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    time_seconds DOUBLE PRECISION,          -- NULL＝沒釘時間（這時 text 一定有內容）
+    text VARCHAR(2000) NOT NULL,
+    source VARCHAR(16) NOT NULL,            -- manual / qa（從問答存的）
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX idx_job_notes_job_id ON job_notes(job_id);
 ```
 
 ### 4.3 transcription_db
