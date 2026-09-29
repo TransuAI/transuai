@@ -168,6 +168,18 @@ describe('JobsPage search and category filter', () => {
     expect(searchParamsShown().get('page')).toBe('2')
   })
 
+  it('goes back to the last page when the one asked for is past the end, e.g. after deleting its only job', async () => {
+    vi.mocked(jobsApi.list).mockImplementation(async (params) =>
+      params?.page === 3 ? listOf([], 15) : listOf([mockJob], 15),
+    )
+    renderAt('/jobs?page=3')
+
+    expect(await screen.findByText('interview.mp3')).toBeInTheDocument()
+    expect(jobsApi.list).toHaveBeenLastCalledWith({ page: 2, pageSize: 10 })
+    expect(searchParamsShown().get('page')).toBe('2')
+    expect(screen.queryByText('還沒有任何 Job')).not.toBeInTheDocument()
+  })
+
   it('says when nothing matches, and clears the search and filter', async () => {
     const user = userEvent.setup()
     vi.mocked(jobsApi.list).mockResolvedValue(listOf([]))

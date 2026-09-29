@@ -100,19 +100,33 @@ export function JobsPage() {
       .list({ page, pageSize: PAGE_SIZE, ...(query && { query }), ...(category && { category }) })
       .then((res) => {
         if (!current) return
+        // Past the last page (its only job was just deleted, or an old address): go to the last page instead.
+        const lastPage = Math.max(1, Math.ceil(res.totalCount / PAGE_SIZE))
+        if (res.jobs.length === 0 && page > lastPage) {
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev)
+              if (lastPage > 1) next.set('page', String(lastPage))
+              else next.delete('page')
+              return next
+            },
+            { replace: true },
+          )
+          return // still loading: the list for that page comes next
+        }
         setJobs(res.jobs)
         setTotalCount(res.totalCount)
+        setIsLoading(false)
       })
       .catch((err: unknown) => {
-        if (current) toast.error(err instanceof ApiError ? err.message : '無法載入 Job 列表')
-      })
-      .finally(() => {
-        if (current) setIsLoading(false)
+        if (!current) return
+        toast.error(err instanceof ApiError ? err.message : '無法載入 Job 列表')
+        setIsLoading(false)
       })
     return () => {
       current = false
     }
-  }, [page, query, category, reloads])
+  }, [page, query, category, reloads, setSearchParams])
 
   const handleDelete = async () => {
     if (!deleteTarget) return
