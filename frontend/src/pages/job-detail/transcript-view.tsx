@@ -116,14 +116,14 @@ export function TranscriptView({
       <TranscriptSearchBar search={search} />
       <ScrollArea
         ref={scrollAreaRef}
-        className="min-h-0 flex-1 pr-4"
+        className="min-h-0 flex-1 pr-3"
         onWheel={pauseOnWheel}
         onTouchMove={pause}
         onKeyDown={pauseOnScrollKey}
         onPointerDown={pauseOnScrollbarDrag}
       >
         {/* pb-12 leaves room so the last segment can scroll above the floating 回到播放位置 button. */}
-        <div className="flex flex-col gap-3 pb-12">
+        <div className="flex flex-col gap-0.5 pb-12">
           {segments.map((segment, i) => (
             <SegmentRow
               key={segment.id}

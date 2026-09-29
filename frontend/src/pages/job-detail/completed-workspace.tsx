@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, FileText, Sparkles } from 'lucide-react'
+import { ArrowLeft, FileText, PanelLeftOpen, PanelRightOpen, Sparkles, type LucideIcon } from 'lucide-react'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { isSummaryStale } from '@/lib/staleness'
@@ -12,6 +12,7 @@ import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane } from '@/pages/job-detail/studio-pane'
+import { cn } from '@/lib/utils'
 import type { Chapter, ConfirmedProposal, Job, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
@@ -69,6 +70,27 @@ function focusSheetInsteadOfSearch(event: Event) {
   if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus()
 }
 
+// A folded side pane on desktop: a slim strip that unfolds it again (its name is in the tooltip).
+function CollapsedRail({ label, icon: Icon, expandIcon: ExpandIcon, onExpand }: {
+  label: string
+  icon: LucideIcon
+  expandIcon: LucideIcon
+  onExpand: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onExpand}
+      className="flex h-full flex-col items-center gap-3 rounded-xl bg-card py-4 text-muted-foreground ring-1 ring-foreground/10 transition-colors outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      <ExpandIcon className="size-4" />
+      <Icon className="size-4" />
+    </button>
+  )
+}
+
 // There is only ever one <audio>/<video> element in the tree — two would race to own the
 // page's media element. On desktop it lives in the Source pane of the grid; on narrow
 // viewports it lives in the MiniPlayer under the Chat pane, and the Source Sheet renders
@@ -118,6 +140,9 @@ export function CompletedWorkspace({
   const [sourceOpen, setSourceOpen] = useState(false)
   const [studioOpen, setStudioOpen] = useState(false)
   const [lastIsDesktop, setLastIsDesktop] = useState(isDesktop)
+  // Desktop only: a folded pane stays mounted (hidden) so the player in the Source pane keeps playing.
+  const [sourceCollapsed, setSourceCollapsed] = useState(false)
+  const [studioCollapsed, setStudioCollapsed] = useState(false)
 
   if (isDesktop !== lastIsDesktop) {
     setLastIsDesktop(isDesktop)
@@ -141,12 +166,14 @@ export function CompletedWorkspace({
   const desktopPlayer =
     mediaUrl &&
     (job.fileType === 'VIDEO' ? (
-      <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-md" />
+      <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-lg bg-black" />
     ) : (
       <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
     ))
-  const studioPane = (
+  const renderStudioPane = (desktop: { onCollapse: () => void; className?: string } | null) => (
     <StudioPane
+      onCollapse={desktop?.onCollapse}
+      className={desktop?.className}
       summary={summary}
       chapters={chapters}
       onSeek={onSeek}
@@ -214,10 +241,32 @@ export function CompletedWorkspace({
       </div>
 
       {isDesktop ? (
-        <div className="grid min-h-0 flex-1 grid-cols-[20rem_minmax(0,1fr)_20rem] gap-4">
-          <SourcePane {...sourcePaneProps} player={desktopPlayer} />
+        // The side panes widen with the screen; a folded one leaves a 3rem rail and gives its room to 問答.
+        <div
+          className={cn(
+            'grid min-h-0 flex-1 grid-cols-[var(--source-width)_minmax(0,1fr)_var(--studio-width)] gap-4',
+            sourceCollapsed
+              ? '[--source-width:3rem]'
+              : '[--source-width:20rem] xl:[--source-width:26rem] 2xl:[--source-width:30rem]',
+            studioCollapsed
+              ? '[--studio-width:3rem]'
+              : '[--studio-width:18rem] xl:[--studio-width:22rem] 2xl:[--studio-width:26rem]',
+          )}
+        >
+          {sourceCollapsed && (
+            <CollapsedRail label="展開來源" icon={FileText} expandIcon={PanelLeftOpen} onExpand={() => setSourceCollapsed(false)} />
+          )}
+          <SourcePane
+            {...sourcePaneProps}
+            player={desktopPlayer}
+            onCollapse={() => setSourceCollapsed(true)}
+            className={cn(sourceCollapsed && 'hidden')}
+          />
           {chatPane}
-          {studioPane}
+          {studioCollapsed && (
+            <CollapsedRail label="展開 Studio" icon={Sparkles} expandIcon={PanelRightOpen} onExpand={() => setStudioCollapsed(false)} />
+          )}
+          {renderStudioPane({ onCollapse: () => setStudioCollapsed(true), className: cn(studioCollapsed && 'hidden') })}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -254,7 +303,7 @@ export function CompletedWorkspace({
       <Sheet open={studioOpen} onOpenChange={setStudioOpen}>
         <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
           <SheetTitle className="sr-only">Studio</SheetTitle>
-          {studioPane}
+          {renderStudioPane(null)}
         </SheetContent>
       </Sheet>
     </div>

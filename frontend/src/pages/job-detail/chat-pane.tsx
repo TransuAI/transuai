@@ -2,7 +2,7 @@ import { AlertCircle, Loader2Icon, MessageCircle } from 'lucide-react'
 import { modelLabel } from '@/lib/providers'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ModelChoice } from '@/types/api'
@@ -50,14 +50,12 @@ export function ChatPane({
   onSelectModel,
 }: ChatPaneProps) {
   return (
-    <Card className="flex h-full min-h-0 flex-col">
-      <CardHeader className="border-b pb-4">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <MessageCircle className="size-4" />
-          問答
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="min-h-0 flex-1 pt-4">
+    <Card className="flex h-full min-h-0 flex-col gap-0 py-0">
+      <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+        <MessageCircle className="size-4 text-primary" />
+        <h2 className="text-sm font-medium">問答</h2>
+      </div>
+      <CardContent className="min-h-0 flex-1 py-4">
         {isLoadingHistory ? (
           <div className="flex h-full items-center justify-center">
             <Loader2Icon className="size-6 animate-spin text-muted-foreground" />

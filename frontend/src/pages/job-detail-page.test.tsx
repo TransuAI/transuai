@@ -281,6 +281,28 @@ describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
     matchMediaSpy.mockRestore()
   })
 
+  it('folds the side panes into rails and back, keeping the same player', async () => {
+    const matchMediaSpy = stubDesktopLayout()
+    const user = userEvent.setup()
+    await renderCompletedJob()
+    const audio = document.querySelector('audio')
+
+    await user.click(screen.getByRole('button', { name: '收合來源' }))
+    await user.click(screen.getByRole('button', { name: '收合 Studio' }))
+    expect(screen.getByRole('button', { name: '展開來源' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '展開 Studio' })).toBeInTheDocument()
+    // Folded, not unmounted: playback carries on.
+    expect(document.querySelector('audio')).toBe(audio)
+
+    await user.click(screen.getByRole('button', { name: '展開來源' }))
+    await user.click(screen.getByRole('button', { name: '展開 Studio' }))
+    expect(screen.queryByRole('button', { name: '展開來源' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收合來源' })).toBeInTheDocument()
+    expect(document.querySelector('audio')).toBe(audio)
+
+    matchMediaSpy.mockRestore()
+  })
+
   it('seeks the media player when a transcript segment is clicked', async () => {
     const matchMediaSpy = stubDesktopLayout()
     const user = userEvent.setup()
@@ -1555,6 +1577,29 @@ describe('JobDetailPage segment editing (COMPLETED, desktop layout)', () => {
 
     expect(screen.getByRole('textbox', { name: '編輯片段文字' })).toBeDisabled()
     expect(screen.getByText('儲存中…')).toBeInTheDocument()
+  })
+
+  it('saves and cancels from the buttons under the editor too (touch keyboards have no Esc)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(transcriptApi.updateSegmentText).mockResolvedValue({
+      segment: { id: 'seg-3', startTime: 8, endTime: 10, speakerLabel: null, text: '第二句改好了', originalText: '第二句' },
+      revision: 1,
+    })
+    await renderGappedTranscriptOnDesktop()
+
+    await user.click(editButtonFor('第二句'))
+    await user.type(screen.getByRole('textbox', { name: '編輯片段文字' }), '亂打')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(transcriptApi.updateSegmentText).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: '編輯片段文字' })).not.toBeInTheDocument()
+
+    await user.click(editButtonFor('第二句'))
+    const editor = screen.getByRole('textbox', { name: '編輯片段文字' })
+    await user.clear(editor)
+    await user.type(editor, '第二句改好了')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+    expect(transcriptApi.updateSegmentText).toHaveBeenCalledWith('job-1', 'seg-3', '第二句改好了')
+    expect(await screen.findByText('第二句改好了')).toBeInTheDocument()
   })
 
   it('pauses auto-follow while editing, without pausing playback', async () => {

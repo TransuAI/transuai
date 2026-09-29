@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
-import { FileText } from 'lucide-react'
-import { formatBytes, formatDuration } from '@/lib/media'
+import { FileAudio, FileText, FileVideo, PanelLeftClose } from 'lucide-react'
+import { formatBytes, formatDuration, formatShortDateTime } from '@/lib/media'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
-import { JobStatusBadge } from '@/components/job-status-badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { SpeakerPanel } from '@/pages/job-detail/speaker-panel'
 import { TranscriptView } from '@/pages/job-detail/transcript-view'
+import { cn } from '@/lib/utils'
 import type { Job, SpeakerAssignment, Transcript } from '@/types/api'
 
 interface SourcePaneProps {
@@ -20,6 +21,9 @@ interface SourcePaneProps {
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onRenameSpeaker: (label: string, name: string) => Promise<void>
   onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
+  /** Folds the pane into a rail (desktop grid only). */
+  onCollapse?: () => void
+  className?: string
 }
 
 export function SourcePane({
@@ -33,22 +37,40 @@ export function SourcePane({
   onSaveSegmentText,
   onRenameSpeaker,
   onAssignSpeaker,
+  onCollapse,
+  className,
 }: SourcePaneProps) {
+  const FileIcon = job.fileType === 'VIDEO' ? FileVideo : FileAudio
   return (
-    <Card className="flex h-full min-h-0 flex-col">
-      <CardHeader className="gap-2 border-b pb-4">
-        <div className="flex items-start justify-between gap-4">
-          <CardTitle className="break-all text-base">{job.fileName}</CardTitle>
-          <JobStatusBadge status={job.status} />
+    <Card className={cn('flex h-full min-h-0 flex-col gap-0 py-0', className)}>
+      <div className="flex flex-col border-b">
+        {/* In the Source Sheet (no onCollapse) the Sheet's own close button sits top-right: leave it room. */}
+        <div className={cn('flex min-h-14 items-center gap-3 py-2.5 pl-4', onCollapse ? 'pr-4' : 'pr-12')}>
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <FileIcon className="size-4" />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <h2 title={job.fileName} className="truncate text-sm leading-snug font-medium">
+              {job.fileName}
+            </h2>
+            <p className="truncate text-xs text-muted-foreground tabular-nums">
+              {formatDuration(job.durationSeconds)} · {formatBytes(job.fileSizeBytes)} · {formatShortDateTime(job.createdAt)}
+            </p>
+          </div>
+          {onCollapse && (
+            <Button size="icon-sm" variant="ghost" aria-label="收合來源" title="收合來源" onClick={onCollapse} className="-mr-1.5">
+              <PanelLeftClose />
+            </Button>
+          )}
         </div>
-        <p className="text-xs text-muted-foreground">
-          {formatBytes(job.fileSizeBytes)} · {formatDuration(job.durationSeconds)} ·{' '}
-          {new Date(job.createdAt).toLocaleString()}
-        </p>
-        {player}
-        {transcript && <SpeakerPanel transcript={transcript} onRename={onRenameSpeaker} />}
-      </CardHeader>
-      <CardContent className="min-h-0 flex-1 pt-4">
+        {player && <div className="px-4 pb-4">{player}</div>}
+      </div>
+      {transcript && (
+        <div className="border-b px-4 py-3 empty:hidden">
+          <SpeakerPanel transcript={transcript} onRename={onRenameSpeaker} />
+        </div>
+      )}
+      <div className="min-h-0 flex-1 px-4 pt-3">
         {transcript ? (
           <TranscriptView
             segments={transcript.segments}
@@ -66,7 +88,7 @@ export function SourcePane({
             尚無逐字稿
           </div>
         )}
-      </CardContent>
+      </div>
     </Card>
   )
 }
