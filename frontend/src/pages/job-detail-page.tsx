@@ -35,6 +35,9 @@ export function JobDetailPage() {
   const [defaultModel, setDefaultModel] = useState<ModelChoice | null>(null)
   const [selectedModel, setSelectedModel] = useState<ModelChoice | null>(null)
   const [qaHistory, setQaHistory] = useState<QaEntry[]>([])
+  // 查網路: offered only when the deployment can search; once switched on it stays on for the next questions on this page.
+  const [webSearchAvailable, setWebSearchAvailable] = useState(false)
+  const [webSearch, setWebSearch] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [questionInput, setQuestionInput] = useState('')
   const [isAsking, setIsAsking] = useState(false)
@@ -135,6 +138,7 @@ export function JobDetailPage() {
         .then(([available, current]) => {
           const listed = available.models.some((m) => sameModel(m, current))
           setModelChoices(listed ? available.models : [...available.models, current])
+          setWebSearchAvailable(available.webSearch ?? false)
           setDefaultModel(current)
           setSelectedModel(current)
         })
@@ -151,6 +155,8 @@ export function JobDetailPage() {
               sourceTimestamps: turn.sourceTimestamps,
               status: 'done',
               model: turn.model,
+              webSearch: turn.webSearch ?? false,
+              webSources: turn.webSources ?? [],
             })),
           ),
         )
@@ -240,7 +246,11 @@ export function JobDetailPage() {
     if (!jobId || !question || isAsking) return
 
     const id = crypto.randomUUID()
-    setQaHistory((prev) => [...prev, { id, question, answer: '', sourceTimestamps: [], status: 'streaming' }])
+    const searchesTheWeb = webSearchAvailable && webSearch
+    setQaHistory((prev) => [
+      ...prev,
+      { id, question, answer: '', sourceTimestamps: [], status: 'streaming', webSearch: searchesTheWeb },
+    ])
     setQuestionInput('')
     setIsAsking(true)
 
@@ -265,6 +275,8 @@ export function JobDetailPage() {
           toast.error(message || '問答失敗')
         },
         onModel: (answeredBy) => patchEntry({ model: answeredBy.model }),
+        onWebSources: (result) => patchEntry({ webSources: result.sources }),
+        ...(searchesTheWeb && { webSearch: true }),
         // Only a model picked for this question is sent; for the default the server uses whatever it is by now.
         ...(selectedModel && !sameModel(defaultModel, selectedModel) && {
           model: { provider: selectedModel.provider, model: selectedModel.model },
@@ -367,6 +379,9 @@ export function JobDetailPage() {
       onQuestionInputChange={setQuestionInput}
       isAsking={isAsking}
       onAsk={handleAskQuestion}
+      webSearchAvailable={webSearchAvailable}
+      webSearch={webSearch}
+      onWebSearchChange={setWebSearch}
       onSeek={seekTo}
       onSaveSegmentText={handleSaveSegmentText}
       onRenameSpeaker={handleRenameSpeaker}

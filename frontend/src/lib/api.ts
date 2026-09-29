@@ -29,6 +29,7 @@ import type {
   Summary,
   Transcript,
   User,
+  WebSearchResult,
 } from '@/types/api'
 
 export const authApi = {
@@ -125,9 +126,13 @@ export interface QaStreamHandlers {
   onError: (message: string) => void
   /** Which model is answering; arrives once, after the sources. */
   onModel?: (model: ModelChoice) => void
+  /** What the web search found; arrives once, between the sources and the model, only when the question searched the web. */
+  onWebSources?: (result: WebSearchResult) => void
   signal?: AbortSignal
   /** A model for this question only; the default model when omitted. */
   model?: ModelRef
+  /** Also search the web for this question (查網路). */
+  webSearch?: boolean
 }
 
 export const qaApi = {
@@ -139,7 +144,10 @@ export const qaApi = {
   ask: (jobId: string, question: string, handlers: QaStreamHandlers) =>
     requestSse(
       `/qa/${jobId}`,
-      { method: 'POST', body: { question, ...(handlers.model && { model: handlers.model }) } },
+      {
+        method: 'POST',
+        body: { question, ...(handlers.model && { model: handlers.model }), ...(handlers.webSearch && { webSearch: true }) },
+      },
       (event, data) => {
         switch (event) {
           case 'sources':
@@ -153,6 +161,9 @@ export const qaApi = {
             break
           case 'model':
             handlers.onModel?.(JSON.parse(data) as ModelChoice)
+            break
+          case 'web_sources':
+            handlers.onWebSources?.(JSON.parse(data) as WebSearchResult)
             break
         }
       },

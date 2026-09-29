@@ -1242,6 +1242,97 @@ describe('JobDetailPage mini player speakers (COMPLETED, narrow viewport)', () =
   })
 })
 
+describe('JobDetailPage web search (查網路, COMPLETED, desktop layout)', () => {
+  const pgvector = { title: 'pgvector: Open-source vector search for Postgres', url: 'https://github.com/pgvector/pgvector' }
+
+  beforeEach(() => {
+    vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false, webSearch: true })
+  })
+
+  async function ask(user: ReturnType<typeof userEvent.setup>, question = 'pgvector 是什麼？') {
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), `${question}{Enter}`)
+  }
+
+  it('offers no switch when the deployment cannot search the web', async () => {
+    stubDesktopLayout()
+    vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false, webSearch: false })
+    await renderCompletedJob()
+    await screen.findByRole('combobox', { name: '回答的模型' })
+
+    expect(screen.queryByRole('button', { name: '查網路' })).not.toBeInTheDocument()
+  })
+
+  it('searches the web only once switched on, and stays on for the next question', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(qaApi.ask).mockResolvedValue(undefined)
+    await renderCompletedJob()
+    const toggle = await screen.findByRole('button', { name: '查網路', pressed: false })
+
+    await ask(user, '第一題')
+    await user.click(toggle)
+    await ask(user, '第二題')
+    await ask(user, '第三題')
+
+    expect(vi.mocked(qaApi.ask).mock.calls.map((call) => call[2].webSearch ?? false)).toEqual([false, true, true])
+    expect(screen.getByRole('button', { name: '查網路', pressed: true })).toBeInTheDocument()
+  })
+
+  it('lists the web sources under the answer, and links each [n] in it to its source', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(qaApi.ask).mockImplementation(async (_jobId, _question, handlers) => {
+      handlers.onSources([12])
+      handlers.onWebSources?.({ sources: [pgvector], failed: false })
+      handlers.onDelta('它是 Postgres 的向量檢索擴充 [1]。')
+    })
+    await renderCompletedJob()
+    await user.click(await screen.findByRole('button', { name: '查網路' }))
+
+    await ask(user)
+
+    const sources = await screen.findByRole('list', { name: '網路來源' })
+    const link = within(sources).getByRole('link', { name: /pgvector: Open-source vector search for Postgres/ })
+    expect(link).toHaveAttribute('href', pgvector.url)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(within(sources).getByText('github.com')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '網路來源 1' })).toHaveAttribute('href', pgvector.url)
+    expect(screen.getByRole('button', { name: '0:12' })).toBeInTheDocument() // the recording's own sources stay
+  })
+
+  it('says when the web could not be searched and the answer comes from the content only', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(qaApi.ask).mockImplementation(async (_jobId, _question, handlers) => {
+      handlers.onSources([12])
+      handlers.onWebSources?.({ sources: [], failed: true })
+      handlers.onDelta('內容裡提到要改用 pgvector。')
+    })
+    await renderCompletedJob()
+    await user.click(await screen.findByRole('button', { name: '查網路' }))
+
+    await ask(user)
+
+    expect(await screen.findByText('這次沒查到網路資料，只根據內容回答')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '網路來源' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the web sources of earlier answers', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(mockTranscript, [
+      { question: '第一題', answer: '見 [1]', sourceTimestamps: [], createdAt: '2026-01-01T00:00:00Z', modelProvider: 'platform',
+        model: 'Qwen/Qwen3.5-9B', webSearch: true, webSources: [pgvector] },
+      { question: '第二題', answer: '第二答', sourceTimestamps: [], createdAt: '2026-01-01T00:01:00Z', modelProvider: 'platform',
+        model: 'Qwen/Qwen3.5-9B', webSearch: true, webSources: [] },
+    ])
+
+    const sources = await screen.findByRole('list', { name: '網路來源' })
+    expect(within(sources).getByRole('link', { name: /pgvector/ })).toHaveAttribute('href', pgvector.url)
+    expect(screen.getByText('這次沒查到網路資料，只根據內容回答')).toBeInTheDocument()
+  })
+})
+
 describe('JobDetailPage answering model (COMPLETED, desktop layout)', () => {
   it('leaves the model to the server while the default model is picked', async () => {
     const user = userEvent.setup()

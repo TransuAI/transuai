@@ -30,6 +30,10 @@ interface CompletedWorkspaceProps {
   onQuestionInputChange: (value: string) => void
   isAsking: boolean
   onAsk: () => void
+  /** 查網路: whether questions can search the web at all, and whether the next one will. */
+  webSearchAvailable: boolean
+  webSearch: boolean
+  onWebSearchChange: (on: boolean) => void
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onRenameSpeaker: (label: string, name: string) => Promise<void>
@@ -113,6 +117,9 @@ export function CompletedWorkspace({
   onQuestionInputChange,
   isAsking,
   onAsk,
+  webSearchAvailable,
+  webSearch,
+  onWebSearchChange,
   onSeek,
   onSaveSegmentText,
   onRenameSpeaker,
@@ -211,6 +218,9 @@ export function CompletedWorkspace({
       onQuestionInputChange={onQuestionInputChange}
       isAsking={isAsking}
       onAsk={onAsk}
+      webSearchAvailable={webSearchAvailable}
+      webSearch={webSearch}
+      onWebSearchChange={onWebSearchChange}
       onSeek={onSeek}
       mediaAvailable={mediaAvailable}
       modelChoices={modelChoices}

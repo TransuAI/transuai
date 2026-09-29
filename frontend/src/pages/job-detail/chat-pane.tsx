@@ -1,11 +1,12 @@
-import { AlertCircle, Loader2Icon, MessageCircle } from 'lucide-react'
+import { AlertCircle, Globe, Loader2Icon, MessageCircle } from 'lucide-react'
 import { modelLabel } from '@/lib/providers'
+import { cn } from '@/lib/utils'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { ModelChoice } from '@/types/api'
+import type { ModelChoice, WebSource } from '@/types/api'
 
 export type QaEntryStatus = 'streaming' | 'done' | 'error'
 
@@ -19,6 +20,10 @@ export interface QaEntry {
   status: QaEntryStatus
   /** The model that answered, once known. */
   model?: string | null
+  /** This question also searched the web (查網路). */
+  webSearch?: boolean
+  /** The web pages the answer drew on, numbered as its [n]; empty once known that the search found nothing to use. */
+  webSources?: WebSource[]
 }
 
 interface ChatPaneProps {
@@ -34,6 +39,74 @@ interface ChatPaneProps {
   modelChoices: ModelChoice[]
   selectedModel: ModelChoice | null
   onSelectModel: (model: ModelChoice) => void
+  /** 查網路 (see ai-service CONTEXT.md「網路搜尋」): shown only when the deployment can search; stays as set. */
+  webSearchAvailable: boolean
+  webSearch: boolean
+  onWebSearchChange: (on: boolean) => void
+}
+
+const WEB_LINK = { target: '_blank', rel: 'noopener noreferrer' } as const
+
+function siteOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+// The answer, with each [n] that points at one of its web sources turned into a small link to that page. Any other
+// bracketed number is left as text.
+function AnswerText({ text, webSources }: { text: string; webSources: WebSource[] }) {
+  if (webSources.length === 0) return <>{text}</>
+  return (
+    <>
+      {text.split(/(\[\d+\])/).map((part, i) => {
+        const n = /^\[(\d+)\]$/.exec(part)?.[1]
+        const source = n ? webSources[Number(n) - 1] : undefined
+        if (!source) return part
+        return (
+          <a
+            key={i}
+            href={source.url}
+            {...WEB_LINK}
+            aria-label={`網路來源 ${n}`}
+            title={source.title}
+            className="mx-0.5 align-super text-[0.7em] font-medium text-primary hover:underline"
+          >
+            [{n}]
+          </a>
+        )
+      })}
+    </>
+  )
+}
+
+// 網路來源: numbered like the answer's [n], each opening its page in a new tab.
+function WebSourceList({ sources }: { sources: WebSource[] }) {
+  return (
+    <div className="flex flex-col gap-1 pt-1">
+      <p aria-hidden className="text-xs font-medium text-muted-foreground">
+        網路來源
+      </p>
+      <ol aria-label="網路來源" className="flex flex-col gap-1">
+        {sources.map((source, i) => (
+          <li key={`${i}-${source.url}`}>
+            <a
+              href={source.url}
+              {...WEB_LINK}
+              title={source.url}
+              className="group flex items-baseline gap-2 rounded-sm text-xs text-muted-foreground"
+            >
+              <span className="shrink-0 tabular-nums">[{i + 1}]</span>
+              <span className="min-w-0 truncate text-foreground group-hover:underline">{source.title}</span>
+              <span className="shrink-0">{siteOf(source.url)}</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
 }
 
 export function ChatPane({
@@ -48,6 +121,9 @@ export function ChatPane({
   modelChoices,
   selectedModel,
   onSelectModel,
+  webSearchAvailable,
+  webSearch,
+  onWebSearchChange,
 }: ChatPaneProps) {
   return (
     <Card className="flex h-full min-h-0 flex-col gap-0 py-0">
@@ -65,10 +141,18 @@ export function ChatPane({
             <div className="flex flex-col gap-4">
               {qaHistory.map((entry) => (
                 <div key={entry.id} className="flex flex-col gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
-                  <p className="text-sm font-medium">{entry.question}</p>
+                  <div className="flex items-start gap-1.5">
+                    <p className="text-sm font-medium">{entry.question}</p>
+                    {entry.webSearch && (
+                      <span title="這一題也查了網路" className="mt-0.5 shrink-0 text-muted-foreground">
+                        <Globe aria-hidden className="size-3.5" />
+                        <span className="sr-only">（查了網路）</span>
+                      </span>
+                    )}
+                  </div>
                   {entry.answer && (
                     <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                      {entry.answer}
+                      <AnswerText text={entry.answer} webSources={entry.webSources ?? []} />
                     </p>
                   )}
                   {entry.model && entry.status !== 'error' && (
@@ -89,6 +173,13 @@ export function ChatPane({
                         <TimestampButton key={j} seconds={ts} onSeek={onSeek} mediaAvailable={mediaAvailable} />
                       ))}
                     </div>
+                  )}
+                  {entry.webSources && entry.webSources.length > 0 && <WebSourceList sources={entry.webSources} />}
+                  {entry.webSearch && entry.webSources?.length === 0 && (
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Globe aria-hidden className="size-3.5" />
+                      這次沒查到網路資料，只根據內容回答
+                    </p>
                   )}
                 </div>
               ))}
@@ -125,6 +216,20 @@ export function ChatPane({
                 </option>
               ))}
             </select>
+          )}
+          {webSearchAvailable && (
+            <Button
+              type="button"
+              variant={webSearch ? 'secondary' : 'ghost'}
+              aria-label="查網路"
+              aria-pressed={webSearch}
+              title={webSearch ? '查網路：開（這一題也會搜尋網路）' : '查網路：關（只根據這段內容回答）'}
+              onClick={() => onWebSearchChange(!webSearch)}
+              className={cn('shrink-0 text-muted-foreground', webSearch && 'text-primary')}
+            >
+              <Globe className="size-4" />
+              <span className="hidden sm:inline">查網路</span>
+            </Button>
           )}
           <Input
             value={questionInput}

@@ -140,6 +140,22 @@ export interface QaTurn {
   /** The model that answered ("platform" is 平台模型); null for answers from before models were recorded. */
   modelProvider: string | null
   model: string | null
+  /** Whether this question also searched the web (查網路); absent from gateways that predate it. */
+  webSearch?: boolean
+  /** The web pages the answer drew on, numbered as the answer's [1], [2]…; empty when the search failed. */
+  webSources?: WebSource[]
+}
+
+/** A web page an answer drew on (網路來源, see ai-service CONTEXT.md). */
+export interface WebSource {
+  title: string
+  url: string
+}
+
+/** What a question's web search found; `failed` when the search didn't go through and the answer uses the content only. */
+export interface WebSearchResult {
+  sources: WebSource[]
+  failed: boolean
 }
 
 export interface ApiErrorBody {
@@ -358,4 +374,6 @@ export interface AvailableModels {
   models: ModelChoice[]
   /** With an OpenRouter key, any OpenRouter model ID can be typed in. */
   openrouterCustom: boolean
+  /** Questions can also search the web (the deployment has a search service); absent from gateways that predate it. */
+  webSearch?: boolean
 }
