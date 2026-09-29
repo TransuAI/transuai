@@ -69,7 +69,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/upl
 | `CompleteUpload` | 前端完成上傳後呼叫，建立 Job（status=`UPLOADED`）並發送 `transcription.requested { jobId, userId, storagePath, fileType, transcriptionLanguage }` 事件（`userId` 一路帶到 ai-service，用量記在他名下；`transcription_language` 是 `zh-TW`（中文，沒帶時的預設）、`en` 或 `auto`，其他值回 `INVALID_ARGUMENT`，存在 Job 上，見 transcription-service ADR 0002）；會改問物件儲存實際存了多大（不信任請求帶的 `file_size_bytes`），超過限制回 `INVALID_ARGUMENT` 並刪除該物件 |
 | `GetJob` | 查詢單一 Job，強制 ownership 檢查（別人的 Job 回 `NOT_FOUND`） |
 | `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md`。`as_attachment=true` 時 URL 會覆寫回應的 `Content-Disposition` 為 attachment、檔名＝Job 原始檔名（RFC 6266 ASCII 備援＋RFC 5987 UTF-8），供前端「匯出 → 下載原始檔」 |
-| `ListJobs` | 分頁查詢目前使用者的所有 Job |
+| `ListJobs` | 分頁查詢目前使用者的 Job（新的在前，`page` 從 1 開始，0 或沒帶當成 1）：`query` 找**標題**或**檔名**包含它的（去頭尾空白、不分大小寫，`%` `_` `\` 照字面比對），`category` 只看某個類型（不在清單回 `INVALID_ARGUMENT`）；空字串＝不篩，`total_count` 跟著條件算 |
 | `DeleteJob` | 刪除 Job record、它的筆記與物件儲存檔案 |
 | `UpdateJob` | 使用者改**標題**與**類型**（見 `CONTEXT.md`）：只改有帶的欄位（`optional`），帶了的記為使用者設定過（`*_set_by_user`），`SetSuggestedDetails` 之後不會再寫；標題去頭尾空白、空字串＝清空（顯示檔名，仍算設定過）；標題超過 100 字或類型不在清單回 `INVALID_ARGUMENT`，別人的 Job 回 `NOT_FOUND` |
 

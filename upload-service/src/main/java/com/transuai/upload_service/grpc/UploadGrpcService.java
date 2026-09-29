@@ -1,5 +1,6 @@
 package com.transuai.upload_service.grpc;
 
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -218,13 +219,20 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
 
     @Override
     public void listJobs(ListJobsRequest request, StreamObserver<ListJobsResponse> responseObserver) {
+        String category = request.getCategory().isBlank() ? null : request.getCategory();
+        if (category != null && !JobCategory.isKnown(category)) {
+            responseObserver.onError(
+                    Status.INVALID_ARGUMENT.withDescription("unknown category: " + category).asRuntimeException());
+            return;
+        }
+        String query = request.getQuery().strip();
         UUID userId = GrpcAuthContext.currentUserId();
 
         int page = request.getPage() > 0 ? request.getPage() : 1;
         int pageSize = request.getPageSize() > 0 ? Math.min(request.getPageSize(), MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
 
-        Page<JobEntity> result = jobRepository.findByUserIdOrderByCreatedAtDesc(userId,
-                PageRequest.of(page - 1, pageSize));
+        Page<JobEntity> result = jobRepository.search(userId, category,
+                query.isEmpty() ? null : containsPattern(query), PageRequest.of(page - 1, pageSize));
 
         ListJobsResponse.Builder builder = ListJobsResponse.newBuilder()
                 .setTotalCount((int) result.getTotalElements())
@@ -274,6 +282,13 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
 
         responseObserver.onNext(JobMapper.toProto(job));
         responseObserver.onCompleted();
+    }
+
+    // 「包含 query」的 LIKE 樣式，不分大小寫；query 裡的 \ % _ 照字面比對（見 JobRepository.search 的 escape）。
+    private static String containsPattern(String query) {
+        String escaped = query.toLowerCase(Locale.ROOT)
+                .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+        return "%" + escaped + "%";
     }
 
     private static UUID parseJobId(String rawJobId, StreamObserver<?> responseObserver) {

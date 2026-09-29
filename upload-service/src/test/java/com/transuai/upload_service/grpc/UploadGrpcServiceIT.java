@@ -201,6 +201,64 @@ class UploadGrpcServiceIT {
                 .containsExactlyInAnyOrder(jobA.getJobId(), jobB.getJobId());
     }
 
+    @SuppressWarnings("null")
+    @Test
+    void listJobs_findsJobsWhoseTitleOrFileNameContainsTheQuery_ignoringCase() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job byTitle = titledJob(userId, "REC_0012.m4a", "Product Weekly：上傳失敗", "meeting");
+        Job byFileName = titledJob(userId, "product-demo.mp4", "新功能展示", "video");
+        titledJob(userId, "lecture-03.m4a", "線性代數第三講", "lecture");
+        createJob(UUID.randomUUID(), "product-someone-elses.mp3");
+
+        ListJobsResponse response = stubFor(userId).listJobs(ListJobsRequest.newBuilder().setQuery("  PRODUCT ").build());
+
+        assertThat(response.getTotalCount()).isEqualTo(2);
+        assertThat(response.getJobsList()).extracting(Job::getJobId)
+                .containsExactlyInAnyOrder(byTitle.getJobId(), byFileName.getJobId());
+        assertThat(stubFor(userId).listJobs(ListJobsRequest.newBuilder().setQuery("上傳失敗").build()).getJobsList())
+                .extracting(Job::getJobId).containsExactly(byTitle.getJobId());
+    }
+
+    @SuppressWarnings("null")
+    @Test
+    void listJobs_takesWildcardCharactersInTheQueryLiterally() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job percent = titledJob(userId, "a.m4a", "成長 100% 的祕密", "podcast");
+        titledJob(userId, "b.m4a", "週會", "meeting");
+
+        assertThat(stubFor(userId).listJobs(ListJobsRequest.newBuilder().setQuery("%").build()).getJobsList())
+                .extracting(Job::getJobId).containsExactly(percent.getJobId());
+        assertThat(stubFor(userId).listJobs(ListJobsRequest.newBuilder().setQuery("_").build()).getTotalCount()).isZero();
+    }
+
+    @SuppressWarnings("null")
+    @Test
+    void listJobs_filtersByCategory_andCountsAndPagesWithinTheFilter() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job first = titledJob(userId, "l1.m4a", "第一講", "lecture");
+        titledJob(userId, "m1.m4a", "週會", "meeting");
+        Job second = titledJob(userId, "l2.m4a", "第二講", "lecture");
+        Job third = titledJob(userId, "l3.m4a", "第三講", "lecture");
+
+        ListJobsResponse page1 = stubFor(userId).listJobs(
+                ListJobsRequest.newBuilder().setCategory("lecture").setPage(1).setPageSize(2).build());
+        ListJobsResponse page2 = stubFor(userId).listJobs(
+                ListJobsRequest.newBuilder().setCategory("lecture").setPage(2).setPageSize(2).build());
+
+        assertThat(page1.getTotalCount()).isEqualTo(3);
+        assertThat(page1.getJobsList()).extracting(Job::getJobId).containsExactly(third.getJobId(), second.getJobId());
+        assertThat(page2.getJobsList()).extracting(Job::getJobId).containsExactly(first.getJobId());
+        assertThat(stubFor(userId).listJobs(ListJobsRequest.newBuilder().setCategory("lecture").setQuery("第二").build())
+                .getJobsList()).extracting(Job::getJobId).containsExactly(second.getJobId());
+    }
+
+    @Test
+    void listJobs_refusesACategoryNotOnTheList() {
+        assertThatThrownBy(() -> stubFor(UUID.randomUUID()).listJobs(ListJobsRequest.newBuilder().setCategory("party").build()))
+                .isInstanceOfSatisfying(StatusRuntimeException.class,
+                        e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
     @Test
     void updateJob_setsTheTitleAndCategoryTheUserChose_andTheAiNoLongerWritesThem() throws Exception {
         UUID userId = UUID.randomUUID();
@@ -342,6 +400,13 @@ class UploadGrpcServiceIT {
                 .build());
         createdJobIds.add(UUID.fromString(job.getJobId()));
         return job;
+    }
+
+    // A job the AI has already given a title and category.
+    private Job titledJob(UUID userId, String fileName, String title, String category) throws Exception {
+        Job job = createJob(userId, fileName);
+        return internalStub().setSuggestedDetails(SetSuggestedDetailsRequest.newBuilder()
+                .setJobId(job.getJobId()).setTitle(title).setCategory(category).build());
     }
 
     private InternalJobServiceGrpc.InternalJobServiceBlockingStub internalStub() {
