@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
-import { ArrowLeft, ClipboardList, Gauge, GraduationCap, History, List, Loader2Icon, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ClipboardList, Gauge, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
+import type { NotesActions } from '@/hooks/use-notes'
 import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
 import { formatCount, formatMinutes } from '@/lib/usage-format'
 import { Card } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { NotesSection } from '@/pages/job-detail/notes-section'
 import { PostMeetingSection } from '@/pages/job-detail/post-meeting-section'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
 import { UsageSection } from '@/pages/job-detail/usage-section'
@@ -12,7 +14,7 @@ import { cn } from '@/lib/utils'
 import type { Chapter, ConfirmedProposal, JobUsage, PostMeeting, Quiz, Summary, Transcript } from '@/types/api'
 
 /** A Studio tool; the pane shows either the tiles of all tools (none picked) or one tool. */
-export type StudioTool = 'summary' | 'chapters' | 'quiz' | 'post-meeting' | 'usage'
+export type StudioTool = 'summary' | 'chapters' | 'notes' | 'quiz' | 'post-meeting' | 'usage'
 
 interface StudioPaneProps {
   jobId: string
@@ -39,6 +41,9 @@ interface StudioPaneProps {
   onExecuteProposals: (runId: string, proposals: ConfirmedProposal[]) => void
   onRetryProposal: (runId: string, proposalId: string) => void
   isExecutingProposals: boolean
+  notes: NotesActions
+  /** Where playback is now, for adding a note there; null without a player. */
+  currentTime: () => number | null
   /** The tool on show; null shows the tiles. Kept by the workspace so it survives the Sheet closing. */
   tool: StudioTool | null
   onToolChange: (tool: StudioTool | null) => void
@@ -69,6 +74,8 @@ export function StudioPane({
   onExecuteProposals,
   onRetryProposal,
   isExecutingProposals,
+  notes,
+  currentTime,
   tool,
   onToolChange,
   onCollapse,
@@ -163,6 +170,9 @@ export function StudioPane({
                 <ToolTile tool="chapters" onOpen={onToolChange} attention={isStale}>
                   {chapters.length > 0 ? `${chapters.length} 個章節` : '尚無章節'}
                 </ToolTile>
+                <ToolTile tool="notes" onOpen={onToolChange}>
+                  {notes.notes.length > 0 ? `${notes.notes.length} 則筆記` : '還沒有筆記'}
+                </ToolTile>
                 <ToolTile tool="quiz" onOpen={onToolChange} attention={quizzes.some((quiz) => quiz.status === 'GENERATING')}>
                   {quizzes.length === 0
                     ? '還沒有測驗'
@@ -255,6 +265,10 @@ export function StudioPane({
             />
           )}
 
+          {tool === 'notes' && (
+            <NotesSection notes={notes} onSeek={onSeek} mediaAvailable={mediaAvailable} currentTime={currentTime} />
+          )}
+
           {tool === 'usage' && <UsageSection usage={usage} />}
         </div>
       </ScrollArea>
@@ -265,6 +279,7 @@ export function StudioPane({
 const TOOLS: Record<StudioTool, { title: string; icon: LucideIcon }> = {
   summary: { title: 'AI 摘要', icon: Sparkles },
   chapters: { title: '章節', icon: List },
+  notes: { title: '筆記', icon: NotebookPen },
   quiz: { title: '測驗', icon: GraduationCap },
   'post-meeting': { title: '會後處理', icon: ClipboardList },
   usage: { title: '用量', icon: Gauge },

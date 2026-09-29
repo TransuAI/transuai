@@ -101,6 +101,21 @@ export interface SegmentUpdate {
   revision: number
 }
 
+/** Where a note came from: written by the user, or an answer saved from 問答. */
+export type NoteSource = 'manual' | 'qa'
+
+/** 筆記: the user's text, pinned to a time in the recording or not; with a time and no text it's a bookmark (書籤). */
+export interface Note {
+  noteId: string
+  jobId: string
+  /** Seconds into the recording; null when not pinned. */
+  timeSeconds: number | null
+  text: string
+  source: NoteSource
+  createdAt: string
+  updatedAt: string
+}
+
 /** 講者名字建議: a name the recording itself gives a speaker, with the line that says so. */
 export interface SpeakerSuggestion {
   speakerLabel: string

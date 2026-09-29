@@ -12,6 +12,8 @@ import type {
   JobUsage,
   MediaUrlResponse,
   ModelChoice,
+  Note,
+  NoteSource,
   PostMeeting,
   PostMeetingRun,
   PostMeetingSettings,
@@ -109,6 +111,16 @@ export const transcriptApi = {
       method: 'PUT',
       body: assignment,
     }),
+}
+
+// 筆記：釘在錄音某個時間（或不釘）的一段文字；只有時間的是書籤。沒有時間的筆記一定要有文字（伺服器會回 400）。
+export const notesApi = {
+  list: (jobId: string) => apiFetch<Note[]>(`/jobs/${jobId}/notes`),
+  create: (jobId: string, note: { timeSeconds?: number; text?: string; source?: NoteSource }) =>
+    apiFetch<Note>(`/jobs/${jobId}/notes`, { method: 'POST', body: note }),
+  update: (jobId: string, noteId: string, text: string) =>
+    apiFetch<Note>(`/jobs/${jobId}/notes/${noteId}`, { method: 'PATCH', body: { text } }),
+  remove: (jobId: string, noteId: string) => apiFetchVoid(`/jobs/${jobId}/notes/${noteId}`, { method: 'DELETE' }),
 }
 
 // 講者名字建議：pipeline 依錄音裡明確講出的話提的名字。套用＝前端先用 transcriptApi.renameSpeaker 改名，再標成 applied。

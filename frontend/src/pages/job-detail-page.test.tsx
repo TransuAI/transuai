@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
+import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
 import type { Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
@@ -16,6 +16,7 @@ vi.mock('@/lib/api', () => ({
   },
   transcriptApi: { get: vi.fn(), updateSegmentText: vi.fn(), renameSpeaker: vi.fn(), assignSegmentSpeaker: vi.fn() },
   speakerSuggestionsApi: { list: vi.fn(), setStatus: vi.fn() },
+  notesApi: { list: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
   summaryApi: { get: vi.fn(), regenerate: vi.fn() },
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
@@ -46,6 +47,7 @@ beforeEach(() => {
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platformModel)
   vi.mocked(quizApi.list).mockResolvedValue([])
   vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([])
+  vi.mocked(notesApi.list).mockResolvedValue([])
   vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], earlierRuns: [], latestRun: null })
 })
 
@@ -280,7 +282,7 @@ describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
     await renderCompletedJob()
 
     const tiles = within(await screen.findByRole('list', { name: 'Studio 功能' })).getAllByRole('button')
-    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '測驗還沒', '會後處理', '用量尚無'])
+    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '筆記還沒', '測驗還沒', '會後處理', '用量尚無'])
     expect(screen.getByRole('button', { name: '章節' })).toHaveAccessibleDescription('1 個章節')
     expect(screen.queryByRole('button', { name: '0:12開場' })).not.toBeInTheDocument()
   })
@@ -298,6 +300,102 @@ describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
     await user.click(screen.getByRole('button', { name: '返回 Studio' }))
     expect(screen.getByRole('list', { name: 'Studio 功能' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '章節' })).toHaveFocus()
+  })
+})
+
+describe('JobDetailPage notes (筆記, COMPLETED, desktop layout)', () => {
+  const note = (noteId: string, timeSeconds: number | null, text: string, source: 'manual' | 'qa' = 'manual') => ({
+    noteId, jobId: 'job-1', timeSeconds, text, source, createdAt: '2026-09-30T00:00:00Z', updatedAt: '2026-09-30T00:00:00Z',
+  })
+  const notesList = () => screen.getByRole('list', { name: '筆記' })
+
+  it('lists the notes by time in the Studio, each time playing from there', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.list).mockResolvedValue([note('n1', 12, '這裡很重要'), note('n2', 30, ''), note('n3', null, '整體心得', 'qa')])
+    await renderCompletedJob()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '筆記' })).toHaveAccessibleDescription('3 則筆記'))
+    await openStudioTool('筆記')
+    const items = within(notesList()).getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent('這裡很重要')
+    expect(items[1]).toHaveTextContent('書籤') // a time and no text
+    expect(items[2]).toHaveTextContent('未釘時間')
+    expect(items[2]).toHaveTextContent('從問答存的')
+    await user.click(within(items[0]).getByRole('button', { name: '0:12' }))
+    expect((document.querySelector('audio') as HTMLMediaElement).currentTime).toBe(12)
+  })
+
+  it('adds a note without a time', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.create).mockResolvedValue(note('n1', null, '下次要問預算'))
+    await renderCompletedJob()
+    await openStudioTool('筆記')
+    expect(screen.getByText(/還沒有筆記/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新增筆記' }))
+    await user.type(screen.getByRole('textbox', { name: '新筆記' }), '下次要問預算')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    expect(notesApi.create).toHaveBeenCalledWith('job-1', { text: '下次要問預算' })
+    expect(await within(notesList()).findByText('下次要問預算')).toBeInTheDocument()
+  })
+
+  it('bookmarks where playback is now, then opens it to write in', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.create).mockResolvedValue(note('n1', 42.3, ''))
+    vi.mocked(notesApi.update).mockResolvedValue(note('n1', 42.3, '預算這段'))
+    await renderCompletedJob()
+    await openStudioTool('筆記')
+    ;(document.querySelector('audio') as HTMLMediaElement).currentTime = 42.34
+
+    await user.click(screen.getByRole('button', { name: '在目前時間加筆記' }))
+    expect(notesApi.create).toHaveBeenCalledWith('job-1', { timeSeconds: 42.3 })
+    await user.type(await screen.findByRole('textbox', { name: '編輯筆記' }), '預算這段')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    expect(notesApi.update).toHaveBeenCalledWith('job-1', 'n1', '預算這段')
+    expect(await within(notesList()).findByText('預算這段')).toBeInTheDocument()
+  })
+
+  it('edits a note, and deletes one only once confirmed', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.list).mockResolvedValue([note('n1', 12, '這裡很重要')])
+    vi.mocked(notesApi.update).mockResolvedValue(note('n1', 12, '這裡很重要，週五前回覆'))
+    vi.mocked(notesApi.remove).mockResolvedValue(undefined)
+    await renderCompletedJob()
+    await openStudioTool('筆記')
+
+    await user.click(await screen.findByRole('button', { name: '編輯筆記' }))
+    const editor = screen.getByRole('textbox', { name: '編輯筆記' })
+    await user.clear(editor)
+    await user.type(editor, '這裡很重要，週五前回覆{Control>}{Enter}{/Control}')
+    expect(notesApi.update).toHaveBeenCalledWith('job-1', 'n1', '這裡很重要，週五前回覆')
+    expect(await within(notesList()).findByText('這裡很重要，週五前回覆')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '刪除筆記' }))
+    expect(notesApi.remove).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '刪除' }))
+    expect(notesApi.remove).toHaveBeenCalledWith('job-1', 'n1')
+    expect(await screen.findByText(/還沒有筆記/)).toBeInTheDocument()
+  })
+
+  it('keeps what was typed when a note cannot be saved', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.create).mockRejectedValue(new Error('network'))
+    await renderCompletedJob()
+    await openStudioTool('筆記')
+
+    await user.click(screen.getByRole('button', { name: '新增筆記' }))
+    await user.type(screen.getByRole('textbox', { name: '新筆記' }), '不要弄丟')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    expect(await screen.findByText('筆記沒有存到')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '新筆記' })).toHaveValue('不要弄丟')
   })
 })
 

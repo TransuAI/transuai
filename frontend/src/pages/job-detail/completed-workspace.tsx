@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { SourcePane } from '@/pages/job-detail/source-pane'
 import type { SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
+import type { NotesActions } from '@/hooks/use-notes'
 import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
 import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
@@ -56,6 +57,9 @@ interface CompletedWorkspaceProps {
   onExecuteProposals: (runId: string, proposals: ConfirmedProposal[]) => void
   onRetryProposal: (runId: string, proposalId: string) => void
   isExecutingProposals: boolean
+  notes: NotesActions
+  /** Where playback is now; null without a player. */
+  currentTime: () => number | null
   modelChoices: ModelChoice[]
   selectedModel: ModelChoice | null
   onSelectModel: (model: ModelChoice) => void
@@ -144,6 +148,8 @@ export function CompletedWorkspace({
   onExecuteProposals,
   onRetryProposal,
   isExecutingProposals,
+  notes,
+  currentTime,
   modelChoices,
   selectedModel,
   onSelectModel,
@@ -190,6 +196,8 @@ export function CompletedWorkspace({
     <StudioPane
       tool={studioTool}
       onToolChange={setStudioTool}
+      notes={notes}
+      currentTime={currentTime}
       onCollapse={desktop?.onCollapse}
       className={desktop?.className}
       summary={summary}
