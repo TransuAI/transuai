@@ -16,6 +16,7 @@ const FEATURE_LABELS: Record<string, string> = {
   post_meeting: '會後處理',
   transcription: '轉錄',
   web_search: '網路搜尋',
+  job_title: '標題',
 }
 
 function tokens(value: number) {

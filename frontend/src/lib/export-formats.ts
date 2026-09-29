@@ -17,6 +17,8 @@ export interface ExportSegment {
 // workspace. Each format picks what it needs.
 export interface ExportContent {
   fileName: string
+  /** The job's title (標題), when it has one: the report's heading. */
+  title?: string | null
   durationSeconds: number
   createdAt: string
   segments: ExportSegment[]
@@ -48,6 +50,7 @@ export function buildExportContent(source: ExportSource): ExportContent {
   const speakerName = speakerNameLookup(transcript?.speakers ?? [])
   return {
     fileName: job.fileName,
+    title: job.title ?? null,
     durationSeconds: job.durationSeconds,
     createdAt: job.createdAt,
     segments:
@@ -184,8 +187,15 @@ function markdownLinkText(title: string) {
 // 個個以空行分隔的段落——Markdown 會把連續的行併成一段，所以逐字稿每個片段之間也空一行（行的內容
 // 跟含時間戳 TXT 相同，只是多了空行）。
 export function toMarkdownReport(content: ExportContent): string {
-  const blocks: string[] = [`# ${content.fileName}`]
-  blocks.push(`- 長度：${formatClock(content.durationSeconds)}\n- 建立時間：${localDateTime(content.createdAt)}`)
+  // Headed by the title when the job has one; the file name then stays among the job's info.
+  const blocks: string[] = [`# ${content.title || content.fileName}`]
+  blocks.push(
+    [
+      ...(content.title ? [`- 檔名：${content.fileName}`] : []),
+      `- 長度：${formatClock(content.durationSeconds)}`,
+      `- 建立時間：${localDateTime(content.createdAt)}`,
+    ].join('\n'),
+  )
 
   blocks.push('## 摘要')
   if (content.summary?.isStale) blocks.push('> 逐字稿在摘要產生後有修改，摘要與章節可能過時')

@@ -255,6 +255,23 @@ describe('JobDetailPage Source/Studio Sheets (COMPLETED, narrow viewport)', () =
 // the chapter list aren't on screen together with the Chat pane. These tests force the
 // desktop layout, where Source/Chat/Studio render inline simultaneously, to exercise the
 // carried-over ask -> history -> citation-seek and segment/chapter-seek behavior.
+describe('JobDetailPage title (COMPLETED, desktop layout)', () => {
+  it('heads the Source pane with the title, keeping the file name beside it', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(mockTranscript, [], { title: '王小明專訪：預算與人力', category: 'interview' })
+
+    expect(await screen.findByRole('heading', { name: '王小明專訪：預算與人力' })).toBeInTheDocument()
+    expect(screen.getByText(baseJob.fileName, { exact: false })).toBeInTheDocument()
+  })
+
+  it('heads it with the file name when there is no title', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob()
+
+    expect(await screen.findByRole('heading', { name: baseJob.fileName })).toBeInTheDocument()
+  })
+})
+
 describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
   it('shows each tool as a tile saying where it stands, without the tools themselves', async () => {
     stubDesktopLayout()

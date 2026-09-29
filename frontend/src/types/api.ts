@@ -26,6 +26,9 @@ export interface AuthResponse {
 /** 轉錄語言: zh-TW 中文(預設)、en 英文、auto 請語音辨識在中文與英文之間自動偵測。 */
 export type TranscriptionLanguage = 'zh-TW' | 'en' | 'auto'
 
+/** A job's category (類型): judged by the AI from the content, changeable by the user. */
+export type JobCategory = 'meeting' | 'lecture' | 'interview' | 'podcast' | 'video' | 'other'
+
 export interface Job {
   jobId: string
   userId: string
@@ -39,6 +42,9 @@ export interface Job {
   createdAt: string
   updatedAt: string
   transcriptionLanguage: TranscriptionLanguage
+  /** 標題: the AI's or the user's; null (or absent, from older gateways) shows the file name instead. */
+  title?: string | null
+  category?: JobCategory | null
 }
 
 export interface JobListResponse {

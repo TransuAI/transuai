@@ -177,6 +177,12 @@ describe('toMarkdownReport', () => {
     qaHistory: [],
   }
 
+  it("heads the report with the job's title when it has one, keeping the file name", () => {
+    const report = toMarkdownReport({ ...content, title: '產品週會：預算確認' })
+
+    expect(report.startsWith('# 產品週會：預算確認\n\n- 檔名：週會.m4a\n- 長度：1:02:05\n')).toBe(true)
+  })
+
   it('writes the title, job info, summary, chapters and transcript in that order', () => {
     expect(toMarkdownReport(content)).toBe(
       [

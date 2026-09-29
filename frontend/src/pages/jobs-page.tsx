@@ -4,8 +4,10 @@ import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Trash2, Upload } from 'lucide-react'
 import { jobsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
+import { CATEGORY_LABELS, jobDisplayName } from '@/lib/job-display'
 import { formatBytes, formatDuration } from '@/lib/media'
 import { JobStatusBadge } from '@/components/job-status-badge'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -97,7 +99,16 @@ export function JobsPage() {
           <Card key={job.jobId}>
             <CardContent className="flex items-center justify-between gap-4 py-4">
               <Link to={`/jobs/${job.jobId}`} className="flex-1 min-w-0">
-                <p className="truncate font-medium">{job.fileName}</p>
+                <div className="flex min-w-0 items-center gap-2">
+                  <p className="truncate font-medium">{jobDisplayName(job)}</p>
+                  {job.category && (
+                    <Badge variant="outline" className="shrink-0 font-normal text-muted-foreground">
+                      {CATEGORY_LABELS[job.category]}
+                    </Badge>
+                  )}
+                </div>
+                {/* The file name stays in view, to match it with the file on the user's computer. */}
+                {job.title && <p className="truncate text-xs text-muted-foreground">{job.fileName}</p>}
                 <p className="text-sm text-muted-foreground">
                   {formatBytes(job.fileSizeBytes)} · {formatDuration(job.durationSeconds)} ·{' '}
                   {new Date(job.createdAt).toLocaleString()}

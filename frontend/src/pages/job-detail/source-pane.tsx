@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { FileAudio, FileText, FileVideo, PanelLeftClose } from 'lucide-react'
+import { jobDisplayName } from '@/lib/job-display'
 import { formatBytes, formatDuration, formatShortDateTime } from '@/lib/media'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { Button } from '@/components/ui/button'
@@ -50,10 +51,12 @@ export function SourcePane({
             <FileIcon className="size-4" />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
-            <h2 title={job.fileName} className="truncate text-sm leading-snug font-medium">
-              {job.fileName}
+            <h2 title={jobDisplayName(job)} className="truncate text-sm leading-snug font-medium">
+              {jobDisplayName(job)}
             </h2>
-            <p className="truncate text-xs text-muted-foreground tabular-nums">
+            <p title={job.fileName} className="truncate text-xs text-muted-foreground tabular-nums">
+              {/* With a title the file name moves down here, to match it with the file on the user's computer. */}
+              {job.title && `${job.fileName} · `}
               {formatDuration(job.durationSeconds)} · {formatBytes(job.fileSizeBytes)} · {formatShortDateTime(job.createdAt)}
             </p>
           </div>

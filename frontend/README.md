@@ -79,9 +79,10 @@ src/
     current-segment.ts 依播放時間找出「目前片段」(定義見 CONTEXT.md),二分搜尋
     download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>);開啟伺服器給的下載 URL(跨網域 presigned 連結靠回應的 Content-Disposition 下載)
     editor-keys.ts     就地編輯器(片段文字、講者名稱)共用的按鍵:Enter 儲存、Esc 取消,輸入法組字中不處理
-    export-formats.ts  匯出格式轉換(不依賴畫面):`buildExportContent` 把工作區內容組成匯出輸入,每種格式是一個 `ExportFormat`(檔名結尾、MIME、render):TXT 純文字 / 含時間戳、SRT、VTT、Markdown 報告(長度與建立時間、摘要、章節、逐字稿,可選問答紀錄——只匯出已完成的回答,查過網路的那一題在時間戳之後列出「網路來源」(編號同回答裡的 [n]、Markdown 連結;沒查到時註明);摘要過時時附註);測驗另外是 `toQuizMarkdown`(輸入是整份測驗而不是工作區內容,檔名結尾與 MIME 在 `QUIZ_MARKDOWN`):題目與選項在前,最後一節是解答、解說與依據的時間戳,過時時附註;共用規則——已清空片段不匯出、兩位以上講者才標示講者、文字格式時間戳 mm:ss / h:mm:ss、檔名取原始檔名去副檔名
+    export-formats.ts  匯出格式轉換(不依賴畫面):`buildExportContent` 把工作區內容組成匯出輸入,每種格式是一個 `ExportFormat`(檔名結尾、MIME、render):TXT 純文字 / 含時間戳、SRT、VTT、Markdown 報告(大標是標題、沒有就檔名,有標題時多一行檔名;長度與建立時間、摘要、章節、逐字稿,可選問答紀錄——只匯出已完成的回答,查過網路的那一題在時間戳之後列出「網路來源」(編號同回答裡的 [n]、Markdown 連結;沒查到時註明);摘要過時時附註);測驗另外是 `toQuizMarkdown`(輸入是整份測驗而不是工作區內容,檔名結尾與 MIME 在 `QUIZ_MARKDOWN`):題目與選項在前,最後一節是解答、解說與依據的時間戳,過時時附註;共用規則——已清空片段不匯出、兩位以上講者才標示講者、文字格式時間戳 mm:ss / h:mm:ss、檔名取原始檔名去副檔名
     navigation.ts      離開這個網站到別的網址(連結帳號時到 Google / Notion);獨立出來讓測試可以替換(jsdom 不能換頁)
     local-time.ts      <input type="datetime-local">(瀏覽器時區、沒有時差)與 API 的 ISO 8601(含時差)互轉
+    job-display.ts     Job 的顯示名稱(有標題用標題,否則檔名;規則只在這裡)與類型的中文名稱
     media.ts           檔案型別判斷、讀取媒體長度、格式化工具(長度、檔案大小、「9/26 14:07」這種簡短時間)
     providers.ts       自有金鑰支援的廠商與顯示名稱;模型怎麼稱呼(「平台模型(…)」/「OpenAI · gpt-5」)、兩個模型是不是同一個
     usage-format.ts    用量數字的格式:token 數加千分位、轉錄秒數換成分鐘(Job 用量與本月用量共用)
@@ -91,7 +92,7 @@ src/
   pages/
     login-page.tsx / register-page.tsx
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete;檔案長度限制 60 分鐘(前端檢查),音訊 120MB、影片 1GB 以內(後端檢查);錄音的語言:中文(預設)/ 英文 / 自動偵測(中文或英文,選它時提示判斷成中文的錯字較多)
-    jobs-page.tsx           Job 列表、分頁、刪除
+    jobs-page.tsx           Job 列表(標題與類型徽章,有標題時檔名小字留在下面)、分頁、刪除
     settings-page.tsx       設定頁(側邊欄「設定」):預設模型、自有金鑰、已連結的帳號、會後處理(Notion 位置、待辦去處)、本月用量、帳號(登出所有裝置);存入或刪除金鑰後重新載入可選的模型
     settings/
       default-model-section.tsx 預設模型:平台模型與有金鑰的廠商的模型(單選),有 OpenRouter 金鑰時可輸入模型 ID;換模型不會重做既有內容
@@ -104,7 +105,7 @@ src/
       export-menu.tsx          工作區頂列的「匯出」下拉選單(桌面 / 手機都有):下載各格式(報告可勾選是否包含問答紀錄)、每份已完成的測驗一項(選了才載入題目,轉成測驗 Markdown)、複製逐字稿 / 摘要(以上全部在瀏覽器產生),以及下載原始檔(向 Gateway 要 `media-url?download=true` 的附件 URL)
       completed-workspace.tsx  COMPLETED 的三欄工作區(桌面 grid / 手機 Sheet,確保同時只有一個 media element;桌面的兩側欄隨螢幕加寬(lg / xl / 2xl),各自可以收合成窄條把空間讓給問答,收合時仍掛著(只是隱藏),播放不中斷:桌面在來源欄、手機在迷你播放器;來源 Sheet 打開時聚焦 Sheet 本身而非搜尋框;標了 data-consumes-escape 的控制項(有內容的搜尋框、片段編輯器)按 Esc 做自己的事,不會關 Sheet)
       mini-player.tsx          手機版常駐底部播放列:播放 / 暫停、進度條、時間、一行目前片段文字(多位講者時前面加「名稱：」),影片顯示 16:9 小畫面
-      source-pane.tsx          來源欄:檔案資訊(檔名過長截斷,滑過看全名)、收合按鈕(只有桌面)、播放器(只有桌面 grid 那份有,由 completed-workspace 以 player slot 傳入)、講者區塊、逐字稿
+      source-pane.tsx          來源欄:檔案資訊(標題,沒有就檔名,過長截斷、滑過看全名;有標題時檔名移到下面那行)、收合按鈕(只有桌面)、播放器(只有桌面 grid 那份有,由 completed-workspace 以 player slot 傳入)、講者區塊、逐字稿
       speaker-panel.tsx        講者區塊:還有片段的講者,每位一顆膠囊(顏色點 + 名稱 + 鉛筆);點一下就地改名(Enter 存 / Esc 取消,名稱清空＝恢復「講者 N」,存檔失敗保留輸入);只有一位講者時不顯示
       speaker-dot.tsx          講者的顏色點(講者區塊、逐字稿換人處共用)
       chat-pane.tsx            問答欄:輸入框旁可以臨時換回答的模型(預設是預設模型,只影響這一次提問;選的是預設模型時不帶 model,由伺服器用當下的預設模型);每則回答標示「由 某模型 回答」;模型出錯時顯示廠商與原因;部署能查網路時(`/ai/models` 的 `webSearch`)輸入框旁有「查網路」切換鈕(`aria-pressed`,手機上只有地球圖示;在這個頁面上保持最後的選擇,重新整理回到關閉),開著時輸入框下方顯示「本月還能查 N 次」(`/me/usage` 的網路搜尋上限減掉這個月成功的次數,每次查過網路後重新載入),用完時切換鈕停用並說明「這個月的網路搜尋已用完,下個月 1 日恢復」(不查網路的問答照常);開著時這一題帶 `webSearch: true`:回答裡指到網路來源的 [n] 變成連到那個網頁的小上標連結,錄音的時間戳之後列出「網路來源」(編號、標題(過長截斷)、網域,新分頁開啟、`noopener noreferrer`),搜尋失敗時改成一行「這次沒查到網路資料,只根據內容回答」;查了網路的問題旁有小地球,問答紀錄重新載入後照樣顯示;回答時在問題下方逐步列出正在做的步驟(SSE `step`,依 id 就地更新:理解問題、在內容裡找相關的段落、查網路(顯示送出的搜尋查詢與找到幾個網頁)、撰寫回答;進行中轉圈、完成打勾、失敗標紅),回答完成後收成一行「完成 N 個步驟」可以再展開;步驟不保存,重新整理後的紀錄沒有
