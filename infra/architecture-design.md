@@ -29,6 +29,7 @@ AI Service 消費訊息
   → 讀取逐字稿，呼叫 HF Inference Providers 產出摘要（兩位以上講者時輸入帶講者名稱，章節也是）
   → 呼叫 HF Inference Providers 依片段時間戳切章節
   → 呼叫 HF Inference Providers 把逐字稿片段轉成向量，存進 embeddings（供之後 RAG 問答用）
+  → 依摘要與章節替 Job 取標題、判斷類型，回寫 Upload Service（失敗只記 log，不影響 Job）
   → 更新 Job status: summarizing → completed
   → 發送訊息「處理完成」到 MQ
 
@@ -306,6 +307,10 @@ CREATE TABLE jobs (
     transcription_language VARCHAR(10),     -- zh-TW / en / auto（上傳時選的轉錄語言；之前的 Job 是 NULL，當成中文）
     status VARCHAR(30) NOT NULL DEFAULT 'pending',
     error_reason TEXT,
+    title VARCHAR(100),                     -- 標題：AI 依內容取的或使用者改的；NULL 顯示檔名（upload-service CONTEXT.md）
+    category VARCHAR(20),                   -- 類型：meeting / lecture / interview / podcast / video / other
+    title_set_by_user BOOLEAN,              -- 使用者改過就是 true，AI 之後不再寫這個欄位
+    category_set_by_user BOOLEAN,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );

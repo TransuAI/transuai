@@ -40,6 +40,15 @@ service UploadService {
 service InternalJobService {
   // 更新 Job 狀態（例如 transcribing / transcribed / failed），失敗時可附上 error_reason。
   rpc UpdateJobStatus(UpdateJobStatusRequest) returns (Job);
+  // AI 依內容建議的標題與類型（ai-service 的 pipeline 在摘要之後呼叫）。使用者改過的欄位不動；空字串的欄位不動；
+  // 類型不在清單裡回 INVALID_ARGUMENT。job_id 格式不對回 INVALID_ARGUMENT、找不到回 NOT_FOUND。
+  rpc SetSuggestedDetails(SetSuggestedDetailsRequest) returns (Job);
+}
+
+message SetSuggestedDetailsRequest {
+  string job_id = 1;
+  string title = 2;
+  string category = 3;
 }
 
 enum FileType {
@@ -74,6 +83,10 @@ message Job {
   google.protobuf.Timestamp updated_at = 11;
   // 轉錄語言：zh-TW（中文）、en（英文）、auto（自動偵測中文或英文）。這個欄位之前建立的 Job 是空字串，當成中文。
   string transcription_language = 12;
+  // 標題（見 upload-service CONTEXT.md）：AI 依內容取的，或使用者改的；空字串是沒有標題（顯示檔名）。
+  string title = 13;
+  // 類型：meeting、lecture、interview、podcast、video、other；空字串是還沒判斷。
+  string category = 14;
 }
 
 message GetPresignedUploadUrlRequest {
