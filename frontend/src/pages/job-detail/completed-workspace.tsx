@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, FileText, PanelLeftOpen, PanelRightOpen, Sparkles, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, BookmarkPlus, FileText, PanelLeftOpen, PanelRightOpen, Sparkles, type LucideIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { answerNoteText, noteTime } from '@/lib/notes'
 import { isSummaryStale } from '@/lib/staleness'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
@@ -10,6 +12,7 @@ import { SourcePane } from '@/pages/job-detail/source-pane'
 import type { SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
 import type { NotesActions } from '@/hooks/use-notes'
 import { ChatPane, type QaEntry } from '@/pages/job-detail/chat-pane'
+import type { NoteToOpen } from '@/pages/job-detail/notes-section'
 import { ExportMenu } from '@/pages/job-detail/export-menu'
 import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
@@ -80,6 +83,17 @@ function keepOpenForControlsThatConsumeEscape(event: KeyboardEvent) {
 function focusSheetInsteadOfSearch(event: Event) {
   event.preventDefault()
   if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus()
+}
+
+// The N key adds a note — but not while the user is typing, holding a modifier (shortcuts of the browser's own), in a
+// menu (N picks an item there) or in a dialog (whatever is behind it isn't what they're looking at).
+function isAddNoteKey(event: KeyboardEvent): boolean {
+  if (event.key !== 'n' && event.key !== 'N') return false
+  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.isComposing) return false
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return true
+  if (target.isContentEditable || target.closest('input, textarea, select, [role="dialog"], [role="menu"], [role="listbox"]')) return false
+  return true
 }
 
 // A folded side pane on desktop: a slim strip that unfolds it again (its name is in the tooltip).
@@ -164,6 +178,7 @@ export function CompletedWorkspace({
   const [studioCollapsed, setStudioCollapsed] = useState(false)
   // The Studio tool on show (null: the tiles), shared by the grid and the Sheet so closing either keeps the place.
   const [studioTool, setStudioTool] = useState<StudioTool | null>(null)
+  const [noteToOpen, setNoteToOpen] = useState<NoteToOpen | null>(null)
 
   if (isDesktop !== lastIsDesktop) {
     setLastIsDesktop(isDesktop)
@@ -172,6 +187,54 @@ export function CompletedWorkspace({
       setStudioOpen(false)
     }
   }
+
+  // A note added or picked anywhere opens in the Studio's 筆記 — unfolded on desktop, its Sheet on a phone.
+  const openNote = (noteId: string, edit: boolean) => {
+    setStudioTool('notes')
+    setStudioCollapsed(false)
+    if (!isDesktop) {
+      setSourceOpen(false)
+      setStudioOpen(true)
+    }
+    setNoteToOpen({ noteId, edit })
+  }
+  const onNoteOpened = useCallback(() => setNoteToOpen(null), [])
+  // A bookmark first (saved even if nothing gets typed), then opened for writing.
+  const addNoteAt = async (seconds: number) => {
+    try {
+      const note = await notes.add({ timeSeconds: noteTime(seconds) })
+      openNote(note.noteId, true)
+    } catch {
+      toast.error('筆記沒有存到')
+    }
+  }
+  const addNoteNow = () => {
+    const seconds = currentTime()
+    if (seconds !== null) void addNoteAt(seconds)
+  }
+  const saveAnswerAsNote = async (entry: QaEntry) => {
+    const note = await notes.add({
+      text: answerNoteText(entry.answer, entry.webSources?.length ?? 0),
+      timeSeconds: entry.sourceTimestamps[0],
+      source: 'qa',
+    })
+    toast.success('已存成筆記', { action: { label: '查看', onClick: () => openNote(note.noteId, false) } })
+  }
+
+  const addNoteNowRef = useRef(addNoteNow)
+  useEffect(() => {
+    addNoteNowRef.current = addNoteNow
+  })
+  useEffect(() => {
+    if (!mediaAvailable) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isAddNoteKey(event)) return
+      event.preventDefault()
+      addNoteNowRef.current()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [mediaAvailable])
 
   const sourcePaneProps = {
     job,
@@ -184,20 +247,41 @@ export function CompletedWorkspace({
     onRenameSpeaker,
     speakerSuggestions,
     onAssignSpeaker,
+    notes: notes.notes,
+    onAddNoteAt: (seconds: number) => void addNoteAt(seconds),
+    onOpenNote: (noteId: string) => openNote(noteId, false),
   }
-  const desktopPlayer =
-    mediaUrl &&
-    (job.fileType === 'VIDEO' ? (
-      <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-lg bg-black" />
-    ) : (
-      <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
-    ))
+  const desktopPlayer = mediaUrl && (
+    <div className="flex flex-col gap-1.5">
+      {job.fileType === 'VIDEO' ? (
+        <video ref={setMediaRef} src={mediaUrl} controls className="w-full rounded-lg bg-black" />
+      ) : (
+        <audio ref={setMediaRef} src={mediaUrl} controls className="w-full" />
+      )}
+      <Button
+        size="xs"
+        variant="ghost"
+        aria-keyshortcuts="N"
+        title="在目前播放的時間加筆記（N）"
+        onClick={addNoteNow}
+        className="self-end text-muted-foreground"
+      >
+        <BookmarkPlus />
+        加筆記
+        <kbd aria-hidden className="rounded border px-1 font-sans text-[10px] leading-4">
+          N
+        </kbd>
+      </Button>
+    </div>
+  )
   const renderStudioPane = (desktop: { onCollapse: () => void; className?: string } | null) => (
     <StudioPane
       tool={studioTool}
       onToolChange={setStudioTool}
       notes={notes}
       currentTime={currentTime}
+      noteToOpen={noteToOpen}
+      onNoteOpened={onNoteOpened}
       onCollapse={desktop?.onCollapse}
       className={desktop?.className}
       summary={summary}
@@ -242,6 +326,7 @@ export function CompletedWorkspace({
       modelChoices={modelChoices}
       selectedModel={selectedModel}
       onSelectModel={onSelectModel}
+      onSaveAsNote={saveAnswerAsNote}
     />
   )
 
@@ -311,6 +396,7 @@ export function CompletedWorkspace({
               currentSpeaker={
                 transcript && currentSegment ? shownSpeakerOf(currentSegment, transcript.segments, transcript.speakers) : null
               }
+              onAddNote={addNoteNow}
             />
           )}
         </div>

@@ -6,7 +6,7 @@ import { formatDuration } from '@/lib/media'
 import { formatCount, formatMinutes } from '@/lib/usage-format'
 import { Card } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { NotesSection } from '@/pages/job-detail/notes-section'
+import { NotesSection, type NoteToOpen } from '@/pages/job-detail/notes-section'
 import { PostMeetingSection } from '@/pages/job-detail/post-meeting-section'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
 import { UsageSection } from '@/pages/job-detail/usage-section'
@@ -44,6 +44,8 @@ interface StudioPaneProps {
   notes: NotesActions
   /** Where playback is now, for adding a note there; null without a player. */
   currentTime: () => number | null
+  noteToOpen: NoteToOpen | null
+  onNoteOpened: () => void
   /** The tool on show; null shows the tiles. Kept by the workspace so it survives the Sheet closing. */
   tool: StudioTool | null
   onToolChange: (tool: StudioTool | null) => void
@@ -76,6 +78,8 @@ export function StudioPane({
   isExecutingProposals,
   notes,
   currentTime,
+  noteToOpen,
+  onNoteOpened,
   tool,
   onToolChange,
   onCollapse,
@@ -266,7 +270,14 @@ export function StudioPane({
           )}
 
           {tool === 'notes' && (
-            <NotesSection notes={notes} onSeek={onSeek} mediaAvailable={mediaAvailable} currentTime={currentTime} />
+            <NotesSection
+              notes={notes}
+              onSeek={onSeek}
+              mediaAvailable={mediaAvailable}
+              currentTime={currentTime}
+              noteToOpen={noteToOpen}
+              onNoteOpened={onNoteOpened}
+            />
           )}
 
           {tool === 'usage' && <UsageSection usage={usage} />}

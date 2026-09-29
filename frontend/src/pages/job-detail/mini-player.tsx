@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Pause, Play } from 'lucide-react'
+import { BookmarkPlus, Pause, Play } from 'lucide-react'
 import { useMediaPlayback } from '@/hooks/use-media-playback'
 import { formatDuration } from '@/lib/media'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,8 @@ interface MiniPlayerProps {
   currentSegmentText: string | null
   /** The current segment's speaker, when speakers are shown at all (two or more of them). */
   currentSpeaker: Speaker | null
+  /** 加筆記 where playback is now. */
+  onAddNote: () => void
 }
 
 // Narrow viewports only: a bar pinned under the Chat pane that owns the workspace's single
@@ -26,6 +28,7 @@ export function MiniPlayer({
   setMediaRef,
   currentSegmentText,
   currentSpeaker,
+  onAddNote,
 }: MiniPlayerProps) {
   const [media, setMedia] = useState<HTMLMediaElement | null>(null)
   const mediaRef = useCallback(
@@ -76,6 +79,9 @@ export function MiniPlayer({
           </span>
         </div>
       </div>
+      <Button size="icon" variant="ghost" aria-label="加筆記" title="加筆記" disabled={!media} onClick={onAddNote}>
+        <BookmarkPlus />
+      </Button>
     </section>
   )
 }

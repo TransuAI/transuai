@@ -399,6 +399,100 @@ describe('JobDetailPage notes (筆記, COMPLETED, desktop layout)', () => {
   })
 })
 
+describe('JobDetailPage adding notes while listening (筆記)', () => {
+  const note = (noteId: string, timeSeconds: number | null, text: string, source: 'manual' | 'qa' = 'manual') => ({
+    noteId, jobId: 'job-1', timeSeconds, text, source, createdAt: '2026-09-30T00:00:00Z', updatedAt: '2026-09-30T00:00:00Z',
+  })
+  const audio = () => document.querySelector('audio') as HTMLMediaElement
+
+  it('bookmarks where playback is from the button by the player, and opens the note to write in', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.create).mockResolvedValue(note('n1', 42.3, ''))
+    await renderGappedTranscriptOnDesktop()
+    audio().currentTime = 42.34
+
+    await user.click(screen.getByRole('button', { name: '加筆記' }))
+
+    expect(notesApi.create).toHaveBeenCalledWith('job-1', { timeSeconds: 42.3 })
+    expect(await screen.findByRole('textbox', { name: '編輯筆記' })).toHaveFocus()
+  })
+
+  it('does the same on the N key, but not while typing', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.create).mockResolvedValue(note('n1', 5, ''))
+    await renderGappedTranscriptOnDesktop()
+    audio().currentTime = 5
+
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), 'n')
+    expect(notesApi.create).not.toHaveBeenCalled()
+
+    ;(document.activeElement as HTMLElement).blur()
+    await user.keyboard('n')
+    expect(notesApi.create).toHaveBeenCalledWith('job-1', { timeSeconds: 5 })
+  })
+
+  it('adds a note at a segment from its actions', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.create).mockResolvedValue(note('n1', 8, ''))
+    await renderGappedTranscriptOnDesktop()
+
+    const row = screen.getByText('第二句').closest('[data-segment-index]') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '在這裡加筆記' }))
+
+    expect(notesApi.create).toHaveBeenCalledWith('job-1', { timeSeconds: 8 })
+    expect(await screen.findByRole('textbox', { name: '編輯筆記' })).toBeInTheDocument()
+  })
+
+  it('marks the segments that have notes, and opens the note from the mark', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    // 11s falls in the silence after 第二句 (8–10s): it's marked there, not on the next one.
+    vi.mocked(notesApi.list).mockResolvedValue([note('n1', 9, '這句要回去確認'), note('n2', 11, ''), note('n3', null, '心得')])
+    await renderGappedTranscriptOnDesktop()
+
+    const row = screen.getByText('第二句').closest('[data-segment-index]') as HTMLElement
+    const mark = await within(row).findByRole('button', { name: '筆記：這句要回去確認' })
+    expect(within(row).getByRole('button', { name: '筆記：書籤' })).toBeInTheDocument()
+    expect(within(screen.getByText('第一句').closest('[data-segment-index]') as HTMLElement)
+      .queryByRole('button', { name: /^筆記：/ })).not.toBeInTheDocument()
+
+    await user.click(mark)
+    expect(within(screen.getByRole('list', { name: '筆記' })).getByText('這句要回去確認')).toBeInTheDocument()
+  })
+
+  it('saves an answer as a note, without its web links and at its first cited time', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(notesApi.create).mockResolvedValue(note('n1', 42, '預算要砍一成。', 'qa'))
+    await renderCompletedJob(mockTranscript, [{
+      question: '預算怎麼了？', answer: '預算要砍一成 [1]。', sourceTimestamps: [42, 50], createdAt: '2026-01-01T00:00:00Z',
+      modelProvider: 'platform', model: 'Qwen/Qwen3.5-9B', webSearch: true, webSources: [{ title: 't', url: 'https://example.com' }],
+    }])
+
+    await user.click(await screen.findByRole('button', { name: '存成筆記' }))
+
+    expect(notesApi.create).toHaveBeenCalledWith('job-1', { text: '預算要砍一成。', timeSeconds: 42, source: 'qa' })
+    expect(await screen.findByText('已存成筆記')).toBeInTheDocument()
+  })
+
+  it('adds a note from the mini player on a phone', async () => {
+    const user = userEvent.setup()
+    vi.mocked(notesApi.create).mockResolvedValue(note('n1', 3, ''))
+    await renderCompletedJob(gappedTranscript)
+    const player = await screen.findByRole('region', { name: '播放器' })
+    await waitFor(() => expect(player.querySelector('audio')).not.toBeNull())
+    audio().currentTime = 3
+
+    await user.click(within(player).getByRole('button', { name: '加筆記' }))
+
+    expect(notesApi.create).toHaveBeenCalledWith('job-1', { timeSeconds: 3 })
+    expect(await within(await screen.findByRole('dialog')).findByRole('textbox', { name: '編輯筆記' })).toBeInTheDocument()
+  })
+})
+
 describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
   it('asks a question, appends it to history, and seeks the media player from a citation timestamp', async () => {
     const matchMediaSpy = stubDesktopLayout()

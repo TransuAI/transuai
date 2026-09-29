@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Pencil, Undo2 } from 'lucide-react'
+import { BookmarkPlus, Pencil, StickyNote, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { handleEditorKeys } from '@/lib/editor-keys'
 import { formatDuration } from '@/lib/media'
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { SegmentSpeakerMenu } from '@/pages/job-detail/segment-speaker-menu'
 import { SpeakerNameInput } from '@/pages/job-detail/speaker-name-input'
 import { SpeakerDot } from '@/pages/job-detail/speaker-dot'
-import type { Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
+import type { Note, Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
 
 function HighlightedText({ text, matches, activeStart }: { text: string; matches: TranscriptMatch[]; activeStart: number | null }) {
   const parts = []
@@ -52,6 +52,11 @@ interface SegmentRowProps {
   /** Who the segment can be handed to (改講者). */
   speakerChoices: Speaker[]
   onAssignSpeaker: (assignment: SpeakerAssignment) => Promise<void>
+  /** The 筆記 pinned within this segment's time, marked by its timestamp. */
+  notes: Note[]
+  /** 在這裡加筆記: a note at the segment's start. */
+  onAddNote: () => void
+  onOpenNote: (noteId: string) => void
 }
 
 // One 片段 of the transcript: its timestamp (click to seek), its text (search matches
@@ -73,6 +78,9 @@ export function SegmentRow({
   onSave,
   speakerChoices,
   onAssignSpeaker,
+  notes,
+  onAddNote,
+  onOpenNote,
 }: SegmentRowProps) {
   // When the editor closes, give keyboard focus back to this segment's edit button rather than
   // letting it fall to <body>.
@@ -138,14 +146,33 @@ export function SegmentRow({
         isCurrent && 'bg-primary/10 hover:bg-primary/10',
       )}
     >
-      <button
-        type="button"
-        disabled={!mediaAvailable}
-        onClick={() => onSeek(segment.startTime)}
-        className="row-start-2 mt-px h-fit rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground tabular-nums enabled:hover:bg-accent enabled:hover:text-accent-foreground disabled:opacity-60"
-      >
-        {formatDuration(segment.startTime)}
-      </button>
+      <div className="row-start-2 flex flex-col items-center gap-1">
+        <button
+          type="button"
+          disabled={!mediaAvailable}
+          onClick={() => onSeek(segment.startTime)}
+          className="mt-px h-fit rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground tabular-nums enabled:hover:bg-accent enabled:hover:text-accent-foreground disabled:opacity-60"
+        >
+          {formatDuration(segment.startTime)}
+        </button>
+        {notes.length > 0 && (
+          // One mark per note, its text on hover; clicking opens it in the Studio.
+          <div className="flex flex-wrap justify-center gap-0.5">
+            {notes.map((note) => (
+              <button
+                key={note.noteId}
+                type="button"
+                aria-label={`筆記：${note.text || '書籤'}`}
+                title={note.text || '書籤'}
+                onClick={() => onOpenNote(note.noteId)}
+                className="rounded p-0.5 text-primary hover:bg-accent"
+              >
+                <StickyNote className="size-3.5" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       {isAddingSpeaker ? (
         <div className="col-start-2 row-start-1 mb-1">
           <SpeakerNameInput
@@ -235,6 +262,9 @@ export function SegmentRow({
               onAddSpeaker={() => setIsAddingSpeaker(true)}
               triggerClassName={toolbarButton}
             />
+            <button type="button" aria-label="在這裡加筆記" title="在這裡加筆記" onClick={onAddNote} className={toolbarButton}>
+              <BookmarkPlus className="size-3.5" />
+            </button>
             <button ref={editButtonRef} type="button" aria-label="編輯片段" onClick={onStartEdit} className={toolbarButton}>
               <Pencil className="size-3.5" />
             </button>

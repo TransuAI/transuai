@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BookmarkPlus, MessageCircle, NotebookPen, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NotesActions } from '@/hooks/use-notes'
+import { noteTime } from '@/lib/notes'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
 import type { Note } from '@/types/api'
@@ -14,21 +16,46 @@ interface NotesSectionProps {
   mediaAvailable: boolean
   /** Where playback is now, for 「在目前時間加筆記」; null without a player. */
   currentTime: () => number | null
+  /** A note to bring into view (and open for writing, with edit), asked for from elsewhere — the player, the
+   *  transcript, 問答. Handled once: onNoteOpened clears it. */
+  noteToOpen: NoteToOpen | null
+  onNoteOpened: () => void
+}
+
+export interface NoteToOpen {
+  noteId: string
+  edit: boolean
 }
 
 // 筆記 (see upload-service CONTEXT.md) in the Studio: by time, unpinned ones last. A note pinned to a time plays from
 // there; one with a time and no text is a bookmark (書籤).
-export function NotesSection({ notes, onSeek, mediaAvailable, currentTime }: NotesSectionProps) {
+export function NotesSection({ notes, onSeek, mediaAvailable, currentTime, noteToOpen, onNoteOpened }: NotesSectionProps) {
   const [drafting, setDrafting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  // The note just opened from elsewhere, briefly highlighted so the eye finds it in the list.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
+  const listRef = useRef<HTMLOListElement>(null)
+
+  useEffect(() => {
+    if (!noteToOpen) return
+    if (noteToOpen.edit) setEditingId(noteToOpen.noteId)
+    setHighlightedId(noteToOpen.noteId)
+    onNoteOpened()
+  }, [noteToOpen, onNoteOpened])
+  useEffect(() => {
+    if (!highlightedId) return
+    listRef.current?.querySelector(`[data-note-id="${highlightedId}"]`)?.scrollIntoView?.({ block: 'nearest' })
+    const timer = setTimeout(() => setHighlightedId(null), 2000)
+    return () => clearTimeout(timer)
+  }, [highlightedId])
 
   // A bookmark first (it's saved even if the user types nothing), then open it for writing.
   const addAtCurrentTime = async () => {
     const seconds = currentTime()
     if (seconds === null) return
     try {
-      const note = await notes.add({ timeSeconds: Math.round(seconds * 10) / 10 })
+      const note = await notes.add({ timeSeconds: noteTime(seconds) })
       setEditingId(note.noteId)
     } catch {
       toast.error(NOT_SAVED)
@@ -64,9 +91,16 @@ export function NotesSection({ notes, onSeek, mediaAvailable, currentTime }: Not
         />
       )}
       {notes.notes.length > 0 ? (
-        <ol aria-label="筆記" className="flex flex-col divide-y">
+        <ol ref={listRef} aria-label="筆記" className="flex flex-col divide-y">
           {notes.notes.map((note) => (
-            <li key={note.noteId} className="flex flex-col gap-1.5 py-2.5 first:pt-0">
+            <li
+              key={note.noteId}
+              data-note-id={note.noteId}
+              className={cn(
+                '-mx-2 flex flex-col gap-1.5 rounded-md px-2 py-2.5 transition-colors duration-700 first:pt-0',
+                highlightedId === note.noteId && 'bg-primary/10',
+              )}
+            >
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 {note.timeSeconds !== null ? (
                   <TimestampButton seconds={note.timeSeconds} onSeek={onSeek} mediaAvailable={mediaAvailable} />

@@ -205,7 +205,9 @@ export function JobDetailPage() {
   const quizzes = useQuizzes(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const postMeeting = usePostMeeting(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const notes = useNotes(jobId, jobStatus === 'COMPLETED')
-  const currentTime = () => (mediaElement ? mediaElement.currentTime : null)
+  // Capped at the recorded length: a media element can report a little past it at the very end, and a note's time must
+  // fall within the recording.
+  const currentTime = () => (mediaElement ? Math.min(mediaElement.currentTime, job?.durationSeconds ?? Infinity) : null)
 
   const seekTo = (seconds: number) => {
     if (mediaElement) {

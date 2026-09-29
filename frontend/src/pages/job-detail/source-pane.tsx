@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card'
 import { SpeakerPanel, type SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
 import { TranscriptView } from '@/pages/job-detail/transcript-view'
 import { cn } from '@/lib/utils'
-import type { Job, SpeakerAssignment, Transcript } from '@/types/api'
+import type { Job, Note, SpeakerAssignment, Transcript } from '@/types/api'
 
 interface SourcePaneProps {
   job: Job
@@ -23,6 +23,10 @@ interface SourcePaneProps {
   onRenameSpeaker: (label: string, name: string) => Promise<void>
   speakerSuggestions: SpeakerSuggestionActions
   onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
+  /** 筆記, marked on the transcript. */
+  notes: Note[]
+  onAddNoteAt: (seconds: number) => void
+  onOpenNote: (noteId: string) => void
   /** Folds the pane into a rail (desktop grid only). */
   onCollapse?: () => void
   className?: string
@@ -40,6 +44,9 @@ export function SourcePane({
   onRenameSpeaker,
   speakerSuggestions,
   onAssignSpeaker,
+  notes,
+  onAddNoteAt,
+  onOpenNote,
   onCollapse,
   className,
 }: SourcePaneProps) {
@@ -92,6 +99,9 @@ export function SourcePane({
             onSeek={onSeek}
             onSaveSegmentText={onSaveSegmentText}
             onAssignSpeaker={onAssignSpeaker}
+            notes={notes}
+            onAddNoteAt={onAddNoteAt}
+            onOpenNote={onOpenNote}
           />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">

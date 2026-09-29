@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
-import { AlertCircle, Check, ChevronRight, CircleAlert, Globe, Loader2Icon, MessageCircle } from 'lucide-react'
+import { AlertCircle, BookmarkPlus, Check, ChevronRight, CircleAlert, Globe, Loader2Icon, MessageCircle } from 'lucide-react'
+import { toast } from 'sonner'
 import { modelLabel } from '@/lib/providers'
 import { cn } from '@/lib/utils'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
@@ -93,6 +94,8 @@ interface ChatPaneProps {
   /** Searches left this month (用量上限); null when unknown. */
   webSearchesLeft: number | null
   onWebSearchChange: (on: boolean) => void
+  /** 存成筆記: keeps a finished answer as a note; rejects when saving fails. */
+  onSaveAsNote: (entry: QaEntry) => Promise<void>
 }
 
 const USED_UP = '這個月的網路搜尋已用完，下個月 1 日恢復'
@@ -131,6 +134,32 @@ function AnswerText({ text, webSources }: { text: string; webSources: WebSource[
         )
       })}
     </>
+  )
+}
+
+// 存成筆記 under a finished answer; once saved it says so (and stays saved while the answer is on screen).
+function SaveAsNoteButton({ onSave }: { onSave: () => Promise<void> }) {
+  const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      className="ml-auto text-muted-foreground"
+      disabled={state !== 'idle'}
+      onClick={async () => {
+        setState('saving')
+        try {
+          await onSave()
+          setState('saved')
+        } catch {
+          toast.error('筆記沒有存到')
+          setState('idle')
+        }
+      }}
+    >
+      <BookmarkPlus />
+      {state === 'saved' ? '已存' : '存成筆記'}
+    </Button>
   )
 }
 
@@ -177,6 +206,7 @@ export function ChatPane({
   webSearch,
   webSearchesLeft,
   onWebSearchChange,
+  onSaveAsNote,
 }: ChatPaneProps) {
   // Once this month's searches are used up the switch is off and can't be turned on; the questions themselves go on.
   const usedUp = webSearchesLeft === 0
@@ -220,8 +250,11 @@ export function ChatPane({
                       <AnswerText text={entry.answer} webSources={entry.webSources ?? []} />
                     </p>
                   )}
-                  {entry.model && entry.status !== 'error' && (
-                    <p className="text-xs text-muted-foreground/80">由 {entry.model} 回答</p>
+                  {entry.status !== 'error' && (entry.model || (entry.status === 'done' && entry.answer)) && (
+                    <div className="flex items-center gap-2">
+                      {entry.model && <p className="text-xs text-muted-foreground/80">由 {entry.model} 回答</p>}
+                      {entry.status === 'done' && entry.answer && <SaveAsNoteButton onSave={() => onSaveAsNote(entry)} />}
+                    </div>
                   )}
                   {/* With steps the running one already spins; the plain spinner is for answers that send none. */}
                   {entry.status === 'streaming' && !entry.steps?.length && (

@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import { LocateFixed } from 'lucide-react'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useTranscriptSearch } from '@/hooks/use-transcript-search'
+import { notesBySegment } from '@/lib/notes'
 import { speakersAtTurns, speakersWithSegments } from '@/lib/speakers'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SegmentRow } from '@/pages/job-detail/segment-row'
 import { TranscriptSearchBar } from '@/pages/job-detail/transcript-search-bar'
-import type { Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
+import type { Note, Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
 
 // Markup of the shadcn ScrollArea (components/ui/scroll-area.tsx) this view relies on.
 const VIEWPORT_SELECTOR = '[data-slot="scroll-area-viewport"]'
@@ -30,6 +31,8 @@ function centerIfOutsideMiddleBand(viewport: HTMLElement, segment: HTMLElement, 
   viewport.scrollTo({ top: viewport.scrollTop + segmentCenter - viewport.clientHeight / 2, behavior })
 }
 
+const NO_NOTES: Note[] = []
+
 interface TranscriptViewProps {
   segments: TranscriptSegment[]
   speakers: Speaker[]
@@ -39,6 +42,9 @@ interface TranscriptViewProps {
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
+  notes: Note[]
+  onAddNoteAt: (seconds: number) => void
+  onOpenNote: (noteId: string) => void
 }
 
 export function TranscriptView({
@@ -50,6 +56,9 @@ export function TranscriptView({
   onSeek,
   onSaveSegmentText,
   onAssignSpeaker,
+  notes,
+  onAddNoteAt,
+  onOpenNote,
 }: TranscriptViewProps) {
   const { isFollowing, pause, resume } = autoFollow
   const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -59,6 +68,7 @@ export function TranscriptView({
   const turnSpeakers = useMemo(() => speakersAtTurns(segments, speakers), [segments, speakers])
   // The same speakers as the speaker panel lists, even for a single-speaker recording.
   const speakerChoices = useMemo(() => speakersWithSegments(segments, speakers), [segments, speakers])
+  const segmentNotes = useMemo(() => notesBySegment(notes, segments), [notes, segments])
 
   // Clicking the transcript text should give the viewport keyboard focus, so that a
   // following PageDown/Space — which the browser uses to scroll the viewport — also reaches
@@ -147,6 +157,9 @@ export function TranscriptView({
               onSave={(text) => onSaveSegmentText(segment.id, text)}
               speakerChoices={speakerChoices}
               onAssignSpeaker={(assignment) => onAssignSpeaker(segment.id, assignment)}
+              notes={segmentNotes.get(i) ?? NO_NOTES}
+              onAddNote={() => onAddNoteAt(segment.startTime)}
+              onOpenNote={onOpenNote}
             />
           ))}
         </div>
