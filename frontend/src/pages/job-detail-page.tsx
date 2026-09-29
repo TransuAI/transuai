@@ -292,6 +292,20 @@ export function JobDetailPage() {
         },
         onModel: (answeredBy) => patchEntry({ model: answeredBy.model }),
         onWebSources: (result) => patchEntry({ webSources: result.sources }),
+        // A step that comes again (running → done) updates its row in place; a new one is added at the end.
+        onStep: (step) =>
+          setQaHistory((prev) =>
+            prev.map((entry) => {
+              if (entry.id !== id) return entry
+              const steps = entry.steps ?? []
+              return {
+                ...entry,
+                steps: steps.some((s) => s.id === step.id)
+                  ? steps.map((s) => (s.id === step.id ? step : s))
+                  : [...steps, step],
+              }
+            }),
+          ),
         ...(searchesTheWeb && { webSearch: true }),
         // Only a model picked for this question is sent; for the default the server uses whatever it is by now.
         ...(selectedModel && !sameModel(defaultModel, selectedModel) && {

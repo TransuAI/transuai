@@ -1,6 +1,7 @@
 import { apiFetch, apiFetchVoid, requestSse } from '@/lib/api-client'
 import type { ModelRef } from '@/lib/providers'
 import type {
+  AnswerStep,
   AuthResponse,
   AvailableModels,
   Chapter,
@@ -128,6 +129,8 @@ export interface QaStreamHandlers {
   onModel?: (model: ModelChoice) => void
   /** What the web search found; arrives once, between the sources and the model, only when the question searched the web. */
   onWebSources?: (result: WebSearchResult) => void
+  /** A step of answering (理解問題, 找段落, 查網路, 撰寫回答); the same step comes again as it moves on. */
+  onStep?: (step: AnswerStep) => void
   signal?: AbortSignal
   /** A model for this question only; the default model when omitted. */
   model?: ModelRef
@@ -164,6 +167,9 @@ export const qaApi = {
             break
           case 'web_sources':
             handlers.onWebSources?.(JSON.parse(data) as WebSearchResult)
+            break
+          case 'step':
+            handlers.onStep?.(JSON.parse(data) as AnswerStep)
             break
         }
       },

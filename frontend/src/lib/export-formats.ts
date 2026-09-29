@@ -1,6 +1,6 @@
 import { speakerNameLookup } from '@/lib/speakers'
 import { isSummaryStale } from '@/lib/staleness'
-import type { Chapter, Job, QuizQuestion, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, QuizQuestion, Summary, Transcript, WebSource } from '@/types/api'
 
 // 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
 // 這裡只負責「內容長什麼樣」，下載 / 複製由呼叫端處理。
@@ -22,7 +22,16 @@ export interface ExportContent {
   segments: ExportSegment[]
   summary: { text: string; isStale: boolean } | null
   chapters: { title: string; startTime: number }[]
-  qaHistory: { question: string; answer: string; sourceTimestamps: number[] }[]
+  qaHistory: ExportQaTurn[]
+}
+
+/** One Q&A turn in an export: the answer, its recording timestamps and, when it searched the web (查網路), its web sources. */
+export interface ExportQaTurn {
+  question: string
+  answer: string
+  sourceTimestamps: number[]
+  webSearch?: boolean
+  webSources?: WebSource[]
 }
 
 export interface ExportSource {
@@ -31,7 +40,7 @@ export interface ExportSource {
   summary: Summary | null
   chapters: Chapter[]
   /** Q&A turns as shown in the Chat pane; a turn with a status other than 'done' is left out. */
-  qaHistory: { question: string; answer: string; sourceTimestamps: number[]; status?: string }[]
+  qaHistory: (ExportQaTurn & { status?: string })[]
 }
 
 export function buildExportContent(source: ExportSource): ExportContent {
@@ -53,7 +62,13 @@ export function buildExportContent(source: ExportSource): ExportContent {
     // A half-streamed or failed answer isn't something to hand to other people.
     qaHistory: qaHistory
       .filter((turn) => turn.status === undefined || turn.status === 'done')
-      .map(({ question, answer, sourceTimestamps }) => ({ question, answer, sourceTimestamps })),
+      .map(({ question, answer, sourceTimestamps, webSearch, webSources }) => ({
+        question,
+        answer,
+        sourceTimestamps,
+        webSearch,
+        webSources,
+      })),
   }
 }
 
@@ -160,6 +175,11 @@ function localDateTime(isoTimestamp: string) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
+// A page title as a Markdown link's text: brackets would end the text early.
+function markdownLinkText(title: string) {
+  return title.replace(/[[\]]/g, (bracket) => `\\${bracket}`)
+}
+
 // Markdown 報告：標題、長度與建立時間、摘要、章節、逐字稿，最後是（有的話）問答紀錄。每一節都是一
 // 個個以空行分隔的段落——Markdown 會把連續的行併成一段，所以逐字稿每個片段之間也空一行（行的內容
 // 跟含時間戳 TXT 相同，只是多了空行）。
@@ -189,6 +209,12 @@ export function toMarkdownReport(content: ExportContent): string {
       blocks.push(`### ${turn.question.replace(/\s*\n\s*/g, ' ')}`, turn.answer)
       if (turn.sourceTimestamps.length > 0) {
         blocks.push(`引用：${turn.sourceTimestamps.map((seconds) => `[${formatClock(seconds)}]`).join('、')}`)
+      }
+      // Numbered like the answer's [n], so a reader of the file can follow them too.
+      if (turn.webSources && turn.webSources.length > 0) {
+        blocks.push('網路來源：', turn.webSources.map((source, i) => `${i + 1}. [${markdownLinkText(source.title)}](${source.url})`).join('\n'))
+      } else if (turn.webSearch) {
+        blocks.push('（這一題查了網路，但沒查到網路資料）')
       }
     }
   }

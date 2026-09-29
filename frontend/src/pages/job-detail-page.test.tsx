@@ -1368,6 +1368,64 @@ describe('JobDetailPage web search (查網路, COMPLETED, desktop layout)', () =
   })
 })
 
+describe('JobDetailPage answer steps (COMPLETED, desktop layout)', () => {
+  const step = (id: string, label: string, state: 'running' | 'done' | 'failed', detail = '') => ({ id, label, state, detail })
+
+  it('shows each step while answering, then folds them into one line that opens again', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    let finish: () => void = () => {}
+    vi.mocked(qaApi.ask).mockImplementation(async (_jobId, _question, handlers) => {
+      handlers.onStep?.(step('retrieve', '在內容裡找相關的段落', 'running'))
+      handlers.onStep?.(step('retrieve', '在內容裡找相關的段落', 'done', '找到 5 段'))
+      handlers.onSources([12])
+      handlers.onStep?.(step('search', '查網路', 'running', '搜尋「pgvector」'))
+      await new Promise<void>((resolve) => (finish = resolve))
+      handlers.onStep?.(step('search', '查網路', 'done', '搜尋「pgvector」· 找到 2 個網頁'))
+      handlers.onStep?.(step('answer', '撰寫回答', 'running'))
+      handlers.onDelta('答案')
+      handlers.onStep?.(step('answer', '撰寫回答', 'done'))
+    })
+    await renderCompletedJob()
+
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), 'pgvector 是什麼？{Enter}')
+
+    const steps = await screen.findByRole('list', { name: '回答步驟' })
+    const items = within(steps).getAllByRole('listitem')
+    expect(items).toHaveLength(2) // one row per step, updated in place
+    expect(items[0]).toHaveTextContent('在內容裡找相關的段落')
+    expect(items[0]).toHaveTextContent('找到 5 段')
+    expect(items[0]).toHaveTextContent('完成')
+    expect(items[1]).toHaveTextContent('查網路')
+    expect(items[1]).toHaveTextContent('搜尋「pgvector」')
+    expect(items[1]).toHaveTextContent('進行中')
+
+    await act(async () => finish())
+
+    const summary = await screen.findByRole('button', { name: /完成 3 個步驟/ })
+    expect(summary).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('list', { name: '回答步驟' })).not.toBeInTheDocument()
+    await user.click(summary)
+    expect(within(screen.getByRole('list', { name: '回答步驟' })).getAllByRole('listitem')).toHaveLength(3)
+  })
+
+  it('marks a step that failed', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(qaApi.ask).mockImplementation(async (_jobId, _question, handlers) => {
+      handlers.onStep?.(step('search', '查網路', 'failed', '搜尋「pgvector」· 沒查到，只根據內容回答'))
+      await new Promise(() => {}) // still answering
+    })
+    await renderCompletedJob()
+
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), 'pgvector 是什麼？{Enter}')
+
+    const item = within(await screen.findByRole('list', { name: '回答步驟' })).getByRole('listitem')
+    expect(item).toHaveTextContent('失敗')
+    expect(item).toHaveTextContent('沒查到，只根據內容回答')
+  })
+})
+
 describe('JobDetailPage answering model (COMPLETED, desktop layout)', () => {
   it('leaves the model to the server while the default model is picked', async () => {
     const user = userEvent.setup()

@@ -1,5 +1,5 @@
-import { useId } from 'react'
-import { AlertCircle, Globe, Loader2Icon, MessageCircle } from 'lucide-react'
+import { useId, useState } from 'react'
+import { AlertCircle, Check, ChevronRight, CircleAlert, Globe, Loader2Icon, MessageCircle } from 'lucide-react'
 import { modelLabel } from '@/lib/providers'
 import { cn } from '@/lib/utils'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { ModelChoice, WebSource } from '@/types/api'
+import type { AnswerStep, ModelChoice, WebSource } from '@/types/api'
 
 export type QaEntryStatus = 'streaming' | 'done' | 'error'
 
@@ -25,6 +25,53 @@ export interface QaEntry {
   webSearch?: boolean
   /** The web pages the answer drew on, numbered as its [n]; empty once known that the search found nothing to use. */
   webSources?: WebSource[]
+  /** The steps of answering, as they came (one per id, updated in place); not kept, so absent from the history. */
+  steps?: AnswerStep[]
+}
+
+const STEP_STATE: Record<AnswerStep['state'], string> = { running: '進行中', done: '完成', failed: '失敗' }
+
+// What the answer is doing, like Claude's: listed while it answers, then folded into one line that opens again.
+function AnswerSteps({ steps, status }: { steps: AnswerStep[]; status: QaEntryStatus }) {
+  const [open, setOpen] = useState(false)
+  const listId = useId()
+  const answering = status === 'streaming'
+  return (
+    <div className="flex flex-col gap-1.5">
+      {!answering && (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => setOpen((shown) => !shown)}
+          className="flex w-fit items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight aria-hidden className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
+          {status === 'error' ? `${steps.length} 個步驟` : `完成 ${steps.length} 個步驟`}
+        </button>
+      )}
+      {(answering || open) && (
+        <ol id={listId} aria-label="回答步驟" className="ml-1.5 flex flex-col gap-1.5 border-l pl-3">
+          {steps.map((step) => (
+            <li key={step.id} className="flex items-start gap-2 text-xs">
+              {step.state === 'running' ? (
+                <Loader2Icon aria-hidden className="mt-px size-3.5 shrink-0 animate-spin text-primary" />
+              ) : step.state === 'failed' ? (
+                <CircleAlert aria-hidden className="mt-px size-3.5 shrink-0 text-destructive" />
+              ) : (
+                <Check aria-hidden className="mt-px size-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="sr-only">{STEP_STATE[step.state]}：</span>
+              <span className="flex min-w-0 flex-col">
+                <span className={cn(step.state === 'running' ? 'text-foreground' : 'text-muted-foreground')}>{step.label}</span>
+                {step.detail && <span className="break-words text-muted-foreground/80">{step.detail}</span>}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
 }
 
 interface ChatPaneProps {
@@ -167,6 +214,7 @@ export function ChatPane({
                       </span>
                     )}
                   </div>
+                  {entry.steps && entry.steps.length > 0 && <AnswerSteps steps={entry.steps} status={entry.status} />}
                   {entry.answer && (
                     <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
                       <AnswerText text={entry.answer} webSources={entry.webSources ?? []} />
@@ -175,7 +223,8 @@ export function ChatPane({
                   {entry.model && entry.status !== 'error' && (
                     <p className="text-xs text-muted-foreground/80">由 {entry.model} 回答</p>
                   )}
-                  {entry.status === 'streaming' && (
+                  {/* With steps the running one already spins; the plain spinner is for answers that send none. */}
+                  {entry.status === 'streaming' && !entry.steps?.length && (
                     <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
                   )}
                   {entry.status === 'error' && (

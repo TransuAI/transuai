@@ -152,6 +152,15 @@ export interface WebSource {
   url: string
 }
 
+/** One step of answering a question (見 ai.proto AnswerStep), shown while it happens; the same id comes again as it moves on. */
+export interface AnswerStep {
+  /** understand / retrieve / search / answer */
+  id: string
+  label: string
+  state: 'running' | 'done' | 'failed'
+  detail: string
+}
+
 /** What a question's web search found; `failed` when the search didn't go through and the answer uses the content only. */
 export interface WebSearchResult {
   sources: WebSource[]

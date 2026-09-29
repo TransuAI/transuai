@@ -226,6 +226,29 @@ describe('toMarkdownReport', () => {
     expect(report.endsWith('## 問答紀錄\n\n### 預算怎麼了?\n\n要再確認。\n\n引用：[06:40]、[1:02:05]\n')).toBe(true)
   })
 
+  it("lists an answer's web sources, numbered as its [n], after the recording's", () => {
+    const report = toMarkdownReport({
+      ...content,
+      qaHistory: [{
+        question: 'pgvector 是什麼?', answer: 'Postgres 的向量擴充 [1]。', sourceTimestamps: [400],
+        webSources: [{ title: 'pgvector', url: 'https://github.com/pgvector/pgvector' }, { title: 'Supabase', url: 'https://supabase.com/pgvector' }],
+      }],
+    })
+
+    expect(report.endsWith(
+      '引用：[06:40]\n\n網路來源：\n\n1. [pgvector](https://github.com/pgvector/pgvector)\n2. [Supabase](https://supabase.com/pgvector)\n',
+    )).toBe(true)
+  })
+
+  it('says so when an answer searched the web but found nothing to use', () => {
+    const report = toMarkdownReport({
+      ...content,
+      qaHistory: [{ question: '問?', answer: '答', sourceTimestamps: [], webSearch: true, webSources: [] }],
+    })
+
+    expect(report.endsWith('### 問?\n\n答\n\n（這一題查了網路，但沒查到網路資料）\n')).toBe(true)
+  })
+
   it('keeps a multi-line question on its heading line', () => {
     const report = toMarkdownReport({ ...content, qaHistory: [{ question: '第一行\n第二行', answer: '答', sourceTimestamps: [] }] })
 
@@ -255,6 +278,19 @@ describe('buildExportContent', () => {
     })
 
     expect(content.qaHistory.map((turn) => turn.question)).toEqual(['完成的'])
+  })
+
+  it('carries the web sources of a turn that searched the web', () => {
+    const pgvector = { title: 'pgvector', url: 'https://github.com/pgvector/pgvector' }
+    const content = buildExportContent({
+      job: { jobId: 'job-1', userId: 'u', fileName: 'a.mp3', fileType: 'AUDIO', fileSizeBytes: 1, storagePath: 'p', durationSeconds: 1, status: 'COMPLETED', errorReason: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', transcriptionLanguage: 'zh-TW' },
+      transcript: null,
+      summary: null,
+      chapters: [],
+      qaHistory: [{ question: '查了', answer: '答 [1]', sourceTimestamps: [], status: 'done', webSearch: true, webSources: [pgvector] }],
+    })
+
+    expect(content.qaHistory[0]).toMatchObject({ webSearch: true, webSources: [pgvector] })
   })
 })
 
