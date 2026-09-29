@@ -146,6 +146,13 @@ docker compose exec rabbitmq rabbitmqctl list_queues
    ```
    Gmail 建立草稿的權限（`gmail.compose`）屬於 Google 的受限權限：應用程式通過 Google 的審查之前，只有 OAuth 同意畫面裡
    登記的測試使用者能連結。
+8. （要讓問答能「查網路」才需要）到 [tavily.com](https://tavily.com) 申請一把 API key（平台付費，免費方案整個平台每月 1,000 次
+   搜尋），補進 secret 後重啟 ai-service；沒設定時問答照常，只是不能查網路、前端不顯示開關：
+   ```bash
+   kubectl -n transuai patch secret app-secrets --type merge -p \
+     "{\"stringData\":{\"TAVILY_API_KEY\":\"$(cut -d= -f2 <<< "$(grep ^TAVILY_API_KEY= ../ai-service/.env)")\"}}"
+   kubectl -n transuai rollout restart deployment ai-service
+   ```
 
 ### 從本機用 localhost 存取
 

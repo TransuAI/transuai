@@ -504,6 +504,9 @@ message AskQuestionRequest {
   string question = 3;
   // 這一次提問臨時用的模型（只看 provider 與 model）；不給就用預設模型。
   ModelChoice model = 4;
+  // 這一題也查網路（見 ai-service CONTEXT.md「網路搜尋」）：回答前用搜尋查詢查一次網路，結果跟這段內容一起給模型。
+  // 沒設定搜尋服務時忽略（當成 false）。
+  bool web_search = 5;
 }
 
 message AskQuestionChunk {
@@ -518,7 +521,21 @@ message AskQuestionChunk {
     string error = 3;
     // 這次用哪個模型回答（sources 之後、第一個 delta 之前送出恰好一次；只設 provider 與 model）。
     ModelChoice answered_by = 4;
+    // 只有這一題真的查了網路（web_search 且有設定搜尋服務）時送出恰好一次，在 sources 之後、answered_by 之前：放進回答依據的
+    // 網路來源，順序就是回答裡 [1]、[2] 的編號。搜尋失敗時 sources 是空的、failed 是 true，回答照樣只根據這段內容產生。
+    WebSources web_sources = 5;
   }
+}
+
+// 網路搜尋的一筆結果：回答依據的一個網頁。
+message WebSource {
+  string title = 1;
+  string url = 2;
+}
+
+message WebSources {
+  repeated WebSource sources = 1;
+  bool failed = 2;
 }
 
 message SourceTimestamps {
@@ -538,6 +555,10 @@ message QaTurn {
   // 回答這一則的模型；記錄模型之前的問答是空字串。provider 是 "platform" 或廠商名稱。
   string model_provider = 5;
   string model = 6;
+  // 這一題有沒有查網路；查了但搜尋失敗時 web_sources 是空的。
+  bool web_search = 7;
+  // 回答依據的網路來源，順序就是回答裡 [n] 的編號（跟 AskQuestionChunk.web_sources 同義）。
+  repeated WebSource web_sources = 8;
 }
 
 message ListQaHistoryResponse {
@@ -576,6 +597,8 @@ message ListAvailableModelsRequest {
 message ListAvailableModelsResponse {
   repeated ModelChoice models = 1;
   bool openrouter_custom = 2;
+  // 問答可以查網路（部署有設定搜尋服務）；false 時前端不顯示「查網路」。
+  bool web_search = 3;
 }
 
 // 一個可以選的模型。provider 是 "platform"（平台模型）或廠商名稱。

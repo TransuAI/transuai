@@ -208,12 +208,14 @@ POST   /jobs/{jobId}/post-meeting/{runId}/execute  執行勾選的行動提案�
                                          （確認、可能改過的最終參數）；回傳每項的結果（成功附連結、失敗附原因）
 POST   /jobs/{jobId}/post-meeting/{runId}/proposals/{proposalId}/retry  用同樣的最終參數重試一個失敗的提案
 POST   /jobs/{jobId}/quizzes/{quizId}/attempts  送出一次作答，body { "answers": number[] }；後端計分並保存，回傳分數與每題結果
-GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料；每則附回答的 modelProvider / model）
-POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string, "model"?: { provider, model } }
-                                         （model 只用在這一次提問，省略就用預設模型），回傳 text/event-stream（SSE，
-                                         逐字串流，含一個說明由哪個模型回答的 model event），不是一次性 JSON
+GET    /qa/{jobId}                      取得這個 job 的完整問答紀錄（對話記憶跟顯示共用同一份資料；每則附回答的 modelProvider / model、
+                                         有沒有查網路 webSearch 與網路來源 webSources）
+POST   /qa/{jobId}                      RAG 問答（含對話記憶），body { "question": string, "model"?: { provider, model },
+                                         "webSearch"?: boolean }（model 只用在這一次提問，省略就用預設模型；webSearch 為 true 時這一題
+                                         也用 Tavily 查一次網路，見 ai-service ADR 0014），回傳 text/event-stream（SSE，逐字串流，含一個
+                                         說明由哪個模型回答的 model event；查了網路時多一個 web_sources event），不是一次性 JSON
 GET    /ai/models                       可以選的模型：平台模型，加上有自有金鑰的廠商整理好的清單（標示能不能呼叫工具）；
-                                         有 OpenRouter 金鑰時可以自己輸入模型 ID（openrouterCustom）
+                                         有 OpenRouter 金鑰時可以自己輸入模型 ID（openrouterCustom）；問答能不能查網路（webSearch）
 GET    /me/default-model                目前的預設模型（沒選過就是平台模型）
 PUT    /me/default-model                設定預設模型，body { "provider", "model" }；清單外的模型或 OpenRouter 上不存在回 400、
                                          沒有那個廠商的自有金鑰回 409、OpenRouter 查不到回 503；不會重做既有內容
@@ -409,6 +411,8 @@ CREATE TABLE qa_history (
     source_timestamps NUMERIC(10,2)[] NOT NULL,
     model_provider VARCHAR(32),             -- 回答的模型：platform 或廠商；記錄模型之前是 NULL
     model VARCHAR(200),
+    web_search BOOLEAN NOT NULL DEFAULT false, -- 這一題有沒有查網路（ai-service ADR 0014）
+    web_sources JSONB NOT NULL DEFAULT '[]',   -- 回答依據的網路來源 [{title, url}]，順序是回答裡 [n] 的編號；搜尋失敗時是空的
     created_at TIMESTAMP NOT NULL
 );
 CREATE INDEX ix_qa_history_job_id ON qa_history(job_id);
@@ -627,6 +631,7 @@ Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登
 | ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體；ai-service 也用它把整段寫成簡體的問答回答與測驗轉成繁體（本機小模型偶爾會） |
 | LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型（問答可以臨時換成別的模型）：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型預設是 HF Inference Providers 的 OpenAI 相容路由（`PLATFORM_LLM_BASE_URL` 可以改指向任何 OpenAI 相容的伺服器：本機開發用 Docker 跑的 Ollama，一般生成與會後處理都用 `qwen3:14b`（見 `ai-service/docs/adr/0011-local-post-meeting-model-qwen3-14b.md`），上雲可以用自架 vLLM 或其他託管 API，見 `infra/README.md`）（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
+| 網路搜尋（問答「查網路」） | Tavily 官方遠端 MCP（`tavily_search`，平台付費的 `TAVILY_API_KEY`；由系統在回答前查一次，不給模型工具；只送出一句搜尋查詢，見 `ai-service/docs/adr/0014-qa-web-search-by-the-system.md`） |
 | 已連結的帳號（會後處理用） | Google OAuth（平台自己的 OAuth client，只要 Calendar 活動、Gmail 建立草稿、Tasks 的權限）與 Notion 官方遠端 MCP 的 OAuth（PKCE + 動態註冊 client）；權杖用自有金鑰那套 AES-GCM 加密存在 ai-service，state 綁定開始連結的瀏覽器（見 `ai-service/README.md`「已連結的帳號」） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
@@ -649,6 +654,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
 | **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
 | **LLM（摘要/章節分段/問答，ai-service）** | **HF Inference Providers** | 依 provider 而定，沒有像 Groq 那樣公開逐模型的固定數字 | 免費額度會隨政策調整而變動，需定期查閱官方文件確認當下額度；特定模型是否有 provider 承載也會隨時間變動，換模型前建議先查（見 `ai-service/README.md` 已知限制） |
+| **網路搜尋（ai-service，問答「查網路」）** | **Tavily** | 整個平台每月 1,000 credits（一般搜尋 1 credit／次），不用綁卡；之後 US$0.008／credit | 額度是整個平台共用，不是每位使用者；每人每月的搜尋次數上限見 `.scratch/qa-web-search` 的 02 |
 | **Embedding（ai-service）** | **HF Inference Providers** | 依 provider 而定，一般有免費額度，無需信用卡即可申請 | 特定模型是否有 provider 承載會隨時間變動，需留意 |
 
 **額度風險提醒**
