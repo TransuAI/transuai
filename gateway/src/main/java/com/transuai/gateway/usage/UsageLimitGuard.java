@@ -65,6 +65,15 @@ public class UsageLimitGuard {
         }
     }
 
+    /** 問答要查網路之前：這個月成功查網路的次數還沒到上限。沒開查網路的問答不用檢查。 */
+    public void requireWebSearchesLeft(UUID userId) {
+        Long used = unlessUnavailable(() -> usage.webSearchesThisMonth(userId));
+        if (used != null && used >= limits.webSearches()) {
+            throw new UsageLimitReachedException("這個月的網路搜尋已經到用量上限（%s 次），下個月 1 日恢復；不查網路的問答照常可以用"
+                    .formatted(number(limits.webSearches())), UsageMonth.secondsUntilNextMonth());
+        }
+    }
+
     public void requirePlatformTokensLeft(UUID userId) {
         requirePlatformTokensLeft(userId, null);
     }

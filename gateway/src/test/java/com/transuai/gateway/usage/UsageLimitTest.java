@@ -37,6 +37,7 @@ import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.grpc.Status;
 import transuai.ai.v1.Ai.AskQuestionChunk;
+import transuai.ai.v1.Ai.CountUserWebSearchesResponse;
 import transuai.ai.v1.Ai.LlmUsageSum;
 import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.Quiz;
@@ -49,6 +50,7 @@ import transuai.transcription.v1.TranscriptionServiceGrpc;
 /** 每月用量上限（見 .scratch/pre-launch-hardening/issues/04）：轉錄分鐘數與平台模型的 token，這裡調小。 */
 @SpringBootTest(properties = {
         "app.usage-limits.transcription-minutes=60", "app.usage-limits.platform-tokens=1000",
+        "app.usage-limits.web-searches=3",
 })
 @AutoConfigureMockMvc
 @Import(RedisContainerConfig.class)
@@ -85,6 +87,7 @@ class UsageLimitTest {
         when(aiServiceStub.requestQuiz(any())).thenReturn(Quiz.getDefaultInstance());
         when(aiServiceStub.askQuestion(any())).thenAnswer(call -> List.of(AskQuestionChunk.getDefaultInstance()).iterator());
         usedThisMonth(0, 0, 0);
+        searchedThisMonth(0, 0);
         defaultModel("platform");
     }
 
@@ -190,10 +193,48 @@ class UsageLimitTest {
 
     @Test
     void thisMonthsUsageComesWithTheLimits() throws Exception {
+        searchedThisMonth(2, 1);
+
         call(MockMvcRequestBuilders.get("/me/usage"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.limits.transcriptionMinutes").value(60))
-                .andExpect(jsonPath("$.limits.platformTokens").value(1000));
+                .andExpect(jsonPath("$.limits.platformTokens").value(1000))
+                .andExpect(jsonPath("$.limits.webSearches").value(3))
+                .andExpect(jsonPath("$.webSearches.succeeded").value(2))
+                .andExpect(jsonPath("$.webSearches.failed").value(1));
+    }
+
+    @Test
+    void aQuestionThatSearchesTheWebStopsOnceThisMonthsSearchesAreUsedUp() throws Exception {
+        searchedThisMonth(3, 0);
+
+        ask("{\"question\":\"q\",\"webSearch\":true}").andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("USAGE_LIMIT_REACHED"))
+                .andExpect(jsonPath("$.message").value(containsString("網路搜尋")))
+                .andExpect(header().exists("Retry-After"));
+        verify(aiServiceStub, never()).askQuestion(any());
+    }
+
+    @Test
+    void questionsThatDoNotSearchTheWebAreNotHeldBackBySearchesUsedUp() throws Exception {
+        searchedThisMonth(3, 0);
+
+        ask("{\"question\":\"q\"}").andExpect(status().is(not(429)));
+        verify(aiServiceStub).askQuestion(any());
+    }
+
+    @Test
+    void searchesThatFailedDoNotCountTowardTheLimit() throws Exception {
+        searchedThisMonth(2, 5);
+
+        ask("{\"question\":\"q\",\"webSearch\":true}").andExpect(status().is(not(429)));
+    }
+
+    @Test
+    void searchingGoesOnWhenUsageCannotBeLookedUp() throws Exception {
+        when(aiServiceStub.countUserWebSearches(any())).thenThrow(Status.UNAVAILABLE.asRuntimeException());
+
+        ask("{\"question\":\"q\",\"webSearch\":true}").andExpect(status().is(not(429)));
     }
 
     private void usedThisMonth(double transcriptionSeconds, long platformInput, long platformOutput) {
@@ -203,6 +244,11 @@ class UsageLimitTest {
                 .addSums(LlmUsageSum.newBuilder().setKeySource("platform").setInputTokens(platformInput)
                         .setOutputTokens(platformOutput))
                 .build());
+    }
+
+    private void searchedThisMonth(long succeeded, long failed) {
+        when(aiServiceStub.countUserWebSearches(any())).thenReturn(
+                CountUserWebSearchesResponse.newBuilder().setSucceeded(succeeded).setFailed(failed).build());
     }
 
     private void defaultModel(String provider) {

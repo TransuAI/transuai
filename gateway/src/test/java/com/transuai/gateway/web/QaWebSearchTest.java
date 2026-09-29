@@ -32,9 +32,15 @@ import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
+import com.google.protobuf.Timestamp;
+
 import transuai.ai.v1.Ai.AskQuestionChunk;
 import transuai.ai.v1.Ai.AskQuestionRequest;
+import transuai.ai.v1.Ai.CountUserWebSearchesResponse;
 import transuai.ai.v1.Ai.ListAvailableModelsResponse;
+import transuai.ai.v1.Ai.ListJobLlmUsageResponse;
+import transuai.ai.v1.Ai.ListJobWebSearchesResponse;
+import transuai.ai.v1.Ai.WebSearchUsage;
 import transuai.ai.v1.Ai.ListQaHistoryResponse;
 import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.QaTurn;
@@ -43,6 +49,7 @@ import transuai.ai.v1.Ai.SumUserLlmUsageResponse;
 import transuai.ai.v1.Ai.WebSource;
 import transuai.ai.v1.Ai.WebSources;
 import transuai.ai.v1.AiServiceGrpc;
+import transuai.transcription.v1.Transcription.ListJobTranscriptionUsageResponse;
 import transuai.transcription.v1.Transcription.SumUserTranscriptionUsageResponse;
 import transuai.transcription.v1.TranscriptionServiceGrpc;
 
@@ -81,6 +88,7 @@ class QaWebSearchTest {
         when(uploadServiceStub.getJob(any())).thenReturn(Job.getDefaultInstance());
         when(aiServiceStub.getDefaultModel(any())).thenReturn(ModelChoice.newBuilder().setProvider("platform").build());
         when(aiServiceStub.sumUserLlmUsage(any())).thenReturn(SumUserLlmUsageResponse.getDefaultInstance());
+        when(aiServiceStub.countUserWebSearches(any())).thenReturn(CountUserWebSearchesResponse.getDefaultInstance());
         when(transcriptionServiceStub.sumUserTranscriptionUsage(any()))
                 .thenReturn(SumUserTranscriptionUsageResponse.getDefaultInstance());
     }
@@ -149,6 +157,29 @@ class QaWebSearchTest {
         call(MockMvcRequestBuilders.get("/ai/models"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.webSearch").value(true));
+    }
+
+    @Test
+    void aJobsUsageListsEachWebSearchAmongItsCalls() throws Exception {
+        when(aiServiceStub.listJobLlmUsage(any())).thenReturn(ListJobLlmUsageResponse.getDefaultInstance());
+        when(transcriptionServiceStub.listJobTranscriptionUsage(any()))
+                .thenReturn(ListJobTranscriptionUsageResponse.getDefaultInstance());
+        when(aiServiceStub.listJobWebSearches(any())).thenReturn(ListJobWebSearchesResponse.newBuilder()
+                .addRecords(WebSearchUsage.newBuilder().setProvider("tavily").setSucceeded(true)
+                        .setCreatedAt(Timestamp.newBuilder().setSeconds(1_800_000_000)))
+                .addRecords(WebSearchUsage.newBuilder().setProvider("tavily").setSucceeded(false)
+                        .setCreatedAt(Timestamp.newBuilder().setSeconds(1_800_000_060)))
+                .build());
+
+        call(MockMvcRequestBuilders.get("/jobs/" + JOB + "/usage"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.records[0].kind").value("web_search"))
+                .andExpect(jsonPath("$.records[0].feature").value("web_search"))
+                .andExpect(jsonPath("$.records[0].provider").value("tavily"))
+                .andExpect(jsonPath("$.records[0].keySource").value("platform"))
+                .andExpect(jsonPath("$.records[0].succeeded").value(true))
+                .andExpect(jsonPath("$.records[1].succeeded").value(false))
+                .andExpect(jsonPath("$.totals.webSearches").value(1));
     }
 
     private AskQuestionRequest sentRequest() {

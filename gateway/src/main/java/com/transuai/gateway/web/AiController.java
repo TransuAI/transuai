@@ -125,6 +125,9 @@ public class AiController {
             @RequestBody QuestionRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
         usageLimitGuard.requirePlatformTokensLeft(userId, request.model());
+        if (request.searchesTheWeb()) {
+            usageLimitGuard.requireWebSearchesLeft(userId);
+        }
 
         AskQuestionRequest.Builder askRequest = AskQuestionRequest.newBuilder()
                 .setJobId(jobId)

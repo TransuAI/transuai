@@ -109,14 +109,14 @@ docker compose up -d
 | `GET` | `/me/provider-keys` | 登入者的自有金鑰：`[{ provider, last4, createdAt }]`，金鑰本身永遠不回傳；轉給 `ListProviderKeys` |
 | `PUT` | `/me/provider-keys/{provider}` | 存入或替換自有金鑰，body `{ key }`（`provider` 是 `openai` / `anthropic` / `gemini` / `openrouter`）；ai-service 先向廠商驗證，無效回 400（附原因）、廠商暫時連不上回 503、沒設定主金鑰回 409，都不會存；轉給 `SaveProviderKey` |
 | `DELETE` | `/me/provider-keys/{provider}` | 刪除自有金鑰，回 `{ deleted, defaultModelReset }`（預設模型正在用它時改回平台模型）；轉給 `DeleteProviderKey` |
-| `GET` | `/jobs/{jobId}/usage` | 這個 Job 的用量：`{ records, totals }`，`records` 依時間排序，每筆有 `kind`（`llm` / `transcription`）、`feature`、`provider`、`model`、`keySource`、`inputTokens`、`outputTokens`、`audioSeconds`（未知是 `null`）、`succeeded`、`createdAt`；`totals` 是已知數字的加總。LLM 用量來自 ai-service 的 `ListJobLlmUsage`，轉錄用量來自 transcription-service 的 `ListJobTranscriptionUsage`（`feature` 是 `transcription`、`keySource` 是 `platform`），在這裡合併 |
+| `GET` | `/jobs/{jobId}/usage` | 這個 Job 的用量：`{ records, totals }`，`records` 依時間排序，每筆有 `kind`（`llm` / `transcription` / `web_search`）、`feature`、`provider`、`model`、`keySource`、`inputTokens`、`outputTokens`、`audioSeconds`（未知是 `null`）、`succeeded`、`createdAt`；`totals` 是已知數字的加總。LLM 用量來自 ai-service 的 `ListJobLlmUsage`，轉錄用量來自 transcription-service 的 `ListJobTranscriptionUsage`（`feature` 是 `transcription`、`keySource` 是 `platform`），網路搜尋來自 ai-service 的 `ListJobWebSearches`（`feature` 是 `web_search`、`model` 是空字串、沒有數字、`keySource` 是 `platform`），在這裡合併；`totals.webSearches` 是成功的搜尋次數 |
 | `GET` | `/me/post-meeting-settings` | 會後處理的設定：`{ notionMeetingsPage, todoDestination }`，`notionMeetingsPage` 是 `{ id, title, url }` 或 `null`（每場會議在這個頁面底下新增一個子頁面，含待辦清單），`todoDestination` 是 `GOOGLE_TASKS` / `NOTION`（待辦放在 Notion 會議紀錄裡）；轉給 `GetPostMeetingSettings` |
 | `PUT` | `/me/post-meeting-settings` | 儲存設定，body `{ notionMeetingsPageUrl, todoDestination }`（網址是 `null` 或空字串是不指定；`todoDestination` 是 `null` 就不變，不是 `GOOGLE_TASKS` / `NOTION` 回 400）；網址改過時 ai-service 先向 Notion 確認（沒改的沿用），沒連結 Notion 回 409、找不到或不是一般頁面回 400（附原因）、連不上 Notion 回 503；轉給 `UpdatePostMeetingSettings` |
 | `GET` | `/me/connections` | 已連結的帳號（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)）：`[{ service, status, connectedAt }]`，`service` 是 `google` / `notion`，`status` 是 `CONNECTED` / `INVALID`（已失效，要重新連結）/ `NOT_CONNECTED`；權杖永遠不回傳。轉給 `ListConnections` |
 | `GET` | `/me/connections/{service}/authorize` | 回傳 `{ authorizeUrl }`，前端把使用者轉過去（不是 302：前端的 JWT 在 header 裡，瀏覽器轉址帶不過來），同時設一個 10 分鐘的 HttpOnly、SameSite=Lax cookie（`transuai_oauth_binding`，隨機值；ai-service 只存雜湊），把這次授權綁定在這個瀏覽器；回呼網址用 `OAUTH_CALLBACK_BASE_URL`。不支援的服務回 400，伺服器沒設定 Google OAuth client 回 409，連不上 Notion 回 503；轉給 `StartConnection` |
 | `GET` | `/oauth/{service}/callback` | Google / Notion 的回呼，**不需要 JWT**（使用者由 `state` 認出來，而且要帶回開始連結時的 cookie——別人的授權網址在使用者瀏覽器裡按同意也連不到使用者的帳號上；用完就清掉 cookie）；轉給 `CompleteConnection`，成功轉址到 `{FRONTEND_URL}/settings?connected={service}`、失敗到 `?connection_failed={service}`（原因只記 log） |
 | `DELETE` | `/me/connections/{service}` | 中斷連結：向對方撤銷授權並刪除權杖，回 `{ revoked }`（撤銷失敗時權杖照樣刪除，`revoked` 是 false）；轉給 `DeleteConnection` |
-| `GET` | `/me/usage?month=YYYY-MM` | 登入者某個月的用量：`{ month, llm: [{ provider, model, keySource, inputTokens, outputTokens, calls, callsWithUnknownUsage }], transcription: [{ provider, model, audioSeconds, calls, callsWithUnknownUsage }], limits: { transcriptionMinutes, platformTokens } }`（`limits` 是每月的用量上限，見「每月用量上限」）。月份依台灣時間（`Asia/Taipei`）切成時間範圍，省略就是這個月，格式不對回 400；數字是已知的加總，`callsWithUnknownUsage` 是沒回報用量的呼叫次數。分別轉給 ai-service 的 `SumUserLlmUsage` 與 transcription-service 的 `SumUserTranscriptionUsage` |
+| `GET` | `/me/usage?month=YYYY-MM` | 登入者某個月的用量：`{ month, llm: [{ provider, model, keySource, inputTokens, outputTokens, calls, callsWithUnknownUsage }], transcription: [{ provider, model, audioSeconds, calls, callsWithUnknownUsage }], webSearches: { succeeded, failed }, limits: { transcriptionMinutes, platformTokens, webSearches } }`（`limits` 是每月的用量上限，見「每月用量上限」）。月份依台灣時間（`Asia/Taipei`）切成時間範圍，省略就是這個月，格式不對回 400；數字是已知的加總，`callsWithUnknownUsage` 是沒回報用量的呼叫次數。分別轉給 ai-service 的 `SumUserLlmUsage`、`CountUserWebSearches` 與 transcription-service 的 `SumUserTranscriptionUsage` |
 | `POST` | `/qa/{jobId}` | RAG 問答（含最近 5 輪對話記憶），body `{ "question": string, "model"?: { provider, model }, "webSearch"?: boolean }`（`model` 只用在這一次提問，省略就用預設模型；用不到的模型回 400。`webSearch` 為 true 時這一題也查網路，省略就是不查；部署沒設定搜尋服務時忽略），回傳 `text/event-stream`（SSE，見下方「問答 streaming」一節）；還沒有 embedding（pipeline 沒跑完）在串流開始前就回 404，不會是 SSE error event |
 
 #### 問答 streaming
@@ -179,9 +179,10 @@ docker compose up -d
 |---|---|---|
 | 轉錄分鐘數 | 600 分鐘（`USAGE_LIMIT_TRANSCRIPTION_MINUTES`） | `POST /uploads/presign`、`POST /uploads/complete` 回 429；兩者都帶檔案長度 `durationSeconds`（前端量的），整個檔案要放得進剩下的分鐘數——在取得上傳網址時就擋，不讓人傳完 1GB 才被拒 |
 | 平台模型的 token（輸入加輸出） | 2,000,000（`USAGE_LIMIT_PLATFORM_TOKENS`） | 要用平台模型的問答、產生測驗、重新產生摘要、開始會後處理回 429；自有金鑰的模型照常可以用（問答這次指定的模型優先，否則看預設模型） |
+| 網路搜尋次數（只算成功的） | 30 次（`USAGE_LIMIT_WEB_SEARCHES`） | 帶 `webSearch: true` 的問答回 429；不查網路的問答照常。搜尋服務一律平台付費，用自有金鑰的模型提問也算（Tavily 的免費額度是整個平台每月 1,000 次） |
 
-用量是 `/me/usage` 同一份加總（`usage/MonthlyUsage`：LLM 向 ai-service 的 `SumUserLlmUsage`、轉錄向 transcription-service 的
-`SumUserTranscriptionUsage`，自有金鑰的 LLM 用量不算），在送出之前檢查（`usage/UsageLimitGuard`）。回 `429`，body 是
+用量是 `/me/usage` 同一份加總（`usage/MonthlyUsage`：LLM 向 ai-service 的 `SumUserLlmUsage`、網路搜尋向 `CountUserWebSearches`、轉錄向
+transcription-service 的 `SumUserTranscriptionUsage`，自有金鑰的 LLM 用量不算），在送出之前檢查（`usage/UsageLimitGuard`）。回 `429`，body 是
 `{ "error": "USAGE_LIMIT_REACHED", "message": "這個月的轉錄已經到用量上限（600 分鐘），下個月 1 日恢復" }`，`Retry-After` 是到下個月
 1 日的秒數。已經在跑的不受影響（剛上傳、還在轉錄的照樣轉錄完；上傳時自動產生的摘要與章節照樣產生），所以可能超過一點：排隊中、還沒轉錄完的檔案還沒算進用量（連續上傳靠限流擋），沒回報用量的呼叫也不算。查不到用量（ai-service 或 transcription-service 連不上）時放行並記 log，跟限流一樣。問答時的 embedding 與編輯後的重算不算在上限裡（embedding 不記用量）。
 
@@ -231,7 +232,7 @@ Job id 是 UUID、不會重用，標記在有效時間內直接回 404。有效�
 | `REDIS_TIMEOUT` / `REDIS_CONNECT_TIMEOUT` | `500ms` | Redis 慢或連不上時多久放棄（放棄時限流放行、快取當作沒記住） |
 | `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`、`RATE_LIMIT_PER_USER`、`RATE_LIMIT_PER_ADDRESS`、`RATE_LIMIT_UPLOAD_URL`、`RATE_LIMIT_UPLOAD`、`RATE_LIMIT_QUESTION`、`RATE_LIMIT_QUIZ`、`RATE_LIMIT_REGENERATE`、`RATE_LIMIT_POST_MEETING`、`RATE_LIMIT_PROVIDER_KEY`、`RATE_LIMIT_TRANSCRIPT_EDIT`、`RATE_LIMIT_LINKED_SERVICE`（與各自的 `_WINDOW`） | 見「限流」的表 | 限流的上限與時間長度 |
 | `CACHE_JOB_OWNER_TTL` | `10m` | Job 擁有者快取的有效時間，見「快取」 |
-| `USAGE_LIMIT_TRANSCRIPTION_MINUTES` / `USAGE_LIMIT_PLATFORM_TOKENS` | `600` / `2000000` | 每月用量上限，見「每月用量上限」 |
+| `USAGE_LIMIT_TRANSCRIPTION_MINUTES` / `USAGE_LIMIT_PLATFORM_TOKENS` / `USAGE_LIMIT_WEB_SEARCHES` | `600` / `2000000` / `30` | 每月用量上限，見「每月用量上限」 |
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
 
 ## 專案結構

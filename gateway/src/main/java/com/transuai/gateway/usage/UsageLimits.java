@@ -9,7 +9,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param transcriptionMinutes 轉錄的分鐘數；用完就不能上傳（這個月已經上傳的照樣轉錄完）
  * @param platformTokens 平台模型的 token（輸入加輸出）；用完就不能用平台模型問答、出題、重新產生摘要、跑會後處理，改用自有金鑰
  *        的模型可以
+ * @param webSearches 問答「查網路」的次數（只算成功的；搜尋服務由平台付費，用自有金鑰的模型也算）；用完就不能查網路，沒開查網路的
+ *        問答照常
  */
 @ConfigurationProperties(prefix = "app.usage-limits")
-public record UsageLimits(int transcriptionMinutes, long platformTokens) {
+public record UsageLimits(int transcriptionMinutes, long platformTokens, int webSearches) {
 }
