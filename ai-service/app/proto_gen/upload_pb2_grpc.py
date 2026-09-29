@@ -349,6 +349,11 @@ class InternalJobServiceStub:
                 request_serializer=upload__pb2.UpdateJobStatusRequest.SerializeToString,
                 response_deserializer=upload__pb2.Job.FromString,
                 _registered_method=True)
+        self.SetSuggestedDetails = channel.unary_unary(
+                '/transuai.upload.v1.InternalJobService/SetSuggestedDetails',
+                request_serializer=upload__pb2.SetSuggestedDetailsRequest.SerializeToString,
+                response_deserializer=upload__pb2.Job.FromString,
+                _registered_method=True)
 
 
 class InternalJobServiceServicer:
@@ -364,12 +369,25 @@ class InternalJobServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SetSuggestedDetails(self, request, context):
+        """AI 依內容建議的標題與類型（ai-service 的 pipeline 在摘要之後呼叫）。使用者改過的欄位不動；空字串的欄位不動；
+        類型不在清單裡回 INVALID_ARGUMENT。job_id 格式不對回 INVALID_ARGUMENT、找不到回 NOT_FOUND。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_InternalJobServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'UpdateJobStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.UpdateJobStatus,
                     request_deserializer=upload__pb2.UpdateJobStatusRequest.FromString,
+                    response_serializer=upload__pb2.Job.SerializeToString,
+            ),
+            'SetSuggestedDetails': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetSuggestedDetails,
+                    request_deserializer=upload__pb2.SetSuggestedDetailsRequest.FromString,
                     response_serializer=upload__pb2.Job.SerializeToString,
             ),
     }
@@ -402,6 +420,33 @@ class InternalJobService:
             target,
             '/transuai.upload.v1.InternalJobService/UpdateJobStatus',
             upload__pb2.UpdateJobStatusRequest.SerializeToString,
+            upload__pb2.Job.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetSuggestedDetails(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.upload.v1.InternalJobService/SetSuggestedDetails',
+            upload__pb2.SetSuggestedDetailsRequest.SerializeToString,
             upload__pb2.Job.FromString,
             options,
             channel_credentials,

@@ -10,7 +10,9 @@ from app.repositories.summary_repository import save_summary
 from app.services.chapter_generator import generate_chapters
 from app.services.default_models import resolve_chat_model
 from app.services.embedder import embed_documents
+from app.services.job_details import suggest_details
 from app.services.job_status_client import job_status_client
+from app.services.llm_client import ChatModel
 from app.services.retry import (
     TERMINAL_FAILURE_LOST_MARKER,
     RetryableMessageError,
@@ -78,6 +80,8 @@ def process_message(
         finally:
             session.close()
 
+        _suggest_title_and_category(job_id, summary_text, chapters, model=model,
+                                    meter=UsageMeter(user_id, job_uuid, LlmFeature.JOB_TITLE))
         job_status_client.update_status(job_id, "COMPLETED")
         publish_completed(job_id)
         logger.info("job %s summarized successfully", job_id)
@@ -101,3 +105,16 @@ def process_message(
             logger.error(
                 "%s job=%s could not report FAILED status / publish job.failed even after retries",
                 TERMINAL_FAILURE_LOST_MARKER, job_id)
+
+
+def _suggest_title_and_category(job_id: str, summary: str, chapters: list[tuple[str, float]], *, model: ChatModel,
+                                meter: UsageMeter) -> None:
+    """替 Job 取標題、判斷類型並回寫（在 COMPLETED 之前，列表一完成就看得到）。只是方便找檔案的附加功能：任何失敗
+    只記 log，不重試、不讓 Job 失敗。"""
+    try:
+        details = suggest_details(summary, chapters, model=model, meter=meter)
+        if details:
+            job_status_client.set_suggested_details(job_id, details.title, details.category)
+    except Exception:
+        logger.exception("job %s: could not give it a title, it keeps its file name", job_id)
+

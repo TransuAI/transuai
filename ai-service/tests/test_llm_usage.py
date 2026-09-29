@@ -67,6 +67,7 @@ def test_the_pipeline_records_the_summary_and_the_chapters_under_the_jobs_owner(
     assert [summary_of(r) for r in saved_usage] == [
         ("summary", OWNER, "platform", "Qwen/Qwen3.5-9B", "platform", 300, 40, True),
         ("chapters", OWNER, "platform", "Qwen/Qwen3.5-9B", "platform", 250, 5, True),
+        ("job_title", OWNER, "platform", "Qwen/Qwen3.5-9B", "platform", 12, 5, True),  # see test_job_details.py
     ]
     assert all(r.job_id == job_id for r in saved_usage)
 
@@ -217,7 +218,7 @@ def test_a_malformed_owner_in_a_message_is_treated_as_unknown(fake_llm, saved_us
                                  MagicMock(), MagicMock())
 
     assert job_status_client.update_status.call_args.args[1] == "COMPLETED"
-    assert [r.user_id for r in saved_usage] == [None, None]
+    assert [r.user_id for r in saved_usage] == [None, None, None]  # the summary, the chapters and the title
 
 
 # --- 查詢（真的 Postgres）---

@@ -169,7 +169,8 @@ def test_the_pipeline_asks_the_platform_model_for_the_summary_and_the_chapters(f
         mock_transcript_client.get_transcript.return_value = transcript
         pipeline.process_message(json.dumps({"jobId": job_id}).encode(), MagicMock(), MagicMock())
 
-    assert [body["model"] for body in fake_llm.bodies()] == ["Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B"]
+    # The summary, the chapters, then the title (test_job_details.py).
+    assert [body["model"] for body in fake_llm.bodies()] == ["Qwen/Qwen3.5-9B"] * 3
     assert "大家好\n今天談預算" in fake_llm.bodies()[0]["messages"][0]["content"]
     assert "[5.0] 今天談預算" in fake_llm.bodies()[1]["messages"][0]["content"]
     assert mock_save_summary.call_args.args[2] == "這場會議討論預算"

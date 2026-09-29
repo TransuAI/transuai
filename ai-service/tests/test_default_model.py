@@ -179,8 +179,8 @@ def test_the_summary_is_made_with_the_owners_default_model_and_key(
     assert fake_llm.bodies()[0]["model"] == "gpt-5-mini"
     assert "chat_template_kwargs" not in fake_llm.bodies()[0]  # that's only for the platform model
     assert save_summary.call_args.kwargs["model"] == ("openai", "gpt-5-mini")
-    assert [(r.provider, r.model, r.key_source) for r in saved_usage] == [
-        ("openai", "gpt-5-mini", "own_key"), ("openai", "gpt-5-mini", "own_key")]
+    # The summary, the chapters and the title (test_job_details.py), all with the owner's own key.
+    assert [(r.provider, r.model, r.key_source) for r in saved_usage] == [("openai", "gpt-5-mini", "own_key")] * 3
 
 
 def test_an_owner_without_a_choice_gets_the_platform_model(ai_stub, db_session, fake_llm, saved_usage):
