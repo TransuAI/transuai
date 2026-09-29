@@ -102,8 +102,8 @@ docker compose up -d
 | `POST` | `/jobs/{jobId}/post-meeting` | 開始會後處理，body `{ "timezone": "Asia/Taipei" }`（瀏覽器的 IANA 時區），回 `202` 與上面的內容；Job 建立（上傳）的時間從 upload-service 的 `GetJob` 一起帶過去（換算相對日期）。已經有一份在跑就回那一份；不能跑（預設模型是平台模型而 ai-service 沒有設定會後處理的平台模型、自有金鑰的模型不支援工具呼叫、Google 與 Notion 都沒有連結或已失效）回 409 並附原因，時區不對回 400。轉給 `RequestPostMeeting` |
 | `POST` | `/jobs/{jobId}/post-meeting/{runId}/execute` | 執行勾選的行動提案，body `{ "proposals": [{ "proposalId": "...", "arguments": { ... } }] }`（`arguments` 是使用者確認、可能改過的最終參數），回傳整份紀錄（`latestRun` 的形狀），每個提案帶 `status`（`PROPOSED` / `DONE` / `FAILED`）、`resultUrl`、`failureReason`；沒列出的不執行，已建立的不再執行。還在跑回 409，提案不屬於這份紀錄回 400，紀錄不屬於這個 Job 回 404。轉給 `ExecuteProposals` |
 | `POST` | `/jobs/{jobId}/post-meeting/{runId}/proposals/{proposalId}/retry` | 用同樣的最終參數重試一個失敗的提案，回傳整份紀錄；不是失敗的回 409。轉給 `RetryProposal` |
-| `GET` | `/qa/{jobId}` | 取得這個 job 的完整問答紀錄（依時間升冪），回傳 `[{ question, answer, sourceTimestamps, createdAt, modelProvider, model }]`（`model` 是回答的模型，記錄模型之前的是 `null`）；一個 job 只有一段連續對話，沒有獨立的 conversation/thread（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)） |
-| `GET` | `/ai/models` | 可以選的模型：`{ models: [{ provider, model, supportsTools }], openrouterCustom }`，平台模型加上有自有金鑰的廠商整理好的清單；轉給 `ListAvailableModels` |
+| `GET` | `/qa/{jobId}` | 取得這個 job 的完整問答紀錄（依時間升冪），回傳 `[{ question, answer, sourceTimestamps, createdAt, modelProvider, model, webSearch, webSources }]`（`model` 是回答的模型，記錄模型之前的是 `null`；`webSearch` 是這一題有沒有查網路，`webSources` 是 `[{ title, url }]`，順序就是回答裡 [n] 的編號，搜尋失敗時是空的）；一個 job 只有一段連續對話，沒有獨立的 conversation/thread（見 [`../ai-service/CONTEXT.md`](../ai-service/CONTEXT.md)） |
+| `GET` | `/ai/models` | 可以選的模型：`{ models: [{ provider, model, supportsTools }], openrouterCustom, webSearch }`（`webSearch`：這個部署的問答能不能查網路），平台模型加上有自有金鑰的廠商整理好的清單；轉給 `ListAvailableModels` |
 | `GET` | `/me/default-model` | 目前的預設模型 `{ provider, model, supportsTools }`（沒選過就是平台模型）；轉給 `GetDefaultModel` |
 | `PUT` | `/me/default-model` | 設定預設模型，body `{ provider, model }`（`provider` 是 `platform` 時 `model` 可省略）；清單外的模型回 400、沒有那個廠商的自有金鑰回 409、OpenRouter 查不到回 503；轉給 `SetDefaultModel` |
 | `GET` | `/me/provider-keys` | 登入者的自有金鑰：`[{ provider, last4, createdAt }]`，金鑰本身永遠不回傳；轉給 `ListProviderKeys` |
@@ -117,16 +117,17 @@ docker compose up -d
 | `GET` | `/oauth/{service}/callback` | Google / Notion 的回呼，**不需要 JWT**（使用者由 `state` 認出來，而且要帶回開始連結時的 cookie——別人的授權網址在使用者瀏覽器裡按同意也連不到使用者的帳號上；用完就清掉 cookie）；轉給 `CompleteConnection`，成功轉址到 `{FRONTEND_URL}/settings?connected={service}`、失敗到 `?connection_failed={service}`（原因只記 log） |
 | `DELETE` | `/me/connections/{service}` | 中斷連結：向對方撤銷授權並刪除權杖，回 `{ revoked }`（撤銷失敗時權杖照樣刪除，`revoked` 是 false）；轉給 `DeleteConnection` |
 | `GET` | `/me/usage?month=YYYY-MM` | 登入者某個月的用量：`{ month, llm: [{ provider, model, keySource, inputTokens, outputTokens, calls, callsWithUnknownUsage }], transcription: [{ provider, model, audioSeconds, calls, callsWithUnknownUsage }], limits: { transcriptionMinutes, platformTokens } }`（`limits` 是每月的用量上限，見「每月用量上限」）。月份依台灣時間（`Asia/Taipei`）切成時間範圍，省略就是這個月，格式不對回 400；數字是已知的加總，`callsWithUnknownUsage` 是沒回報用量的呼叫次數。分別轉給 ai-service 的 `SumUserLlmUsage` 與 transcription-service 的 `SumUserTranscriptionUsage` |
-| `POST` | `/qa/{jobId}` | RAG 問答（含最近 5 輪對話記憶），body `{ "question": string, "model"?: { provider, model } }`（`model` 只用在這一次提問，省略就用預設模型；用不到的模型回 400），回傳 `text/event-stream`（SSE，見下方「問答 streaming」一節）；還沒有 embedding（pipeline 沒跑完）在串流開始前就回 404，不會是 SSE error event |
+| `POST` | `/qa/{jobId}` | RAG 問答（含最近 5 輪對話記憶），body `{ "question": string, "model"?: { provider, model }, "webSearch"?: boolean }`（`model` 只用在這一次提問，省略就用預設模型；用不到的模型回 400。`webSearch` 為 true 時這一題也查網路，省略就是不查；部署沒設定搜尋服務時忽略），回傳 `text/event-stream`（SSE，見下方「問答 streaming」一節）；還沒有 embedding（pipeline 沒跑完）在串流開始前就回 404，不會是 SSE error event |
 
 #### 問答 streaming
 
-`POST /qa/{jobId}` 回傳 SSE，四種 event，`data` 一律是後端已經 JSON encode 過的單行字串：
+`POST /qa/{jobId}` 回傳 SSE，五種 event，`data` 一律是後端已經 JSON encode 過的單行字串：
 
 | event | data | 說明 |
 |---|---|---|
 | `sources` | `number[]` | 檢索到的來源時間戳，恰好一次，在文字開始生成之前送出 |
-| `model` | `{ provider, model }` | 這次用哪個模型回答，恰好一次，在 `sources` 之後、第一個 `delta` 之前 |
+| `web_sources` | `{ sources: [{ title, url }], failed: boolean }` | 只有這一題查了網路時送出，恰好一次，在 `sources` 之後、`model` 之前：回答依據的網路來源，順序就是回答裡 [n] 的編號；搜尋失敗時 `sources` 是空的、`failed` 為 true（回答照樣只根據內容產生） |
+| `model` | `{ provider, model }` | 這次用哪個模型回答，恰好一次，在 `sources`（與 `web_sources`）之後、第一個 `delta` 之前 |
 | `delta` | `string` | 答案文字的其中一段，依生成順序送出任意數量次 |
 | `error` | `string` | 這輪問答中途失敗（改寫/檢索/生成任一步出錯；模型呼叫失敗時點出廠商與原因），恰好一次；送出後 stream 結束，這輪不會寫進 `qa_history` |
 

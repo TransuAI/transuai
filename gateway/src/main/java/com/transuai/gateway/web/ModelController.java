@@ -32,7 +32,8 @@ public class ModelController {
         ListAvailableModelsResponse response = aiServiceStub.listAvailableModels(
                 ListAvailableModelsRequest.newBuilder().setUserId(userId.toString()).build());
         return new AvailableModelsDto(
-                response.getModelsList().stream().map(ModelController::toDto).toList(), response.getOpenrouterCustom());
+                response.getModelsList().stream().map(ModelController::toDto).toList(), response.getOpenrouterCustom(),
+                response.getWebSearch());
     }
 
     @GetMapping("/me/default-model")

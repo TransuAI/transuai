@@ -26,6 +26,7 @@ import com.transuai.gateway.web.dto.ChapterDto;
 import com.transuai.gateway.web.dto.QaTurnDto;
 import com.transuai.gateway.web.dto.QuestionRequestDto;
 import com.transuai.gateway.web.dto.SummaryDto;
+import com.transuai.gateway.web.dto.WebSourceDto;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -109,7 +110,8 @@ public class AiController {
                 .getTurnsList().stream()
                 .map(t -> new QaTurnDto(t.getQuestion(), t.getAnswer(), t.getSourceTimestampsList(),
                         GrpcTimestamps.toInstant(t.getCreatedAt()), GrpcStrings.emptyToNull(t.getModelProvider()),
-                        GrpcStrings.emptyToNull(t.getModel())))
+                        GrpcStrings.emptyToNull(t.getModel()), t.getWebSearch(),
+                        t.getWebSourcesList().stream().map(WebSourceDto::from).toList()))
                 .toList();
     }
 
@@ -127,7 +129,8 @@ public class AiController {
         AskQuestionRequest.Builder askRequest = AskQuestionRequest.newBuilder()
                 .setJobId(jobId)
                 .setUserId(userId.toString())
-                .setQuestion(request.question());
+                .setQuestion(request.question())
+                .setWebSearch(request.searchesTheWeb());
         if (request.model() != null) {
             if (isBlank(request.model().provider()) || isBlank(request.model().model())) {
                 throw new IllegalArgumentException("model needs both provider and model"); // → 400 via GrpcExceptionAdvice
@@ -180,8 +183,16 @@ public class AiController {
             case ANSWERED_BY -> emitter.send(SseEmitter.event().name("model")
                     .data(objectMapper.writeValueAsString(Map.of("provider", chunk.getAnsweredBy().getProvider(),
                             "model", chunk.getAnsweredBy().getModel()))));
+            // 這一題查了網路：網路來源（順序就是回答裡 [n] 的編號），搜尋失敗時是空的、failed 為 true。
+            case WEB_SOURCES -> emitter.send(SseEmitter.event().name("web_sources")
+                    .data(objectMapper.writeValueAsString(new WebSourcesEvent(
+                            chunk.getWebSources().getSourcesList().stream().map(WebSourceDto::from).toList(),
+                            chunk.getWebSources().getFailed()))));
             case PAYLOAD_NOT_SET -> log.warn("AskQuestionChunk with no payload set, skipping");
         }
+    }
+
+    private record WebSourcesEvent(List<WebSourceDto> sources, boolean failed) {
     }
 
     private static boolean isBlank(String value) {
