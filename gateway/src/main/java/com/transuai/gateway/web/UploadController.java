@@ -119,9 +119,12 @@ public class UploadController {
 
         @GetMapping("/jobs")
         public JobListResponseDto listJobs(@CurrentUserId UUID userId,
-                        @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "0") int pageSize) {
+                        @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "0") int pageSize,
+                        @RequestParam(defaultValue = "") String query, @RequestParam(defaultValue = "") String category) {
+                // query：標題或檔名包含它的；category：只看某個類型。空字串不篩，由 upload-service 處理。
                 ListJobsResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
-                                .listJobs(ListJobsRequest.newBuilder().setPage(page).setPageSize(pageSize).build());
+                                .listJobs(ListJobsRequest.newBuilder().setPage(page).setPageSize(pageSize)
+                                                .setQuery(query).setCategory(category).build());
                 return new JobListResponseDto(
                                 response.getJobsList().stream().map(UploadMapper::toDto).toList(),
                                 response.getTotalCount(), response.getPage(), response.getPageSize());

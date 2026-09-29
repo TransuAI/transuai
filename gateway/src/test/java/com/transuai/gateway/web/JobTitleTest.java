@@ -27,6 +27,7 @@ import com.transuai.gateway.RedisContainerConfig;
 import com.transuai.gateway.TestAuth;
 import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.Job;
+import com.transuai.upload.grpc.v1.ListJobsRequest;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UpdateJobRequest;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
@@ -82,6 +83,26 @@ class JobTitleTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.jobs[0].title").isEmpty())
                 .andExpect(jsonPath("$.jobs[0].category").isEmpty());
+    }
+
+    @Test
+    void theListIsSearchedAndFilteredByUploadService() throws Exception {
+        when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.newBuilder().setTotalCount(0).build());
+
+        get("/jobs?page=2&pageSize=10&query=週會&category=lecture").andExpect(status().isOk());
+
+        ArgumentCaptor<ListJobsRequest> sent = ArgumentCaptor.forClass(ListJobsRequest.class);
+        verify(uploadServiceStub).listJobs(sent.capture());
+        assertThat(sent.getValue().getQuery()).isEqualTo("週會");
+        assertThat(sent.getValue().getCategory()).isEqualTo("lecture");
+        assertThat(sent.getValue().getPage()).isEqualTo(2);
+    }
+
+    @Test
+    void anUnknownCategoryFilterIsABadRequest() throws Exception {
+        when(uploadServiceStub.listJobs(any())).thenThrow(Status.INVALID_ARGUMENT.withDescription("unknown category").asRuntimeException());
+
+        get("/jobs?category=party").andExpect(status().isBadRequest());
     }
 
     @Test
