@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,6 +35,7 @@ import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import com.google.protobuf.Timestamp;
 
+import transuai.ai.v1.Ai.AnswerStep;
 import transuai.ai.v1.Ai.AskQuestionChunk;
 import transuai.ai.v1.Ai.AskQuestionRequest;
 import transuai.ai.v1.Ai.CountUserWebSearchesResponse;
@@ -109,6 +111,22 @@ class QaWebSearchTest {
         assertThat(stream).containsSubsequence("event:sources", "event:web_sources", "event:model", "event:delta");
         assertThat(stream).contains(
                 "data:{\"sources\":[{\"title\":\"pgvector\",\"url\":\"https://github.com/pgvector/pgvector\"}],\"failed\":false}");
+    }
+
+    @Test
+    void eachStepOfTheAnswerIsRelayedAsItComes() throws Exception {
+        when(aiServiceStub.askQuestion(any())).thenAnswer(call -> List.of(
+                AskQuestionChunk.newBuilder().setStep(AnswerStep.newBuilder().setId("retrieve")
+                        .setLabel("在內容裡找相關的段落").setState("running")).build(),
+                AskQuestionChunk.newBuilder().setStep(AnswerStep.newBuilder().setId("retrieve")
+                        .setLabel("在內容裡找相關的段落").setState("done").setDetail("找到 5 段")).build(),
+                AskQuestionChunk.newBuilder().setSources(SourceTimestamps.getDefaultInstance()).build()).iterator());
+
+        String stream = streamOf(ask("{\"question\":\"q\"}"));
+
+        assertThat(stream).containsSubsequence("event:step", "event:step", "event:sources");
+        assertThat(stream).contains(
+                "data:{\"id\":\"retrieve\",\"label\":\"在內容裡找相關的段落\",\"state\":\"done\",\"detail\":\"找到 5 段\"}");
     }
 
     @Test
@@ -192,7 +210,7 @@ class QaWebSearchTest {
     private String streamOf(ResultActions started) throws Exception {
         MvcResult result = started.andReturn();
         result.getAsyncResult(5_000);  // the emitter itself has no timeout
-        return result.getResponse().getContentAsString();
+        return result.getResponse().getContentAsString(StandardCharsets.UTF_8);
     }
 
     private ResultActions ask(String body) throws Exception {

@@ -145,7 +145,7 @@ public class AiController {
         }
         Iterator<AskQuestionChunk> chunks = aiServiceStub.askQuestion(askRequest.build());
 
-        // 同步先拉第一個 chunk（ai-service 保證是 sources，見 ai.proto 的註解）：這是唯一會讓
+        // 同步先拉第一個 chunk（可能是 step 或 sources；「沒有內容」「用不到的模型」一定在它之前，見 ai.proto 的註解）：這是唯一會讓
         // StatusRuntimeException 冒出來的時機點（例如這個 job 還沒有 embedding 對應的
         // NOT_FOUND），讓它在這裡往外拋，走跟其他端點一樣的 GrpcExceptionAdvice，回傳一般的
         // JSON 錯誤 response——這時候 HTTP response 都還沒開始送，還來得及回一個正常的錯誤
@@ -191,11 +191,18 @@ public class AiController {
                     .data(objectMapper.writeValueAsString(new WebSourcesEvent(
                             chunk.getWebSources().getSourcesList().stream().map(WebSourceDto::from).toList(),
                             chunk.getWebSources().getFailed()))));
+            // 回答過程正在做的一步（同一個 id 會送好幾次：running → done / failed），前端依 id 更新。
+            case STEP -> emitter.send(SseEmitter.event().name("step")
+                    .data(objectMapper.writeValueAsString(new StepEvent(chunk.getStep().getId(), chunk.getStep().getLabel(),
+                            chunk.getStep().getState(), chunk.getStep().getDetail()))));
             case PAYLOAD_NOT_SET -> log.warn("AskQuestionChunk with no payload set, skipping");
         }
     }
 
     private record WebSourcesEvent(List<WebSourceDto> sources, boolean failed) {
+    }
+
+    private record StepEvent(String id, String label, String state, String detail) {
     }
 
     private static boolean isBlank(String value) {

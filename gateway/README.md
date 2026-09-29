@@ -121,10 +121,11 @@ docker compose up -d
 
 #### 問答 streaming
 
-`POST /qa/{jobId}` 回傳 SSE，五種 event，`data` 一律是後端已經 JSON encode 過的單行字串：
+`POST /qa/{jobId}` 回傳 SSE，六種 event，`data` 一律是後端已經 JSON encode 過的單行字串：
 
 | event | data | 說明 |
 |---|---|---|
+| `step` | `{ id, label, state, detail }` | 回答過程正在做的一步（`id`：`understand` 理解問題、`retrieve` 在內容裡找段落、`search` 查網路、`answer` 撰寫回答；`state`：`running` / `done` / `failed`；`label`、`detail` 是給人看的文字），穿插在其他 event 之間，可能是第一個 event；同一個 `id` 會送好幾次，前端依 `id` 更新 |
 | `sources` | `number[]` | 檢索到的來源時間戳，恰好一次，在文字開始生成之前送出 |
 | `web_sources` | `{ sources: [{ title, url }], failed: boolean }` | 只有這一題查了網路時送出，恰好一次，在 `sources` 之後、`model` 之前：回答依據的網路來源，順序就是回答裡 [n] 的編號；搜尋失敗時 `sources` 是空的、`failed` 為 true（回答照樣只根據內容產生） |
 | `model` | `{ provider, model }` | 這次用哪個模型回答，恰好一次，在 `sources`（與 `web_sources`）之後、第一個 `delta` 之前 |
