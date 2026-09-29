@@ -230,6 +230,17 @@ describe('SettingsPage monthly usage (本月用量)', () => {
     expect(within(transcriptionGroup).getByText('25.5 分鐘 · 3 次')).toBeInTheDocument()
   })
 
+  it("counts this month's web searches against their limit, only the ones that went through", async () => {
+    vi.mocked(usageApi.getMonthly).mockResolvedValue({
+      month: '2026-09', limits: { ...limits, webSearches: 30 }, llm: [], transcription: [],
+      webSearches: { succeeded: 27, failed: 2 },
+    })
+    const section = await renderUsage()
+
+    const limitsGroup = await within(section).findByRole('group', { name: '用量上限' })
+    expect(within(limitsGroup).getByText('27 次 / 30 次 · 剩 3 次')).toBeInTheDocument()
+  })
+
   it("shows how much of this month's limits is used and left", async () => {
     vi.mocked(usageApi.getMonthly).mockResolvedValue({
       month: '2026-09', limits,

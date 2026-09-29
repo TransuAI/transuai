@@ -33,6 +33,8 @@ interface CompletedWorkspaceProps {
   /** 查網路: whether questions can search the web at all, and whether the next one will. */
   webSearchAvailable: boolean
   webSearch: boolean
+  /** Searches left this month; null when unknown. */
+  webSearchesLeft: number | null
   onWebSearchChange: (on: boolean) => void
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
@@ -119,6 +121,7 @@ export function CompletedWorkspace({
   onAsk,
   webSearchAvailable,
   webSearch,
+  webSearchesLeft,
   onWebSearchChange,
   onSeek,
   onSaveSegmentText,
@@ -220,6 +223,7 @@ export function CompletedWorkspace({
       onAsk={onAsk}
       webSearchAvailable={webSearchAvailable}
       webSearch={webSearch}
+      webSearchesLeft={webSearchesLeft}
       onWebSearchChange={onWebSearchChange}
       onSeek={onSeek}
       mediaAvailable={mediaAvailable}

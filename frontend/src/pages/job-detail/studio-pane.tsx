@@ -273,7 +273,12 @@ const TOOLS: Record<StudioTool, { title: string; icon: LucideIcon }> = {
 function usageStatus(usage: JobUsage | null): string {
   if (!usage || usage.records.length === 0) return '尚無紀錄'
   const tokens = usage.totals.inputTokens + usage.totals.outputTokens
-  const parts = [tokens > 0 && `${formatCount(tokens)} tokens`, usage.totals.audioSeconds > 0 && `轉錄 ${formatMinutes(usage.totals.audioSeconds)}`]
+  const searches = usage.totals.webSearches ?? 0
+  const parts = [
+    tokens > 0 && `${formatCount(tokens)} tokens`,
+    usage.totals.audioSeconds > 0 && `轉錄 ${formatMinutes(usage.totals.audioSeconds)}`,
+    searches > 0 && `網路搜尋 ${searches} 次`,
+  ]
   return parts.filter(Boolean).join(' · ') || `${usage.records.length} 次呼叫`
 }
 

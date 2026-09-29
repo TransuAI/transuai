@@ -38,6 +38,22 @@ export function JobDetailPage() {
   // 查網路: offered only when the deployment can search; once switched on it stays on for the next questions on this page.
   const [webSearchAvailable, setWebSearchAvailable] = useState(false)
   const [webSearch, setWebSearch] = useState(false)
+  // How many more times questions can search the web this month (用量上限); null while unknown (not loaded, or an older
+  // gateway), which doesn't hold the switch back — the server still refuses once the limit is reached.
+  const [webSearchesLeft, setWebSearchesLeft] = useState<number | null>(null)
+  const reloadWebSearchesLeft = useCallback(() => {
+    usageApi
+      .getMonthly()
+      .then(({ webSearches, limits }) =>
+        setWebSearchesLeft(
+          webSearches && limits.webSearches !== undefined ? Math.max(0, limits.webSearches - webSearches.succeeded) : null,
+        ),
+      )
+      .catch(() => {}) // keeps what's on screen
+  }, [])
+  useEffect(() => {
+    if (webSearchAvailable) reloadWebSearchesLeft()
+  }, [webSearchAvailable, reloadWebSearchesLeft])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [questionInput, setQuestionInput] = useState('')
   const [isAsking, setIsAsking] = useState(false)
@@ -246,7 +262,7 @@ export function JobDetailPage() {
     if (!jobId || !question || isAsking) return
 
     const id = crypto.randomUUID()
-    const searchesTheWeb = webSearchAvailable && webSearch
+    const searchesTheWeb = webSearchAvailable && webSearch && webSearchesLeft !== 0
     setQaHistory((prev) => [
       ...prev,
       { id, question, answer: '', sourceTimestamps: [], status: 'streaming', webSearch: searchesTheWeb },
@@ -292,6 +308,7 @@ export function JobDetailPage() {
       .finally(() => {
         setIsAsking(false)
         reloadUsage()
+        if (searchesTheWeb) reloadWebSearchesLeft()
       })
   }
 
@@ -381,6 +398,7 @@ export function JobDetailPage() {
       onAsk={handleAskQuestion}
       webSearchAvailable={webSearchAvailable}
       webSearch={webSearch}
+      webSearchesLeft={webSearchesLeft}
       onWebSearchChange={setWebSearch}
       onSeek={seekTo}
       onSaveSegmentText={handleSaveSegmentText}

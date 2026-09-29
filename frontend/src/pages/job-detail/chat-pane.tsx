@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { AlertCircle, Globe, Loader2Icon, MessageCircle } from 'lucide-react'
 import { modelLabel } from '@/lib/providers'
 import { cn } from '@/lib/utils'
@@ -42,8 +43,12 @@ interface ChatPaneProps {
   /** 查網路 (see ai-service CONTEXT.md「網路搜尋」): shown only when the deployment can search; stays as set. */
   webSearchAvailable: boolean
   webSearch: boolean
+  /** Searches left this month (用量上限); null when unknown. */
+  webSearchesLeft: number | null
   onWebSearchChange: (on: boolean) => void
 }
+
+const USED_UP = '這個月的網路搜尋已用完，下個月 1 日恢復'
 
 const WEB_LINK = { target: '_blank', rel: 'noopener noreferrer' } as const
 
@@ -123,8 +128,20 @@ export function ChatPane({
   onSelectModel,
   webSearchAvailable,
   webSearch,
+  webSearchesLeft,
   onWebSearchChange,
 }: ChatPaneProps) {
+  // Once this month's searches are used up the switch is off and can't be turned on; the questions themselves go on.
+  const usedUp = webSearchesLeft === 0
+  const searching = webSearch && !usedUp
+  const webSearchNoteId = useId()
+  const webSearchNote = !webSearchAvailable
+    ? null
+    : usedUp
+      ? USED_UP
+      : searching && webSearchesLeft !== null
+        ? `本月還能查 ${webSearchesLeft} 次`
+        : null
   return (
     <Card className="flex h-full min-h-0 flex-col gap-0 py-0">
       <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
@@ -191,7 +208,7 @@ export function ChatPane({
           </div>
         )}
       </CardContent>
-      <CardFooter>
+      <CardFooter className="flex-col items-stretch gap-1.5">
         <form
           className="flex w-full gap-2"
           onSubmit={(e) => {
@@ -220,12 +237,16 @@ export function ChatPane({
           {webSearchAvailable && (
             <Button
               type="button"
-              variant={webSearch ? 'secondary' : 'ghost'}
+              variant={searching ? 'secondary' : 'ghost'}
               aria-label="查網路"
-              aria-pressed={webSearch}
-              title={webSearch ? '查網路：開（這一題也會搜尋網路）' : '查網路：關（只根據這段內容回答）'}
+              aria-pressed={searching}
+              aria-describedby={webSearchNote ? webSearchNoteId : undefined}
+              disabled={usedUp}
+              title={
+                usedUp ? USED_UP : searching ? '查網路：開（這一題也會搜尋網路）' : '查網路：關（只根據這段內容回答）'
+              }
               onClick={() => onWebSearchChange(!webSearch)}
-              className={cn('shrink-0 text-muted-foreground', webSearch && 'text-primary')}
+              className={cn('shrink-0 text-muted-foreground', searching && 'text-primary')}
             >
               <Globe className="size-4" />
               <span className="hidden sm:inline">查網路</span>
@@ -241,6 +262,12 @@ export function ChatPane({
             {isAsking ? <Loader2Icon className="size-4 animate-spin" /> : '問'}
           </Button>
         </form>
+        {webSearchNote && (
+          <p id={webSearchNoteId} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Globe aria-hidden className="size-3.5" />
+            {webSearchNote}
+          </p>
+        )}
       </CardFooter>
     </Card>
   )

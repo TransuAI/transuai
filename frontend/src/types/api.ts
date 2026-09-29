@@ -171,9 +171,9 @@ export interface JobStatusEvent {
   errorReason?: string
 }
 
-/** One billed call (用量): an LLM call counts tokens, a transcription counts audio seconds. */
+/** One billed call (用量): an LLM call counts tokens, a transcription counts audio seconds, a web search just counts once. */
 export interface UsageRecord {
-  kind: 'llm' | 'transcription'
+  kind: 'llm' | 'transcription' | 'web_search'
   /** What the call was for, e.g. summary, chapters, qa_answer, qa_rewrite, regenerated_summary, quiz, post_meeting, transcription. */
   feature: string
   provider: string
@@ -191,8 +191,8 @@ export interface UsageRecord {
 export interface JobUsage {
   /** Oldest first. */
   records: UsageRecord[]
-  /** Sums of the known numbers. */
-  totals: { inputTokens: number; outputTokens: number; audioSeconds: number }
+  /** Sums of the known numbers; webSearches counts the searches that went through (absent from older gateways). */
+  totals: { inputTokens: number; outputTokens: number; audioSeconds: number; webSearches?: number }
 }
 
 /** LLM usage of one model and key source over a month; token counts add up only what's known. */
@@ -222,6 +222,8 @@ export interface UsageLimits {
   transcriptionMinutes: number
   /** Input plus output tokens on the platform model. */
   platformTokens: number
+  /** Web searches (查網路) that went through; absent from gateways that predate it. */
+  webSearches?: number
 }
 
 /** A user's usage over one month (YYYY-MM, Taiwan time), with the monthly limits. */
@@ -229,6 +231,8 @@ export interface MonthlyUsage {
   month: string
   llm: LlmUsageSum[]
   transcription: TranscriptionUsageSum[]
+  /** Web searches this month; only the ones that went through count toward the limit. Absent from older gateways. */
+  webSearches?: { succeeded: number; failed: number }
   limits: UsageLimits
 }
 

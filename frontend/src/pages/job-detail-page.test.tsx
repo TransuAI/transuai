@@ -18,7 +18,7 @@ vi.mock('@/lib/api', () => ({
   summaryApi: { get: vi.fn(), regenerate: vi.fn() },
   chapterApi: { list: vi.fn() },
   qaApi: { ask: vi.fn(), history: vi.fn() },
-  usageApi: { getJobUsage: vi.fn() },
+  usageApi: { getJobUsage: vi.fn(), getMonthly: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
   quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), submitAttempt: vi.fn() },
   postMeetingApi: { get: vi.fn(), start: vi.fn(), execute: vi.fn(), retry: vi.fn() },
@@ -1245,8 +1245,14 @@ describe('JobDetailPage mini player speakers (COMPLETED, narrow viewport)', () =
 describe('JobDetailPage web search (查網路, COMPLETED, desktop layout)', () => {
   const pgvector = { title: 'pgvector: Open-source vector search for Postgres', url: 'https://github.com/pgvector/pgvector' }
 
+  const searchedThisMonth = (succeeded: number) => ({
+    month: '2026-09', llm: [], transcription: [], webSearches: { succeeded, failed: 0 },
+    limits: { transcriptionMinutes: 600, platformTokens: 2000000, webSearches: 30 },
+  })
+
   beforeEach(() => {
     vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false, webSearch: true })
+    vi.mocked(usageApi.getMonthly).mockResolvedValue(searchedThisMonth(0))
   })
 
   async function ask(user: ReturnType<typeof userEvent.setup>, question = 'pgvector 是什麼？') {
@@ -1316,6 +1322,35 @@ describe('JobDetailPage web search (查網路, COMPLETED, desktop layout)', () =
 
     expect(await screen.findByText('這次沒查到網路資料，只根據內容回答')).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: '網路來源' })).not.toBeInTheDocument()
+  })
+
+  it("says how many searches are left this month, and counts down after a question that searched", async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(usageApi.getMonthly).mockResolvedValue(searchedThisMonth(27))
+    vi.mocked(qaApi.ask).mockResolvedValue(undefined)
+    await renderCompletedJob()
+
+    await user.click(await screen.findByRole('button', { name: '查網路' }))
+    expect(await screen.findByText('本月還能查 3 次')).toBeInTheDocument()
+
+    vi.mocked(usageApi.getMonthly).mockResolvedValue(searchedThisMonth(28))
+    await ask(user)
+
+    expect(await screen.findByText('本月還能查 2 次')).toBeInTheDocument()
+  })
+
+  it("turns the switch off, and says when searching comes back, once this month's searches are used up", async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(usageApi.getMonthly).mockResolvedValue(searchedThisMonth(30))
+    vi.mocked(qaApi.ask).mockResolvedValue(undefined)
+    await renderCompletedJob()
+
+    expect(await screen.findByText('這個月的網路搜尋已用完，下個月 1 日恢復')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查網路' })).toBeDisabled()
+    await ask(user)
+    expect(vi.mocked(qaApi.ask).mock.calls[0][2].webSearch ?? false).toBe(false) // questions without it go on
   })
 
   it('keeps the web sources of earlier answers', async () => {
@@ -1512,6 +1547,22 @@ describe('JobDetailPage usage (COMPLETED, desktop layout)', () => {
 
     await within(usageSection()).findByText('部分用量未知，未計入總計')
     expect(showEveryCall()[0]).toHaveTextContent('轉錄nova-3—失敗')
+  })
+
+  it('lists web searches as a feature of their own, counted, with every search among the calls', async () => {
+    const search = (succeeded: boolean) => ({ ...llmRecord('web_search', null, null, succeeded), kind: 'web_search' as const,
+      provider: 'tavily', model: '' })
+    await renderUsage({
+      records: [search(true), search(false)],
+      totals: { inputTokens: 0, outputTokens: 0, audioSeconds: 0, webSearches: 1 },
+    })
+
+    await within(usageSection()).findByText('網路搜尋')
+    expect(byFeature()[0]).toHaveTextContent(/^網路搜尋2 次 · 1 次失敗$/)
+    expect(usageSection()).not.toHaveTextContent('部分用量未知')
+    const calls = showEveryCall()
+    expect(calls[0]).toHaveTextContent('網路搜尋tavily1 次')
+    expect(calls[1]).toHaveTextContent('失敗')
   })
 
   it('says so when nothing has been used yet', async () => {

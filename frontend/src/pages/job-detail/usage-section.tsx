@@ -15,6 +15,7 @@ const FEATURE_LABELS: Record<string, string> = {
   quiz: '測驗',
   post_meeting: '會後處理',
   transcription: '轉錄',
+  web_search: '網路搜尋',
 }
 
 function tokens(value: number) {
@@ -23,12 +24,14 @@ function tokens(value: number) {
 
 // What one call consumed; each unknown number (the provider didn't report it) shows as 「—」, never 0.
 function consumption(record: UsageRecord) {
+  if (record.kind === 'web_search') return '1 次'
   if (record.kind === 'transcription') return record.audioSeconds === null ? '—' : formatMinutes(record.audioSeconds)
   const known = (value: number | null) => (value === null ? '—' : formatCount(value))
   return `${known(record.inputTokens)} → ${known(record.outputTokens)} tokens`
 }
 
 function hasUnknownNumbers(record: UsageRecord) {
+  if (record.kind === 'web_search') return false // a search has no numbers to know
   return record.kind === 'transcription'
     ? record.audioSeconds === null
     : record.inputTokens === null || record.outputTokens === null
@@ -57,11 +60,13 @@ function sumByFeature(records: UsageRecord[]): FeatureSum[] {
     sum.calls += 1
     if (!record.succeeded) sum.failed += 1
     const known =
-      record.kind === 'transcription'
-        ? record.audioSeconds
-        : record.inputTokens === null && record.outputTokens === null
-          ? null
-          : (record.inputTokens ?? 0) + (record.outputTokens ?? 0)
+      record.kind === 'web_search'
+        ? null
+        : record.kind === 'transcription'
+          ? record.audioSeconds
+          : record.inputTokens === null && record.outputTokens === null
+            ? null
+            : (record.inputTokens ?? 0) + (record.outputTokens ?? 0)
     if (known !== null) sum.amount = (sum.amount ?? 0) + known
     sums.set(label, sum)
   }
@@ -105,7 +110,14 @@ export function UsageSection({ usage }: { usage: JobUsage | null }) {
                   {sum.calls} 次{sum.failed > 0 && <span className="text-destructive"> · {sum.failed} 次失敗</span>}
                 </span>
                 <span className="ml-auto font-mono text-xs text-muted-foreground tabular-nums">
-                  {sum.amount === null ? '—' : sum.kind === 'transcription' ? formatMinutes(sum.amount) : tokens(sum.amount)}
+                  {/* A web search has nothing to show but how many times, which the row already says. */}
+                  {sum.kind === 'web_search'
+                    ? ''
+                    : sum.amount === null
+                      ? '—'
+                      : sum.kind === 'transcription'
+                        ? formatMinutes(sum.amount)
+                        : tokens(sum.amount)}
                 </span>
               </li>
             ))}
@@ -132,8 +144,9 @@ export function UsageSection({ usage }: { usage: JobUsage | null }) {
                 >
                   <span className="font-mono tabular-nums">{clockTime(record.createdAt)}</span>
                   <span className="whitespace-nowrap text-foreground">{FEATURE_LABELS[record.feature] ?? record.feature}</span>
-                  <span title={record.model} className="truncate">
-                    {record.model}
+                  {/* A web search has no model: its service (tavily) instead. */}
+                  <span title={record.model || record.provider} className="truncate">
+                    {record.model || record.provider}
                   </span>
                   <span className="text-right font-mono whitespace-nowrap tabular-nums">
                     {consumption(record)}

@@ -60,17 +60,22 @@ function limitRow(label: string, used: number, limit: number, format: (value: nu
   }
 }
 
-// The platform pays for transcription and the platform model; when a limit is reached, uploads or the platform model
-// stop until next month (own-key models keep working).
+// The platform pays for transcription, the platform model and web searches; when a limit is reached, uploads, the
+// platform model or searching the web stop until next month (own-key models, and questions that don't search, keep working).
 function limitRows(usage: MonthlyUsage): UsageRow[] {
   const seconds = usage.transcription.reduce((total, sum) => total + sum.audioSeconds, 0)
   const tokens = usage.llm
     .filter((sum) => sum.keySource === 'platform')
     .reduce((total, sum) => total + sum.inputTokens + sum.outputTokens, 0)
-  return [
+  const rows = [
     limitRow('轉錄', seconds, usage.limits.transcriptionMinutes * 60, formatMinutes),
     limitRow('平台模型', tokens, usage.limits.platformTokens, (value) => `${formatCount(value)} tokens`),
   ]
+  // 查網路: only searches that went through count.
+  if (usage.webSearches && usage.limits.webSearches !== undefined) {
+    rows.push(limitRow('網路搜尋', usage.webSearches.succeeded, usage.limits.webSearches, (value) => `${formatCount(value)} 次`))
+  }
+  return rows
 }
 
 // 用量 (see ai-service CONTEXT.md) over one month, per model: what the user's own provider bills will roughly
