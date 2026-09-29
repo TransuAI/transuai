@@ -7,7 +7,7 @@ import type { TranscriptMatch } from '@/lib/transcript-search'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { SegmentSpeakerMenu } from '@/pages/job-detail/segment-speaker-menu'
-import { SpeakerNameInput } from '@/pages/job-detail/speaker-name-input'
+import { NameInput } from '@/pages/job-detail/name-input'
 import { SpeakerDot } from '@/pages/job-detail/speaker-dot'
 import type { Note, Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
 
@@ -175,7 +175,7 @@ export function SegmentRow({
       </div>
       {isAddingSpeaker ? (
         <div className="col-start-2 row-start-1 mb-1">
-          <SpeakerNameInput
+          <NameInput
             label="新講者名稱"
             initialName=""
             placeholder="新講者名稱（可留空）"

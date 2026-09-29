@@ -9,6 +9,7 @@ import type {
   Connection,
   Job,
   JobListResponse,
+  JobUpdate,
   JobUsage,
   MediaUrlResponse,
   ModelChoice,
@@ -77,6 +78,9 @@ export const jobsApi = {
   },
 
   get: (jobId: string) => apiFetch<Job>(`/jobs/${jobId}`),
+
+  update: (jobId: string, update: JobUpdate) =>
+    apiFetch<Job>(`/jobs/${jobId}`, { method: 'PATCH', body: update }),
 
   // download: true 要的是「存成原始檔名」的附件 URL（匯出 → 下載原始檔）；預設是給播放器的 inline URL。
   getMediaUrl: (jobId: string, options: { download?: boolean } = {}) =>

@@ -3,7 +3,7 @@ import { Pencil, Sparkles } from 'lucide-react'
 import { hasMultipleSpeakers, speakersWithSegments } from '@/lib/speakers'
 import { Button } from '@/components/ui/button'
 import { SpeakerDot } from '@/pages/job-detail/speaker-dot'
-import { SpeakerNameInput } from '@/pages/job-detail/speaker-name-input'
+import { NameInput } from '@/pages/job-detail/name-input'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
 import type { Speaker, SpeakerSuggestion, Transcript } from '@/types/api'
 
@@ -60,7 +60,7 @@ export function SpeakerPanel({ transcript, onRename, suggestions, onSeek, mediaA
             {renamingLabel === speaker.label ? (
               <span className="flex max-w-full min-w-0 items-center gap-1.5 h-7 rounded-full border border-ring bg-background pr-0.5 pl-2.5 ring-[3px] ring-ring/30">
                 <SpeakerDot speaker={speaker} />
-                <SpeakerNameInput
+                <NameInput
                   label="講者名稱"
                   initialName={speaker.displayName}
                   placeholder="留空＝預設名稱"

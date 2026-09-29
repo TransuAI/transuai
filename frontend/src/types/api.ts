@@ -29,6 +29,12 @@ export type TranscriptionLanguage = 'zh-TW' | 'en' | 'auto'
 /** A job's category (類型): judged by the AI from the content, changeable by the user. */
 export type JobCategory = 'meeting' | 'lecture' | 'interview' | 'podcast' | 'video' | 'other'
 
+/** 使用者改標題／類型：只帶要改的欄位；標題空字串＝清空（顯示檔名）。改過的 AI 之後不會再寫。 */
+export interface JobUpdate {
+  title?: string
+  category?: JobCategory
+}
+
 export interface Job {
   jobId: string
   userId: string

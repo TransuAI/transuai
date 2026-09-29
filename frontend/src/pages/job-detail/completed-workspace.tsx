@@ -18,7 +18,7 @@ import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane, type StudioTool } from '@/pages/job-detail/studio-pane'
 import { cn } from '@/lib/utils'
-import type { Chapter, ConfirmedProposal, Job, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+import type { Chapter, ConfirmedProposal, Job, JobUpdate, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
   job: Job
@@ -44,6 +44,8 @@ interface CompletedWorkspaceProps {
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onRenameSpeaker: (label: string, name: string) => Promise<void>
+  /** 改標題／類型; rejects when saving fails. */
+  onUpdateJob: (update: JobUpdate) => Promise<void>
   speakerSuggestions: SpeakerSuggestionActions
   onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
   onRegenerateSummary: () => void
@@ -146,6 +148,7 @@ export function CompletedWorkspace({
   onSeek,
   onSaveSegmentText,
   onRenameSpeaker,
+  onUpdateJob,
   speakerSuggestions,
   onAssignSpeaker,
   onRegenerateSummary,
@@ -245,6 +248,7 @@ export function CompletedWorkspace({
     onSeek,
     onSaveSegmentText,
     onRenameSpeaker,
+    onUpdateJob,
     speakerSuggestions,
     onAssignSpeaker,
     notes: notes.notes,

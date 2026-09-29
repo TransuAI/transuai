@@ -3,10 +3,10 @@ import { toast } from 'sonner'
 import { handleEditorKeys } from '@/lib/editor-keys'
 import { cn } from '@/lib/utils'
 
-// Same limit as the backend (speakers.name).
-const MAX_SPEAKER_NAME_LENGTH = 100
+// Same limit as the backend: speakers.name and jobs.title are both 100 characters.
+const MAX_NAME_LENGTH = 100
 
-interface SpeakerNameInputProps {
+interface NameInputProps {
   label: string
   initialName: string
   placeholder?: string
@@ -19,9 +19,9 @@ interface SpeakerNameInputProps {
   className?: string
 }
 
-// The in-place box for a 講者's name — renaming a speaker, or naming one being added. Enter saves,
+// The in-place box for a name — renaming a 講者, naming one being added, changing a Job's 標題. Enter saves,
 // Esc cancels.
-export function SpeakerNameInput({
+export function NameInput({
   label,
   initialName,
   placeholder,
@@ -30,7 +30,7 @@ export function SpeakerNameInput({
   onDone,
   saveUnchanged = false,
   className,
-}: SpeakerNameInputProps) {
+}: NameInputProps) {
   const [draft, setDraft] = useState(initialName)
   const [isSaving, setIsSaving] = useState(false)
 
@@ -58,7 +58,7 @@ export function SpeakerNameInput({
       data-consumes-escape=""
       autoFocus
       onFocus={(event) => event.target.select()}
-      maxLength={MAX_SPEAKER_NAME_LENGTH}
+      maxLength={MAX_NAME_LENGTH}
       value={draft}
       disabled={isSaving}
       onChange={(event) => setDraft(event.target.value)}

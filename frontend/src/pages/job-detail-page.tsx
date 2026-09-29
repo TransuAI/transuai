@@ -22,7 +22,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { CompletedWorkspace } from '@/pages/job-detail/completed-workspace'
 import type { QaEntry } from '@/pages/job-detail/chat-pane'
 import type { SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
-import type { Chapter, Job, JobStatusEvent, JobUsage, ModelChoice, SpeakerAssignment, SpeakerSuggestion, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobStatusEvent, JobUpdate, JobUsage, ModelChoice, SpeakerAssignment, SpeakerSuggestion, Summary, Transcript } from '@/types/api'
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -261,6 +261,12 @@ export function JobDetailPage() {
     },
   }
 
+  // 改標題／類型：用回應的 Job 更新（狀態等其他欄位也跟著是最新的）。失敗 reject，由畫面提示。
+  const handleUpdateJob = async (update: JobUpdate) => {
+    if (!jobId) return
+    setJob(await jobsApi.update(jobId, update))
+  }
+
   const handleRenameSpeaker = async (label: string, name: string) => {
     if (!jobId) return
     const { speaker, revision } = await transcriptApi.renameSpeaker(jobId, label, name)
@@ -452,6 +458,7 @@ export function JobDetailPage() {
       onSeek={seekTo}
       onSaveSegmentText={handleSaveSegmentText}
       onRenameSpeaker={handleRenameSpeaker}
+      onUpdateJob={handleUpdateJob}
       speakerSuggestions={speakerSuggestionActions}
       onAssignSpeaker={handleAssignSpeaker}
       onRegenerateSummary={regeneration.regenerate}

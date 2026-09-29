@@ -10,6 +10,7 @@ import type { Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptR
 vi.mock('@/lib/api', () => ({
   jobsApi: {
     get: vi.fn(),
+    update: vi.fn(),
     getMediaUrl: vi
       .fn()
       .mockResolvedValue({ downloadUrl: 'https://media.example.com/uploads/interview.mp3', expiresAt: '2026-01-01T01:00:00Z' }),
@@ -273,6 +274,82 @@ describe('JobDetailPage title (COMPLETED, desktop layout)', () => {
     await renderCompletedJob()
 
     expect(await screen.findByRole('heading', { name: baseJob.fileName })).toBeInTheDocument()
+  })
+
+  it('lets the user change the title in place', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(jobsApi.update).mockResolvedValue({ ...baseJob, status: 'COMPLETED', title: '產品週會' })
+    await renderCompletedJob(mockTranscript, [], { title: 'AI 取的標題' })
+
+    await user.click(await screen.findByRole('button', { name: '改標題' }))
+    const input = screen.getByRole('textbox', { name: '標題' })
+    expect(input).toHaveValue('AI 取的標題')
+    await user.clear(input)
+    await user.type(input, '產品週會{Enter}')
+
+    expect(jobsApi.update).toHaveBeenCalledWith('job-1', { title: '產品週會' })
+    expect(await screen.findByRole('heading', { name: '產品週會' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '標題' })).not.toBeInTheDocument()
+  })
+
+  it('clearing the title goes back to the file name; Esc leaves it as it was', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(jobsApi.update).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
+    await renderCompletedJob(mockTranscript, [], { title: 'AI 取的標題' })
+
+    await user.click(await screen.findByRole('button', { name: '改標題' }))
+    await user.type(screen.getByRole('textbox', { name: '標題' }), '改到一半{Escape}')
+    expect(jobsApi.update).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'AI 取的標題' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '改標題' }))
+    await user.clear(screen.getByRole('textbox', { name: '標題' }))
+    await user.keyboard('{Enter}')
+
+    expect(jobsApi.update).toHaveBeenCalledWith('job-1', { title: '' })
+    expect(await screen.findByRole('heading', { name: baseJob.fileName })).toBeInTheDocument()
+  })
+
+  it('keeps what was typed when the title fails to save', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(jobsApi.update).mockRejectedValue(new Error('network'))
+    await renderCompletedJob(mockTranscript, [], { title: 'AI 取的標題' })
+
+    await user.click(await screen.findByRole('button', { name: '改標題' }))
+    await user.type(screen.getByRole('textbox', { name: '標題' }), '，第二版{Enter}')
+
+    expect(await screen.findByText('標題沒有存到')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '標題' })).toHaveValue('AI 取的標題，第二版')
+  })
+
+  it('lets the user pick the category', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(jobsApi.update).mockResolvedValue({ ...baseJob, status: 'COMPLETED', category: 'lecture' })
+    await renderCompletedJob(mockTranscript, [], { category: 'meeting' })
+
+    const category = await screen.findByRole('combobox', { name: '類型' })
+    expect(category).toHaveValue('meeting')
+    await user.selectOptions(category, '課程')
+
+    expect(jobsApi.update).toHaveBeenCalledWith('job-1', { category: 'lecture' })
+    await waitFor(() => expect(category).toHaveValue('lecture'))
+  })
+
+  it('puts the category back when it fails to save', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(jobsApi.update).mockRejectedValue(new Error('network'))
+    await renderCompletedJob(mockTranscript, [], { category: 'meeting' })
+
+    const category = await screen.findByRole('combobox', { name: '類型' })
+    await user.selectOptions(category, '課程')
+
+    expect(await screen.findByText('類型沒有存到')).toBeInTheDocument()
+    expect(category).toHaveValue('meeting')
   })
 })
 

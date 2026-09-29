@@ -1,14 +1,16 @@
-import type { ReactNode } from 'react'
-import { FileAudio, FileText, FileVideo, PanelLeftClose } from 'lucide-react'
-import { jobDisplayName } from '@/lib/job-display'
+import { useState, type ReactNode } from 'react'
+import { FileAudio, FileText, FileVideo, PanelLeftClose, Pencil } from 'lucide-react'
+import { toast } from 'sonner'
+import { CATEGORY_LABELS, jobDisplayName } from '@/lib/job-display'
 import { formatBytes, formatDuration, formatShortDateTime } from '@/lib/media'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { NameInput } from '@/pages/job-detail/name-input'
 import { SpeakerPanel, type SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
 import { TranscriptView } from '@/pages/job-detail/transcript-view'
 import { cn } from '@/lib/utils'
-import type { Job, Note, SpeakerAssignment, Transcript } from '@/types/api'
+import type { Job, JobCategory, JobUpdate, Note, SpeakerAssignment, Transcript } from '@/types/api'
 
 interface SourcePaneProps {
   job: Job
@@ -21,6 +23,8 @@ interface SourcePaneProps {
   onSeek: (seconds: number) => void
   onSaveSegmentText: (segmentId: string, text: string) => Promise<void>
   onRenameSpeaker: (label: string, name: string) => Promise<void>
+  /** 改標題／類型; rejects when saving fails. */
+  onUpdateJob: (update: JobUpdate) => Promise<void>
   speakerSuggestions: SpeakerSuggestionActions
   onAssignSpeaker: (segmentId: string, assignment: SpeakerAssignment) => Promise<void>
   /** 筆記, marked on the transcript. */
@@ -42,6 +46,7 @@ export function SourcePane({
   onSeek,
   onSaveSegmentText,
   onRenameSpeaker,
+  onUpdateJob,
   speakerSuggestions,
   onAssignSpeaker,
   notes,
@@ -60,14 +65,15 @@ export function SourcePane({
             <FileIcon className="size-4" />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
-            <h2 title={jobDisplayName(job)} className="truncate text-sm leading-snug font-medium">
-              {jobDisplayName(job)}
-            </h2>
-            <p title={job.fileName} className="truncate text-xs text-muted-foreground tabular-nums">
-              {/* With a title the file name moves down here, to match it with the file on the user's computer. */}
-              {job.title && `${job.fileName} · `}
-              {formatDuration(job.durationSeconds)} · {formatBytes(job.fileSizeBytes)} · {formatShortDateTime(job.createdAt)}
-            </p>
+            <JobTitle job={job} onUpdateJob={onUpdateJob} />
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <CategorySelect category={job.category} onUpdateJob={onUpdateJob} />
+              <p title={job.fileName} className="truncate tabular-nums">
+                {/* With a title the file name moves down here, to match it with the file on the user's computer. */}
+                {job.title && `${job.fileName} · `}
+                {formatDuration(job.durationSeconds)} · {formatBytes(job.fileSizeBytes)} · {formatShortDateTime(job.createdAt)}
+              </p>
+            </div>
           </div>
           {onCollapse && (
             <Button size="icon-sm" variant="ghost" aria-label="收合來源" title="收合來源" onClick={onCollapse} className="-mr-1.5">
@@ -111,5 +117,82 @@ export function SourcePane({
         )}
       </div>
     </Card>
+  )
+}
+
+// The Job's 標題 (or its file name when it has none), changed in place: empty clears it back to the file name. Once the
+// user has set it the AI leaves it alone (see upload-service CONTEXT.md).
+function JobTitle({ job, onUpdateJob }: { job: Job; onUpdateJob: (update: JobUpdate) => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
+  if (editing) {
+    return (
+      <NameInput
+        label="標題"
+        initialName={job.title ?? ''}
+        placeholder={job.fileName}
+        failureMessage="標題沒有存到"
+        onSave={(title) => onUpdateJob({ title })}
+        onDone={() => setEditing(false)}
+        className="-ml-1.5 max-w-full min-w-40 text-sm font-medium"
+      />
+    )
+  }
+  return (
+    <div className="group/title flex min-w-0 items-center gap-1">
+      <h2 title={jobDisplayName(job)} className="truncate text-sm leading-snug font-medium">
+        {jobDisplayName(job)}
+      </h2>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        aria-label="改標題"
+        title="改標題"
+        onClick={() => setEditing(true)}
+        className="shrink-0 text-muted-foreground opacity-0 group-hover/title:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+      >
+        <Pencil />
+      </Button>
+    </div>
+  )
+}
+
+// The Job's 類型, picked from the fixed list. Shows the choice straight away and puts it back if saving fails.
+function CategorySelect({
+  category,
+  onUpdateJob,
+}: {
+  category: JobCategory | null | undefined
+  onUpdateJob: (update: JobUpdate) => Promise<void>
+}) {
+  const [pending, setPending] = useState<JobCategory | null>(null)
+  const shown = pending ?? category ?? ''
+  return (
+    <select
+      aria-label="類型"
+      value={shown}
+      disabled={pending !== null}
+      onChange={async (event) => {
+        const chosen = event.target.value as JobCategory
+        setPending(chosen)
+        try {
+          await onUpdateJob({ category: chosen })
+        } catch {
+          toast.error('類型沒有存到')
+        }
+        setPending(null)
+      }}
+      className="shrink-0 rounded-sm bg-transparent py-0.5 text-xs text-foreground/80 outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
+    >
+      {shown === '' && (
+        <option value="" disabled>
+          未分類
+        </option>
+      )}
+      {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+        <option key={value} value={value}>
+          {label}
+        </option>
+      ))}
+    </select>
   )
 }
