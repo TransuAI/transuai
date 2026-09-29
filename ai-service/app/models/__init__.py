@@ -7,7 +7,8 @@ from app.models.post_meeting import ActionProposal, PostMeetingRun, PostMeetingS
 from app.models.provider_key import ProviderKey
 from app.models.qa_history import QaHistory
 from app.models.quiz import QuestionKind, Quiz, QuizAttempt, QuizQuestion, QuizStatus
+from app.models.speaker_suggestion import SpeakerSuggestion
 from app.models.summary import Base, RegenerationStatus, Summary
 from app.models.web_search_usage import WebSearchUsage
 
-__all__ = ["ActionProposal", "Base", "Chapter", "ConnectionStatus", "DefaultModel", "Embedding", "LlmUsage", "OAuthClient", "OAuthConnection", "OAuthPendingAuthorization", "PostMeetingRun", "PostMeetingSettings", "PostMeetingStatus", "ProposalStatus", "ProviderKey", "QaHistory", "QuestionKind", "Quiz", "QuizAttempt", "QuizQuestion", "QuizStatus", "RegenerationStatus", "Summary", "TodoDestination", "WebSearchUsage"]
+__all__ = ["ActionProposal", "Base", "Chapter", "ConnectionStatus", "DefaultModel", "Embedding", "LlmUsage", "OAuthClient", "OAuthConnection", "OAuthPendingAuthorization", "PostMeetingRun", "PostMeetingSettings", "PostMeetingStatus", "ProposalStatus", "ProviderKey", "QaHistory", "QuestionKind", "Quiz", "QuizAttempt", "QuizQuestion", "QuizStatus", "RegenerationStatus", "SpeakerSuggestion", "Summary", "TodoDestination", "WebSearchUsage"]

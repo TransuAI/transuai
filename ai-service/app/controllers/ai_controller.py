@@ -68,6 +68,7 @@ from app.services.post_meeting_settings import (
     save_settings,
 )
 from app.services.notion import NotionUnreachable
+from app.repositories.speaker_suggestion_repository import list_speaker_suggestions, set_speaker_suggestion_status
 from app.repositories.web_search_usage_repository import count_user_web_searches, list_job_web_searches
 from app.services.web_search import WebSearchResult
 from app.services.web_search import is_available as web_search_available
@@ -90,6 +91,7 @@ from app.models import (
     QuizQuestion,
     QuizStatus,
     RegenerationStatus,
+    SpeakerSuggestion,
     TodoDestination,
 )
 from app.services.regeneration import (
@@ -333,6 +335,28 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                 records.append(ai_pb2.WebSearchUsage(provider=usage.provider, succeeded=usage.succeeded,
                                                      created_at=created_at))
             return ai_pb2.ListJobWebSearchesResponse(records=records)
+        finally:
+            session.close()
+
+    def ListSpeakerSuggestions(self, request, context):
+        job_id = _parse_job_id(request.job_id, context)
+        session = new_session()
+        try:
+            return ai_pb2.ListSpeakerSuggestionsResponse(
+                suggestions=[_speaker_suggestion_to_proto(s) for s in list_speaker_suggestions(session, job_id)])
+        finally:
+            session.close()
+
+    def SetSpeakerSuggestionStatus(self, request, context):
+        job_id = _parse_job_id(request.job_id, context)
+        if request.status not in ("applied", "dismissed"):
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "status must be applied or dismissed")
+        session = new_session()
+        try:
+            suggestion = set_speaker_suggestion_status(session, job_id, request.speaker_label, request.status)
+            if suggestion is None:
+                _abort(context, grpc.StatusCode.NOT_FOUND, "no suggestion for this speaker")
+            return _speaker_suggestion_to_proto(suggestion)
         finally:
             session.close()
 
@@ -666,6 +690,10 @@ def _parse_user_id(value: str, context: grpc.ServicerContext) -> uuid.UUID:
     return _parse_uuid(value, "user_id", context)
 
 
+def _parse_job_id(value: str, context: grpc.ServicerContext) -> uuid.UUID:
+    return _parse_uuid(value, "job_id", context)
+
+
 def _provider_key_to_proto(key) -> ai_pb2.ProviderKey:
     created_at = timestamp_pb2.Timestamp()
     created_at.FromDatetime(key.created_at)
@@ -684,3 +712,11 @@ def _llm_usage_to_proto(usage) -> ai_pb2.LlmUsage:
     if usage.output_tokens is not None:
         record.output_tokens = usage.output_tokens
     return record
+
+
+def _speaker_suggestion_to_proto(suggestion: SpeakerSuggestion) -> ai_pb2.SpeakerSuggestion:
+    return ai_pb2.SpeakerSuggestion(
+        speaker_label=suggestion.speaker_label, name=suggestion.name,
+        evidence_start_time=float(suggestion.evidence_start_time), evidence_text=suggestion.evidence_text,
+        status=suggestion.status)
+

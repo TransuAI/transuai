@@ -38,6 +38,7 @@ class LlmFeature(StrEnum):
     QUIZ = "quiz"
     POST_MEETING = "post_meeting"
     JOB_TITLE = "job_title"  # 替 Job 取標題、判斷類型
+    SPEAKER_NAMES = "speaker_names"  # 講者名字建議
 
 
 @dataclass(frozen=True)

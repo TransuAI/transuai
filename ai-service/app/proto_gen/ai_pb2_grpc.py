@@ -84,6 +84,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.CountUserWebSearchesRequest.SerializeToString,
                 response_deserializer=ai__pb2.CountUserWebSearchesResponse.FromString,
                 _registered_method=True)
+        self.ListSpeakerSuggestions = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListSpeakerSuggestions',
+                request_serializer=ai__pb2.ListSpeakerSuggestionsRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListSpeakerSuggestionsResponse.FromString,
+                _registered_method=True)
+        self.SetSpeakerSuggestionStatus = channel.unary_unary(
+                '/transuai.ai.v1.AiService/SetSpeakerSuggestionStatus',
+                request_serializer=ai__pb2.SetSpeakerSuggestionStatusRequest.SerializeToString,
+                response_deserializer=ai__pb2.SpeakerSuggestion.FromString,
+                _registered_method=True)
         self.RequestQuiz = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestQuiz',
                 request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
@@ -273,6 +283,23 @@ class AiServiceServicer:
     def CountUserWebSearches(self, request, context):
         """一位使用者在 [start, end) 之間查了幾次網路（成功與失敗分開算；用量上限只算成功的）。user_id 不合法、或沒給 start / end
         回 INVALID_ARGUMENT。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListSpeakerSuggestions(self, request, context):
+        """講者名字建議（見 ai-service/CONTEXT.md）：pipeline 依錄音裡明確講出的話替還沒改名的講者提出的名字，附依據的原話與時間。
+        列出一個 Job 的全部建議（任何狀態；前端只顯示 pending）。job_id 不合法回 INVALID_ARGUMENT，沒有建議回空列表。
+        不驗證使用者，Gateway 已經做過 ownership 檢查。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetSpeakerSuggestionStatus(self, request, context):
+        """把一個建議標成 applied（使用者套用了，改名本身走 transcription-service 的 RenameSpeaker）或 dismissed（忽略，不再顯示）。
+        status 不是這兩個、job_id 不合法回 INVALID_ARGUMENT；這個 Job 沒有這位講者的建議回 NOT_FOUND。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -493,6 +520,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.CountUserWebSearches,
                     request_deserializer=ai__pb2.CountUserWebSearchesRequest.FromString,
                     response_serializer=ai__pb2.CountUserWebSearchesResponse.SerializeToString,
+            ),
+            'ListSpeakerSuggestions': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListSpeakerSuggestions,
+                    request_deserializer=ai__pb2.ListSpeakerSuggestionsRequest.FromString,
+                    response_serializer=ai__pb2.ListSpeakerSuggestionsResponse.SerializeToString,
+            ),
+            'SetSpeakerSuggestionStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetSpeakerSuggestionStatus,
+                    request_deserializer=ai__pb2.SetSpeakerSuggestionStatusRequest.FromString,
+                    response_serializer=ai__pb2.SpeakerSuggestion.SerializeToString,
             ),
             'RequestQuiz': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestQuiz,
@@ -842,6 +879,60 @@ class AiService:
             '/transuai.ai.v1.AiService/CountUserWebSearches',
             ai__pb2.CountUserWebSearchesRequest.SerializeToString,
             ai__pb2.CountUserWebSearchesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListSpeakerSuggestions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListSpeakerSuggestions',
+            ai__pb2.ListSpeakerSuggestionsRequest.SerializeToString,
+            ai__pb2.ListSpeakerSuggestionsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetSpeakerSuggestionStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/SetSpeakerSuggestionStatus',
+            ai__pb2.SetSpeakerSuggestionStatusRequest.SerializeToString,
+            ai__pb2.SpeakerSuggestion.FromString,
             options,
             channel_credentials,
             insecure,

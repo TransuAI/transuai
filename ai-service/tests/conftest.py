@@ -65,7 +65,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, web_search_usage, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals, post_meeting_settings"))
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, web_search_usage, speaker_name_suggestions, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals, post_meeting_settings"))
 
 
 @pytest.fixture(scope="session")

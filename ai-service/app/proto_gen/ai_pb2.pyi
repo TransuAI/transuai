@@ -454,6 +454,42 @@ class LlmUsageSum(_message.Message):
     calls_with_unknown_usage: int
     def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., key_source: _Optional[str] = ..., input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., calls: _Optional[int] = ..., calls_with_unknown_usage: _Optional[int] = ...) -> None: ...
 
+class ListSpeakerSuggestionsRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class ListSpeakerSuggestionsResponse(_message.Message):
+    __slots__ = ("suggestions",)
+    SUGGESTIONS_FIELD_NUMBER: _ClassVar[int]
+    suggestions: _containers.RepeatedCompositeFieldContainer[SpeakerSuggestion]
+    def __init__(self, suggestions: _Optional[_Iterable[_Union[SpeakerSuggestion, _Mapping]]] = ...) -> None: ...
+
+class SpeakerSuggestion(_message.Message):
+    __slots__ = ("speaker_label", "name", "evidence_start_time", "evidence_text", "status")
+    SPEAKER_LABEL_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_START_TIME_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_TEXT_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    speaker_label: str
+    name: str
+    evidence_start_time: float
+    evidence_text: str
+    status: str
+    def __init__(self, speaker_label: _Optional[str] = ..., name: _Optional[str] = ..., evidence_start_time: _Optional[float] = ..., evidence_text: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+
+class SetSpeakerSuggestionStatusRequest(_message.Message):
+    __slots__ = ("job_id", "speaker_label", "status")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    SPEAKER_LABEL_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    speaker_label: str
+    status: str
+    def __init__(self, job_id: _Optional[str] = ..., speaker_label: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+
 class ListJobWebSearchesRequest(_message.Message):
     __slots__ = ("job_id",)
     JOB_ID_FIELD_NUMBER: _ClassVar[int]

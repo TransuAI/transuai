@@ -6,6 +6,7 @@ from typing import Callable
 from app.db import new_session
 from app.repositories.chapter_repository import save_chapters
 from app.repositories.embedding_repository import save_embeddings
+from app.repositories.speaker_suggestion_repository import save_speaker_suggestions
 from app.repositories.summary_repository import save_summary
 from app.services.chapter_generator import generate_chapters
 from app.services.default_models import resolve_chat_model
@@ -13,6 +14,7 @@ from app.services.embedder import embed_documents
 from app.services.job_details import suggest_details
 from app.services.job_status_client import job_status_client
 from app.services.llm_client import ChatModel
+from app.services.speaker_names import suggest_speaker_names
 from app.services.retry import (
     TERMINAL_FAILURE_LOST_MARKER,
     RetryableMessageError,
@@ -20,7 +22,7 @@ from app.services.retry import (
     has_retry_budget,
     retry_terminal_report,
 )
-from app.services.speaker_context import chapter_input, spoken_segments, summary_input
+from app.services.speaker_context import chapter_input, speaker_names, spoken_segments, summary_input
 from app.services.summarizer import summarize
 from app.services.transcript_client import transcript_client
 from app.services.usage_meter import LlmFeature, UsageMeter, job_owner
@@ -82,6 +84,8 @@ def process_message(
 
         _suggest_title_and_category(job_id, summary_text, chapters, model=model,
                                     meter=UsageMeter(user_id, job_uuid, LlmFeature.JOB_TITLE))
+        _suggest_speaker_names(job_uuid, transcript, model=model,
+                               meter=UsageMeter(user_id, job_uuid, LlmFeature.SPEAKER_NAMES))
         job_status_client.update_status(job_id, "COMPLETED")
         publish_completed(job_id)
         logger.info("job %s summarized successfully", job_id)
@@ -117,4 +121,16 @@ def _suggest_title_and_category(job_id: str, summary: str, chapters: list[tuple[
             job_status_client.set_suggested_details(job_id, details.title, details.category)
     except Exception:
         logger.exception("job %s: could not give it a title, it keeps its file name", job_id)
+
+
+def _suggest_speaker_names(job_uuid: uuid.UUID, transcript, *, model: ChatModel, meter: UsageMeter) -> None:
+    """講者名字建議（兩位以上講者才問模型）。附加功能：任何失敗只記 log，講者照舊是「講者 N」，Job 照樣完成。"""
+    if speaker_names(transcript) is None:
+        return
+    try:
+        suggestions = suggest_speaker_names(transcript, model=model, meter=meter)
+        if suggestions is not None:
+            save_speaker_suggestions(job_uuid, suggestions)
+    except Exception:
+        logger.exception("job %s: could not suggest speaker names", job_uuid)
 
