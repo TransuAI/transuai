@@ -67,6 +67,7 @@ from app.services.post_meeting_settings import (
     save_settings,
 )
 from app.services.notion import NotionUnreachable
+from app.repositories.web_search_usage_repository import count_user_web_searches, list_job_web_searches
 from app.services.web_search import WebSearchResult
 from app.services.web_search import is_available as web_search_available
 from app.services.qa import NoEmbeddingsError, stream_answer
@@ -311,6 +312,37 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
                                output_tokens=s.output_tokens, calls=s.calls,
                                calls_with_unknown_usage=s.calls_with_unknown_usage)
             for s in sums])
+
+    def ListJobWebSearches(self, request, context):
+        try:
+            job_id = uuid.UUID(request.job_id)
+        except ValueError:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "job_id must be a valid UUID")
+
+        session = new_session()
+        try:
+            records = []
+            for usage in list_job_web_searches(session, job_id):
+                created_at = timestamp_pb2.Timestamp()
+                created_at.FromDatetime(usage.created_at)
+                records.append(ai_pb2.WebSearchUsage(provider=usage.provider, succeeded=usage.succeeded,
+                                                     created_at=created_at))
+            return ai_pb2.ListJobWebSearchesResponse(records=records)
+        finally:
+            session.close()
+
+    def CountUserWebSearches(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        if not (request.HasField("start") and request.HasField("end")):
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "start and end are required")
+
+        session = new_session()
+        try:
+            succeeded, failed = count_user_web_searches(session, user_id, request.start.ToDatetime(timezone.utc),
+                                                        request.end.ToDatetime(timezone.utc))
+        finally:
+            session.close()
+        return ai_pb2.CountUserWebSearchesResponse(succeeded=succeeded, failed=failed)
 
     def SaveProviderKey(self, request, context):
         user_id = _parse_user_id(request.user_id, context)

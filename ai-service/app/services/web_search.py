@@ -18,6 +18,8 @@ from mcp.client.streamable_http import streamable_http_client
 from app.core.config import settings
 
 TAVILY_MCP_URL = "https://mcp.tavily.com/mcp/"
+# 用量紀錄上的搜尋服務名稱。
+PROVIDER = "tavily"
 server_override: Any = None
 
 # 一般搜尋（basic，1 credit），最多 5 筆；每筆的內容截短再給模型，整題的 prompt 才不會被網頁撐大。

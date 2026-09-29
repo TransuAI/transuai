@@ -203,7 +203,9 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
 功能、廠商、模型、金鑰來源、輸入 / 輸出 token（取廠商回報的數字，沒回報就是未知，不估算）、成功或失敗。失敗的呼叫也記
 （通常沒有數字）；串流回答被中途放棄也算失敗。用量用自己的 session 立即寫入，跟摘要存檔無關；寫不進去只記 log，不讓
 Job 失敗。embedding 不記。`ListJobLlmUsage`（一個 Job 逐筆）與 `SumUserLlmUsage`（一位使用者一段時間依模型加總）提供查詢，
-Gateway 跟 transcription-service 的轉錄用量合併後給前端。
+Gateway 跟 transcription-service 的轉錄用量合併後給前端。問答每查一次網路，另外記一筆到 `web_search_usage`（使用者、Job、
+搜尋服務、成功或失敗；量是次數，所以不放在 `llm_usage`），由 `ListJobWebSearches`（一個 Job 逐筆）與 `CountUserWebSearches`
+（一位使用者一段時間成功 / 失敗各幾次，Gateway 的每月上限只算成功的）查詢。
 
 ### 重新產生摘要與章節（`summary.regeneration.requested`）
 
@@ -289,6 +291,7 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 | `RetryProposal` | 用上一次的最終參數重試一個 FAILED 的提案；不是 FAILED 回 `FAILED_PRECONDITION` |
 | `DeleteConnection` | 中斷連結：向對方撤銷授權並刪除權杖；撤銷失敗時照樣刪除，`revoked` 是 false（對方說權杖本來就無效——授權早就不在了——算撤銷成功）。沒連結也算成功 |
 | `SubmitQuizAttempt` | 送出一次作答（依題目順序、每題一個選項位置）：計分、存進 `quiz_attempts`，回傳答對題數與每題的選擇、正確選項、對錯、解說；同一份測驗可以重做，每次都保存。題數不對或選項超出範圍回 `INVALID_ARGUMENT`，還沒產生完成回 `FAILED_PRECONDITION`，不屬於這個 `job_id` 回 `NOT_FOUND` |
+| `ListJobWebSearches` / `CountUserWebSearches` | 網路搜尋的用量：一個 Job 的每一次（搜尋服務、成功或失敗、時間，依時間升冪），與一位使用者在 `[start, end)` 之間成功 / 失敗各幾次。ID 不合法、或沒給 `start` / `end` 回 `INVALID_ARGUMENT` |
 | `SumUserLlmUsage` | 一位使用者在 `[start, end)` 之間的 LLM 用量，依廠商、模型、金鑰來源加總：輸入 / 輸出 token（已知數字的加總）、呼叫次數（失敗也算）、廠商沒回報 token 的次數；Gateway 把「某個月」換成時間範圍。`user_id` 不合法或沒給 `start` / `end` 回 `INVALID_ARGUMENT`，沒有用量回空列表 |
 | `SaveProviderKey` / `DeleteProviderKey` / `ListProviderKeys` | 自有金鑰（見上方「自有金鑰」）：存入或替換（先向廠商驗證，通過才加密存下，回傳末四碼；廠商不在清單、金鑰是空的或無效回 `INVALID_ARGUMENT` 附原因，廠商暫時連不上回 `UNAVAILABLE`，沒設定主金鑰回 `FAILED_PRECONDITION`）、刪除（沒有這把回 `deleted=false`；預設模型正在用它時一起改回平台模型，`default_model_reset=true`）、列出（只有末四碼） |
 | `ListAvailableModels` / `GetDefaultModel` / `SetDefaultModel` | 預設模型（見上方「預設模型」）：可以選的模型（附 `web_search`：這個部署的問答能不能查網路）、目前的預設模型、設定預設模型（沒有那個廠商的自有金鑰回 `FAILED_PRECONDITION`，清單外的模型或 OpenRouter 上不存在回 `INVALID_ARGUMENT`，OpenRouter 查不到回 `UNAVAILABLE`） |
@@ -412,6 +415,7 @@ app/
     embedding_repository.py                ai_db 存取（embeddings，含向量相似度搜尋）
     qa_repository.py                       ai_db 存取（qa_history）
     llm_usage_repository.py                ai_db 存取（llm_usage）：每筆用量用自己的 session 立即寫入
+    web_search_usage_repository.py         ai_db 存取（web_search_usage）：每次網路搜尋一筆（自己的 session 立即寫入）、一個 Job 的列表、一位使用者一段時間的成功 / 失敗次數
     provider_key_repository.py             ai_db 存取（provider_keys）：存入或替換（upsert）、刪除、列出
     default_model_repository.py            ai_db 存取（default_models）
     post_meeting_repository.py             ai_db 存取（post_meeting_runs、action_proposals）

@@ -250,3 +250,53 @@ def test_when_the_search_query_cannot_be_written_the_question_itself_is_searched
     assert tavily.queries == ["他們說的 pgvector 是什麼？"]
     assert events[1][1].sources == [WebSource(title="pgvector", url="https://github.com/pgvector/pgvector")]
     assert "## 網路搜尋結果" in prompt
+
+
+# --- 網路搜尋的用量：每查一次記一筆（成功或失敗），列出這個 Job 的、數這位使用者某段時間的 ---
+
+def month_of(ai_stub, user: uuid.UUID) -> ai_pb2.CountUserWebSearchesResponse:
+    from datetime import datetime, timedelta, timezone
+
+    from google.protobuf import timestamp_pb2
+
+    now = datetime.now(timezone.utc)
+    start, end = timestamp_pb2.Timestamp(), timestamp_pb2.Timestamp()
+    start.FromDatetime(now - timedelta(days=1))
+    end.FromDatetime(now + timedelta(days=1))
+    return ai_stub.CountUserWebSearches(ai_pb2.CountUserWebSearchesRequest(user_id=str(user), start=start, end=end))
+
+
+def test_each_search_is_recorded_under_the_asker_and_the_job(ai_stub, db_session, fake_llm, tavily):
+    tavily.found(("pgvector", "https://github.com/pgvector/pgvector", "Open-source vector similarity search"))
+    fake_llm.reply("pgvector 是什麼")
+    fake_llm.stream(["是 Postgres 的擴充 [1]。"])
+    job_id = uuid.uuid4()
+
+    ask_over_grpc(ai_stub, job_id, web_search=True)
+
+    (record,) = ai_stub.ListJobWebSearches(ai_pb2.ListJobWebSearchesRequest(job_id=str(job_id))).records
+    assert (record.provider, record.succeeded) == ("tavily", True)
+    assert month_of(ai_stub, USER) == ai_pb2.CountUserWebSearchesResponse(succeeded=1, failed=0)
+    assert month_of(ai_stub, uuid.uuid4()) == ai_pb2.CountUserWebSearchesResponse(succeeded=0, failed=0)
+
+
+def test_a_failed_search_is_recorded_as_failed(ai_stub, db_session, fake_llm, tavily):
+    tavily.error = RuntimeError("down")
+    fake_llm.reply("pgvector 是什麼")
+    fake_llm.stream(["內容裡提到要改用 pgvector。"])
+    job_id = uuid.uuid4()
+
+    ask_over_grpc(ai_stub, job_id, web_search=True)
+
+    (record,) = ai_stub.ListJobWebSearches(ai_pb2.ListJobWebSearchesRequest(job_id=str(job_id))).records
+    assert not record.succeeded
+    assert month_of(ai_stub, USER) == ai_pb2.CountUserWebSearchesResponse(succeeded=0, failed=1)
+
+
+def test_a_question_that_does_not_search_records_no_search(ai_stub, db_session, fake_llm, tavily):
+    fake_llm.stream(["內容裡提到要改用 pgvector。"])
+    job_id = uuid.uuid4()
+
+    ask_over_grpc(ai_stub, job_id, web_search=False)
+
+    assert list(ai_stub.ListJobWebSearches(ai_pb2.ListJobWebSearchesRequest(job_id=str(job_id))).records) == []

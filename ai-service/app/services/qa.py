@@ -10,6 +10,7 @@ from app.repositories.chapter_repository import find_by_job_id as find_chapters
 from app.repositories.embedding_repository import find_similar
 from app.repositories.qa_repository import find_by_job_id
 from app.repositories.summary_repository import find_by_job_id as find_summary
+from app.repositories.web_search_usage_repository import save_web_search
 from app.services.embedder import embed_query
 from app.services.default_models import resolve_chat_model, resolve_requested_chat_model
 from app.services.llm_client import ChatModel, LlmError, chat, stream_chat
@@ -165,6 +166,14 @@ def _search_query(
     return (lines[0] if lines else question)[:_MAX_SEARCH_QUERY_CHARS]
 
 
+def _record_web_search(user_id: uuid.UUID | None, job_id: uuid.UUID, *, succeeded: bool) -> None:
+    """用量（見 CONTEXT.md）：成功或失敗都記。記不到不能讓這一題跟著失敗——少一筆紀錄比沒有回答好。"""
+    try:
+        save_web_search(user_id, job_id, web.PROVIDER, succeeded)
+    except Exception:
+        logger.exception("could not record a web search for job %s", job_id)
+
+
 def _web_results(pages: list[WebPage]) -> str:
     if not pages:
         return ""
@@ -225,6 +234,7 @@ def stream_answer(
         except WebSearchFailed:
             logger.warning("job %s: web search failed, answering from the content only", job_id, exc_info=True)
             failed = True
+        _record_web_search(user_id, job_id, succeeded=not failed)
         yield ("web_sources", WebSearchResult(sources=[page.source for page in pages], failed=failed))
     yield ("answered_by", (model.provider, model.model))
 

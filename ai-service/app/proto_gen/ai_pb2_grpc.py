@@ -74,6 +74,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.SumUserLlmUsageRequest.SerializeToString,
                 response_deserializer=ai__pb2.SumUserLlmUsageResponse.FromString,
                 _registered_method=True)
+        self.ListJobWebSearches = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListJobWebSearches',
+                request_serializer=ai__pb2.ListJobWebSearchesRequest.SerializeToString,
+                response_deserializer=ai__pb2.ListJobWebSearchesResponse.FromString,
+                _registered_method=True)
+        self.CountUserWebSearches = channel.unary_unary(
+                '/transuai.ai.v1.AiService/CountUserWebSearches',
+                request_serializer=ai__pb2.CountUserWebSearchesRequest.SerializeToString,
+                response_deserializer=ai__pb2.CountUserWebSearchesResponse.FromString,
+                _registered_method=True)
         self.RequestQuiz = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestQuiz',
                 request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
@@ -247,6 +257,22 @@ class AiServiceServicer:
     def SumUserLlmUsage(self, request, context):
         """一位使用者在 [start, end) 之間的 LLM 用量，依廠商、模型、金鑰來源彙總（Gateway 把「某個月」換成這段時間）。
         user_id 不合法、或沒給 start / end 回 INVALID_ARGUMENT；沒有用量回空列表。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListJobWebSearches(self, request, context):
+        """網路搜尋的用量（見 ai-service/CONTEXT.md「用量」）：問答每查一次網路記一筆（成功或失敗）。一個 Job 的每一筆，依時間升冪；
+        job_id 不合法回 INVALID_ARGUMENT，沒有紀錄回空列表。不驗證使用者，Gateway 已經做過 ownership 檢查。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CountUserWebSearches(self, request, context):
+        """一位使用者在 [start, end) 之間查了幾次網路（成功與失敗分開算；用量上限只算成功的）。user_id 不合法、或沒給 start / end
+        回 INVALID_ARGUMENT。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -457,6 +483,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.SumUserLlmUsage,
                     request_deserializer=ai__pb2.SumUserLlmUsageRequest.FromString,
                     response_serializer=ai__pb2.SumUserLlmUsageResponse.SerializeToString,
+            ),
+            'ListJobWebSearches': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListJobWebSearches,
+                    request_deserializer=ai__pb2.ListJobWebSearchesRequest.FromString,
+                    response_serializer=ai__pb2.ListJobWebSearchesResponse.SerializeToString,
+            ),
+            'CountUserWebSearches': grpc.unary_unary_rpc_method_handler(
+                    servicer.CountUserWebSearches,
+                    request_deserializer=ai__pb2.CountUserWebSearchesRequest.FromString,
+                    response_serializer=ai__pb2.CountUserWebSearchesResponse.SerializeToString,
             ),
             'RequestQuiz': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestQuiz,
@@ -752,6 +788,60 @@ class AiService:
             '/transuai.ai.v1.AiService/SumUserLlmUsage',
             ai__pb2.SumUserLlmUsageRequest.SerializeToString,
             ai__pb2.SumUserLlmUsageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListJobWebSearches(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListJobWebSearches',
+            ai__pb2.ListJobWebSearchesRequest.SerializeToString,
+            ai__pb2.ListJobWebSearchesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CountUserWebSearches(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/CountUserWebSearches',
+            ai__pb2.CountUserWebSearchesRequest.SerializeToString,
+            ai__pb2.CountUserWebSearchesResponse.FromString,
             options,
             channel_credentials,
             insecure,

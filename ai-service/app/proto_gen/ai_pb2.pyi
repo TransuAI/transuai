@@ -454,6 +454,46 @@ class LlmUsageSum(_message.Message):
     calls_with_unknown_usage: int
     def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., key_source: _Optional[str] = ..., input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., calls: _Optional[int] = ..., calls_with_unknown_usage: _Optional[int] = ...) -> None: ...
 
+class ListJobWebSearchesRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class ListJobWebSearchesResponse(_message.Message):
+    __slots__ = ("records",)
+    RECORDS_FIELD_NUMBER: _ClassVar[int]
+    records: _containers.RepeatedCompositeFieldContainer[WebSearchUsage]
+    def __init__(self, records: _Optional[_Iterable[_Union[WebSearchUsage, _Mapping]]] = ...) -> None: ...
+
+class WebSearchUsage(_message.Message):
+    __slots__ = ("provider", "succeeded", "created_at")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    succeeded: bool
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, provider: _Optional[str] = ..., succeeded: _Optional[bool] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class CountUserWebSearchesRequest(_message.Message):
+    __slots__ = ("user_id", "start", "end")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    START_FIELD_NUMBER: _ClassVar[int]
+    END_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    start: _timestamp_pb2.Timestamp
+    end: _timestamp_pb2.Timestamp
+    def __init__(self, user_id: _Optional[str] = ..., start: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., end: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class CountUserWebSearchesResponse(_message.Message):
+    __slots__ = ("succeeded", "failed")
+    SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
+    FAILED_FIELD_NUMBER: _ClassVar[int]
+    succeeded: int
+    failed: int
+    def __init__(self, succeeded: _Optional[int] = ..., failed: _Optional[int] = ...) -> None: ...
+
 class LlmUsage(_message.Message):
     __slots__ = ("feature", "provider", "model", "key_source", "input_tokens", "output_tokens", "succeeded", "created_at")
     FEATURE_FIELD_NUMBER: _ClassVar[int]
