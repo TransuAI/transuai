@@ -442,6 +442,20 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 
 開發環境都不檢查、照舊開著。見 `.scratch/pre-launch-hardening/issues/07`。
 
+## 依賴套件弱點掃描
+
+掃的是正式執行時會裝的依賴（跟 Dockerfile 的 `uv sync --no-dev` 一樣，不含 pytest 這類開發工具），用 [pip-audit](https://pypi.org/project/pip-audit/)
+對照 PyPI／OSV 的弱點資料庫：
+
+```bash
+uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/requirements.txt
+uvx pip-audit --no-deps --disable-pip -r /tmp/requirements.txt
+```
+
+上線前、以及之後每個月或升級依賴時跑一次。高風險、嚴重的要升級，或在這裡寫清楚為什麼不影響。
+
+最近一次結果：2026-10-03：沒有已知弱點。
+
 ## 已知限制 / 待辦
 
 - 已連結的帳號：Google 的 `gmail.compose`（建立草稿）屬於 Google 的受限權限，應用程式通過 Google 的審查之前，只有 OAuth
