@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts`、`oauth_connections`、`oauth_pending_authorizations`、`oauth_clients`、`post_meeting_runs`、`action_proposals`、`post_meeting_settings`、`web_search_usage`、`speaker_name_suggestions` 十八張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。`export_outputs` 對應的功能還沒做，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts`、`oauth_connections`、`oauth_pending_authorizations`、`oauth_clients`、`post_meeting_runs`、`action_proposals`、`post_meeting_settings`、`web_search_usage`、`speaker_name_suggestions`、`speaker_insights`、`speaker_insight_items`、`deleted_jobs` 二十一張表。
 
 原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)；embedding 仍用 `hf_client.py`。
 
@@ -463,10 +463,10 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 
 upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanout exchange `job.deleted`；這個服務綁 `job.deleted.ai`
 （`app/services/deletion_consumer.py`，另一條 thread、另一條連線，不排在摘要、出題、會後處理後面），清掉這個 Job 的摘要、章節、embedding、
-問答、測驗（題目、作答跟著 cascade）、講者名字建議、會後處理（行動提案跟著 cascade）。**用量（`llm_usage`、`web_search_usage`）不刪**。
+問答、測驗（題目、作答跟著 cascade）、講者名字建議、講者數據的問題與打斷（項目跟著 cascade）、會後處理（行動提案跟著 cascade）。**用量（`llm_usage`、`web_search_usage`）不刪**。
 可以重複處理；處理失敗 nack 到 `job.deleted.ai.retry`，30 秒後回來，不限次數；訊息本身不合法才丟掉。見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md`。
 
-刪除當下還在跑的寫入（pipeline、重算 embedding、重新產生摘要、出題、講者名字建議、會後處理、問答存紀錄）可能比刪除晚：收到事件時先記下
+刪除當下還在跑的寫入（pipeline、重算 embedding、重新產生摘要、出題、講者名字建議、講者數據分析、會後處理、問答存紀錄）可能比刪除晚：收到事件時先記下
 `deleted_jobs`（保留一天）再刪資料；寫入那一邊不用各自檢查——`job_deletion.guard_writes(SessionLocal)`（啟動時掛上）在 session 上記下每次
 commit 新增或修改了哪些 Job 的資料，commit 之後查這些 Job 有沒有被刪，有就刪掉。新的資料表只要帶 `job_id` 就要加進 `job_deletion.JOB_SCOPED`。
 改到已經被刪掉的列（例如重新產生摘要寫回）會失敗（`StaleDataError`），不會把資料帶回來。

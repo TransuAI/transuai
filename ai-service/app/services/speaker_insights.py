@@ -8,6 +8,7 @@
 
 import logging
 from dataclasses import dataclass
+from enum import StrEnum
 
 from app.services.agent_tools import timed_line
 from app.services.chapter_generator import parse_json_reply
@@ -46,9 +47,14 @@ class Line:
     text: str
 
 
+class InsightKind(StrEnum):
+    QUESTION = "question"
+    INTERRUPTION = "interruption"
+
+
 @dataclass(frozen=True)
 class Insight:
-    kind: str  # "question" / "interruption"
+    kind: InsightKind
     speaker_label: str
     # 打斷時被打斷的講者；問題是 None。
     interrupted_label: str | None
@@ -92,22 +98,23 @@ def analyze_speakers(transcript, *, model: ChatModel, meter: UsageMeter | None) 
 
     by_number = {line.number: line for line in lines}
     insights = [
-        Insight("question", line.speaker_label, None, line.start_time, line.text)
-        for line in _lines(data.get("questions", []), by_number)
+        Insight(InsightKind.QUESTION, line.speaker_label, None, line.start_time, line.text)
+        for line in _valid_lines(data.get("questions", []), by_number)
     ]
     allowed = set(candidates)
     insights += [
-        Insight("interruption", line.speaker_label, by_number[line.number - 1].speaker_label, line.start_time, line.text)
-        for line in _lines(data.get("interruptions", []), by_number) if line.number in allowed
+        Insight(InsightKind.INTERRUPTION, line.speaker_label, by_number[line.number - 1].speaker_label, line.start_time,
+                line.text)
+        for line in _valid_lines(data.get("interruptions", []), by_number) if line.number in allowed
     ]
-    return sorted(insights, key=lambda insight: (insight.start_time, insight.kind != "question"))
+    return sorted(insights, key=lambda insight: (insight.start_time, insight.kind != InsightKind.QUESTION))
 
 
-def _lines(numbers: list, by_number: dict[int, Line]) -> list[Line]:
-    """模型給的行號裡真的存在的那幾行，各一次。"""
-    seen: list[Line] = []
+def _valid_lines(numbers: list, by_number: dict[int, Line]) -> list[Line]:
+    """模型給的行號裡真的存在的那幾行，各一次（不是整數、不存在、重複的都丟掉）。"""
+    lines: list[Line] = []
     for number in numbers:
         line = by_number.get(number) if isinstance(number, int) and not isinstance(number, bool) else None
-        if line is not None and line not in seen:
-            seen.append(line)
-    return seen
+        if line is not None and line not in lines:
+            lines.append(line)
+    return lines
