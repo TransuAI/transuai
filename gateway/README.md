@@ -120,6 +120,8 @@ docker compose up -d
 | `GET` | `/summary/{jobId}` | 取得摘要（含 `sourceRevision`，前端跟逐字稿的 `revision` 比對判斷過時；`regenerationStatus`：`IDLE`／`RUNNING`／`FAILED`；`modelProvider` / `model`：產生它的模型，記錄模型之前的摘要是 `null`） |
 | `POST` | `/summary/{jobId}/regenerate` | 在背景依最新逐字稿重新產生摘要與章節，回 `202` 與目前的摘要；轉給 `RequestRegeneration`，帶上當下使用者（用量記在他名下；Job 狀態不變） |
 | `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
+| `POST` | `/jobs/{jobId}/speaker-insights` | 分析講者的問題與打斷（AI 估計），回 `202` 與目前這一份（`status: GENERATING`）；一個 Job 一份，再分析完成才取代；轉給 `RequestSpeakerInsights`，帶上當下使用者。花錢的功能、受每月平台模型上限管 |
+| `GET` | `/jobs/{jobId}/speaker-insights` | `{ status, failureReason, sourceRevision, modelProvider, model, requestedAt, completedAt, items: [{ kind, speakerLabel, interruptedLabel, startTime, text }] }`；`status` 是 `NONE`（還沒分析過）/ `GENERATING` / `COMPLETED` / `FAILED`；`kind` 是 `question` / `interruption`；前端每 3 秒輪詢直到不是 `GENERATING` |
 | `POST` | `/jobs/{jobId}/quizzes` | 產生一份測驗，body `{ "questionCount": 5 \| 10 \| 20 }`，回 `202` 與「產生中」的測驗（不含題目）；每次都多一份新的。題數不對回 400；轉給 `RequestQuiz`，帶上當下使用者（用他的預設模型、用量記在他名下） |
 | `GET` | `/jobs/{jobId}/quizzes` | 這個 Job 的測驗（新的在前）：`[{ id, jobId, questionCount, status, failureReason, sourceRevision, modelProvider, model, requestedAt, completedAt, questions: null, bestCorrectCount }]`（`bestCorrectCount` 是所有作答裡答對最多的題數，還沒作答過是 `null`）；`status` 是 `GENERATING` / `COMPLETED` / `FAILED`（產生中超過 5 分鐘回報成失敗），前端每 3 秒輪詢直到不是 `GENERATING`；轉給 `ListQuizzes` |
 | `GET` | `/jobs/{jobId}/quizzes/{quizId}` | 一份測驗含題目：`questions: [{ kind, prompt, options, correctOption, explanation, sourceTimestamps }]`（`kind` 是 `multiple_choice` / `true_false`；答案直接回傳，作答時不顯示是前端的事）；不屬於這個 Job 回 404；轉給 `GetQuiz` |
@@ -185,6 +187,7 @@ docker compose up -d
 | 完成上傳（`POST /uploads/complete`） | 每人每小時 10 次 | 每次上傳都觸發要付費的轉錄 |
 | 問答（`POST /qa/{jobId}`） | 每人每分鐘 20 題 | 每題都呼叫 AI |
 | 產生測驗（`POST /jobs/{jobId}/quizzes`） | 每人每小時 10 份 | |
+| 分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`） | 每人每小時 10 次 | `RATE_LIMIT_SPEAKER_INSIGHTS` |
 | 重新產生摘要（`POST /summary/{jobId}/regenerate`） | 每人每小時 5 次 | |
 | 開始會後處理（`POST /jobs/{jobId}/post-meeting`） | 每人每小時 10 次 | 一次最多 10 次 AI 呼叫 |
 | 存自有金鑰（`PUT /me/provider-keys/{provider}`） | 每人每小時 10 次 | 每次都向 AI 廠商驗證：不讓人拿平台去試偷來的金鑰 |
