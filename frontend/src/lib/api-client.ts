@@ -1,5 +1,5 @@
-import type { ApiErrorBody } from '@/types/api'
-import { clearSession, getRefreshToken, loadSession, updateTokens } from '@/lib/auth-storage'
+import type { ApiErrorBody, AuthResponse } from '@/types/api'
+import { getAccessToken, setAccessToken } from '@/lib/access-token'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -16,44 +16,37 @@ export class ApiError extends Error {
   }
 }
 
-let refreshPromise: Promise<string | null> | null = null
+let refreshPromise: Promise<AuthResponse | null> | null = null
 
-async function refreshAccessToken(): Promise<string | null> {
-  if (refreshPromise) return refreshPromise
-
-  refreshPromise = (async () => {
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) return null
-
+// 用 httpOnly cookie 裡的 refresh token 換新的 access token（記在記憶體），cookie 由 gateway 換成輪替後的新 token。
+// 開啟或重新整理頁面時靠這個恢復登入；同時有好幾個請求要換只換一次。換不到（沒登入、過期、作廢）回 null。
+// cookie 只限同一個網站送：API 要跟前端同源（經 /api 轉過去），fetch 預設的 credentials: 'same-origin' 才會帶 cookie。
+export function refreshSession(): Promise<AuthResponse | null> {
+  refreshPromise ??= (async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
-      })
+      const res = await fetch(`${API_BASE_URL}/auth/refresh`, { method: 'POST' })
       if (!res.ok) return null
-      const data = (await res.json()) as { accessToken: string; refreshToken: string }
-      updateTokens(data.accessToken, data.refreshToken)
-      return data.accessToken
+      const session = (await res.json()) as AuthResponse
+      setAccessToken(session.accessToken)
+      return session
     } catch {
       return null
+    } finally {
+      refreshPromise = null
     }
   })()
-
-  const result = await refreshPromise
-  refreshPromise = null
-  return result
+  return refreshPromise
 }
 
-// access token 被拒絕之後：換發一次；換不到就是登入過期——清掉 session、通知 App 回登入頁，回傳 null。
+// access token 被拒絕之後：換發一次；換不到就是登入過期——忘掉 access token、通知 App 回登入頁，回傳 null。
 // 一般請求的 401 跟 WebSocket 的 4401（見 use-job-socket）都走這裡。
 export async function renewAccessToken(): Promise<string | null> {
-  const newAccessToken = await refreshAccessToken()
-  if (!newAccessToken) {
-    clearSession()
+  const session = await refreshSession()
+  if (!session) {
+    setAccessToken(null)
     window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
   }
-  return newAccessToken
+  return session?.accessToken ?? null
 }
 
 interface RequestOptions {
@@ -65,8 +58,8 @@ interface RequestOptions {
 function buildHeaders(auth: boolean): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (auth) {
-    const session = loadSession()
-    if (session) headers.Authorization = `Bearer ${session.accessToken}`
+    const accessToken = getAccessToken()
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`
   }
   return headers
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { JobStatusEvent } from '@/types/api'
 import { renewAccessToken } from '@/lib/api-client'
-import { loadSession } from '@/lib/auth-storage'
+import { getAccessToken } from '@/lib/access-token'
 
 const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8085'
 
@@ -35,7 +35,7 @@ export function useJobSocket(jobId: string | undefined, onEvent: (event: JobStat
     }
 
     const connect = () => {
-      const accessToken = loadSession()?.accessToken
+      const accessToken = getAccessToken()
       if (!accessToken) return
       socket = new WebSocket(`${WS_BASE_URL}/ws/jobs/${jobId}`)
       socket.onopen = () => {

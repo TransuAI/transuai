@@ -17,9 +17,9 @@ export interface User {
   createdAt: string
 }
 
+/** 登入、註冊、換發的回應。refresh token 不在這裡：gateway 把它放在 httpOnly cookie。 */
 export interface AuthResponse {
   accessToken: string
-  refreshToken: string
   user: User
 }
 

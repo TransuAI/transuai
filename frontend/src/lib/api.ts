@@ -47,9 +47,9 @@ export const authApi = {
 
   me: () => apiFetch<User>('/auth/me'),
 
-  // Revokes this sign-in's refresh token on the server; needs no access token (it may have expired).
-  logout: (refreshToken: string) =>
-    apiFetchVoid('/auth/logout', { method: 'POST', body: { refreshToken }, auth: false }),
+  // Revokes this sign-in's refresh token (sent as its httpOnly cookie) and clears the cookie; needs no access token
+  // (it may have expired).
+  logout: () => apiFetchVoid('/auth/logout', { method: 'POST', auth: false }),
 
   logoutAll: () => apiFetchVoid('/auth/logout-all', { method: 'POST' }),
 }

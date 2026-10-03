@@ -12,7 +12,7 @@
 | UI | Tailwind CSS v4 + shadcn/ui（Nova preset：Radix + Geist 字型） |
 | 路由 | react-router-dom v7 |
 | 狀態 | 沒有拉 Redux/Zustand,登入狀態用一個簡單的 `AuthContext`（`src/context/auth-context.tsx`），Job 資料用各頁面自己的 `useState`/`useEffect`,規模還不需要全域 data-fetching 套件 |
-| API 呼叫 | 手刻的 `fetch` wrapper（`src/lib/api-client.ts`），處理 401 → 自動 refresh token（伺服器每次換發都會輪替 refresh token）→ 重試一次；問答走 SSE（`requestSse`），不用原生 `EventSource`——它沒辦法附加 Authorization header，見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md) |
+| API 呼叫 | 手刻的 `fetch` wrapper（`src/lib/api-client.ts`），處理 401 → 自動換發 access token（refresh token 在 gateway 設的 httpOnly cookie，JavaScript 讀不到；伺服器每次換發都會輪替）→ 重試一次；問答走 SSE（`requestSse`），不用原生 `EventSource`——它沒辦法附加 Authorization header，見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md) |
 | 即時更新 | 原生 `WebSocket`（`src/hooks/use-job-socket.ts`）直連 notification-service |
 
 ## 前置需求
@@ -42,7 +42,7 @@ npm test
 
 Vitest + React Testing Library + `jsdom`。頁面測試一律 mock `src/lib/api.ts`（或 `api-client.ts`）當作對外邊界,其餘透過使用者看得到的行為（文字、role、點擊）驅動,不測內部實作細節。不碰畫面也沒有 I/O 的純函式模組(例如 `lib/export-formats.ts`,規則組合多、直接比對輸出文字比透過頁面可靠)則直接測它的 export。設定在 `vite.config.ts` 的 `test` 欄位,共用的測試環境設定在 `src/test/setup.ts`。
 
-`vite.config.ts` 把 `/api` proxy 到 `http://localhost:8080`（Gateway),所以本機開發預設 `VITE_API_BASE_URL=/api` 即可,不會有 CORS 問題。notification-service 的 WebSocket(`8085`)沒有走 Gateway,前端直連,見 `.env.example` 的 `VITE_WS_BASE_URL`。
+`vite.config.ts` 把 `/api` proxy 到 `http://localhost:8080`（Gateway),所以本機開發預設 `VITE_API_BASE_URL=/api` 即可,不會有 CORS 問題。**API 一定要跟前端同源**(正式環境也是經反向代理的 `/api`):refresh token 的 cookie 是 `SameSite=Strict`、`Path=/api/auth`,`VITE_API_BASE_URL` 設成別的網站的網址,重新整理頁面就會被登出(見 gateway README「refresh token 的 cookie」)。notification-service 的 WebSocket(`8085`)沒有走 Gateway,前端直連,見 `.env.example` 的 `VITE_WS_BASE_URL`。
 
 ### 環境變數
 
@@ -61,7 +61,7 @@ src/
     job-status-badge.tsx
     protected-route.tsx
   context/
-    auth-context.tsx  登入狀態、token 儲存、自動載入 /auth/me;登出時通知伺服器作廢 refresh token(不等回應,連不上也照樣登出),登出所有裝置(`logoutEverywhere`)
+    auth-context.tsx  登入狀態;開啟或重新整理頁面時用 refresh token 的 cookie 換 access token 恢復登入(順便清掉舊版存在 localStorage 的 token);登出時通知伺服器作廢 refresh token、清 cookie(不等回應,連不上也照樣登出這裡),登出所有裝置(`logoutEverywhere`)
   hooks/
     use-auto-follow.ts 自動跟隨的兩態狀態(跟隨中 / 已暫停)與 pause / resume
     use-job-socket.ts  WebSocket 訂閱單一 job 狀態更新:連上後第一則訊息送 access token;依關閉代碼決定重連——4401 換發 token 後重連(換發後仍被拒就不再試)、4404 不是你的 Job 不重連、4429 連線太多隔 30 秒、其他 3 秒
@@ -74,9 +74,9 @@ src/
     use-summary-regeneration.ts 「重新產生摘要與章節」:呼叫 regenerate,RUNNING 期間每 3 秒輪詢摘要,IDLE 換上新內容並重新載入章節、FAILED 提示並保留舊內容;進頁面時已在跑也會接著等
     use-transcript-search.ts 逐字稿搜尋狀態(query、符合結果、選中的那個、上一個 / 下一個);輸入或切換結果時暫停自動跟隨
   lib/
-    api-client.ts     fetch wrapper(auth header、401 refresh-and-retry、錯誤格式)+ requestSse(手動解析 SSE frame,問答 streaming 用)
+    api-client.ts     fetch wrapper(auth header、401 refresh-and-retry、錯誤格式)+ refreshSession(用 cookie 換 access token,同時多個請求只換一次)+ requestSse(手動解析 SSE frame,問答 streaming 用)
     api.ts            對應 Gateway 每支 REST API 的函式
-    auth-storage.ts    token/user 存 localStorage
+    access-token.ts    access token 只放在記憶體(不放 localStorage);refresh token 在 httpOnly cookie,前端碰不到
     current-segment.ts 依播放時間找出「目前片段」(定義見 CONTEXT.md),二分搜尋
     download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>);開啟伺服器給的下載 URL(跨網域 presigned 連結靠回應的 Content-Disposition 下載)
     editor-keys.ts     就地編輯器(片段文字、講者名稱)共用的按鍵:Enter 儲存、Esc 取消,輸入法組字中不處理

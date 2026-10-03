@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { authApi } from '@/lib/api'
-import { ApiError, SESSION_EXPIRED_EVENT } from '@/lib/api-client'
-import { clearSession, getRefreshToken, loadSession, saveSession } from '@/lib/auth-storage'
+import { refreshSession, SESSION_EXPIRED_EVENT } from '@/lib/api-client'
+import { forgetLegacyStoredSession, setAccessToken } from '@/lib/access-token'
 import type { User } from '@/types/api'
 
 interface AuthContextValue {
@@ -17,25 +17,23 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => loadSession()?.user ?? null)
+  const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  // The access token lives only in memory, so every page load signs back in with the refresh-token cookie.
   useEffect(() => {
-    const session = loadSession()
-    if (!session) {
-      setIsLoading(false)
-      return
-    }
-    authApi
-      .me()
-      .then((freshUser) => setUser(freshUser))
-      .catch((err) => {
-        if (err instanceof ApiError && err.status === 401) {
-          clearSession()
-          setUser(null)
-        }
+    forgetLegacyStoredSession()
+    let cancelled = false
+    refreshSession()
+      .then((session) => {
+        if (!cancelled) setUser(session?.user ?? null)
       })
-      .finally(() => setIsLoading(false))
+      .finally(() => {
+        if (!cancelled) setIsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -46,28 +44,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await authApi.login({ email, password })
-    saveSession(res)
+    setAccessToken(res.accessToken)
     setUser(res.user)
   }, [])
 
   const register = useCallback(async (email: string, password: string, displayName: string) => {
     const res = await authApi.register({ email, password, displayName })
-    saveSession(res)
+    setAccessToken(res.accessToken)
     setUser(res.user)
   }, [])
 
-  // Signing out here doesn't wait for the server: the refresh token is revoked there if it can be, and forgotten here
-  // regardless.
+  // Signing out here doesn't wait for the server: the refresh token is revoked (and its cookie cleared) there if it can
+  // be, and the access token is forgotten here regardless.
   const logout = useCallback(() => {
-    const refreshToken = getRefreshToken()
-    if (refreshToken) void authApi.logout(refreshToken).catch(() => {})
-    clearSession()
+    void authApi.logout().catch(() => {})
+    setAccessToken(null)
     setUser(null)
   }, [])
 
   const logoutEverywhere = useCallback(async () => {
     await authApi.logoutAll()
-    clearSession()
+    setAccessToken(null)
     setUser(null)
   }, [])
 

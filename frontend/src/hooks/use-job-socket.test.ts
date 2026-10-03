@@ -9,7 +9,7 @@ import {
   useJobSocket,
 } from '@/hooks/use-job-socket'
 import { renewAccessToken } from '@/lib/api-client'
-import { clearSession, saveSession, updateTokens } from '@/lib/auth-storage'
+import { setAccessToken } from '@/lib/access-token'
 
 vi.mock('@/lib/api-client', () => ({ renewAccessToken: vi.fn() }))
 
@@ -52,14 +52,14 @@ describe('useJobSocket', () => {
     vi.useFakeTimers()
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
-    saveSession({ accessToken: 'access-1', refreshToken: 'refresh-1', user: { id: 'u1', email: 'a@b.c' } as never })
+    setAccessToken('access-1')
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.mocked(renewAccessToken).mockReset()
-    clearSession()
+    setAccessToken(null)
   })
 
   it('sends the access token as the first message', () => {
@@ -84,7 +84,7 @@ describe('useJobSocket', () => {
   })
 
   it('does not connect without a session', () => {
-    clearSession()
+    setAccessToken(null)
     renderHook(() => useJobSocket('job-1', vi.fn()))
 
     expect(FakeWebSocket.instances).toHaveLength(0)
@@ -121,7 +121,7 @@ describe('useJobSocket', () => {
 
   it('renews the access token and reconnects with the new one when the token is refused', async () => {
     vi.mocked(renewAccessToken).mockImplementation(async () => {
-      updateTokens('access-2', 'refresh-2')
+      setAccessToken('access-2')
       return 'access-2'
     })
     renderHook(() => useJobSocket('job-1', vi.fn()))
