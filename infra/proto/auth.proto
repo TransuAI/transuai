@@ -31,6 +31,10 @@ service AuthService {
 
   // 登出所有裝置：作廢這位使用者所有的 refresh token（需要 x-user-id）。已簽出的 access token 仍有效到過期（最多 15 分鐘）。
   rpc LogoutAllDevices(LogoutAllDevicesRequest) returns (LogoutResponse);
+
+  // 刪除帳號（需要 x-user-id）：再確認一次密碼，錯了回 PERMISSION_DENIED（不是 UNAUTHENTICATED——那表示 token 不能用）。
+  // 通過就刪掉使用者與他所有的 refresh token，並發 account.deleted 讓其他服務清掉他的資料；找不到使用者回 NOT_FOUND。
+  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
 }
 
 message RegisterRequest {
@@ -72,4 +76,11 @@ message LogoutAllDevicesRequest {
 }
 
 message LogoutResponse {
+}
+
+message DeleteAccountRequest {
+  string password = 1;
+}
+
+message DeleteAccountResponse {
 }

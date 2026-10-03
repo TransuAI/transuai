@@ -112,6 +112,8 @@ POST   /auth/login             登入，回傳 access token、refresh token 設�
 POST   /auth/refresh           用 cookie 裡的 refresh token 換發新的 access token，cookie 換成新的 refresh token（舊的作廢；已換發過的再被用視為被盜，整串作廢）
 POST   /auth/logout            登出：作廢 cookie 裡的 refresh token 所在的那一串、清掉 cookie（不需要 access token）
 POST   /auth/logout-all        登出所有裝置：作廢登入者所有的 refresh token、清掉 cookie
+POST   /auth/account/delete    刪除帳號：body { password }（密碼錯 403、猜太多次 429）；刪掉使用者、發 account.deleted，其他服務清掉他的資料（用量去識別化）；
+                                刪除後還沒過期的 access token 也被擋下（gateway 在 Redis 記 15 分鐘）
 GET    /auth/me                取得目前使用者資訊（需帶 access token）
 ```
 
@@ -309,6 +311,7 @@ CREATE TABLE users (
 另外有 `refresh_tokens`（Hibernate 依 entity 建表）：每個簽出去的 refresh token 一列——`id`（JWT 的 `jti`）、`user_id`、
 `family_id`（同一次登入一路換發出來的）、`token_hash`（SHA-256）、`expires_at`、`created_at`、`revoked_at`、
 `revoked_reason`（`ROTATED` / `LOGGED_OUT` / `REUSED`）。
+刪除帳號時刪掉使用者與他的 `refresh_tokens`，`account.deleted` 寫進 `outbox_events`（欄位跟 upload_db 的一樣，見 4.2）。
 
 ### 4.2 upload_db
 
@@ -688,6 +691,7 @@ CREATE TABLE export_outputs (
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
 | `post_meeting.requested` | AI Service | AI Service | `{ runId, jobId, userId }`（`userId` 是觸發的使用者）——使用者啟動會後處理（`POST /jobs/{jobId}/post-meeting`）；ai-service 排給自己的背景工作 |
 | `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
+| `account.deleted`（**fanout exchange**） | Auth Service（outbox） | Upload Service（`account.deleted.upload`）、AI Service（`account.deleted.ai`）、Transcription Service（`account.deleted.transcription`） | `{ userId }`——使用者刪除了帳號：upload-service 刪掉他所有的 Job（每個再發 `job.deleted`），ai-service 撤銷並刪掉已連結的帳號、自有金鑰與個人設定，兩個服務把用量去識別化（`user_id` 設 NULL） |
 | `job.deleted`（**fanout exchange**） | Upload Service（outbox） | Transcription Service（`job.deleted.transcription`）、AI Service（`job.deleted.ai`） | `{ jobId, userId }`——Job 刪掉了，各服務清掉自己手上這個 Job 的資料（用量不刪）；見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md` |
 
 **實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
