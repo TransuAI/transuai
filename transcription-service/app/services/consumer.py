@@ -1,5 +1,6 @@
 import logging
 import time
+from collections.abc import Callable
 
 import pika
 from pika.adapters.blocking_connection import BlockingChannel
@@ -100,6 +101,10 @@ def _consume_once() -> None:
 
 
 def run_consumer() -> None:
+    run_with_reconnect(_consume_once)
+
+
+def run_with_reconnect(consume_once: Callable[[], None]) -> None:
     """建連線/消費中斷（RabbitMQ 重啟、DNS 暫時解析失敗等）時用指數退避重連，
     避免 consumer thread 死掉後就永久停止消費（pod 本身因為 gRPC server 還活著，
     不會因此被判定 unhealthy，訊息會無聲無息地堆積在 queue 裡）。
@@ -108,7 +113,7 @@ def run_consumer() -> None:
     while True:
         connected_at = time.monotonic()
         try:
-            _consume_once()
+            consume_once()
             return
         except KeyboardInterrupt:
             return

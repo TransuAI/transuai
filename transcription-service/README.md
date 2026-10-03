@@ -90,7 +90,7 @@ Redis 的 `transcript:v1:{job_id}` 是一個 hash，存序列化的 `Transcript`
 
 - 讀：有內容就直接回；沒有才讀資料庫並寫回。找不到的逐字稿不記。
 - 三種編輯（`UpdateSegmentText`、`RenameSpeaker`、`AssignSegmentSpeaker`）真的改了之後（已經寫進資料庫），記下最新的 `revision` 並丟掉內容；
-  pipeline 存檔之後也是（訊息重送時會再存一次）。之後要刪除逐字稿的（例如刪除帳號）也要這樣做。
+  pipeline 存檔之後也是（訊息重送時會再存一次）。Job 刪掉時用 `forget`：丟掉內容，並擋住刪除之前就開始、晚一步寫回的讀取。
 - 寫回只在自己讀到的 `revision` 不比記下的舊時才寫（Lua 原子地比較）：編輯之前就開始、晚一步寫回的讀取帶不回舊版，編輯後下一次讀到的一定是新版。
 - Redis 連不上時照樣讀資料庫，只記 log，而且不重試（redis-py 預設重試 10 次，實測連不上時一次要 3.7 秒以上；逾時 0.5 秒）；編輯時
   連不上的話，舊內容最多留到有效時間結束。
@@ -177,6 +177,8 @@ app/
     transcript_controller.py       TranscriptionServiceServicer 實作（GetTranscript、UpdateSegmentText、RenameSpeaker、AssignSegmentSpeaker）
   services/
     consumer.py                      RabbitMQ consumer loop（pika）
+    deletion_consumer.py             刪除事件（job.deleted）：自己的佇列、retry 佇列，另一條 thread
+    job_deletion.py                  刪掉一個 Job 的逐字稿與快取；deleted_jobs 標記與寫入後的檢查
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     storage.py                         從 MinIO/R2 下載檔案
     audio.py                            moviepy 抽音軌
@@ -198,6 +200,17 @@ app/
   proto_gen/                                  gRPC stub 產物（由 scripts/generate_grpc.sh 產生）
 scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```
+
+## 刪除 Job（`job.deleted`）
+
+upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanout exchange `job.deleted`；這個服務綁 `job.deleted.transcription`
+（`app/services/deletion_consumer.py`，另一條 thread、另一條連線，不排在轉錄後面），清掉這個 Job 的逐字稿（片段、講者跟著 cascade）與逐字稿快取。
+**轉錄用量不刪**（月用量不能因為刪 Job 變少）。可以重複處理；處理失敗（例如資料庫連不上）nack 到 `job.deleted.transcription.retry`，30 秒後回來，
+不限次數；訊息本身不合法才丟掉。見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md`。
+
+刪除當下還在轉錄（或在編輯）的話，存檔可能比刪除晚：收到事件時先記下 `deleted_jobs`（保留一天）再刪資料，pipeline 存檔與三種編輯在 commit
+**之後**查它（`job_deletion.discard_if_deleted`），有就把剛寫的刪掉——pipeline 就此停下、不回報狀態也不發 `transcription.completed`，編輯回
+`NOT_FOUND`。
 
 ## 正式環境（`APP_ENV=production`）
 

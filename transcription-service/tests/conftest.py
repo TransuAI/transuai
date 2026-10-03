@@ -56,6 +56,7 @@ def mocks():
         patch.object(pipeline, "recognize") as recognize,
         patch.object(pipeline, "new_session", return_value=MagicMock(name="session")),
         patch.object(pipeline, "save_transcript") as save_transcript,
+        patch.object(pipeline.job_deletion, "discard_if_deleted", return_value=False) as discard_if_deleted,
         patch.object(transcription_usage, "save_transcription_usage"),
         patch("pathlib.Path.unlink"),
     ):
@@ -66,6 +67,7 @@ def mocks():
             extract_audio_track=extract_audio_track,
             recognize=recognize,
             save_transcript=save_transcript,
+            discard_if_deleted=discard_if_deleted,
         )
 
 
@@ -141,7 +143,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE transcripts, transcript_segments, speakers, transcription_usage CASCADE"))
+        conn.execute(text("TRUNCATE transcripts, transcript_segments, speakers, transcription_usage, deleted_jobs CASCADE"))
 
 
 @pytest.fixture(scope="session")

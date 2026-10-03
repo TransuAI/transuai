@@ -19,7 +19,7 @@ from app.repositories.transcript_repository import (
     update_segment_text,
 )
 from app.repositories.transcription_usage_repository import list_job_transcription_usage, sum_user_transcription_usage
-from app.services import transcript_cache
+from app.services import job_deletion, transcript_cache
 from app.services.edit_events import publish_transcript_edited
 
 logger = logging.getLogger(__name__)
@@ -78,9 +78,12 @@ def _usage_to_proto(usage: TranscriptionUsage) -> transcription_pb2.Transcriptio
     return record
 
 
-def _after_edit(job_id: uuid.UUID, revision: int) -> None:
-    """逐字稿真的改了（已經寫進資料庫）之後：快取記下新的 revision，並通知 ai-service 重算 embedding。"""
+def _after_edit(job_id: uuid.UUID, revision: int, context: grpc.ServicerContext) -> None:
+    """逐字稿真的改了（已經寫進資料庫）之後：快取記下新的 revision，並通知 ai-service 重算 embedding。編輯的同時 Job 被刪掉了
+    （見 job_deletion）就丟掉這次寫入、回 NOT_FOUND。"""
     transcript_cache.record_edit(job_id, revision)
+    if job_deletion.discard_if_deleted(job_id):
+        _abort(context, grpc.StatusCode.NOT_FOUND, "job was deleted")
     publish_transcript_edited(str(job_id))
 
 
@@ -125,7 +128,7 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
             except SegmentNotFound:
                 _abort(context, grpc.StatusCode.NOT_FOUND, "segment not found in this job's transcript")
             if edit.changed:
-                _after_edit(job_id, edit.revision)
+                _after_edit(job_id, edit.revision, context)
             return transcription_pb2.UpdateSegmentTextResponse(
                 segment=_segment_to_proto(edit.segment), revision=edit.revision)
         finally:
@@ -142,7 +145,7 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
             except SpeakerNotFound:
                 _abort(context, grpc.StatusCode.NOT_FOUND, "speaker not found in this job's transcript")
             if edit.changed:
-                _after_edit(job_id, edit.revision)
+                _after_edit(job_id, edit.revision, context)
             return transcription_pb2.RenameSpeakerResponse(
                 speaker=_speaker_to_proto(edit.speaker), revision=edit.revision)
         finally:
@@ -168,7 +171,7 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
             except SpeakerNotFound:
                 _abort(context, grpc.StatusCode.NOT_FOUND, "speaker not found in this job's transcript")
             if assignment.changed:
-                _after_edit(job_id, assignment.revision)
+                _after_edit(job_id, assignment.revision, context)
             return transcription_pb2.AssignSegmentSpeakerResponse(
                 segment=_segment_to_proto(assignment.segment),
                 speakers=[_speaker_to_proto(speaker) for speaker in assignment.speakers],

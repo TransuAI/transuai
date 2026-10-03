@@ -6,7 +6,7 @@ from typing import Callable
 
 from app.db import new_session
 from app.repositories.transcript_repository import save_transcript
-from app.services import transcript_cache
+from app.services import job_deletion, transcript_cache
 from app.services.audio import extract_audio_track
 from app.services.job_status_client import job_status_client
 from app.services.retry import RetryableMessageError, retry_queue_for
@@ -82,6 +82,9 @@ def process_message(
             session.close()
         # 訊息重送時會再存一次；之前那份可能已經被讀過、記在快取裡。
         transcript_cache.record_edit(uuid.UUID(job_id), saved.revision)
+        # 轉錄的時候 Job 被刪掉了：丟掉剛存的，不回報、不通知 ai-service（見 job_deletion）。
+        if job_deletion.discard_if_deleted(uuid.UUID(job_id)):
+            return
 
         job_status_client.update_status(job_id, "TRANSCRIBED")
         publish_completed(job_id, str(owner) if owner else None)

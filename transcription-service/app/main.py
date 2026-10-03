@@ -12,6 +12,7 @@ from app.core.production import check_secrets
 from app.db import init_db
 from app.proto_gen import transcription_pb2, transcription_pb2_grpc
 from app.services.consumer import run_consumer
+from app.services.deletion_consumer import run_deletion_consumer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -45,7 +46,9 @@ def serve() -> None:
 
     consumer_thread = threading.Thread(target=run_consumer, name="transcription-requested-consumer", daemon=True)
     consumer_thread.start()
-    logger.info("started RabbitMQ consumer thread")
+    deletion_thread = threading.Thread(target=run_deletion_consumer, name="deletion-consumer", daemon=True)
+    deletion_thread.start()
+    logger.info("started RabbitMQ consumer threads")
 
     server = build_server()
     server.add_insecure_port(f"[::]:{settings.grpc_port}")

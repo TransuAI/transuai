@@ -109,3 +109,12 @@ class TranscriptionUsage(Base):
     succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DeletedJob(Base):
+    """upload-service 刪掉的 Job（收到 `job.deleted` 時記下，保留一天）：刪除之後才寫進來的逐字稿要丟掉（見 services/job_deletion）。"""
+
+    __tablename__ = "deleted_jobs"
+
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

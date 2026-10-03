@@ -5,7 +5,7 @@
 丟掉內容（`record_edit`）。寫回只在自己讀到的 revision 不比記下的舊時才寫：編輯之前就開始、晚一步寫回的讀取，帶不回舊版。比較與寫入在
 同一個 Lua script 裡。有效時間是保險。
 
-會寫逐字稿的地方都要呼叫 `record_edit`：三種編輯，與 pipeline 存檔（訊息重送時會再存一次）。之後要刪除逐字稿的（例如刪除帳號）也要。
+會寫逐字稿的地方都要呼叫 `record_edit`：三種編輯，與 pipeline 存檔（訊息重送時會再存一次）。刪除逐字稿（Job 刪掉了）呼叫 `forget`。
 鍵帶著格式的版本（`v1`）：`Transcript` 的欄位變了就換版本，舊格式的快取不會被讀到。Redis 連不上時照樣讀資料庫，只記 log；不重試
 （redis-py 預設會重試 10 次，連不上時一次要好幾秒）。"""
 
@@ -83,3 +83,12 @@ def record_edit(job_id: uuid.UUID, revision: int) -> None:
         _client.eval(_EDITED, 1, _key(job_id), revision, _ttl_millis())
     except redis.RedisError as exc:
         logger.warning("transcript cache for job %s not invalidated, Redis unavailable: %s", job_id, exc)
+
+
+# 比任何真的 revision 都大：forget 之後，刪除之前就開始、晚一步寫回的讀取寫不進來（直到有效時間結束）。
+_FORGOTTEN_REVISION = 2**53 - 1
+
+
+def forget(job_id: uuid.UUID) -> None:
+    """逐字稿刪掉（Job 刪掉了）之後呼叫：丟掉內容，並擋住晚到的寫回。"""
+    record_edit(job_id, _FORGOTTEN_REVISION)

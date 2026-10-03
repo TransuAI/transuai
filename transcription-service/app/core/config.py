@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     transcription_completed_queue: str = "transcription.completed"
     job_failed_queue: str = "job.failed"
     transcript_edited_queue: str = "transcript.edited"
+    # job.deleted（upload-service 的 fanout exchange）綁到這個服務自己的佇列；處理失敗（例如資料庫連不上）dead-letter 到 retry 佇列，
+    # 等 deletion_retry_delay_ms 再回來，不限次數——刪除一定要做完。
+    job_deleted_exchange: str = "job.deleted"
+    job_deleted_queue: str = "job.deleted.transcription"
+    job_deleted_retry_queue: str = "job.deleted.transcription.retry"
+    deletion_retry_delay_ms: int = 30_000
     # 由 transcription-service 自己宣告跟擁有，不需要共用 RabbitMQ infra 的 exchange 設定變更，
     # 見 ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md。
     retry_queue_2s: str = "transcription.requested.retry.2s"
