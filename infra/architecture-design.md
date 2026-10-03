@@ -93,6 +93,8 @@ MQ 事件外互不直接呼叫，也不會有即時跨庫 join。
 > 不是就回 404，不會再往下游打。確認過的擁有者記在 Redis（cache-aside），之後的請求不用再跑這一趟內部 gRPC 往返。這個檢查只存在於走 Gateway
 > 的路徑——如果之後有服務直接繞過 Gateway 打 transcription-service/ai-service，還是能查到任意
 > job，這種情境目前假設不存在（下游服務只監聽 cluster 內部網路）。
+> 唯一不經 Gateway、直接對外的 notification-service（WebSocket）自己做同樣的事：驗 access token，再問 upload-service 的
+> `GetJob`（見 3.5）。
 
 ---
 
@@ -264,6 +266,13 @@ GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省�
 ```
 WS     /ws/jobs/{jobId}         訂閱單一 Job 的狀態更新事件
 ```
+
+連上之後第一則訊息要帶 access token（瀏覽器的 WebSocket 不能帶 `Authorization` 標頭，token 也不放網址）：
+`{ "type": "auth", "accessToken": "..." }`。notification-service 本地驗 JWT（跟 Gateway 同一把 `JWT_SECRET`），
+再 gRPC 問 upload-service 的 `GetJob` 確認 Job 是這位使用者的（跟 Gateway 的 ownership 檢查一樣），通過才回
+`{ "type": "subscribed", "jobId": "uuid" }` 並開始推播；不通過用關閉代碼告訴前端：`4401` token 不能用（前端換發後再連）、
+`4404` 不是你的 Job、`4429` 超過同時連線數上限（每位使用者 10、每個來源 IP 20，可調）、`1011` 問不到 upload-service。
+細節見 `notification-service/README.md`。
 
 事件格式依觸發的 MQ 訊息而不同（見 5. 訊息佇列設計）：
 ```json
