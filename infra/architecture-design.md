@@ -108,10 +108,10 @@ proto 定義在 `infra/proto/*.proto`）。下游服務本身沒有對外 REST e
 
 ```
 POST   /auth/register          註冊（email 已存在回 409/ALREADY_EXISTS，成功直接簽發 token，不用再呼叫一次 login；同一個 IP 註冊太多次回 429）
-POST   /auth/login             登入，回傳 access/refresh token（email/password 任一錯誤都回 401，不細分以避免帳號列舉；猜密碼太多次回 429，見 gateway README「限流」）
-POST   /auth/refresh           用 refresh token 換發新的 access/refresh token 組合（舊的作廢；已換發過的再被用視為被盜，整串作廢）
-POST   /auth/logout            登出：作廢這個 refresh token 所在的那一串（不需要 access token）
-POST   /auth/logout-all        登出所有裝置：作廢登入者所有的 refresh token
+POST   /auth/login             登入，回傳 access token、refresh token 設在 httpOnly cookie（email/password 任一錯誤都回 401，不細分以避免帳號列舉；猜密碼太多次回 429，見 gateway README「限流」）
+POST   /auth/refresh           用 cookie 裡的 refresh token 換發新的 access token，cookie 換成新的 refresh token（舊的作廢；已換發過的再被用視為被盜，整串作廢）
+POST   /auth/logout            登出：作廢 cookie 裡的 refresh token 所在的那一串、清掉 cookie（不需要 access token）
+POST   /auth/logout-all        登出所有裝置：作廢登入者所有的 refresh token、清掉 cookie
 GET    /auth/me                取得目前使用者資訊（需帶 access token）
 ```
 
@@ -119,7 +119,9 @@ GET    /auth/me                取得目前使用者資訊（需帶 access token
 gateway 共用同一把。access token 15 分鐘、refresh token 7 天過期（皆可透過
 `app.jwt.access-token-ttl-minutes` / `app.jwt.refresh-token-ttl-days` 覆蓋）。refresh token 記在 auth-service 的
 `refresh_tokens`（只存雜湊）：每次換發輪替、登出作廢，已經換發過的又被用一次視為被盜、整串作廢（見 `auth-service/README.md`）。
-access token 仍是 stateless，登出後有效到過期（最多 15 分鐘）。Gateway 收到請求後在本地驗證 access token（不會回頭呼叫
+access token 仍是 stateless，登出後有效到過期（最多 15 分鐘）。前端不把 token 存在 localStorage：access token 只放在記憶體，
+refresh token 由 gateway 放在 httpOnly、Secure、`SameSite=Strict`、`Path=/api/auth` 的 cookie，重新整理頁面時用它換新的 access token
+（見 `gateway/README.md`「refresh token 的 cookie」）。所以**前端與 API 要在同一個網站**（同源最單純：前端經反向代理的 `/api` 呼叫 gateway）。Gateway 收到請求後在本地驗證 access token（不會回頭呼叫
 auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user-id` 轉發給下游服務。
 
 ### 3.2 Upload Service
@@ -724,6 +726,11 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 - Render 免費層的休眠機制會讓使用者第一次連線時等待 30-60 秒，MVP 測試階段可接受，但要事先跟測試者說明，避免誤以為服務掛掉
 
 **建議組合**：Render（3 個後端服務）+ Supabase（Postgres + pgvector）+ Upstash（Redis）+ Cloudflare R2（檔案儲存）+ Vercel（前端），全部組合都不需要信用卡即可開始。
+
+**前端與 API 要同一個網站**：refresh token 的 cookie 是 `SameSite=Strict`（見 3.1），`*.vercel.app` 的前端直接呼叫 `*.onrender.com` 的 gateway
+是兩個不同網站，cookie 不會送出、重新整理頁面就被登出。做法：用 Vercel 的 rewrites 把 `/api/*` 轉到 gateway（瀏覽器看來是同源），
+或兩邊都掛在自己的網域底下（例如 `app.example.com` 與 `api.example.com`，並調整 `REFRESH_COOKIE_PATH`）。notification-service 的
+WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣直連。
 
 ---
 
