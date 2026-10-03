@@ -45,6 +45,17 @@ async function refreshAccessToken(): Promise<string | null> {
   return result
 }
 
+// access token 被拒絕之後：換發一次；換不到就是登入過期——清掉 session、通知 App 回登入頁，回傳 null。
+// 一般請求的 401 跟 WebSocket 的 4401（見 use-job-socket）都走這裡。
+export async function renewAccessToken(): Promise<string | null> {
+  const newAccessToken = await refreshAccessToken()
+  if (!newAccessToken) {
+    clearSession()
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+  }
+  return newAccessToken
+}
+
 interface RequestOptions {
   method?: string
   body?: unknown
@@ -80,12 +91,8 @@ async function fetchWithAuthRetry(
   let res = await doFetch()
 
   if (res.status === 401 && auth) {
-    const newAccessToken = await refreshAccessToken()
-    if (newAccessToken) {
+    if (await renewAccessToken()) {
       res = await doFetch()
-    } else {
-      clearSession()
-      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
     }
   }
 

@@ -64,7 +64,7 @@ src/
     auth-context.tsx  登入狀態、token 儲存、自動載入 /auth/me;登出時通知伺服器作廢 refresh token(不等回應,連不上也照樣登出),登出所有裝置(`logoutEverywhere`)
   hooks/
     use-auto-follow.ts 自動跟隨的兩態狀態(跟隨中 / 已暫停)與 pause / resume
-    use-job-socket.ts  WebSocket 訂閱單一 job 狀態更新,斷線自動重連
+    use-job-socket.ts  WebSocket 訂閱單一 job 狀態更新:連上後第一則訊息送 access token;依關閉代碼決定重連——4401 換發 token 後重連(換發後仍被拒就不再試)、4404 不是你的 Job 不重連、4429 連線太多隔 30 秒、其他 3 秒
     use-media-playback.ts 把 media element 的播放狀態(時間、長度、是否暫停)同步成 React state;每次 timeupdate 都會 re-render,只給迷你播放器這種小元件用
     use-media-query.ts matchMedia 的 hook(工作區用它判斷桌面 / 手機版面)
     use-playback-continuity.ts 版面切換重新掛載 media element 時,把播放位置跟「是否正在播放」帶到新元素
