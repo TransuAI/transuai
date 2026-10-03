@@ -142,6 +142,12 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 | `app.mq.job-deleted-exchange` | `job.deleted` | fanout exchange（啟動時宣告） |
 | `app.outbox.poll-interval` / `app.outbox.confirm-timeout` | `1s` / `5s` | 多久看一次 outbox、每一筆等 broker 確認多久 |
 
+### 刪除帳號（`account.deleted`）
+
+auth-service 刪除帳號後發 `account.deleted { userId }` 到 fanout exchange `account.deleted`；這個服務綁 `account.deleted.upload`
+（`event/AccountDeletedListener`），刪掉他所有的 Job——每個都走上面的 `JobDeletion`，所以也各自發 `job.deleted`。可以重複處理；
+處理失敗 reject 不 requeue，dead-letter 到 `account.deleted.upload.retry`，30 秒後回來，不限次數；訊息本身不合法才記 log 收下。
+
 ## 專案結構
 
 ```
@@ -149,7 +155,7 @@ src/main/java/com/transuai/upload_service/
   domain/          Job entity、FileType / JobStatus enum（狀態機）、JobCategory（類型清單）、JobNoteEntity（筆記）、OutboxEventEntity（outbox）
   repository/       Spring Data JPA repository
   service/          StorageService（S3 presign / head / delete）、JobDeletion（刪 Job 並寫 job.deleted 到 outbox）
-  event/            JobEventPublisher 抽象 + RabbitMQ 實作（發送 transcription.requested）、OutboxPublisher（把 outbox 送出去）
+  event/            JobEventPublisher 抽象 + RabbitMQ 實作（發送 transcription.requested）、OutboxPublisher（把 outbox 送出去）、AccountDeletedListener（刪帳號時刪掉他所有的 Job）
   grpc/             UploadGrpcService（6 支 rpc 實作）、NoteGrpcService（筆記）、InternalJobGrpcService（UpdateJobStatus、SetSuggestedDetails）、JobMapper（domain ↔ proto）
   grpc/auth/        UserIdServerInterceptor（解析 x-user-id metadata）、GrpcAuthContext
   grpc/advice/      GrpcExceptionAdvice（非預期例外 → 安全的 gRPC Status，避免內部細節外洩）

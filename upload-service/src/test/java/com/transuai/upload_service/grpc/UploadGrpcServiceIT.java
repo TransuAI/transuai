@@ -82,6 +82,7 @@ class UploadGrpcServiceIT {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<UUID> createdJobIds = new ArrayList<>();
+    private final List<String> testQueues = new ArrayList<>();
 
     // JUnit 5 透過反射在每個 @Test 執行後呼叫，不會有直接的呼叫端，IDE 的「unused」偵測看不到這點。
     @SuppressWarnings("unused")
@@ -89,6 +90,8 @@ class UploadGrpcServiceIT {
     void cleanUp() {
         createdJobIds.forEach(jobRepository::deleteById);
         createdJobIds.clear();
+        testQueues.forEach(amqpAdmin::deleteQueue);
+        testQueues.clear();
         while (rabbitTemplate.receive(mqProperties.transcriptionRequestedQueue(), 100) != null) {
             // drain leftover test messages so queue depth doesn't leak between tests
         }
@@ -356,7 +359,7 @@ class UploadGrpcServiceIT {
         assertThat(jobRepository.findById(UUID.fromString(job.getJobId()))).isEmpty();
 
         // job.deleted 經 outbox 送到 fanout exchange，讓 transcription-service、ai-service 清掉自己的資料。
-        var event = receiveJobDeleted(listener, job.getJobId());
+        var event = receiveJobDeleted(listener, job.getJobId()).get(job.getJobId());
         assertThat(event.get("userId").asText()).isEqualTo(userId.toString());
         assertThat(outbox.findAll()).noneMatch(row -> row.getPayload().contains(job.getJobId()));
     }
@@ -374,26 +377,52 @@ class UploadGrpcServiceIT {
         assertThat(jobRepository.findById(UUID.fromString(job.getJobId()))).isPresent();
     }
 
-    // 一個只給這個測試的佇列（broker 取名、連線斷了就刪），綁到 job.deleted。
+    @Test
+    void accountDeleted_deletesAllOfThatUsersJobs_eachWithJobDeleted_andNoOneElses() throws Exception {
+        UUID leaving = UUID.randomUUID();
+        UUID staying = UUID.randomUUID();
+        Job first = createJob(leaving, "a.mp3");
+        Job second = createJob(leaving, "b.mp3");
+        Job others = createJob(staying, "c.mp3");
+        String listener = listenToJobDeleted();
+
+        // 不合法的訊息收下就算了，不能卡住後面的
+        rabbitTemplate.send(mqProperties.accountDeletedExchange(), "", new Message("not json".getBytes()));
+        rabbitTemplate.send(mqProperties.accountDeletedExchange(), "",
+                new Message(("{\"userId\":\"" + leaving + "\"}").getBytes()));
+
+        receiveJobDeleted(listener, first.getJobId(), second.getJobId());
+        assertThat(jobRepository.findAllByUserId(leaving)).isEmpty();
+        assertThat(jobRepository.findById(UUID.fromString(others.getJobId()))).isPresent();
+        createdJobIds.remove(UUID.fromString(first.getJobId()));
+        createdJobIds.remove(UUID.fromString(second.getJobId()));
+    }
+
+    // 一個只給這個測試的佇列，綁到 job.deleted；測試結束刪掉（不用 auto-delete：第一次 receive 結束就會被 broker 刪掉）。
     private String listenToJobDeleted() {
-        String queue = amqpAdmin.declareQueue().getName();
+        String queue = "test.job-deleted." + UUID.randomUUID();
+        amqpAdmin.declareQueue(new Queue(queue, false, false, false));
         amqpAdmin.declareBinding(BindingBuilder.bind(new Queue(queue))
                 .to(new FanoutExchange(mqProperties.jobDeletedExchange())));
+        testQueues.add(queue);
         return queue;
     }
 
-    private com.fasterxml.jackson.databind.JsonNode receiveJobDeleted(String queue, String jobId) throws Exception {
+    // 等到這些 Job 的 job.deleted 都收到（順序不一定），回傳每個 Job 的事件內容。
+    private java.util.Map<String, com.fasterxml.jackson.databind.JsonNode> receiveJobDeleted(String queue, String... jobIds)
+            throws Exception {
+        var wanted = java.util.Set.of(jobIds);
+        var received = new java.util.HashMap<String, com.fasterxml.jackson.databind.JsonNode>();
         long deadline = System.currentTimeMillis() + 10_000;
-        while (System.currentTimeMillis() < deadline) {
+        while (!received.keySet().containsAll(wanted) && System.currentTimeMillis() < deadline) {
             Message message = rabbitTemplate.receive(queue, 1_000);
             if (message != null) {
                 var payload = objectMapper.readTree(message.getBody());
-                if (payload.get("jobId").asText().equals(jobId)) {
-                    return payload;
-                }
+                received.put(payload.get("jobId").asText(), payload);
             }
         }
-        throw new AssertionError("no job.deleted for " + jobId);
+        assertThat(received.keySet()).as("job.deleted received").containsAll(wanted);
+        return received;
     }
 
     @Test
