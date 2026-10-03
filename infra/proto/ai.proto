@@ -65,16 +65,16 @@ service AiService {
   // status 不是這兩個、job_id 不合法回 INVALID_ARGUMENT；這個 Job 沒有這位講者的建議回 NOT_FOUND。
   rpc SetSpeakerSuggestionStatus(SetSpeakerSuggestionStatusRequest) returns (SpeakerSuggestion);
 
-  // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
-  // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
-  // job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
-  // user_id 是 Gateway 驗證過 ownership 的使用者，用他的預設模型產生、用量記在他名下。
   // 講者數據的 AI 判斷（每位講者提出的問題、可能的打斷）：一個 Job 一份，再分析就取代。要求後立刻回傳「分析中」，背景用要求者的
   // 預設模型分析（見 ai-service README「講者數據」）。少於兩位講者時分析會失敗並附原因。
   rpc RequestSpeakerInsights(RequestSpeakerInsightsRequest) returns (SpeakerInsights);
   // 還沒分析過時 status 是 UNSPECIFIED、沒有項目。
   rpc GetSpeakerInsights(GetSpeakerInsightsRequest) returns (SpeakerInsights);
 
+  // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
+  // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
+  // job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
+  // user_id 是 Gateway 驗證過 ownership 的使用者，用他的預設模型產生、用量記在他名下。
   rpc RequestQuiz(RequestQuizRequest) returns (Quiz);
   // 一個 Job 的所有測驗（新的在前），不含題目。「產生中」超過 5 分鐘回報成 FAILED。
   rpc ListQuizzes(ListQuizzesRequest) returns (ListQuizzesResponse);
