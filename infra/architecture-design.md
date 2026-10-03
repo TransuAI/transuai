@@ -347,6 +347,15 @@ CREATE TABLE job_notes (
     updated_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX idx_job_notes_job_id ON job_notes(job_id);
+
+-- outbox：要發的事件跟引起它的變更在同一個交易寫入，排程送到 RabbitMQ（broker 確認收到才刪）。目前只有 job.deleted。
+CREATE TABLE outbox_events (
+    id UUID PRIMARY KEY,
+    exchange VARCHAR(128) NOT NULL,         -- 送到哪個 fanout exchange
+    payload TEXT NOT NULL,                  -- JSON
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX idx_outbox_events_created_at ON outbox_events(created_at);
 ```
 
 ### 4.3 transcription_db
@@ -396,6 +405,12 @@ CREATE TABLE transcription_usage (
 );
 CREATE INDEX ix_transcription_usage_job_id ON transcription_usage(job_id);
 CREATE INDEX ix_transcription_usage_user_id ON transcription_usage(user_id);
+
+-- 收到 job.deleted 時記下（保留一天）：刪除之後才寫進來的資料要丟掉（見 docs/adr/0005）
+CREATE TABLE deleted_jobs (
+    job_id UUID PRIMARY KEY,
+    deleted_at TIMESTAMPTZ NOT NULL
+);
 ```
 
 ### 4.4 ai_db
@@ -638,6 +653,12 @@ CREATE TABLE post_meeting_settings (
     todo_destination VARCHAR(20) NOT NULL DEFAULT 'google_tasks',  -- 待辦放在 google_tasks 或 notion（會議紀錄子頁面的打勾清單）
     updated_at TIMESTAMPTZ NOT NULL
 );
+
+-- 收到 job.deleted 時記下（保留一天）：刪除之後才寫進來的資料要丟掉（見 docs/adr/0005）
+CREATE TABLE deleted_jobs (
+    job_id UUID PRIMARY KEY,
+    deleted_at TIMESTAMPTZ NOT NULL
+);
 ```
 
 **規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
@@ -667,10 +688,13 @@ CREATE TABLE export_outputs (
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
 | `post_meeting.requested` | AI Service | AI Service | `{ runId, jobId, userId }`（`userId` 是觸發的使用者）——使用者啟動會後處理（`POST /jobs/{jobId}/post-meeting`）；ai-service 排給自己的背景工作 |
 | `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
+| `job.deleted`（**fanout exchange**） | Upload Service（outbox） | Transcription Service（`job.deleted.transcription`）、AI Service（`job.deleted.ai`） | `{ jobId, userId }`——Job 刪掉了，各服務清掉自己手上這個 Job 的資料（用量不刪）；見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md` |
 
 **實作現況**：實際用的是 **RabbitMQ**（不是原規劃的 Redis Queue），上表 queue 的名稱/payload
 都跟實作一致，`job.failed` 目前由 transcription-service、ai-service 各自在 pipeline 失敗時發送。
 ai-service 消費的每個 queue 各有一組自己的 retry queue（`<queue>.retry.2s`／`.4s`，見 ai-service ADR 0001）。
+刪除事件不一樣：一個事件要給好幾個服務，所以發到 fanout exchange、每個服務綁自己的佇列；發送經過 upload-service 的 outbox
+（跟刪除同一個交易），處理失敗不限次數地 30 秒後重試（`<queue>.retry`），見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md`。
 Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登入、註冊的計數器，見 `gateway/README.md`「限流」）與 cache-aside
 的快取（gateway 的 Job 擁有者，見 `gateway/README.md`「快取」；transcription-service 的逐字稿，見 `transcription-service/README.md`
 「逐字稿快取」）；Redis 連不上時都照常服務（限流放行、快取當作沒記住）。
@@ -775,9 +799,8 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
       一次約 US$0.02，費用算在平台的 HF 金鑰）；沒設定時仍只能用自有金鑰、支援工具呼叫的模型。平台模型的用量受每月用量上限管（見 `gateway/README.md`）
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
-      靠背景清理排除）。但這只清 upload_db 自己的資料，**不會**連帶清 transcription_db / ai_db
-      的 `transcripts`/`summaries`/`chapters`/`embeddings`/`qa_history`——服務間沒有 `job.deleted`
-      事件，刪除 Job 後這些表會留下孤兒資料，是目前真實存在的缺口（不是設計決定，是還沒做）
+      靠背景清理排除）。transcription_db／ai_db 的資料由 `job.deleted` 事件清掉（2026-10-03，見 5.）：逐字稿、片段、講者、
+      摘要、章節、embedding、問答、測驗、講者名字建議、會後處理；用量紀錄保留。刪除當下還在跑的寫入晚到也會被丟掉
 - [x] 授權缺口：使用者只能存取自己的 job——**已解決**：Gateway 在轉發 Transcription/AI 的查詢
       前先呼叫 upload-service 的 `GetJob` 做 ownership 檢查（見 2.1），但 transcription-service /
       ai-service 本身仍不驗證 `x-user-id`，這個決定維持不變（見 2.1 授權模型）
