@@ -22,13 +22,16 @@ import com.transuai.auth.grpc.v1.User;
 import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.ratelimit.AuthRateLimits;
+import com.transuai.gateway.security.RefreshTokenCookie;
 import com.transuai.gateway.web.dto.AuthResponseDto;
 import com.transuai.gateway.web.dto.LoginRequestDto;
-import com.transuai.gateway.web.dto.RefreshRequestDto;
 import com.transuai.gateway.web.dto.RegisterRequestDto;
 import com.transuai.gateway.web.dto.UserDto;
 
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import lombok.RequiredArgsConstructor;
 
@@ -41,11 +44,13 @@ public class AuthController {
 
     private final AuthServiceGrpc.AuthServiceBlockingStub authServiceStub;
     private final AuthRateLimits rateLimits;
+    private final RefreshTokenCookie refreshTokenCookie;
 
     // 限流用的 IP 是 getRemoteAddr()，預設就是直接連進來的位址（不看使用者可以自己填的 X-Forwarded-For；在反向代理後面時
     // 怎麼設定見 gateway README「限流」）。
     @PostMapping("/register")
-    public AuthResponseDto register(@RequestBody RegisterRequestDto request, HttpServletRequest servletRequest) {
+    public AuthResponseDto register(@RequestBody RegisterRequestDto request, HttpServletRequest servletRequest,
+            HttpServletResponse servletResponse) {
         requireCredentials(request.email(), request.password());
         rateLimits.beforeRegister(servletRequest.getRemoteAddr());
         AuthResponse response = authServiceStub.register(RegisterRequest.newBuilder()
@@ -53,43 +58,56 @@ public class AuthController {
                 .setPassword(request.password())
                 .setDisplayName(request.displayName() == null ? "" : request.displayName())
                 .build());
-        return toDto(response);
+        return signedIn(response, servletResponse);
     }
 
     @PostMapping("/login")
-    public AuthResponseDto login(@RequestBody LoginRequestDto request, HttpServletRequest servletRequest) {
+    public AuthResponseDto login(@RequestBody LoginRequestDto request, HttpServletRequest servletRequest,
+            HttpServletResponse servletResponse) {
         requireCredentials(request.email(), request.password());
         AuthResponse response = rateLimits.login(servletRequest.getRemoteAddr(), request.email(),
                 () -> authServiceStub.login(LoginRequest.newBuilder()
                         .setEmail(request.email())
                         .setPassword(request.password())
                         .build()));
-        return toDto(response);
+        return signedIn(response, servletResponse);
     }
 
+    // 用 cookie 裡的 refresh token 換新的 access token，cookie 換成輪替後的新 refresh token。前端重新整理頁面時也靠這個恢復登入。
+    // 沒有 cookie、或 auth-service 不認（過期、作廢、被盜）：清掉 cookie，回 401。
     @PostMapping("/refresh")
-    public AuthResponseDto refresh(@RequestBody RefreshRequestDto request) {
-        AuthResponse response = authServiceStub.refresh(RefreshRequest.newBuilder()
-                .setRefreshToken(request.refreshToken())
-                .build());
-        return toDto(response);
+    public AuthResponseDto refresh(HttpServletRequest servletRequest, HttpServletResponse servletResponse) {
+        String refreshToken = refreshTokenCookie.read(servletRequest)
+                .orElseThrow(() -> Status.UNAUTHENTICATED.withDescription("not signed in").asRuntimeException());
+        AuthResponse response;
+        try {
+            response = authServiceStub.refresh(RefreshRequest.newBuilder().setRefreshToken(refreshToken).build());
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
+                refreshTokenCookie.clear(servletResponse);
+            }
+            throw e;
+        }
+        return signedIn(response, servletResponse);
     }
 
-    // 登出：作廢這個 refresh token 所在的那一串（auth-service 的 Logout）；不需要 access token，無效的 token 也回成功。
+    // 登出：作廢 cookie 裡這個 refresh token 所在的那一串（auth-service 的 Logout），並清掉 cookie；不需要 access token，
+    // 沒有 cookie 或 token 無效也回成功。
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void logout(@RequestBody RefreshRequestDto request) {
-        authServiceStub.logout(LogoutRequest.newBuilder()
-                .setRefreshToken(request.refreshToken() == null ? "" : request.refreshToken())
-                .build());
+    public void logout(HttpServletRequest servletRequest, HttpServletResponse servletResponse) {
+        refreshTokenCookie.read(servletRequest).ifPresent(refreshToken -> authServiceStub.logout(
+                LogoutRequest.newBuilder().setRefreshToken(refreshToken).build()));
+        refreshTokenCookie.clear(servletResponse);
     }
 
-    // 登出所有裝置：作廢這位使用者所有的 refresh token。已簽出的 access token 仍有效到過期（最多 15 分鐘）。
+    // 登出所有裝置：作廢這位使用者所有的 refresh token，並清掉這個瀏覽器的 cookie。已簽出的 access token 仍有效到過期（最多 15 分鐘）。
     @PostMapping("/logout-all")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void logoutAllDevices(@CurrentUserId UUID userId) {
+    public void logoutAllDevices(@CurrentUserId UUID userId, HttpServletResponse servletResponse) {
         GrpcMetadataSupport.withUserId(authServiceStub, userId)
                 .logoutAllDevices(LogoutAllDevicesRequest.getDefaultInstance());
+        refreshTokenCookie.clear(servletResponse);
     }
 
     @GetMapping("/me")
@@ -106,8 +124,10 @@ public class AuthController {
         }
     }
 
-    private static AuthResponseDto toDto(AuthResponse response) {
-        return new AuthResponseDto(response.getAccessToken(), response.getRefreshToken(), toDto(response.getUser()));
+    // refresh token 放進 cookie，回應本文只有 access token 與使用者。
+    private AuthResponseDto signedIn(AuthResponse response, HttpServletResponse servletResponse) {
+        refreshTokenCookie.set(servletResponse, response.getRefreshToken());
+        return new AuthResponseDto(response.getAccessToken(), toDto(response.getUser()));
     }
 
     private static UserDto toDto(User user) {

@@ -20,14 +20,34 @@
 跟 [`auth-service`](../auth-service) README 的「身分模型」一節是同一張圖，這裡是驗證端：
 
 ```
-前端登入 → 呼叫 POST /auth/login（轉發給 AuthService.Login）→ 拿到 access token（15 分鐘）+ refresh token（7 天）
+前端登入 → 呼叫 POST /auth/login（轉發給 AuthService.Login）→ 回應本文是 access token（15 分鐘，前端只放在記憶體），
+  refresh token（7 天）放在 httpOnly cookie（見下方「refresh token 的 cookie」）
 前端後續請求帶 Authorization: Bearer <access_token>
   → JwtAuthenticationFilter 用 app.jwt.secret 本地驗章/驗效期/驗 type=access，解出 user_id
   → controller 呼叫下游 gRPC 服務時，需要身分的（Auth/Upload）透過 GrpcMetadataSupport 帶 x-user-id metadata
   → Transcription/AI 這兩個服務的 rpc 本身不驗證 x-user-id（見下方「已知限制」），呼叫時不帶，
     改由 Gateway 自己先用 JobOwnershipGuard 呼叫 upload-service 的 GetJob 確認 job 擁有者
-access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token，這裡不解析，原樣轉發給 AuthService.Refresh；舊的隨即作廢，見 auth-service README）
+access token 過期、或重新整理頁面 → 前端呼叫 POST /auth/refresh（瀏覽器自動帶 cookie；這裡不解析 refresh token，從 cookie 拿出來
+  原樣轉發給 AuthService.Refresh，舊的隨即作廢、cookie 換成新的，見 auth-service README）
 ```
+
+### refresh token 的 cookie
+
+refresh token 不在任何回應本文裡，只在 cookie（`security/RefreshTokenCookie`）：JavaScript 讀不到，XSS 偷不走；access token 只放在前端記憶體。
+
+```
+Set-Cookie: refresh_token=…; Path=/api/auth; Max-Age=604800; Secure; HttpOnly; SameSite=Strict
+```
+
+- **`SameSite=Strict`**：別的網站發起的請求不帶這個 cookie，換發、登出不會被跨站偽造。也因此**前端跟 API 一定要在同一個網站**
+ （同一個網域，或同一個網域底下的子網域）——前端 `fetch('/api/…')` 同源呼叫、由反向代理（本機是 Vite 的 proxy）把 `/api` 拿掉轉到
+  這個 Gateway 最單純。前端放在 `*.vercel.app`、API 放在 `*.onrender.com` 這種兩個不同網站的部署，cookie 不會送出、登入撐不過重新整理。
+- **`Path`**（`REFRESH_COOKIE_PATH`，預設 `/api/auth`）：是**瀏覽器看到的**路徑，只有換發、登出（還有同一路徑底下的登入、註冊）會帶它，
+  其他 API 不帶。API 不是掛在 `/api` 底下時要改。
+- **`Secure`**（`REFRESH_COOKIE_SECURE`，預設 `true`）：只在 HTTPS 送。Chrome、Firefox 把 `http://localhost` 當成安全的，本機開發照樣能用；
+  Safari 不行，本機用 Safari 要設 `false`。正式環境（`APP_ENV=production`）固定是 `true`，不看這個變數。
+- **`Max-Age`**：跟 auth-service 的 refresh token 一樣長，讀同一個 `JWT_REFRESH_TOKEN_TTL_DAYS`（預設 7 天）。
+- 換發時 auth-service 不認這個 token（過期、作廢、被盜）就清掉 cookie、回 401；登出、登出所有裝置也會清掉 cookie。
 
 **`app.jwt.secret` 必須跟 auth-service 的完全一致**——本機開發共用同一組預設值即可，正式環境要覆蓋成夠長的隨機值時兩邊要同時改（少於 32 bytes 會被 HS256 直接拒絕，啟動時就炸）。
 
@@ -59,11 +79,11 @@ docker compose up -d
 
 | Method | Path | 說明 |
 |---|---|---|
-| `POST` | `/auth/register` | 註冊，不需要 token |
-| `POST` | `/auth/login` | 登入，不需要 token |
-| `POST` | `/auth/logout` | 登出：body `{ refreshToken }`，作廢這個 refresh token 所在的那一串，回 `204`；不需要 `Authorization`（access token 可能已經過期），token 無效也回 `204` |
-| `POST` | `/auth/logout-all` | 登出所有裝置：作廢登入者所有的 refresh token，回 `204`，需要 `Authorization`；已簽出的 access token 仍有效到過期（最多 15 分鐘） |
-| `POST` | `/auth/refresh` | 用 refresh token 換發新的 access/refresh token，不需要 `Authorization` header（refresh token 本身就是憑證） |
+| `POST` | `/auth/register` | 註冊，不需要 token；回 `{ accessToken, user }`，refresh token 設在 cookie |
+| `POST` | `/auth/login` | 登入，不需要 token；回 `{ accessToken, user }`，refresh token 設在 cookie |
+| `POST` | `/auth/logout` | 登出：作廢 cookie 裡這個 refresh token 所在的那一串、清掉 cookie，回 `204`；不需要 `Authorization`（access token 可能已經過期），沒有 cookie 或 token 無效也回 `204` |
+| `POST` | `/auth/logout-all` | 登出所有裝置：作廢登入者所有的 refresh token、清掉這個瀏覽器的 cookie，回 `204`，需要 `Authorization`；已簽出的 access token 仍有效到過期（最多 15 分鐘） |
+| `POST` | `/auth/refresh` | 用 cookie 裡的 refresh token 換發：回 `{ accessToken, user }`，cookie 換成新的 refresh token；不需要 `Authorization`、沒有 body。沒有 cookie 或 token 不能用回 `401`（並清掉 cookie） |
 | `GET` | `/auth/me` | 取得目前使用者資訊，需要 `Authorization: Bearer <access_token>` |
 
 ### Upload（`UploadController` → `upload-service`）—— 以下全部需要 `Authorization`
@@ -242,6 +262,8 @@ Job id 是 UUID、不會重用，標記在有效時間內直接回 404。有效�
 | `CACHE_JOB_OWNER_TTL` | `10m` | Job 擁有者快取的有效時間，見「快取」 |
 | `USAGE_LIMIT_TRANSCRIPTION_MINUTES` / `USAGE_LIMIT_PLATFORM_TOKENS` / `USAGE_LIMIT_WEB_SEARCHES` | `600` / `2000000` / `30` | 每月用量上限，見「每月用量上限」 |
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
+| `REFRESH_COOKIE_PATH` / `REFRESH_COOKIE_SECURE` | `/api/auth` / `true` | refresh token 的 cookie，見「refresh token 的 cookie」 |
+| `JWT_REFRESH_TOKEN_TTL_DAYS` | `7` | refresh token 的 cookie 多久過期（跟 auth-service 讀同一個變數） |
 
 ## 專案結構
 
