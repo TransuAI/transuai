@@ -12,6 +12,8 @@ interface AuthContextValue {
   logout: () => void
   /** Signs out every device (revokes all refresh tokens), then this one. */
   logoutEverywhere: () => Promise<void>
+  /** Deletes the account (confirmed with the password), then signs out here. */
+  deleteAccount: (password: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -68,8 +70,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
+  const deleteAccount = useCallback(async (password: string) => {
+    await authApi.deleteAccount(password)
+    setAccessToken(null)
+    setUser(null)
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout, logoutEverywhere }}>
+    <AuthContext.Provider value={{ user, isLoading, login, register, logout, logoutEverywhere, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   )

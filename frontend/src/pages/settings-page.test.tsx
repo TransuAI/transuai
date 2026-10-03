@@ -19,7 +19,8 @@ vi.mock('@/lib/api', () => ({
 vi.mock('@/lib/navigation', () => ({ leaveTo: vi.fn() }))
 
 const logoutEverywhere = vi.fn()
-vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ logoutEverywhere }) }))
+const deleteAccount = vi.fn()
+vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ logoutEverywhere, deleteAccount }) }))
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -502,5 +503,56 @@ describe('SettingsPage account (帳號)', () => {
     await clicker.click(within(section).getByRole('button', { name: '登出所有裝置' }))
 
     expect(logoutEverywhere).toHaveBeenCalled()
+  })
+})
+
+describe('SettingsPage deleting the account (刪除帳號)', () => {
+  async function openDialog() {
+    const clicker = userEvent.setup()
+    await renderSettings()
+    const section = screen.getByRole('group', { name: '刪除帳號' })
+    await clicker.click(within(section).getByRole('button', { name: '刪除帳號…' }))
+    return { clicker, dialog: await screen.findByRole('alertdialog', { name: '刪除帳號？' }) }
+  }
+
+  it('says what will be deleted and needs the password before it can be confirmed', async () => {
+    const { dialog } = await openDialog()
+
+    expect(within(dialog).getByText('所有 Job 與上傳的錄音、影片')).toBeInTheDocument()
+    expect(within(dialog).getByText('已連結的 Google、Notion 帳號（會向對方撤銷授權）')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '永久刪除帳號' })).toBeDisabled()
+    expect(deleteAccount).not.toHaveBeenCalled()
+  })
+
+  it('deletes the account with the password', async () => {
+    deleteAccount.mockResolvedValue(undefined)
+    const { clicker, dialog } = await openDialog()
+
+    await clicker.type(within(dialog).getByLabelText('輸入密碼確認'), 'my-password')
+    await clicker.click(within(dialog).getByRole('button', { name: '永久刪除帳號' }))
+
+    expect(deleteAccount).toHaveBeenCalledWith('my-password')
+    expect(await screen.findByText('帳號已刪除')).toBeInTheDocument()
+  })
+
+  it('keeps the dialog open and says so when the password is wrong', async () => {
+    deleteAccount.mockRejectedValue(new ApiError(403, { error: 'PERMISSION_DENIED', message: 'wrong password' }))
+    const { clicker, dialog } = await openDialog()
+
+    await clicker.type(within(dialog).getByLabelText('輸入密碼確認'), 'not-it')
+    await clicker.click(within(dialog).getByRole('button', { name: '永久刪除帳號' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('密碼不正確')
+    expect(within(dialog).getByRole('button', { name: '永久刪除帳號' })).toBeEnabled()
+  })
+
+  it('shows the server message when there were too many tries', async () => {
+    deleteAccount.mockRejectedValue(new ApiError(429, { error: 'RATE_LIMITED', message: '嘗試太多次，請 15 分鐘後再試' }))
+    const { clicker, dialog } = await openDialog()
+
+    await clicker.type(within(dialog).getByLabelText('輸入密碼確認'), 'guess')
+    await clicker.click(within(dialog).getByRole('button', { name: '永久刪除帳號' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('嘗試太多次，請 15 分鐘後再試')
   })
 })

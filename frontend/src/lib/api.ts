@@ -52,6 +52,10 @@ export const authApi = {
   logout: () => apiFetchVoid('/auth/logout', { method: 'POST', auth: false }),
 
   logoutAll: () => apiFetchVoid('/auth/logout-all', { method: 'POST' }),
+
+  // 刪除帳號: the password again (403 when wrong). Everything of the user's is deleted on the server and the refresh-token
+  // cookie cleared.
+  deleteAccount: (password: string) => apiFetchVoid('/auth/account/delete', { method: 'POST', body: { password } }),
 }
 
 export const uploadApi = {

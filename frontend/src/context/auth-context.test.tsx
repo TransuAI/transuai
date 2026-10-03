@@ -6,13 +6,13 @@ import { getAccessToken, setAccessToken } from '@/lib/access-token'
 import { AuthProvider, useAuth } from './auth-context'
 
 vi.mock('@/lib/api', () => ({
-  authApi: { me: vi.fn(), login: vi.fn(), register: vi.fn(), logout: vi.fn(), logoutAll: vi.fn() },
+  authApi: { me: vi.fn(), login: vi.fn(), register: vi.fn(), logout: vi.fn(), logoutAll: vi.fn(), deleteAccount: vi.fn() },
 }))
 
 const user = { id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z' }
 
 function Buttons() {
-  const { user: signedIn, isLoading, login, logout, logoutEverywhere } = useAuth()
+  const { user: signedIn, isLoading, login, logout, logoutEverywhere, deleteAccount } = useAuth()
   if (isLoading) return <span>載入中</span>
   return (
     <>
@@ -20,6 +20,7 @@ function Buttons() {
       <button onClick={() => void login('a@example.com', 'secret-password')}>登入</button>
       <button onClick={logout}>登出</button>
       <button onClick={() => void logoutEverywhere()}>登出所有裝置</button>
+      <button onClick={() => void deleteAccount('the-password').catch(() => {})}>刪除帳號</button>
     </>
   )
 }
@@ -135,5 +136,34 @@ describe('logging out (登出)', () => {
     await waitFor(() => expect(screen.getByText('未登入')).toBeInTheDocument())
     expect(authApi.logoutAll).toHaveBeenCalled()
     expect(getAccessToken()).toBeNull()
+  })
+})
+
+describe('deleting the account (刪除帳號)', () => {
+  it('asks the server with the password, then forgets the access token and signs out', async () => {
+    vi.mocked(authApi.deleteAccount).mockResolvedValue(undefined)
+    refreshCookie(true)
+    const clicker = userEvent.setup()
+    render(<AuthProvider><Buttons /></AuthProvider>)
+    await screen.findByText('已登入')
+
+    await clicker.click(screen.getByRole('button', { name: '刪除帳號' }))
+
+    await waitFor(() => expect(screen.getByText('未登入')).toBeInTheDocument())
+    expect(authApi.deleteAccount).toHaveBeenCalledWith('the-password')
+    expect(getAccessToken()).toBeNull()
+  })
+
+  it('stays signed in when the server refuses', async () => {
+    vi.mocked(authApi.deleteAccount).mockRejectedValue(new Error('wrong password'))
+    refreshCookie(true)
+    const clicker = userEvent.setup()
+    render(<AuthProvider><Buttons /></AuthProvider>)
+    await screen.findByText('已登入')
+
+    await clicker.click(screen.getByRole('button', { name: '刪除帳號' }))
+
+    expect(screen.getByText('已登入')).toBeInTheDocument()
+    expect(getAccessToken()).toBe('access-from-cookie')
   })
 })
