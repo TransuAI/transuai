@@ -1609,6 +1609,67 @@ describe("JobDetailPage changing a segment's speaker (COMPLETED, desktop layout)
   })
 })
 
+describe('JobDetailPage speaker stats (講者數據, COMPLETED, desktop layout)', () => {
+  const statsTable = () => screen.getByRole('table', { name: '每位講者的發言' })
+  const rowOf = (name: string) => within(statsTable()).getByRole('row', { name: new RegExp(`^${name}`) })
+
+  it('shows a tile only when there are two or more speakers', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(soloTranscript)
+
+    await screen.findByRole('list', { name: 'Studio 功能' })
+    expect(screen.queryByRole('button', { name: '講者數據' })).not.toBeInTheDocument()
+  })
+
+  it('lists each speaker’s talk time, share, turns and longest turn, and the turn changes', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(multiSpeakerTranscript)
+
+    expect(await screen.findByRole('button', { name: '講者數據' })).toHaveAccessibleDescription('2 位講者 · 講最多：主持人')
+    await openStudioTool('講者數據')
+
+    // 主持人: 0–4 (one turn) and 6–8; 講者 2: 4–6. 講者 3 has no segments left and isn't listed.
+    expect(within(rowOf('主持人')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:06', '75%', '2', '00:04'])
+    expect(within(rowOf('講者 2')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:02', '25%', '1', '00:02'])
+    expect(within(statsTable()).queryByRole('row', { name: /講者 3/ })).not.toBeInTheDocument()
+    expect(screen.getByText('換人 2 次')).toBeInTheDocument()
+  })
+
+  it('works the numbers out again when a segment is given to another speaker', async () => {
+    const user = userEvent.setup()
+    stubDesktopLayout()
+    vi.mocked(transcriptApi.assignSegmentSpeaker).mockResolvedValue({
+      segment: { ...multiSpeakerTranscript.segments[1], speakerLabel: 'S2' },
+      speakers: multiSpeakerTranscript.speakers,
+      revision: 1,
+    })
+    await renderCompletedJob(multiSpeakerTranscript)
+    await openStudioTool('講者數據')
+
+    const row = screen.getByText('今天請到來賓').closest('[data-segment-index]') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '改講者' }))
+    await user.click(within(await screen.findByRole('menu')).getByRole('menuitemradio', { name: '講者 2' }))
+
+    await waitFor(() =>
+      expect(within(rowOf('講者 2')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:04', '50%', '1', '00:04']))
+  })
+
+  it('marks a speaker who talks very little', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob({
+      ...multiSpeakerTranscript,
+      segments: [
+        { id: 'q1', startTime: 0, endTime: 100, speakerLabel: 'S1', text: '很長的開場', originalText: '很長的開場' },
+        { id: 'q2', startTime: 100, endTime: 105, speakerLabel: 'S2', text: '好', originalText: '好' },
+      ],
+    })
+    await openStudioTool('講者數據')
+
+    expect(within(rowOf('講者 2')).getByText('發言很少')).toBeInTheDocument()
+    expect(within(rowOf('主持人')).queryByText('發言很少')).not.toBeInTheDocument()
+  })
+})
+
 describe('JobDetailPage mini player speakers (COMPLETED, narrow viewport)', () => {
   it("puts the current speaker's name before the current segment's text", async () => {
     await renderCompletedJob(multiSpeakerTranscript)

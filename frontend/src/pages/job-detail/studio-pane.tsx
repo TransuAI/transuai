@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react'
-import { ArrowLeft, ClipboardList, Gauge, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
+import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
+import { ArrowLeft, ChartBarBig, ClipboardList, Gauge, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
 import type { NotesActions } from '@/hooks/use-notes'
 import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
@@ -9,12 +9,14 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { NotesSection, type NoteToOpen } from '@/pages/job-detail/notes-section'
 import { PostMeetingSection } from '@/pages/job-detail/post-meeting-section'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
+import { SpeakerStatsSection } from '@/pages/job-detail/speaker-stats-section'
+import { computeSpeakerStats, speakerStatsStatus } from '@/lib/speaker-stats'
 import { UsageSection } from '@/pages/job-detail/usage-section'
 import { cn } from '@/lib/utils'
 import type { Chapter, ConfirmedProposal, JobUsage, PostMeeting, Quiz, Summary, Transcript } from '@/types/api'
 
 /** A Studio tool; the pane shows either the tiles of all tools (none picked) or one tool. */
-export type StudioTool = 'summary' | 'chapters' | 'notes' | 'quiz' | 'post-meeting' | 'usage'
+export type StudioTool = 'summary' | 'chapters' | 'notes' | 'quiz' | 'speaker-stats' | 'post-meeting' | 'usage'
 
 interface StudioPaneProps {
   jobId: string
@@ -126,6 +128,17 @@ export function StudioPane({
     </div>
   )
 
+  // 講者數據: null with fewer than two speakers, and then there's no tile for it.
+  const speakerStats = useMemo(
+    () => (transcript ? computeSpeakerStats(transcript.segments, transcript.speakers) : null),
+    [transcript],
+  )
+
+  // Speaker edits can leave a single speaker while 講者數據 is open: there's nothing to show any more.
+  useEffect(() => {
+    if (tool === 'speaker-stats' && !speakerStats) onToolChange(null)
+  }, [tool, speakerStats, onToolChange])
+
   const shown = tool ? TOOLS[tool] : null
   const pendingProposals =
     postMeeting?.latestRun?.proposals.filter((proposal) => proposal.status === 'PROPOSED').length ?? 0
@@ -184,6 +197,11 @@ export function StudioPane({
                       ? '產生中…'
                       : `${quizzes.length} 份測驗`}
                 </ToolTile>
+                {speakerStats && (
+                  <ToolTile tool="speaker-stats" onOpen={onToolChange}>
+                    {speakerStatsStatus(speakerStats)}
+                  </ToolTile>
+                )}
                 <ToolTile
                   tool="post-meeting"
                   onOpen={onToolChange}
@@ -258,6 +276,8 @@ export function StudioPane({
             />
           )}
 
+          {tool === 'speaker-stats' && speakerStats && <SpeakerStatsSection stats={speakerStats} />}
+
           {tool === 'post-meeting' && (
             <PostMeetingSection
               postMeeting={postMeeting}
@@ -292,6 +312,7 @@ const TOOLS: Record<StudioTool, { title: string; icon: LucideIcon }> = {
   chapters: { title: '章節', icon: List },
   notes: { title: '筆記', icon: NotebookPen },
   quiz: { title: '測驗', icon: GraduationCap },
+  'speaker-stats': { title: '講者數據', icon: ChartBarBig },
   'post-meeting': { title: '會後處理', icon: ClipboardList },
   usage: { title: '用量', icon: Gauge },
 }

@@ -1,4 +1,5 @@
 import { speakerNameLookup } from '@/lib/speakers'
+import { computeSpeakerStats } from '@/lib/speaker-stats'
 import { sortNotes } from '@/lib/notes'
 import { isSummaryStale } from '@/lib/staleness'
 import type { Chapter, Job, Note, QuizQuestion, Summary, Transcript, WebSource } from '@/types/api'
@@ -28,6 +29,15 @@ export interface ExportContent {
   qaHistory: ExportQaTurn[]
   /** 筆記, by time with the unpinned ones last. */
   notes: ExportNote[]
+  /** 講者數據; null (or absent) when speakers aren't shown. */
+  speakerStats?: ExportSpeakerStats | null
+}
+
+/** 講者數據 in an export (see lib/speaker-stats): one row per speaker, by display order. */
+export interface ExportSpeakerStats {
+  speakers: { name: string; talkSeconds: number; share: number; turns: number; longestTurnSeconds: number; quiet: boolean }[]
+  speakerChanges: number
+  silenceSeconds: number
 }
 
 /** A 筆記 in an export: its time (null when not pinned to one) and text (empty for a 書籤). */
@@ -83,6 +93,19 @@ export function buildExportContent(source: ExportSource): ExportContent {
         webSources,
       })),
     notes: sortNotes(notes).map(({ timeSeconds, text }) => ({ timeSeconds, text })),
+    speakerStats: exportSpeakerStats(transcript),
+  }
+}
+
+function exportSpeakerStats(transcript: Transcript | null): ExportSpeakerStats | null {
+  const stats = transcript && computeSpeakerStats(transcript.segments, transcript.speakers)
+  if (!stats) return null
+  return {
+    speakers: stats.speakers.map(({ speaker, talkSeconds, share, turns, longestTurnSeconds, quiet }) => ({
+      name: speaker.displayName, talkSeconds, share, turns, longestTurnSeconds, quiet,
+    })),
+    speakerChanges: stats.speakerChanges,
+    silenceSeconds: stats.silenceSeconds,
   }
 }
 
@@ -244,6 +267,10 @@ export function toMarkdownReport(content: ExportContent): string {
       : '尚無章節',
   )
 
+  if (content.speakerStats) {
+    blocks.push('## 講者數據', speakerStatsTable(content.speakerStats))
+  }
+
   if (content.notes.length > 0) {
     blocks.push('## 筆記', notesList(content.notes))
   }
@@ -270,6 +297,18 @@ export function toMarkdownReport(content: ExportContent): string {
   }
 
   return blocks.join('\n\n') + '\n'
+}
+
+function speakerStatsTable(stats: ExportSpeakerStats): string {
+  const rows = stats.speakers.map((row) =>
+    `| ${row.name}${row.quiet ? '（發言很少）' : ''} | ${formatClock(row.talkSeconds)} | ${Math.round(row.share * 100)}% | ${row.turns} | ${formatClock(row.longestTurnSeconds)} |`)
+  return [
+    '| 講者 | 發言時間 | 佔比 | 發言次數 | 最長一次 |',
+    '|---|---|---|---|---|',
+    ...rows,
+    '',
+    `換人 ${stats.speakerChanges} 次；無人說話共 ${formatClock(stats.silenceSeconds)}。`,
+  ].join('\n')
 }
 
 // 測驗的 Markdown：題目與選項在前（可以印出來作答），最後一節是解答、解說與依據的時間戳。

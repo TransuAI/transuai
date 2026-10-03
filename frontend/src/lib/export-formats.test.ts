@@ -292,6 +292,52 @@ describe('toMarkdownReport', () => {
   })
 })
 
+describe('toMarkdownReport speaker stats (講者數據)', () => {
+  const base: ExportContent = {
+    fileName: '週會.m4a',
+    durationSeconds: 120,
+    createdAt: new Date(2026, 8, 1, 9, 5).toISOString(),
+    segments: [],
+    summary: null,
+    chapters: [],
+    qaHistory: [],
+    notes: [],
+  }
+
+  it('adds a table of each speaker after the chapters, marking those who talk very little', () => {
+    const report = toMarkdownReport({
+      ...base,
+      speakerStats: {
+        speakers: [
+          { name: '王小明', talkSeconds: 90, share: 0.9, turns: 3, longestTurnSeconds: 45, quiet: false },
+          { name: '李小華', talkSeconds: 10, share: 0.1, turns: 1, longestTurnSeconds: 10, quiet: true },
+        ],
+        speakerChanges: 3,
+        silenceSeconds: 12,
+      },
+    })
+
+    expect(report).toContain(
+      [
+        '## 講者數據',
+        '',
+        '| 講者 | 發言時間 | 佔比 | 發言次數 | 最長一次 |',
+        '|---|---|---|---|---|',
+        '| 王小明 | 01:30 | 90% | 3 | 00:45 |',
+        '| 李小華（發言很少） | 00:10 | 10% | 1 | 00:10 |',
+        '',
+        '換人 3 次；無人說話共 00:12。',
+      ].join('\n'),
+    )
+    expect(report.indexOf('## 講者數據')).toBeGreaterThan(report.indexOf('## 章節'))
+  })
+
+  it('leaves the section out when speakers aren’t shown', () => {
+    expect(toMarkdownReport({ ...base, speakerStats: null })).not.toContain('講者數據')
+    expect(toMarkdownReport(base)).not.toContain('講者數據')
+  })
+})
+
 describe('toNotesMarkdown', () => {
   it('writes the notes on their own, headed by the title', () => {
     const markdown = toNotesMarkdown({
@@ -334,6 +380,34 @@ describe('buildExportContent', () => {
     })
 
     expect(content.qaHistory[0]).toMatchObject({ webSearch: true, webSources: [pgvector] })
+  })
+
+  it('works out the speaker stats from a transcript with two or more speakers', () => {
+    const transcript = {
+      jobId: 'job-1', language: 'zh-TW', fullText: '', revision: 0,
+      speakers: [
+        { label: 'S1', displayName: '王小明', displayOrder: 1 },
+        { label: 'S2', displayName: '講者 2', displayOrder: 2 },
+      ],
+      segments: [
+        { id: 'a', startTime: 0, endTime: 30, speakerLabel: 'S1', text: '大家好', originalText: '大家好' },
+        { id: 'b', startTime: 30, endTime: 40, speakerLabel: 'S2', text: '好', originalText: '好' },
+      ],
+    }
+    const content = buildExportContent({
+      job: { jobId: 'job-1', userId: 'u', fileName: 'a.mp3', fileType: 'AUDIO', fileSizeBytes: 1, storagePath: 'p', durationSeconds: 1, status: 'COMPLETED', errorReason: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', transcriptionLanguage: 'zh-TW' },
+      transcript,
+      summary: null,
+      chapters: [],
+      qaHistory: [],
+      notes: [],
+    })
+
+    expect(content.speakerStats?.speakers.map((row) => [row.name, row.talkSeconds, row.turns])).toEqual([
+      ['王小明', 30, 1],
+      ['講者 2', 10, 1],
+    ])
+    expect(content.speakerStats?.speakerChanges).toBe(1)
   })
 
   it('carries the notes in their order: by time, unpinned ones last', () => {
