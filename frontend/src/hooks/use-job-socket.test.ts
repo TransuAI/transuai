@@ -15,12 +15,14 @@ vi.mock('@/lib/api-client', () => ({ renewAccessToken: vi.fn() }))
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
+  url: string
   sent: string[] = []
   onopen: (() => void) | null = null
   onmessage: ((msg: { data: string }) => void) | null = null
   onclose: ((event: { code: number }) => void) | null = null
 
-  constructor(public url: string) {
+  constructor(url: string) {
+    this.url = url
     FakeWebSocket.instances.push(this)
   }
 
