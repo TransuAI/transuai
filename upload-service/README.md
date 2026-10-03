@@ -70,7 +70,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/upl
 | `GetJob` | 查詢單一 Job，強制 ownership 檢查（別人的 Job 回 `NOT_FOUND`） |
 | `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md`。`as_attachment=true` 時 URL 會覆寫回應的 `Content-Disposition` 為 attachment、檔名＝Job 原始檔名（RFC 6266 ASCII 備援＋RFC 5987 UTF-8），供前端「匯出 → 下載原始檔」 |
 | `ListJobs` | 分頁查詢目前使用者的 Job（新的在前，`page` 從 1 開始，0 或沒帶當成 1）：`query` 找**標題**或**檔名**包含它的（去頭尾空白、不分大小寫，`%` `_` `\` 照字面比對），`category` 只看某個類型（不在清單回 `INVALID_ARGUMENT`）；空字串＝不篩，`total_count` 跟著條件算 |
-| `DeleteJob` | 刪除 Job record、它的筆記與物件儲存檔案 |
+| `DeleteJob` | 刪除 Job record、它的筆記與物件儲存檔案，並發 `job.deleted`（見下方「刪除 Job」） |
 | `UpdateJob` | 使用者改**標題**與**類型**（見 `CONTEXT.md`）：只改有帶的欄位（`optional`），帶了的記為使用者設定過（`*_set_by_user`），`SetSuggestedDetails` 之後不會再寫；標題去頭尾空白、空字串＝清空（顯示檔名，仍算設定過）；標題超過 100 字或類型不在清單回 `INVALID_ARGUMENT`，別人的 Job 回 `NOT_FOUND` |
 
 `NoteService`（`transuai.upload.v1`）—— **筆記**（見 `CONTEXT.md`「筆記」「書籤」），跟 `UploadService` 一樣需要 `x-user-id`：Job 不是這位使用者的、或筆記不屬於這個 Job，一律 `NOT_FOUND`。資料在 `job_notes`：
@@ -130,14 +130,26 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 
 `UploadGrpcServiceIT` 是涵蓋全部 5 支 rpc 的整合測試（筆記另有 `NoteGrpcServiceIT`、AI 回寫另有 `InternalJobGrpcServiceIT`）（`@SpringBootTest` + in-process gRPC transport），會**直接連本機真實的 Postgres / RabbitMQ / MinIO**（沒有 mock），所以跑測試前一樣要先 `docker compose up -d` 把 infra 開著。
 
+## 刪除 Job
+
+`DeleteJob`（`service/JobDeletion`）刪掉物件儲存的檔案（失敗只記警告）、筆記、Job，並在**同一個交易**裡寫一筆 `job.deleted { jobId, userId }`
+到 `outbox_events`。`event/OutboxPublisher` 每秒把 outbox 裡的事件送到 RabbitMQ 的 fanout exchange `job.deleted`，等 broker 確認收到
+（publisher confirm）才刪掉那一筆；送失敗就留著下一輪重送——事件至少送一次、可能重複。transcription-service、ai-service 各自綁一個佇列，
+清掉自己手上這個 Job 的資料（見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md`）。
+
+| 設定 | 預設 | 說明 |
+|---|---|---|
+| `app.mq.job-deleted-exchange` | `job.deleted` | fanout exchange（啟動時宣告） |
+| `app.outbox.poll-interval` / `app.outbox.confirm-timeout` | `1s` / `5s` | 多久看一次 outbox、每一筆等 broker 確認多久 |
+
 ## 專案結構
 
 ```
 src/main/java/com/transuai/upload_service/
-  domain/          Job entity、FileType / JobStatus enum（狀態機）、JobCategory（類型清單）、JobNoteEntity（筆記）
+  domain/          Job entity、FileType / JobStatus enum（狀態機）、JobCategory（類型清單）、JobNoteEntity（筆記）、OutboxEventEntity（outbox）
   repository/       Spring Data JPA repository
-  service/          StorageService（S3 presign / head / delete）
-  event/            JobEventPublisher 抽象 + RabbitMQ 實作（發送 transcription.requested）
+  service/          StorageService（S3 presign / head / delete）、JobDeletion（刪 Job 並寫 job.deleted 到 outbox）
+  event/            JobEventPublisher 抽象 + RabbitMQ 實作（發送 transcription.requested）、OutboxPublisher（把 outbox 送出去）
   grpc/             UploadGrpcService（6 支 rpc 實作）、NoteGrpcService（筆記）、InternalJobGrpcService（UpdateJobStatus、SetSuggestedDetails）、JobMapper（domain ↔ proto）
   grpc/auth/        UserIdServerInterceptor（解析 x-user-id metadata）、GrpcAuthContext
   grpc/advice/      GrpcExceptionAdvice（非預期例外 → 安全的 gRPC Status，避免內部細節外洩）
@@ -177,6 +189,6 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
 - Upload Service 不驗證 JWT，完全信任呼叫端轉發的 `x-user-id` metadata —— 前提是網路層保證只有 Gateway 能直接打到這個服務的 9090 port
 - 「下載原始檔」靠 presigned URL 帶 `response-content-disposition` 覆寫回應標頭；MinIO 支援（整合測試有驗證），正式環境規劃的 Cloudflare R2 是否支援這個覆寫參數，上雲前要實測確認——不支援的話，前端點「下載原始檔」會在同一分頁直接打開媒體網址、離開 app，而不是下載
-- 刪除 Job 時只清 Upload Service 自己的資料（DB row + 物件儲存），不會連帶清除其他服務的逐字稿/embedding（見 [`architecture-design.md`](../architecture-design.md) 第 8 節待確認事項）
+- 物件儲存的檔案刪除失敗只記警告，不會重試；孤兒檔案要靠之後的背景清理（還沒做）
 
 - gRPC 服務裡丟出的 `StatusRuntimeException`（例如 `job_id` 格式不對的 `INVALID_ARGUMENT`、找不到的 `NOT_FOUND`）照它自己的 status 回給呼叫端（`GrpcExceptionAdvice`）；之前會被最後的 catch-all 變成 `INTERNAL`。

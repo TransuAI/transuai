@@ -10,7 +10,11 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.AmqpAdmin;
+import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.FanoutExchange;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.grpc.test.autoconfigure.AutoConfigureTestGrpcTransport;
@@ -69,6 +73,12 @@ class UploadGrpcServiceIT {
 
     @Autowired
     private MqProperties mqProperties;
+
+    @Autowired
+    private AmqpAdmin amqpAdmin;
+
+    @Autowired
+    private com.transuai.upload_service.repository.OutboxEventRepository outbox;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<UUID> createdJobIds = new ArrayList<>();
@@ -334,6 +344,7 @@ class UploadGrpcServiceIT {
         UUID userId = UUID.randomUUID();
         Job job = createJob(userId, "delete-me.mp3");
         UploadServiceGrpc.UploadServiceBlockingStub stub = stubFor(userId);
+        String listener = listenToJobDeleted();
 
         Empty ignored = stub.deleteJob(DeleteJobRequest.newBuilder().setJobId(job.getJobId()).build());
         assertThat(ignored).isNotNull();
@@ -343,6 +354,46 @@ class UploadGrpcServiceIT {
                 .isInstanceOfSatisfying(StatusRuntimeException.class,
                         e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.NOT_FOUND));
         assertThat(jobRepository.findById(UUID.fromString(job.getJobId()))).isEmpty();
+
+        // job.deleted 經 outbox 送到 fanout exchange，讓 transcription-service、ai-service 清掉自己的資料。
+        var event = receiveJobDeleted(listener, job.getJobId());
+        assertThat(event.get("userId").asText()).isEqualTo(userId.toString());
+        assertThat(outbox.findAll()).noneMatch(row -> row.getPayload().contains(job.getJobId()));
+    }
+
+    @Test
+    void deleteJob_ofSomeoneElsesJob_publishesNothing() throws Exception {
+        Job job = createJob(UUID.randomUUID(), "not-yours.mp3");
+        String listener = listenToJobDeleted();
+
+        assertThatThrownBy(() -> stubFor(UUID.randomUUID()).deleteJob(
+                DeleteJobRequest.newBuilder().setJobId(job.getJobId()).build()))
+                .isInstanceOf(StatusRuntimeException.class);
+
+        assertThat(rabbitTemplate.receive(listener, 2_000)).isNull();
+        assertThat(jobRepository.findById(UUID.fromString(job.getJobId()))).isPresent();
+    }
+
+    // 一個只給這個測試的佇列（broker 取名、連線斷了就刪），綁到 job.deleted。
+    private String listenToJobDeleted() {
+        String queue = amqpAdmin.declareQueue().getName();
+        amqpAdmin.declareBinding(BindingBuilder.bind(new Queue(queue))
+                .to(new FanoutExchange(mqProperties.jobDeletedExchange())));
+        return queue;
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode receiveJobDeleted(String queue, String jobId) throws Exception {
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (System.currentTimeMillis() < deadline) {
+            Message message = rabbitTemplate.receive(queue, 1_000);
+            if (message != null) {
+                var payload = objectMapper.readTree(message.getBody());
+                if (payload.get("jobId").asText().equals(jobId)) {
+                    return payload;
+                }
+            }
+        }
+        throw new AssertionError("no job.deleted for " + jobId);
     }
 
     @Test

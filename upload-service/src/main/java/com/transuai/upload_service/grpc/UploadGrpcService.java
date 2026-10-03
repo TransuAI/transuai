@@ -24,8 +24,8 @@ import com.transuai.upload_service.domain.TranscriptionLanguage;
 import com.transuai.upload_service.event.JobEventPublisher;
 import com.transuai.upload_service.event.TranscriptionRequestedEvent;
 import com.transuai.upload_service.grpc.auth.GrpcAuthContext;
-import com.transuai.upload_service.repository.JobNoteRepository;
 import com.transuai.upload_service.repository.JobRepository;
+import com.transuai.upload_service.service.JobDeletion;
 import com.transuai.upload_service.service.StorageService;
 
 import com.google.protobuf.Empty;
@@ -48,8 +48,8 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
 
     private final StorageService storageService;
     private final JobRepository jobRepository;
-    private final JobNoteRepository noteRepository;
     private final JobEventPublisher jobEventPublisher;
+    private final JobDeletion jobDeletion;
     private final UploadLimitsProperties uploadLimitsProperties;
 
     @Override
@@ -315,14 +315,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
             return;
         }
 
-        // 物件儲存刪除失敗只記警告、不擋刪除：使用者的刪除意圖優先，孤兒物件之後可靠背景清理排除。
-        try {
-            storageService.deleteObject(job.getStoragePath());
-        } catch (RuntimeException e) {
-            log.warn("failed to delete storage object {} for job {}", job.getStoragePath(), job.getId(), e);
-        }
-        noteRepository.deleteByJobId(job.getId());  // 筆記屬於 Job，一起刪
-        jobRepository.delete(job);
+        jobDeletion.delete(job);
 
         responseObserver.onNext(Empty.getDefaultInstance());
         responseObserver.onCompleted();
