@@ -139,6 +139,24 @@ src/main/java/com/transuai/auth_service/
 
 開發環境都不檢查、照舊開著。見 `.scratch/pre-launch-hardening/issues/07`。
 
+## 依賴套件弱點掃描
+
+掃 build 出來的 Spring Boot jar（裡面就是正式執行時的所有依賴），用 [Grype](https://github.com/anchore/grype)（Docker 跑，不用安裝）對照 GitHub
+Advisory 等弱點資料庫：
+
+```bash
+./gradlew bootJar -x test
+docker run --rm -v grype-db:/root/.cache/grype -v "$PWD/build/libs/auth_service-0.0.1-SNAPSHOT.jar:/scan/app.jar:ro" anchore/grype:latest file:/scan/app.jar
+```
+
+沒用 OWASP Dependency-Check：它要先下載 NVD 全部資料（沒有 NVD API key 時很慢），而且靠 CPE 比對、誤報多；Grype 直接認 jar 裡的套件座標。
+上線前、以及之後每個月或升級依賴時跑一次。高風險、嚴重的要升級，或在這裡寫清楚為什麼不影響。
+
+Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ext['…version']` 覆蓋（目前覆蓋 Jackson、Tomcat、RabbitMQ amqp-client，
+見 `build.gradle` 的註解）；升級 Spring Boot 之後它管理的版本追上了，就拿掉對應的覆蓋。
+
+最近一次結果：2026-10-03：Spring Boot 4.1.0 → 4.1.1 加上覆蓋之後沒有已知弱點（原本有 Netty、Jackson、PostgreSQL JDBC、log4j-api 的高風險／嚴重弱點，都是 Spring Boot 管理的傳遞依賴）。
+
 ## 已知限制 / 待辦
 
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
