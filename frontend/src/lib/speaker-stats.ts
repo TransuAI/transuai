@@ -1,4 +1,4 @@
-import type { Speaker, TranscriptSegment } from '@/types/api'
+import type { Speaker, SpeakerInsight, TranscriptSegment } from '@/types/api'
 import { hasMultipleSpeakers, speakersWithSegments } from '@/lib/speakers'
 
 // 講者數據 (.scratch/speaker-analytics): the numbers worked out straight from the transcript's timeline — no AI, so
@@ -81,12 +81,23 @@ export function computeSpeakerStats(segments: TranscriptSegment[], speakers: Spe
 }
 
 function silence(spoken: TranscriptSegment[]): number {
+  // Measured from the latest end so far: an earlier segment that runs past a shorter later one is still someone talking.
   let total = 0
-  for (let i = 1; i < spoken.length; i++) {
-    const gap = spoken[i].startTime - spoken[i - 1].endTime
+  let talkingUntil = spoken[0]?.endTime ?? 0
+  for (const segment of spoken.slice(1)) {
+    const gap = segment.startTime - talkingUntil
     if (gap > SILENCE_GAP_SECONDS) total += gap
+    talkingUntil = Math.max(talkingUntil, segment.endTime)
   }
   return total
+}
+
+/** 講者數據的 AI 判斷, split by kind (each list in time order, as the server sends them). */
+export function insightsByKind(items: SpeakerInsight[]): { questions: SpeakerInsight[]; interruptions: SpeakerInsight[] } {
+  return {
+    questions: items.filter((item) => item.kind === 'question'),
+    interruptions: items.filter((item) => item.kind === 'interruption'),
+  }
 }
 
 /** The tile's one line: how many speakers and who talked most. */

@@ -309,8 +309,8 @@ describe('toMarkdownReport speaker stats (講者數據)', () => {
       ...base,
       speakerStats: {
         speakers: [
-          { name: '王小明', talkSeconds: 90, share: 0.9, turns: 3, longestTurnSeconds: 45, quiet: false },
-          { name: '李小華', talkSeconds: 10, share: 0.1, turns: 1, longestTurnSeconds: 10, quiet: true },
+          { name: '王小明', talkSeconds: 90, share: 0.9, turns: 3, longestTurnSeconds: 45, averageTurnSeconds: 30, quiet: false },
+          { name: '李小華', talkSeconds: 10, share: 0.1, turns: 1, longestTurnSeconds: 10, averageTurnSeconds: 10, quiet: true },
         ],
         speakerChanges: 3,
         silenceSeconds: 12,
@@ -321,10 +321,10 @@ describe('toMarkdownReport speaker stats (講者數據)', () => {
       [
         '## 講者數據',
         '',
-        '| 講者 | 發言時間 | 佔比 | 發言次數 | 最長一次 |',
-        '|---|---|---|---|---|',
-        '| 王小明 | 01:30 | 90% | 3 | 00:45 |',
-        '| 李小華（發言很少） | 00:10 | 10% | 1 | 00:10 |',
+        '| 講者 | 發言時間 | 佔比 | 發言次數 | 最長一次 | 平均 |',
+        '|---|---|---|---|---|---|',
+        '| 王小明 | 01:30 | 90% | 3 | 00:45 | 00:30 |',
+        '| 李小華（發言很少） | 00:10 | 10% | 1 | 00:10 | 00:10 |',
         '',
         '換人 3 次；無人說話共 00:12。',
       ].join('\n'),
@@ -336,7 +336,7 @@ describe('toMarkdownReport speaker stats (講者數據)', () => {
     const report = toMarkdownReport({
       ...base,
       speakerStats: {
-        speakers: [{ name: '王小明', talkSeconds: 90, share: 0.9, turns: 3, longestTurnSeconds: 45, quiet: false }],
+        speakers: [{ name: '王小明', talkSeconds: 90, share: 0.9, turns: 3, longestTurnSeconds: 45, averageTurnSeconds: 30, quiet: false }],
         speakerChanges: 3,
         silenceSeconds: 0,
         insights: {

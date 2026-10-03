@@ -2,8 +2,9 @@ import { History, Loader2Icon, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import { formatClock } from '@/lib/export-formats'
-import { speakerColour, speakerNameLookup } from '@/lib/speakers'
-import type { MeetingStats } from '@/lib/speaker-stats'
+import { speakerColour, speakerNameOrLabel } from '@/lib/speakers'
+import { insightsByKind, type MeetingStats } from '@/lib/speaker-stats'
+import { hasSpeakerInsightResults, isSpeakerInsightsStale } from '@/lib/staleness'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
 import type { SpeakerInsight, Transcript } from '@/types/api'
 
@@ -49,6 +50,7 @@ export function SpeakerStatsSection({
             <th scope="col" className="py-1 pl-3 text-right font-normal">佔比</th>
             <th scope="col" className="py-1 pl-3 text-right font-normal">次數</th>
             <th scope="col" className="py-1 pl-3 text-right font-normal">最長一次</th>
+            <th scope="col" className="py-1 pl-3 text-right font-normal">平均</th>
           </tr>
         </thead>
         <tbody>
@@ -71,6 +73,7 @@ export function SpeakerStatsSection({
               <td className="py-1.5 pl-3 text-right tabular-nums">{percent(row.share)}</td>
               <td className="py-1.5 pl-3 text-right tabular-nums">{row.turns}</td>
               <td className="py-1.5 pl-3 text-right tabular-nums">{formatClock(row.longestTurnSeconds)}</td>
+              <td className="py-1.5 pl-3 text-right tabular-nums">{formatClock(row.averageTurnSeconds)}</td>
             </tr>
           ))}
         </tbody>
@@ -81,7 +84,7 @@ export function SpeakerStatsSection({
         {stats.silenceSeconds > 0 && <li>{`無人說話共 ${formatClock(stats.silenceSeconds)}`}</li>}
       </ul>
       <p className="text-xs text-muted-foreground/80">
-        依逐字稿的時間計算；講者分得不對時，改片段的講者後會重新計算。「次數」是輪到這位講者說話的次數，「發言很少」是少於平均每人的四分之一。
+        依逐字稿的時間計算；講者分得不對時，改片段的講者後會重新計算。「次數」是輪到這位講者說話的次數，「平均」是平均一次說多久，「發言很少」是少於平均每人的四分之一。
       </p>
 
       <QuestionsAndInterruptions transcript={transcript} insights={insights} onSeek={onSeek} mediaAvailable={mediaAvailable} />
@@ -106,12 +109,12 @@ function QuestionsAndInterruptions({
   onSeek: (seconds: number) => void
   mediaAvailable: boolean
 }) {
-  const nameOf = speakerNameLookup(transcript.speakers)
+  const nameOf = speakerNameOrLabel(transcript.speakers)
   const status = insights?.status ?? 'NONE'
-  const hasResults = !!insights && (status === 'COMPLETED' || insights.completedAt !== null)
-  const isStale = hasResults && insights.sourceRevision !== transcript.revision
-  const questions = insights?.items.filter((item) => item.kind === 'question') ?? []
-  const interruptions = insights?.items.filter((item) => item.kind === 'interruption') ?? []
+  const hasResults = hasSpeakerInsightResults(insights)
+  // Only once it's done: while analysing there's nothing to offer, and a failure already offers 再分析一次.
+  const offerReanalysis = status === 'COMPLETED' && isSpeakerInsightsStale(insights, transcript)
+  const { questions, interruptions } = insightsByKind(insights?.items ?? [])
 
   return (
     <div className="flex flex-col gap-3 border-t pt-4">
@@ -139,7 +142,7 @@ function QuestionsAndInterruptions({
           分析問題與打斷
         </Button>
       )}
-      {isStale && status !== 'GENERATING' && (
+      {offerReanalysis && (
         <div className="flex flex-col gap-2 rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
           <p className="flex items-start gap-2">
             <History className="mt-0.5 size-4 shrink-0" />
@@ -158,7 +161,7 @@ function QuestionsAndInterruptions({
             label="提出的問題"
             items={questions}
             empty="沒有找到提問"
-            describe={(item) => nameOf(item.speakerLabel) ?? item.speakerLabel}
+            describe={(item) => nameOf(item.speakerLabel)}
             onSeek={onSeek}
             mediaAvailable={mediaAvailable}
           />
@@ -166,12 +169,11 @@ function QuestionsAndInterruptions({
             label="可能的打斷"
             items={interruptions}
             empty="沒有找到打斷"
-            describe={(item) =>
-              `${nameOf(item.speakerLabel) ?? item.speakerLabel} 打斷了 ${nameOf(item.interruptedLabel) ?? item.interruptedLabel}`}
+            describe={(item) => `${nameOf(item.speakerLabel)} 打斷了 ${nameOf(item.interruptedLabel)}`}
             onSeek={onSeek}
             mediaAvailable={mediaAvailable}
           />
-          {insights.model && <p className="text-xs text-muted-foreground/80">由 {insights.model} 分析</p>}
+          {insights?.model && <p className="text-xs text-muted-foreground/80">由 {insights.model} 分析</p>}
         </>
       )}
     </div>

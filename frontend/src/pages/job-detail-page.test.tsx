@@ -1634,8 +1634,8 @@ describe('JobDetailPage speaker stats (講者數據, COMPLETED, desktop layout)'
     await openStudioTool('講者數據')
 
     // 主持人: 0–4 (one turn) and 6–8; 講者 2: 4–6. 講者 3 has no segments left and isn't listed.
-    expect(within(rowOf('主持人')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:06', '75%', '2', '00:04'])
-    expect(within(rowOf('講者 2')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:02', '25%', '1', '00:02'])
+    expect(within(rowOf('主持人')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:06', '75%', '2', '00:04', '00:03'])
+    expect(within(rowOf('講者 2')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:02', '25%', '1', '00:02', '00:02'])
     expect(within(statsTable()).queryByRole('row', { name: /講者 3/ })).not.toBeInTheDocument()
     expect(screen.getByText('換人 2 次')).toBeInTheDocument()
   })
@@ -1656,7 +1656,7 @@ describe('JobDetailPage speaker stats (講者數據, COMPLETED, desktop layout)'
     await user.click(within(await screen.findByRole('menu')).getByRole('menuitemradio', { name: '講者 2' }))
 
     await waitFor(() =>
-      expect(within(rowOf('講者 2')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:04', '50%', '1', '00:04']))
+      expect(within(rowOf('講者 2')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:04', '50%', '1', '00:04', '00:04']))
   })
 
   describe('questions and interruptions judged by AI (估計)', () => {
@@ -1722,6 +1722,17 @@ describe('JobDetailPage speaker stats (講者數據, COMPLETED, desktop layout)'
 
       expect(await screen.findByText('逐字稿已修改，這份分析可能過時')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: '重新分析' })).toBeInTheDocument()
+    })
+
+    it('offers only one way to try again when a re-analysis of out-of-date results failed', async () => {
+      stubDesktopLayout()
+      vi.mocked(speakerInsightsApi.get).mockResolvedValue({ ...analysed, status: 'FAILED', failureReason: '分析失敗，請再試一次' })
+      await renderCompletedJob({ ...multiSpeakerTranscript, revision: 2 })
+      await openStudioTool('講者數據')
+
+      expect(await screen.findByRole('button', { name: '再分析一次' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '重新分析' })).not.toBeInTheDocument()
+      expect(screen.getByRole('list', { name: '提出的問題' })).toBeInTheDocument() // the earlier results stay
     })
 
     it('shows why it failed and offers to try again', async () => {

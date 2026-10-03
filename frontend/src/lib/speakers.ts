@@ -9,6 +9,12 @@ export function speakerNameLookup(speakers: Speaker[]): (label: string | null) =
   return (label) => (label === null ? null : (names.get(label) ?? null))
 }
 
+/** Like speakerNameLookup, but falls back to the label itself (a speaker the list no longer has). */
+export function speakerNameOrLabel(speakers: Speaker[]): (label: string | null) => string {
+  const lookup = speakerNameLookup(speakers)
+  return (label) => lookup(label) ?? label ?? ''
+}
+
 /**
  * Whether speakers are shown at all: only when the segments that aren't cleared (已清空片段) come
  * from two or more speakers. A single-speaker recording shows no speaker panel or names.

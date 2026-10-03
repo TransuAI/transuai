@@ -18,6 +18,7 @@ const FEATURE_LABELS: Record<string, string> = {
   web_search: '網路搜尋',
   job_title: '標題',
   speaker_names: '講者名字建議',
+  speaker_insights: '講者數據分析',
 }
 
 function tokens(value: number) {

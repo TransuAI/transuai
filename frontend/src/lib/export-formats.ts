@@ -1,7 +1,7 @@
-import { speakerNameLookup } from '@/lib/speakers'
-import { computeSpeakerStats } from '@/lib/speaker-stats'
+import { speakerNameLookup, speakerNameOrLabel } from '@/lib/speakers'
+import { computeSpeakerStats, insightsByKind } from '@/lib/speaker-stats'
 import { sortNotes } from '@/lib/notes'
-import { isSummaryStale } from '@/lib/staleness'
+import { hasSpeakerInsightResults, isSpeakerInsightsStale, isSummaryStale } from '@/lib/staleness'
 import type { Chapter, Job, Note, QuizQuestion, SpeakerInsights, Summary, Transcript, WebSource } from '@/types/api'
 
 // 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
@@ -35,7 +35,15 @@ export interface ExportContent {
 
 /** 講者數據 in an export (see lib/speaker-stats): one row per speaker, by display order. */
 export interface ExportSpeakerStats {
-  speakers: { name: string; talkSeconds: number; share: number; turns: number; longestTurnSeconds: number; quiet: boolean }[]
+  speakers: {
+    name: string
+    talkSeconds: number
+    share: number
+    turns: number
+    longestTurnSeconds: number
+    averageTurnSeconds: number
+    quiet: boolean
+  }[]
   speakerChanges: number
   silenceSeconds: number
   /** The questions and possible interruptions judged by AI, when it has been analysed. */
@@ -108,18 +116,14 @@ export function buildExportContent(source: ExportSource): ExportContent {
 function exportSpeakerStats(transcript: Transcript | null, insights: SpeakerInsights | null): ExportSpeakerStats | null {
   const stats = transcript && computeSpeakerStats(transcript.segments, transcript.speakers)
   if (!transcript || !stats) return null
-  const nameOf = (label: string | null) => speakerNameLookup(transcript.speakers)(label) ?? label ?? ''
-  const analysed = insights && (insights.status === 'COMPLETED' || insights.completedAt !== null)
+  const nameOf = speakerNameOrLabel(transcript.speakers)
+  const { questions, interruptions } = insightsByKind(insights?.items ?? [])
   return {
-    insights: analysed
+    insights: hasSpeakerInsightResults(insights)
       ? {
-          isStale: insights.sourceRevision !== transcript.revision,
-          questions: insights.items
-            .filter((item) => item.kind === 'question')
-            .map((item) => ({ startTime: item.startTime, speakerName: nameOf(item.speakerLabel), text: item.text })),
-          interruptions: insights.items
-            .filter((item) => item.kind === 'interruption')
-            .map((item) => ({
+          isStale: isSpeakerInsightsStale(insights, transcript),
+          questions: questions.map((item) => ({ startTime: item.startTime, speakerName: nameOf(item.speakerLabel), text: item.text })),
+          interruptions: interruptions.map((item) => ({
               startTime: item.startTime,
               speakerName: nameOf(item.speakerLabel),
               interruptedName: nameOf(item.interruptedLabel),
@@ -127,8 +131,8 @@ function exportSpeakerStats(transcript: Transcript | null, insights: SpeakerInsi
             })),
         }
       : null,
-    speakers: stats.speakers.map(({ speaker, talkSeconds, share, turns, longestTurnSeconds, quiet }) => ({
-      name: speaker.displayName, talkSeconds, share, turns, longestTurnSeconds, quiet,
+    speakers: stats.speakers.map(({ speaker, talkSeconds, share, turns, longestTurnSeconds, averageTurnSeconds, quiet }) => ({
+      name: speaker.displayName, talkSeconds, share, turns, longestTurnSeconds, averageTurnSeconds, quiet,
     })),
     speakerChanges: stats.speakerChanges,
     silenceSeconds: stats.silenceSeconds,
@@ -327,10 +331,10 @@ export function toMarkdownReport(content: ExportContent): string {
 
 function speakerStatsTable(stats: ExportSpeakerStats): string {
   const rows = stats.speakers.map((row) =>
-    `| ${row.name}${row.quiet ? '（發言很少）' : ''} | ${formatClock(row.talkSeconds)} | ${Math.round(row.share * 100)}% | ${row.turns} | ${formatClock(row.longestTurnSeconds)} |`)
+    `| ${row.name}${row.quiet ? '（發言很少）' : ''} | ${formatClock(row.talkSeconds)} | ${Math.round(row.share * 100)}% | ${row.turns} | ${formatClock(row.longestTurnSeconds)} | ${formatClock(row.averageTurnSeconds)} |`)
   return [
-    '| 講者 | 發言時間 | 佔比 | 發言次數 | 最長一次 |',
-    '|---|---|---|---|---|',
+    '| 講者 | 發言時間 | 佔比 | 發言次數 | 最長一次 | 平均 |',
+    '|---|---|---|---|---|---|',
     ...rows,
     '',
     `換人 ${stats.speakerChanges} 次；無人說話共 ${formatClock(stats.silenceSeconds)}。`,

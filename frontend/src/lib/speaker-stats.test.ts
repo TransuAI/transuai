@@ -71,6 +71,16 @@ describe('computeSpeakerStats', () => {
     expect(stats!.silenceSeconds).toBe(8)
   })
 
+  it('doesn’t count time someone is still talking as silence, when an earlier segment runs past a later one', () => {
+    const stats = computeSpeakerStats([
+      segment('S1', 0, 20),
+      segment('S2', 5, 8), // inside S1's segment
+      segment('S1', 21, 25), // 1s after S1 stopped: an ordinary pause, not 13s of silence
+    ], speakers)
+
+    expect(stats!.silenceSeconds).toBe(0)
+  })
+
   it('flags a speaker who talks less than a quarter of the average per speaker (發言很少)', () => {
     const stats = computeSpeakerStats([
       segment('S1', 0, 100),
