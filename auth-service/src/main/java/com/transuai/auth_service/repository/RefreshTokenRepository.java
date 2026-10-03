@@ -29,6 +29,10 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 
     /** 這位使用者的全部作廢（登出所有裝置）。 */
     @Modifying
+    @Query("delete from RefreshToken t where t.userId = :userId")
+    int deleteByUserId(@Param("userId") UUID userId);
+
+    @Modifying
     @Query("update RefreshToken t set t.revokedAt = :now, t.revokedReason = :reason where t.userId = :userId")
     int revokeAllOf(@Param("userId") UUID userId, @Param("reason") RefreshToken.RevokedReason reason,
             @Param("now") OffsetDateTime now);

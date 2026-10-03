@@ -28,6 +28,7 @@ public class ProductionSecretsCheck {
         List<String> problems = new ArrayList<>();
         check(environment, "app.jwt.secret", "JWT_SECRET", MIN_JWT_SECRET_LENGTH, problems);
         check(environment, "spring.datasource.password", "DB_PASSWORD", MIN_LENGTH, problems);
+        check(environment, "spring.rabbitmq.password", "RABBITMQ_PASSWORD", MIN_LENGTH, problems);
         if (!problems.isEmpty()) {
             throw new IllegalStateException("APP_ENV=production needs real secrets: " + String.join("; ", problems));
         }

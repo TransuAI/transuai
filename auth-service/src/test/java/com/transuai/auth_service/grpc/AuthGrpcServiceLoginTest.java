@@ -33,7 +33,8 @@ class AuthGrpcServiceLoginTest {
         PasswordEncoder encoder = spy(new BCryptPasswordEncoder());
         StreamObserver<AuthResponse> observer = mock(StreamObserver.class);
 
-        new AuthGrpcService(users, encoder, mock(JwtService.class), mock(RefreshTokens.class)).login(
+        new AuthGrpcService(users, encoder, mock(JwtService.class), mock(RefreshTokens.class),
+                mock(com.transuai.auth_service.service.AccountDeletion.class)).login(
                 LoginRequest.newBuilder().setEmail("nobody@example.com").setPassword("guess").build(), observer);
 
         verify(encoder).matches(eq("guess"), argThat(hash -> hash != null && hash.startsWith("$2")));

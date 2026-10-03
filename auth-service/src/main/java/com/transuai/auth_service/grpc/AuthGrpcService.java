@@ -8,6 +8,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.auth.grpc.v1.DeleteAccountRequest;
+import com.transuai.auth.grpc.v1.DeleteAccountResponse;
 import com.transuai.auth.grpc.v1.GetMeRequest;
 import com.transuai.auth.grpc.v1.LoginRequest;
 import com.transuai.auth.grpc.v1.LogoutAllDevicesRequest;
@@ -20,6 +22,7 @@ import com.transuai.auth_service.grpc.auth.GrpcAuthContext;
 import com.transuai.auth_service.repository.UserRepository;
 import com.transuai.auth_service.security.JwtService;
 import com.transuai.auth_service.security.RefreshTokens;
+import com.transuai.auth_service.service.AccountDeletion;
 
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
@@ -35,6 +38,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final RefreshTokens refreshTokens;
+    private final AccountDeletion accountDeletion;
     // 帳號不存在時也拿密碼比對這個雜湊，回應時間才跟「密碼錯」一樣長，不能用來猜哪些 email 註冊過。第一次用到才產生
     // （跟真的密碼用同一個 encoder、同樣的成本）。
     private volatile String unknownUserHash;
@@ -111,6 +115,27 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     public void logoutAllDevices(LogoutAllDevicesRequest request, StreamObserver<LogoutResponse> responseObserver) {
         refreshTokens.logoutAll(GrpcAuthContext.currentUserId());
         responseObserver.onNext(LogoutResponse.getDefaultInstance());
+        responseObserver.onCompleted();
+    }
+
+    // 刪除帳號前再確認一次密碼：開著的瀏覽器被別人拿到也刪不掉帳號。密碼錯是 PERMISSION_DENIED（Gateway 回 403），不是
+    // UNAUTHENTICATED——那會讓前端以為 token 過期、去換發再重試。
+    @Override
+    public void deleteAccount(DeleteAccountRequest request, StreamObserver<DeleteAccountResponse> responseObserver) {
+        UUID userId = GrpcAuthContext.currentUserId();
+        com.transuai.auth_service.domain.User user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("user not found").asRuntimeException());
+            return;
+        }
+        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            responseObserver.onError(
+                    Status.PERMISSION_DENIED.withDescription("wrong password").asRuntimeException());
+            return;
+        }
+
+        accountDeletion.delete(userId);
+        responseObserver.onNext(DeleteAccountResponse.getDefaultInstance());
         responseObserver.onCompleted();
     }
 

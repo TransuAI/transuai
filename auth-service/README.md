@@ -23,6 +23,7 @@
 access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）→ Gateway 直接轉發給 AuthService.Refresh
   → AuthService 驗證 refresh token（自己簽的，自己驗；還要在 refresh_tokens 查得到、沒有作廢），舊的作廢、換發新的一組 access/refresh token
 登出 → POST /auth/logout（帶 refresh_token）→ AuthService.Logout 作廢那一串；登出所有裝置 → POST /auth/logout-all → AuthService.LogoutAllDevices
+刪除帳號 → POST /auth/account/delete（再輸入密碼）→ AuthService.DeleteAccount：刪掉使用者、發 account.deleted
 ```
 
 每個簽出去的 refresh token 在 `refresh_tokens` 有一列（只存 SHA-256 雜湊；JWT 的 `jti` 對到這一列）。同一次登入一路換發出來的屬於
@@ -31,7 +32,7 @@ access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）�
 refresh token，幾乎同時換發時第二個拿的是剛被換掉的舊 token。登出作廢那一串；登出所有裝置作廢這位使用者的全部。已簽出的 access token
 不受影響，仍有效到過期（最多 15 分鐘，gateway 本地驗章）。這個機制上線之前簽的 refresh token 沒有 `jti`，換發會失敗，要重新登入一次。
 
-`AuthService` 這個 gRPC service 比較特別：`Register` / `Login` / `Refresh` / `Logout` 四支不需要 `x-user-id`（呼叫當下使用者還沒有 token，或 access token 已經過期；`Logout` 靠 refresh token 本身），`GetMe` 與 `LogoutAllDevices` 需要——所以 `UserIdServerInterceptor` 這裡是**依 method** 而不是整個 service 豁免，跟 upload-service 用整個 service 豁免 `InternalJobService` 不一樣，理由寫在 [`UserIdServerInterceptor`](src/main/java/com/transuai/auth_service/grpc/auth/UserIdServerInterceptor.java) 的註解。
+`AuthService` 這個 gRPC service 比較特別：`Register` / `Login` / `Refresh` / `Logout` 四支不需要 `x-user-id`（呼叫當下使用者還沒有 token，或 access token 已經過期；`Logout` 靠 refresh token 本身），`GetMe`、`LogoutAllDevices` 與 `DeleteAccount` 需要——所以 `UserIdServerInterceptor` 這裡是**依 method** 而不是整個 service 豁免，跟 upload-service 用整個 service 豁免 `InternalJobService` 不一樣，理由寫在 [`UserIdServerInterceptor`](src/main/java/com/transuai/auth_service/grpc/auth/UserIdServerInterceptor.java) 的註解。
 
 **`app.jwt.secret` 必須跟 gateway 的 `app.jwt.secret` 完全一致**——這是這兩個服務之間唯一的隱性耦合，本機開發共用同一組預設值即可，正式環境要覆蓋成夠長的隨機值時，兩邊要同時改。
 
@@ -100,6 +101,14 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `Logout` | 作廢這個 refresh token 所在的那一串；token 無效或已經作廢也回成功 |
 | `LogoutAllDevices` | 依 `x-user-id` 作廢這位使用者所有的 refresh token |
 | `GetMe` | 依 `x-user-id` 查目前使用者資訊，找不到（例如帳號已被刪除）回 `NOT_FOUND` |
+| `DeleteAccount` | 刪除帳號（`x-user-id`）：再確認一次密碼，錯了回 `PERMISSION_DENIED`（不是 `UNAUTHENTICATED`——前端會以為 token 過期去換發）；通過就在同一個交易裡刪掉使用者、他所有的 refresh token，並把 `account.deleted { userId }` 寫進 outbox（見下方「刪除帳號」）。找不到使用者回 `NOT_FOUND`。猜密碼的次數由 gateway 限流 |
+
+## 刪除帳號
+
+`DeleteAccount` 不自己去清別的服務：`account.deleted` 經 outbox（`outbox_events`，跟刪除同一個交易）由 `event/OutboxPublisher` 每秒送到 RabbitMQ 的
+fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（送失敗下一輪重送，至少送一次）。upload-service 刪掉他所有的 Job（每個再發
+`job.deleted`）、ai-service 撤銷並刪掉已連結的帳號與個人設定、兩個服務把用量去識別化（見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md`、
+`.scratch/account-deletion/spec.md`）。帳號一刪，同一個 email 馬上可以重新註冊（全新的帳號）。所以這個服務現在也連 RabbitMQ（只發送）。
 
 ## 環境變數
 
@@ -112,16 +121,20 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `JWT_ACCESS_TOKEN_TTL_MINUTES` | `15` | access token 效期 |
 | `JWT_REFRESH_TOKEN_TTL_DAYS` | `7` | refresh token 效期 |
 | `JWT_REFRESH_REUSE_GRACE_SECONDS` | `10` | 已經換發過的 refresh token 在這幾秒內再用一次不算被盜（多個分頁同時換發） |
+| `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ（刪除帳號時發 `account.deleted`） |
+| `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `admin` / `0000` | RabbitMQ 帳密 |
 
 ## 專案結構
 
 ```
 src/main/java/com/transuai/auth_service/
-  domain/           User entity
+  domain/           User entity、RefreshToken、OutboxEventEntity（outbox）
   repository/        Spring Data JPA repository
   security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）
-  config/             SecurityConfig（BCryptPasswordEncoder bean）
-  grpc/               AuthGrpcService（4 支 rpc 實作）、UserMapper（domain ↔ proto）
+  config/             SecurityConfig（BCryptPasswordEncoder bean）、RabbitConfig（account.deleted fanout exchange）
+  service/            AccountDeletion（刪使用者與 refresh token，account.deleted 寫進 outbox）
+  event/              OutboxPublisher（把 outbox 送到 RabbitMQ，publisher confirm）
+  grpc/               AuthGrpcService（rpc 實作）、UserMapper（domain ↔ proto）
   grpc/auth/          UserIdServerInterceptor（依 method 豁免，見上方「身分模型」）、GrpcAuthContext
   grpc/advice/        GrpcExceptionAdvice —— 注意這裡特別 handle 了 StatusRuntimeException/StatusException
                        原樣放行，因為 JwtService 是直接 throw Status.xxx().asRuntimeException()
@@ -133,7 +146,7 @@ src/main/java/com/transuai/auth_service/
 
 `APP_ENV` 預設是 `development`；設成 `production`（Java 服務用 `spring.profiles.active=${APP_ENV:development}`，就是 `production` profile）時：
 
-- 啟動前檢查密鑰（`config/ProductionSecretsCheck`）：`JWT_SECRET`（至少 32 字元）、`DB_PASSWORD` 沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
+- 啟動前檢查密鑰（`config/ProductionSecretsCheck`）：`JWT_SECRET`（至少 32 字元）、`DB_PASSWORD`、`RABBITMQ_PASSWORD` 沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
   或少於 12 字元，就不啟動，錯誤訊息列出是哪幾個環境變數。
 - gRPC reflection 關掉（`application-production.properties`）。
 
