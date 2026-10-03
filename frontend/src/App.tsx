@@ -5,6 +5,7 @@ import { ProtectedRoute } from '@/components/protected-route'
 import { AppShell } from '@/components/layout/app-shell'
 import { LoginPage } from '@/pages/login-page'
 import { RegisterPage } from '@/pages/register-page'
+import { PrivacyPage } from '@/pages/privacy-page'
 import { UploadPage } from '@/pages/upload-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { JobsPage } from '@/pages/jobs-page'
@@ -17,6 +18,8 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          {/* 隱私權說明：註冊前就要看得到，不用登入 */}
+          <Route path="/privacy" element={<PrivacyPage />} />
 
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>

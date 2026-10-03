@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/context/auth-context'
@@ -43,6 +44,10 @@ export function AccountSection() {
           登出所有裝置
         </Button>
       </div>
+      <p className="text-sm text-muted-foreground">
+        你的資料會送到哪些第三方處理、保存多久、你的權利：
+        <Link to="/privacy" className="text-foreground underline underline-offset-4">隱私權說明</Link>
+      </p>
       <DeleteAccount />
     </section>
   )

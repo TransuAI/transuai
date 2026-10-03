@@ -85,6 +85,13 @@ export function RegisterPage() {
             <Button type="submit" disabled={isSubmitting} className="mt-2 w-full">
               {isSubmitting ? '註冊中...' : '註冊'}
             </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              註冊即表示你已閱讀並同意{' '}
+              <Link to="/privacy" className="text-foreground underline underline-offset-4">
+                隱私權說明
+              </Link>
+              ——錄音與逐字稿會送到哪些第三方處理。
+            </p>
             <p className="text-center text-sm text-muted-foreground">
               已經有帳號了?{' '}
               <Link to="/login" className="text-foreground underline underline-offset-4">
