@@ -1,4 +1,4 @@
-# 純 FastAPI + pika，不涉及 gRPC/proto，build context 就是這個 repo 自己：
+# app/proto_gen 是預先產生好、已 commit 進版控的 protoc 產物，這裡不需要 infra/proto，build context 就是這個 repo 自己：
 #   docker build -t transuai/notification-service:dev .
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 

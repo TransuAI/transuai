@@ -13,20 +13,21 @@ REAL = "a-long-real-production-secret-0123456789"
 
 def test_the_development_defaults_are_refused_in_production():
     with pytest.raises(RuntimeError) as error:
-        check_secrets(Settings(app_env="production", rabbitmq_password="0000"))
+        check_secrets(Settings(app_env="production", rabbitmq_password="0000",
+                               jwt_secret="dev-only-shared-secret-change-me-before-any-real-deployment"))
 
-    for variable in ("RABBITMQ_PASSWORD",):
+    for variable in ("RABBITMQ_PASSWORD", "JWT_SECRET"):
         assert variable in str(error.value)
 
 
 def test_a_short_secret_is_refused_in_production():
-    problems = secret_problems(Settings(app_env="production", rabbitmq_password="short-1"))
+    problems = secret_problems(Settings(app_env="production", rabbitmq_password="short-1", jwt_secret="only-20-characters!!"))
 
-    assert problems == ["RABBITMQ_PASSWORD must be at least 12 characters"]
+    assert problems == ["RABBITMQ_PASSWORD must be at least 12 characters", "JWT_SECRET must be at least 32 characters"]
 
 
 def test_real_secrets_pass_in_production():
-    check_secrets(Settings(app_env="production", rabbitmq_password=REAL))
+    check_secrets(Settings(app_env="production", rabbitmq_password=REAL, jwt_secret=REAL))
 
 
 def test_development_is_not_checked():

@@ -14,6 +14,8 @@ from app.services.consumer import run_consumer
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+_WS_MAX_MESSAGE_BYTES = 16 * 1024
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -47,7 +49,16 @@ app = create_app(settings.is_production)
 
 def serve() -> None:
     check_secrets(settings)
-    uvicorn.run(app, host="0.0.0.0", port=settings.http_port)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=settings.http_port,
+        # 只信 TRUSTED_PROXIES 帶的 X-Forwarded-For（見 config.py），沒設就看直接連進來的位址。
+        proxy_headers=bool(settings.trusted_proxies),
+        forwarded_allow_ips=settings.trusted_proxies or None,
+        # client 只會送一則帶 access token 的訊息，不用收大訊息。
+        ws_max_size=_WS_MAX_MESSAGE_BYTES,
+    )
 
 
 if __name__ == "__main__":

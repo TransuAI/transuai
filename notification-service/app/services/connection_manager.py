@@ -14,7 +14,7 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
 
     async def connect(self, job_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
+        """加入已經接受、驗證過的連線（見 ws_controller）。"""
         async with self._lock:
             self._connections.setdefault(job_id, set()).add(websocket)
 
