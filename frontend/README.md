@@ -129,6 +129,21 @@ src/
     api.ts             對齊 gateway `web/dto/*.java` 的 TS 型別
 ```
 
+## 依賴套件弱點掃描
+
+```bash
+npm audit --omit=dev   # 會進到瀏覽器的依賴：要是 0
+npm audit              # 含建置與測試工具（Vite、Vitest、shadcn CLI…），只在開發機與建置時執行
+```
+
+上線前、以及之後每個月或升級依賴時跑一次。高風險、嚴重的要升級（`npm audit fix`，不要用會降版的 `--force`），或在這裡寫清楚為什麼不影響。
+
+最近一次結果（2026-10-03）：`npm audit fix` 修掉了 undici、qs、hono、js-yaml、fast-uri、ip-address 這些（都是 shadcn CLI 帶進來的）。`shadcn` 從
+`dependencies` 移到 `devDependencies`——它是產生元件用的 CLI，程式只在建置時引用它的 `shadcn/tailwind.css`（`src/index.css`），不會進到瀏覽器。
+之後 `npm audit --omit=dev` 是 0；完整的 `npm audit` 還剩 7 個高風險，全部來自 shadcn CLI → fast-glob → micromatch → `braces`
+（大量巢狀大括號的 glob 會讓堆疊耗盡）。`braces` 目前沒有修好的版本，`npm audit` 建議的修法是把 shadcn 降到 1.0.0，不採用；它只在開發者自己跑
+`npx shadcn add` 時、拿自己的檔案路徑執行，沒有外部輸入，不影響正式環境。
+
 ## 已知限制
 
 - Job 列表頁 pageSize 固定 10,沒有讓使用者調整。
