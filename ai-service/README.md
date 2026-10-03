@@ -393,6 +393,8 @@ app/
     post_meeting_settings.py         會後處理的設定：Notion 的會議紀錄位置（改過的網址儲存前用 Notion 確認是頁面）、待辦去處
     quiz_generator.py                出題：組 prompt、呼叫 llm_client、驗證模型回的 JSON（格式不對 raise QuizFormatError）、過濾時間戳
     consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
+    deletion_consumer.py             刪除事件（job.deleted）：自己的佇列、retry 佇列，另一條 thread
+    job_deletion.py                  刪掉一個 Job 的資料；deleted_jobs 標記；guard_writes（commit 之後丟掉寫給已刪 Job 的資料）
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
     llm_client.py                       生成類呼叫的 OpenAI 相容 client：chat()／stream_chat() 回傳文字與 token 用量，錯誤轉成 LlmError（廠商、模型、原因、是否暫時性）；平台模型設定（HF 路由 + DISABLE_THINKING）；strip_thinking()／stream_without_thinking() 防禦性濾掉 <think> 區塊
@@ -431,6 +433,18 @@ app/
   proto_gen/                                 gRPC stub 產物（由 scripts/generate_grpc.sh 產生）
 scripts/generate_grpc.sh                    重新產生 gRPC stub
 ```
+
+## 刪除 Job（`job.deleted`）
+
+upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanout exchange `job.deleted`；這個服務綁 `job.deleted.ai`
+（`app/services/deletion_consumer.py`，另一條 thread、另一條連線，不排在摘要、出題、會後處理後面），清掉這個 Job 的摘要、章節、embedding、
+問答、測驗（題目、作答跟著 cascade）、講者名字建議、會後處理（行動提案跟著 cascade）。**用量（`llm_usage`、`web_search_usage`）不刪**。
+可以重複處理；處理失敗 nack 到 `job.deleted.ai.retry`，30 秒後回來，不限次數；訊息本身不合法才丟掉。見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md`。
+
+刪除當下還在跑的寫入（pipeline、重算 embedding、重新產生摘要、出題、講者名字建議、會後處理、問答存紀錄）可能比刪除晚：收到事件時先記下
+`deleted_jobs`（保留一天）再刪資料；寫入那一邊不用各自檢查——`job_deletion.guard_writes(SessionLocal)`（啟動時掛上）在 session 上記下每次
+commit 新增或修改了哪些 Job 的資料，commit 之後查這些 Job 有沒有被刪，有就刪掉。新的資料表只要帶 `job_id` 就要加進 `job_deletion.JOB_SCOPED`。
+改到已經被刪掉的列（例如重新產生摘要寫回）會失敗（`StaleDataError`），不會把資料帶回來。
 
 ## 正式環境（`APP_ENV=production`）
 

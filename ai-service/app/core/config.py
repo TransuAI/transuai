@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     summary_regeneration_requested_queue: str = "summary.regeneration.requested"
     quiz_requested_queue: str = "quiz.requested"
     post_meeting_requested_queue: str = "post_meeting.requested"
+    # job.deleted（upload-service 的 fanout exchange）綁到這個服務自己的佇列；處理失敗（例如資料庫連不上）dead-letter 到 retry 佇列，
+    # 等 deletion_retry_delay_ms 再回來，不限次數——刪除一定要做完。
+    job_deleted_exchange: str = "job.deleted"
+    job_deleted_queue: str = "job.deleted.ai"
+    job_deleted_retry_queue: str = "job.deleted.ai.retry"
+    deletion_retry_delay_ms: int = 30_000
 
     upload_service_grpc_target: str = "localhost:9090"
     transcription_service_grpc_target: str = "localhost:8083"

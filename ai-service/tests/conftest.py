@@ -28,6 +28,11 @@ os.environ["KEY_ENCRYPTION_KEY"] = "dGVzdC1tYXN0ZXIta2V5LWZvci1hZXMtZ2NtLTMyYiE=
 
 from app.core.config import settings  # noqa: E402
 from app.db import engine, init_db, new_session  # noqa: E402
+from app.db import SessionLocal  # noqa: E402
+from app.services import job_deletion  # noqa: E402
+
+# 跟正式環境一樣：刪掉的 Job 晚到的寫入會被丟掉（main.serve 也這樣掛）。
+job_deletion.guard_writes(SessionLocal)
 
 
 def _reset_schema():
@@ -65,7 +70,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, web_search_usage, speaker_name_suggestions, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals, post_meeting_settings"))
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, web_search_usage, speaker_name_suggestions, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals, post_meeting_settings, deleted_jobs"))
 
 
 @pytest.fixture(scope="session")
