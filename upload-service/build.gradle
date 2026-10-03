@@ -1,6 +1,6 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '4.1.0'
+	id 'org.springframework.boot' version '4.1.1'
 	id 'io.spring.dependency-management' version '1.1.7'
 	id 'com.google.protobuf' version '0.9.6'
 }
@@ -17,6 +17,13 @@ java {
 repositories {
 	mavenCentral()
 }
+
+// 依賴套件弱點掃描（見 README）：Spring Boot 4.1.1 管理的這幾個版本還有已知弱點，先覆蓋成修好的版本；升級 Spring Boot 後
+// 它管理的版本追上（或更新）就拿掉對應的那一行。
+ext['jackson-2-bom.version'] = '2.21.7'
+ext['jackson-bom.version'] = '3.1.7'
+ext['tomcat.version'] = '11.0.25'
+ext['rabbit-amqp-client.version'] = '5.34.0'
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
