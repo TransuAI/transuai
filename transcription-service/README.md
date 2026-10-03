@@ -209,6 +209,20 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 
 開發環境都不檢查、照舊開著。見 `.scratch/pre-launch-hardening/issues/07`。
 
+## 依賴套件弱點掃描
+
+掃的是正式執行時會裝的依賴（跟 Dockerfile 的 `uv sync --no-dev` 一樣，不含 pytest 這類開發工具），用 [pip-audit](https://pypi.org/project/pip-audit/)
+對照 PyPI／OSV 的弱點資料庫：
+
+```bash
+uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/requirements.txt
+uvx pip-audit --no-deps --disable-pip -r /tmp/requirements.txt
+```
+
+上線前、以及之後每個月或升級依賴時跑一次。高風險、嚴重的要升級，或在這裡寫清楚為什麼不影響。
+
+最近一次結果：2026-10-03：沒有已知弱點。原本 pillow 11.3.0 有多個高風險弱點（PSD／FITS／PDF／字型等格式的解析），urllib3 2.7.0 也有；urllib3 升到 2.8.0。pillow 是 moviepy 帶進來的，moviepy 2.2.1（目前最新）把它限制在 <12，所以在 `pyproject.toml` 的 `[tool.uv]` 用 `override-dependencies` 覆蓋成 12.3.0。這個服務只用 moviepy 的 `VideoFileClip` 抽音軌，影片由 ffmpeg 解碼、不經過 Pillow，原本那些弱點本來就碰不到；覆蓋之後 `tests/test_audio_extraction.py` 實際抽一次音軌確認照樣能跑。moviepy 放寬限制之後拿掉覆蓋。
+
 ## 已知限制 / 待辦
 
 - `recognize()` 呼叫 Deepgram 遇到暫時性錯誤（429、5xx、逾時、連不上）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、認證失敗、額度用完的 402 等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）

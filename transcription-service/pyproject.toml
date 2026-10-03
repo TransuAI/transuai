@@ -35,3 +35,8 @@ testpaths = ["tests"]
 # app/proto_gen 是 protoc 自動產生的程式碼（DO NOT EDIT），grpc 的 type stub
 # 沒宣告 grpc.experimental 等屬性會在這裡產生假警報，不用檢查、也不該手動修改。
 exclude = ["app/proto_gen"]
+
+[tool.uv]
+# moviepy 2.2.1（目前最新）把 pillow 限制在 <12，但 11.x 有已知弱點（見 README「依賴套件弱點掃描」）。這裡只用 VideoFileClip 抽音軌，
+# 影片由 ffmpeg 解碼、不經過 Pillow；pillow 12 下這條路照樣能跑（測試會實際抽一次音軌），所以覆蓋成修好的版本。moviepy 放寬限制後拿掉。
+override-dependencies = ["pillow>=12.3.0"]
