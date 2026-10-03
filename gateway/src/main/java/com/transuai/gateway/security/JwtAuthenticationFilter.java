@@ -47,11 +47,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final ApiRateLimits rateLimits;
+    private final DeletedUsers deletedUsers;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public JwtAuthenticationFilter(JwtService jwtService, ApiRateLimits rateLimits) {
+    public JwtAuthenticationFilter(JwtService jwtService, ApiRateLimits rateLimits, DeletedUsers deletedUsers) {
         this.jwtService = jwtService;
         this.rateLimits = rateLimits;
+        this.deletedUsers = deletedUsers;
     }
 
     @Override
@@ -75,6 +77,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             userId = jwtService.validateAccessToken(header.substring(BEARER_PREFIX.length()));
         } catch (InvalidTokenException e) {
             reject(request, response, e.getMessage());
+            return;
+        }
+        // 帳號剛刪掉：token 還沒過期也不能用（見 DeletedUsers）。
+        if (deletedUsers.isDeleted(userId)) {
+            reject(request, response, "account deleted");
             return;
         }
 

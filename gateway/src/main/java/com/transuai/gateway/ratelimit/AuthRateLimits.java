@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
@@ -24,6 +25,7 @@ public class AuthRateLimits {
     private static final String LOGIN_BY_ADDRESS = "login:ip:";
     private static final String REGISTER_BY_ADDRESS = "register:ip:";
     private static final String LOGIN_FAILURES = "login-failures:";
+    private static final String DELETE_ACCOUNT_FAILURES = "delete-account-failures:";
 
     private final RateLimiter limiter;
     private final RateLimitProperties properties;
@@ -41,6 +43,26 @@ public class AuthRateLimits {
             result = attempt.get();
         } catch (StatusRuntimeException e) {
             if (e.getStatus().getCode() != Status.Code.UNAUTHENTICATED) {
+                limiter.release(failures);
+            }
+            throw e;
+        }
+        limiter.reset(failures);
+        return result;
+    }
+
+    /**
+     * 刪除帳號要再輸入一次密碼：拿到別人開著的瀏覽器也不能一直猜。跟登入失敗同一個上限，算的是這位使用者的失敗次數（密碼錯是
+     * auth-service 的 PERMISSION_DENIED）；成功或 auth-service 沒回答就不算。
+     */
+    public <T> T deleteAccount(UUID userId, Supplier<T> attempt) {
+        String failures = DELETE_ACCOUNT_FAILURES + userId;
+        limiter.hit(failures, properties.loginFailures()).orThrow(RateLimitedException::tooManyTries);
+        T result;
+        try {
+            result = attempt.get();
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() != Status.Code.PERMISSION_DENIED) {
                 limiter.release(failures);
             }
             throw e;

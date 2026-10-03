@@ -83,6 +83,7 @@ docker compose up -d
 | `POST` | `/auth/login` | 登入，不需要 token；回 `{ accessToken, user }`，refresh token 設在 cookie |
 | `POST` | `/auth/logout` | 登出：作廢 cookie 裡這個 refresh token 所在的那一串、清掉 cookie，回 `204`；不需要 `Authorization`（access token 可能已經過期），沒有 cookie 或 token 無效也回 `204` |
 | `POST` | `/auth/logout-all` | 登出所有裝置：作廢登入者所有的 refresh token、清掉這個瀏覽器的 cookie，回 `204`，需要 `Authorization`；已簽出的 access token 仍有效到過期（最多 15 分鐘） |
+| `POST` | `/auth/account/delete` | 刪除帳號：body `{ password }`（再輸入一次密碼），需要 `Authorization`。成功 `204` 並清掉 cookie；密碼錯 `403`（不是 401，前端不會去換發 token）；沒帶密碼 `400`；猜錯太多次 `429`（見「限流」）。auth-service 刪掉使用者並發 `account.deleted`，其他服務清掉他的資料（見 auth-service README「刪除帳號」）。刪除之後，還沒過期的 access token 也不能用（見下方） |
 | `POST` | `/auth/refresh` | 用 cookie 裡的 refresh token 換發：回 `{ accessToken, user }`，cookie 換成新的 refresh token；不需要 `Authorization`、沒有 body。沒有 cookie 或 token 不能用回 `401`（並清掉 cookie） |
 | `GET` | `/auth/me` | 取得目前使用者資訊，需要 `Authorization: Bearer <access_token>` |
 
@@ -176,6 +177,7 @@ docker compose up -d
 |---|---|---|
 | 登入失敗 | 同一個 IP 對同一個 email，15 分鐘 5 次 | 猜密碼。每次嘗試**先**計成一次失敗再送去 auth-service（同時送出的請求也只放得進 5 次），登入成功就清掉，auth-service 沒回答（例如 503）就退回；到了上限連正確的密碼也擋到時間過去。email 跟 auth-service 一樣去空白、轉小寫（`Locale.ROOT`），Redis 的鍵只放雜湊（看不到 email） |
 | 登入 | 同一個 IP，15 分鐘 20 次 | 不分 email，換 email 猜也擋得到 |
+| 刪除帳號時的密碼 | 每位使用者，15 分鐘 5 次失敗 | 跟登入失敗同一組設定（`RATE_LIMIT_LOGIN_FAILURES`）。密碼錯（auth-service 的 `PERMISSION_DENIED`）才算，成功就清掉 |
 | 註冊 | 同一個 IP，每小時 5 次 | |
 | **所有 API**（登入後） | 每位使用者，每分鐘 600 個請求 | `ratelimit/ApiRateLimits`（HandlerInterceptor，在 JWT 驗證之後、controller 之前）；一個 Job 頁面的輪詢最多約每分鐘 75 個請求，同時開幾個分頁也碰不到 |
 | **所有 API**（沒登入的：登入、註冊、換發、OAuth 回呼、API 文件，以及 token 缺少或無效被擋下的） | 每個 IP，每分鐘 60 個請求 | 跟上面登入／註冊的限制**同時**生效；token 無效的請求在 `JwtAuthenticationFilter` 裡計數，超過時回 429 而不是 401（拿假 token 亂打的腳本也擋得到） |
@@ -234,6 +236,12 @@ negative cache）。只記擁有者、不記會變的 Job 狀態——`GET /jobs
 Job id 是 UUID、不會重用，標記在有效時間內直接回 404。有效時間是保險，也限制了「刪除時 Redis 剛好連不上、標記沒寫成」最多多久
 （10 分鐘，這段時間只有原本的擁有者讀得到）。
 
+### 刪除帳號之後
+
+access token 是 stateless 的，帳號刪掉之後最多還能用到過期（15 分鐘）——其他分頁或裝置照樣能呼叫 API，甚至建出新的 Job、留下沒人刪的資料。
+所以刪除成功後在 Redis 記 `deleted-user:{id}`（有效時間＝access token 的有效時間，`security/DeletedUsers`），`JwtAuthenticationFilter` 驗完 token
+再查它，有就回 `401`。**Redis 連不上時放行**（跟限流、快取一樣），那段時間舊 token 照樣能用到過期。
+
 ### 錯誤格式
 
 下游 gRPC 呼叫失敗時（`GrpcExceptionAdvice`），統一轉成：
@@ -264,13 +272,14 @@ Job id 是 UUID、不會重用，標記在有效時間內直接回 404。有效�
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
 | `REFRESH_COOKIE_PATH` / `REFRESH_COOKIE_SECURE` | `/api/auth` / `true` | refresh token 的 cookie，見「refresh token 的 cookie」 |
 | `JWT_REFRESH_TOKEN_TTL_DAYS` | `7` | refresh token 的 cookie 多久過期（跟 auth-service 讀同一個變數） |
+| `JWT_ACCESS_TOKEN_TTL_MINUTES` | `15` | 剛刪除帳號的使用者記多久（跟 access token 一樣長，跟 auth-service 讀同一個變數），見「刪除帳號之後」 |
 
 ## 專案結構
 
 ```
 src/main/java/com/transuai/gateway/
   config/            GrpcClientConfig（4 個 ManagedChannel + blocking stub bean）、GrpcProperties、WebConfig
-  security/           JwtProperties、JwtService（只驗證 access token）、JwtAuthenticationFilter、InvalidTokenException
+  security/           JwtProperties、JwtService（只驗證 access token）、JwtAuthenticationFilter、InvalidTokenException、RefreshTokenCookie、DeletedUsers（剛刪除帳號的使用者）
   web/                CurrentUserId annotation + CurrentUserIdArgumentResolver、AuthController、UploadController、
                        TranscriptionController、AiController、QuizController、UsageController、ModelController、
                        ProviderKeyController、ConnectionController、PostMeetingController

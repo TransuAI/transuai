@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.auth.grpc.v1.DeleteAccountRequest;
 import com.transuai.auth.grpc.v1.GetMeRequest;
 import com.transuai.auth.grpc.v1.LoginRequest;
 import com.transuai.auth.grpc.v1.LogoutAllDevicesRequest;
@@ -22,8 +23,10 @@ import com.transuai.auth.grpc.v1.User;
 import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.ratelimit.AuthRateLimits;
+import com.transuai.gateway.security.DeletedUsers;
 import com.transuai.gateway.security.RefreshTokenCookie;
 import com.transuai.gateway.web.dto.AuthResponseDto;
+import com.transuai.gateway.web.dto.DeleteAccountRequestDto;
 import com.transuai.gateway.web.dto.LoginRequestDto;
 import com.transuai.gateway.web.dto.RegisterRequestDto;
 import com.transuai.gateway.web.dto.UserDto;
@@ -45,6 +48,7 @@ public class AuthController {
     private final AuthServiceGrpc.AuthServiceBlockingStub authServiceStub;
     private final AuthRateLimits rateLimits;
     private final RefreshTokenCookie refreshTokenCookie;
+    private final DeletedUsers deletedUsers;
 
     // 限流用的 IP 是 getRemoteAddr()，預設就是直接連進來的位址（不看使用者可以自己填的 X-Forwarded-For；在反向代理後面時
     // 怎麼設定見 gateway README「限流」）。
@@ -107,6 +111,21 @@ public class AuthController {
     public void logoutAllDevices(@CurrentUserId UUID userId, HttpServletResponse servletResponse) {
         GrpcMetadataSupport.withUserId(authServiceStub, userId)
                 .logoutAllDevices(LogoutAllDevicesRequest.getDefaultInstance());
+        refreshTokenCookie.clear(servletResponse);
+    }
+
+    // 刪除帳號：再輸入一次密碼（錯了 403，連續錯太多次 429）。auth-service 刪掉使用者、發 account.deleted，其他服務清掉他的資料；
+    // 這裡記住「剛刪掉」讓還沒過期的 access token 不能再用，並清掉這個瀏覽器的 refresh token cookie。
+    @PostMapping("/account/delete")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteAccount(@CurrentUserId UUID userId, @RequestBody DeleteAccountRequestDto request,
+            HttpServletResponse servletResponse) {
+        if (request.password() == null || request.password().isEmpty()) {
+            throw new IllegalArgumentException("password is required");
+        }
+        rateLimits.deleteAccount(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
+                .deleteAccount(DeleteAccountRequest.newBuilder().setPassword(request.password()).build()));
+        deletedUsers.remember(userId);
         refreshTokenCookie.clear(servletResponse);
     }
 
