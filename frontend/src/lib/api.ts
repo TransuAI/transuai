@@ -36,6 +36,7 @@ import type {
   Transcript,
   User,
   WebSearchResult,
+  SpeakerInsights,
 } from '@/types/api'
 
 export const authApi = {
@@ -222,6 +223,12 @@ export const quizApi = {
   // 後端計分並保存；answers 依題目順序，每題選的選項位置（從 0 開始）
   submitAttempt: (jobId: string, quizId: string, answers: number[]) =>
     apiFetch<QuizAttemptResult>(`/jobs/${jobId}/quizzes/${quizId}/attempts`, { method: 'POST', body: { answers } }),
+}
+
+// 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.
+export const speakerInsightsApi = {
+  get: (jobId: string) => apiFetch<SpeakerInsights>(`/jobs/${jobId}/speaker-insights`),
+  request: (jobId: string) => apiFetch<SpeakerInsights>(`/jobs/${jobId}/speaker-insights`, { method: 'POST' }),
 }
 
 export const usageApi = {

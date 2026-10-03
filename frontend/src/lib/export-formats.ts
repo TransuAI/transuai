@@ -2,7 +2,7 @@ import { speakerNameLookup } from '@/lib/speakers'
 import { computeSpeakerStats } from '@/lib/speaker-stats'
 import { sortNotes } from '@/lib/notes'
 import { isSummaryStale } from '@/lib/staleness'
-import type { Chapter, Job, Note, QuizQuestion, Summary, Transcript, WebSource } from '@/types/api'
+import type { Chapter, Job, Note, QuizQuestion, SpeakerInsights, Summary, Transcript, WebSource } from '@/types/api'
 
 // 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
 // 這裡只負責「內容長什麼樣」，下載 / 複製由呼叫端處理。
@@ -38,6 +38,12 @@ export interface ExportSpeakerStats {
   speakers: { name: string; talkSeconds: number; share: number; turns: number; longestTurnSeconds: number; quiet: boolean }[]
   speakerChanges: number
   silenceSeconds: number
+  /** The questions and possible interruptions judged by AI, when it has been analysed. */
+  insights?: {
+    isStale: boolean
+    questions: { startTime: number; speakerName: string; text: string }[]
+    interruptions: { startTime: number; speakerName: string; interruptedName: string; text: string }[]
+  } | null
 }
 
 /** A 筆記 in an export: its time (null when not pinned to one) and text (empty for a 書籤). */
@@ -63,6 +69,8 @@ export interface ExportSource {
   /** Q&A turns as shown in the Chat pane; a turn with a status other than 'done' is left out. */
   qaHistory: (ExportQaTurn & { status?: string })[]
   notes: Note[]
+  /** 講者數據's AI part; left out of the report when it hasn't been analysed. */
+  speakerInsights?: SpeakerInsights | null
 }
 
 export function buildExportContent(source: ExportSource): ExportContent {
@@ -93,14 +101,32 @@ export function buildExportContent(source: ExportSource): ExportContent {
         webSources,
       })),
     notes: sortNotes(notes).map(({ timeSeconds, text }) => ({ timeSeconds, text })),
-    speakerStats: exportSpeakerStats(transcript),
+    speakerStats: exportSpeakerStats(transcript, source.speakerInsights ?? null),
   }
 }
 
-function exportSpeakerStats(transcript: Transcript | null): ExportSpeakerStats | null {
+function exportSpeakerStats(transcript: Transcript | null, insights: SpeakerInsights | null): ExportSpeakerStats | null {
   const stats = transcript && computeSpeakerStats(transcript.segments, transcript.speakers)
-  if (!stats) return null
+  if (!transcript || !stats) return null
+  const nameOf = (label: string | null) => speakerNameLookup(transcript.speakers)(label) ?? label ?? ''
+  const analysed = insights && (insights.status === 'COMPLETED' || insights.completedAt !== null)
   return {
+    insights: analysed
+      ? {
+          isStale: insights.sourceRevision !== transcript.revision,
+          questions: insights.items
+            .filter((item) => item.kind === 'question')
+            .map((item) => ({ startTime: item.startTime, speakerName: nameOf(item.speakerLabel), text: item.text })),
+          interruptions: insights.items
+            .filter((item) => item.kind === 'interruption')
+            .map((item) => ({
+              startTime: item.startTime,
+              speakerName: nameOf(item.speakerLabel),
+              interruptedName: nameOf(item.interruptedLabel),
+              text: item.text,
+            })),
+        }
+      : null,
     speakers: stats.speakers.map(({ speaker, talkSeconds, share, turns, longestTurnSeconds, quiet }) => ({
       name: speaker.displayName, talkSeconds, share, turns, longestTurnSeconds, quiet,
     })),
@@ -308,6 +334,24 @@ function speakerStatsTable(stats: ExportSpeakerStats): string {
     ...rows,
     '',
     `換人 ${stats.speakerChanges} 次；無人說話共 ${formatClock(stats.silenceSeconds)}。`,
+    ...(stats.insights ? ['', insightsBlock(stats.insights)] : []),
+  ].join('\n')
+}
+
+function insightsBlock(insights: NonNullable<ExportSpeakerStats['insights']>): string {
+  const list = <T extends { startTime: number; text: string }>(items: T[], who: (item: T) => string) =>
+    items.length > 0 ? items.map((item) => `- [${formatClock(item.startTime)}] ${who(item)}：${oneLine(item.text)}`).join('\n') : '（沒有）'
+  return [
+    '### 問題與打斷（AI 估計）',
+    ...(insights.isStale ? ['', '> 逐字稿在分析後有修改，這份分析可能過時'] : []),
+    '',
+    '提出的問題：',
+    '',
+    list(insights.questions, (item) => item.speakerName),
+    '',
+    '可能的打斷：',
+    '',
+    list(insights.interruptions, (item) => `${item.speakerName} 打斷了 ${item.interruptedName}`),
   ].join('\n')
 }
 

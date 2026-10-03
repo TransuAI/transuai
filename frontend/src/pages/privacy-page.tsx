@@ -38,7 +38,7 @@ const THIRD_PARTIES: ThirdParty[] = [
   {
     name: 'Hugging Face Inference Providers（以及它轉給、實際執行模型的服務商）',
     what: '逐字稿的內容與片段、講者名稱、你問的問題、測驗與會後處理需要的內容',
-    when: '使用平台提供的 AI 模型時：產生標題、摘要、章節、問答、測驗、講者名字建議、會後處理，以及把逐字稿片段轉成檢索用的向量',
+    when: '使用平台提供的 AI 模型時：產生標題、摘要、章節、問答、測驗、講者名字建議、講者數據的問題與打斷、會後處理，以及把逐字稿片段轉成檢索用的向量',
   },
   {
     name: '你自己設定金鑰的 AI 廠商（OpenAI、Anthropic、Google Gemini、OpenRouter）',

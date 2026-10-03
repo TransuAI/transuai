@@ -1,10 +1,27 @@
+import { History, Loader2Icon, RefreshCw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import { formatClock } from '@/lib/export-formats'
-import { speakerColour } from '@/lib/speakers'
+import { speakerColour, speakerNameLookup } from '@/lib/speakers'
 import type { MeetingStats } from '@/lib/speaker-stats'
+import { TimestampButton } from '@/pages/job-detail/timestamp-button'
+import type { SpeakerInsight, Transcript } from '@/types/api'
 
 // 講者數據 (.scratch/speaker-analytics): who talked how much, worked out straight from the transcript, so it follows
 // speaker edits at once. Only shown with two or more speakers (the tile isn't there otherwise).
-export function SpeakerStatsSection({ stats }: { stats: MeetingStats }) {
+export function SpeakerStatsSection({
+  stats,
+  transcript,
+  insights,
+  onSeek,
+  mediaAvailable,
+}: {
+  stats: MeetingStats
+  transcript: Transcript
+  insights: SpeakerInsightsActions
+  onSeek: (seconds: number) => void
+  mediaAvailable: boolean
+}) {
   return (
     <section className="flex flex-col gap-4">
       <h3>講者數據</h3>
@@ -66,6 +83,8 @@ export function SpeakerStatsSection({ stats }: { stats: MeetingStats }) {
       <p className="text-xs text-muted-foreground/80">
         依逐字稿的時間計算；講者分得不對時，改片段的講者後會重新計算。「次數」是輪到這位講者說話的次數，「發言很少」是少於平均每人的四分之一。
       </p>
+
+      <QuestionsAndInterruptions transcript={transcript} insights={insights} onSeek={onSeek} mediaAvailable={mediaAvailable} />
     </section>
   )
 }
@@ -74,3 +93,124 @@ function percent(share: number): string {
   return `${Math.round(share * 100)}%`
 }
 
+// The part judged by AI: there's no punctuation to count questions by, nor to tell whether someone finished speaking, so
+// it's an estimate — every item comes with its time to listen and check.
+function QuestionsAndInterruptions({
+  transcript,
+  insights: { insights, isRequesting, request },
+  onSeek,
+  mediaAvailable,
+}: {
+  transcript: Transcript
+  insights: SpeakerInsightsActions
+  onSeek: (seconds: number) => void
+  mediaAvailable: boolean
+}) {
+  const nameOf = speakerNameLookup(transcript.speakers)
+  const status = insights?.status ?? 'NONE'
+  const hasResults = !!insights && (status === 'COMPLETED' || insights.completedAt !== null)
+  const isStale = hasResults && insights.sourceRevision !== transcript.revision
+  const questions = insights?.items.filter((item) => item.kind === 'question') ?? []
+  const interruptions = insights?.items.filter((item) => item.kind === 'interruption') ?? []
+
+  return (
+    <div className="flex flex-col gap-3 border-t pt-4">
+      <h4 className="text-sm font-medium">問題與打斷</h4>
+      <p className="text-xs text-muted-foreground">
+        由 AI 讀逐字稿判斷誰提出了問題、誰在別人還沒講完時插話。這是 AI 估計，可能有誤；點時間聽原話確認。
+      </p>
+
+      {status === 'GENERATING' && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+          <Loader2Icon className="size-4 animate-spin" />
+          分析中…
+        </p>
+      )}
+      {status === 'FAILED' && (
+        <div className="flex flex-col gap-2 text-sm">
+          <p className="text-destructive">{insights?.failureReason ?? '分析失敗'}</p>
+          <Button size="sm" variant="outline" className="w-fit" disabled={isRequesting} onClick={request}>
+            再分析一次
+          </Button>
+        </div>
+      )}
+      {status === 'NONE' && (
+        <Button size="sm" variant="outline" className="w-fit" disabled={isRequesting} onClick={request}>
+          分析問題與打斷
+        </Button>
+      )}
+      {isStale && status !== 'GENERATING' && (
+        <div className="flex flex-col gap-2 rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
+          <p className="flex items-start gap-2">
+            <History className="mt-0.5 size-4 shrink-0" />
+            逐字稿已修改，這份分析可能過時
+          </p>
+          <Button size="sm" variant="outline" className="w-fit bg-background" disabled={isRequesting} onClick={request}>
+            <RefreshCw className="size-4" />
+            重新分析
+          </Button>
+        </div>
+      )}
+
+      {hasResults && (
+        <>
+          <InsightList
+            label="提出的問題"
+            items={questions}
+            empty="沒有找到提問"
+            describe={(item) => nameOf(item.speakerLabel) ?? item.speakerLabel}
+            onSeek={onSeek}
+            mediaAvailable={mediaAvailable}
+          />
+          <InsightList
+            label="可能的打斷"
+            items={interruptions}
+            empty="沒有找到打斷"
+            describe={(item) =>
+              `${nameOf(item.speakerLabel) ?? item.speakerLabel} 打斷了 ${nameOf(item.interruptedLabel) ?? item.interruptedLabel}`}
+            onSeek={onSeek}
+            mediaAvailable={mediaAvailable}
+          />
+          {insights.model && <p className="text-xs text-muted-foreground/80">由 {insights.model} 分析</p>}
+        </>
+      )}
+    </div>
+  )
+}
+
+function InsightList({
+  label,
+  items,
+  empty,
+  describe,
+  onSeek,
+  mediaAvailable,
+}: {
+  label: string
+  items: SpeakerInsight[]
+  empty: string
+  describe: (item: SpeakerInsight) => string
+  onSeek: (seconds: number) => void
+  mediaAvailable: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs font-medium text-muted-foreground">{`${label}（${items.length}）`}</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        <ul aria-label={label} className="flex flex-col gap-2">
+          {items.map((item) => (
+            <li key={`${item.kind}-${item.startTime}`} className="flex items-start gap-2 text-sm">
+              <TimestampButton seconds={item.startTime} onSeek={onSeek} mediaAvailable={mediaAvailable} />
+              <span className="flex min-w-0 flex-col">
+                <span className="text-xs text-muted-foreground">{describe(item)}</span>
+                <span className="leading-relaxed">{item.text}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}

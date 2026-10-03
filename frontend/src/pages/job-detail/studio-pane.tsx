@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
 import { ArrowLeft, ChartBarBig, ClipboardList, Gauge, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
 import type { NotesActions } from '@/hooks/use-notes'
+import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
 import { formatCount, formatMinutes } from '@/lib/usage-format'
@@ -37,6 +38,7 @@ interface StudioPaneProps {
   onRequestQuiz: (questionCount: number) => void
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
+  speakerInsights: SpeakerInsightsActions
   postMeeting: PostMeeting | null
   onStartPostMeeting: () => void
   isStartingPostMeeting: boolean
@@ -72,6 +74,7 @@ export function StudioPane({
   onRequestQuiz,
   isRequestingQuiz,
   onQuizAttempted,
+  speakerInsights,
   postMeeting,
   onStartPostMeeting,
   isStartingPostMeeting,
@@ -276,7 +279,15 @@ export function StudioPane({
             />
           )}
 
-          {tool === 'speaker-stats' && speakerStats && <SpeakerStatsSection stats={speakerStats} />}
+          {tool === 'speaker-stats' && speakerStats && transcript && (
+            <SpeakerStatsSection
+              stats={speakerStats}
+              transcript={transcript}
+              insights={speakerInsights}
+              onSeek={onSeek}
+              mediaAvailable={mediaAvailable}
+            />
+          )}
 
           {tool === 'post-meeting' && (
             <PostMeetingSection

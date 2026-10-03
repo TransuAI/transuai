@@ -4,8 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
-import type { Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
+import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi } from '@/lib/api'
+import type { SpeakerInsights, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -25,6 +25,7 @@ vi.mock('@/lib/api', () => ({
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
   quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), submitAttempt: vi.fn() },
   postMeetingApi: { get: vi.fn(), start: vi.fn(), execute: vi.fn(), retry: vi.fn() },
+  speakerInsightsApi: { get: vi.fn(), request: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -47,6 +48,7 @@ beforeEach(() => {
   vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false })
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platformModel)
   vi.mocked(quizApi.list).mockResolvedValue([])
+  vi.mocked(speakerInsightsApi.get).mockResolvedValue(noInsights)
   vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([])
   vi.mocked(notesApi.list).mockResolvedValue([])
   vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], earlierRuns: [], latestRun: null })
@@ -101,6 +103,9 @@ const mockSummary: Summary = {
 }
 
 const noUsage: JobUsage = { records: [], totals: { inputTokens: 0, outputTokens: 0, audioSeconds: 0 } }
+const noInsights: SpeakerInsights = {
+  status: 'NONE', failureReason: null, sourceRevision: 0, modelProvider: null, model: null, requestedAt: null, completedAt: null, items: [],
+}
 
 const mockChapters: Chapter[] = [{ id: 'ch-1', jobId: 'job-1', title: '開場', startTime: 12, sequenceNo: 0 }]
 
@@ -1652,6 +1657,82 @@ describe('JobDetailPage speaker stats (講者數據, COMPLETED, desktop layout)'
 
     await waitFor(() =>
       expect(within(rowOf('講者 2')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['00:04', '50%', '1', '00:04']))
+  })
+
+  describe('questions and interruptions judged by AI (估計)', () => {
+    const analysed: SpeakerInsights = {
+      ...noInsights,
+      status: 'COMPLETED',
+      sourceRevision: 0,
+      model: 'qwen3:14b',
+      completedAt: '2026-10-03T10:00:00Z',
+      items: [
+        { kind: 'question', speakerLabel: 'S1', interruptedLabel: null, startTime: 2, text: '今天請到來賓' },
+        { kind: 'interruption', speakerLabel: 'S2', interruptedLabel: 'S1', startTime: 4, text: '大家好' },
+      ],
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('analyses on request, then lists the questions and possible interruptions with who and when', async () => {
+      stubDesktopLayout()
+      vi.mocked(speakerInsightsApi.request).mockResolvedValue({ ...noInsights, status: 'GENERATING' })
+      await renderCompletedJob(multiSpeakerTranscript)
+      await openStudioTool('講者數據')
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+      await user.click(screen.getByRole('button', { name: '分析問題與打斷' }))
+      expect(speakerInsightsApi.request).toHaveBeenCalledWith('job-1')
+      expect(screen.getByText('分析中…')).toBeInTheDocument()
+
+      vi.mocked(speakerInsightsApi.get).mockResolvedValue(analysed)
+      await vi.advanceTimersByTimeAsync(3000)
+
+      const questions = await screen.findByRole('list', { name: '提出的問題' })
+      expect(within(questions).getByRole('listitem')).toHaveTextContent('主持人')
+      expect(within(questions).getByRole('listitem')).toHaveTextContent('今天請到來賓')
+      const interruptions = screen.getByRole('list', { name: '可能的打斷' })
+      expect(within(interruptions).getByRole('listitem')).toHaveTextContent('講者 2 打斷了 主持人')
+      expect(screen.getByText(/AI 估計/)).toBeInTheDocument()
+    })
+
+    it('plays from where a question was asked', async () => {
+      stubDesktopLayout()
+      vi.mocked(speakerInsightsApi.get).mockResolvedValue(analysed)
+      await renderCompletedJob(multiSpeakerTranscript)
+      await openStudioTool('講者數據')
+
+      const questions = await screen.findByRole('list', { name: '提出的問題' })
+      fireEvent.click(within(questions).getByRole('button', { name: '0:02' }))
+
+      expect((document.querySelector('audio') as HTMLMediaElement).currentTime).toBe(2)
+    })
+
+    it('says the analysis may be out of date once the transcript has changed', async () => {
+      stubDesktopLayout()
+      vi.mocked(speakerInsightsApi.get).mockResolvedValue({ ...analysed, sourceRevision: 0 })
+      await renderCompletedJob({ ...multiSpeakerTranscript, revision: 2 })
+      await openStudioTool('講者數據')
+
+      expect(await screen.findByText('逐字稿已修改，這份分析可能過時')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '重新分析' })).toBeInTheDocument()
+    })
+
+    it('shows why it failed and offers to try again', async () => {
+      stubDesktopLayout()
+      vi.mocked(speakerInsightsApi.get).mockResolvedValue({ ...noInsights, status: 'FAILED', failureReason: '模型回傳的格式不正確，請再分析一次' })
+      await renderCompletedJob(multiSpeakerTranscript)
+      await openStudioTool('講者數據')
+
+      expect(await screen.findByText('模型回傳的格式不正確，請再分析一次')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '再分析一次' })).toBeInTheDocument()
+    })
   })
 
   it('marks a speaker who talks very little', async () => {

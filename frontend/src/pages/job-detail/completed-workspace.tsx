@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, BookmarkPlus, FileText, PanelLeftOpen, PanelRightOpen, Sparkles, type LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -56,6 +57,7 @@ interface CompletedWorkspaceProps {
   onRequestQuiz: (questionCount: number) => void
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
+  speakerInsights: SpeakerInsightsActions
   postMeeting: PostMeeting | null
   onStartPostMeeting: () => void
   isStartingPostMeeting: boolean
@@ -159,6 +161,7 @@ export function CompletedWorkspace({
   onRequestQuiz,
   isRequestingQuiz,
   onQuizAttempted,
+  speakerInsights,
   postMeeting,
   onStartPostMeeting,
   isStartingPostMeeting,
@@ -302,6 +305,7 @@ export function CompletedWorkspace({
       onRequestQuiz={onRequestQuiz}
       isRequestingQuiz={isRequestingQuiz}
       onQuizAttempted={onQuizAttempted}
+      speakerInsights={speakerInsights}
       postMeeting={postMeeting}
       onStartPostMeeting={onStartPostMeeting}
       isStartingPostMeeting={isStartingPostMeeting}
@@ -345,7 +349,10 @@ export function CompletedWorkspace({
         </Button>
 
         <div className="flex items-center gap-2">
-          <ExportMenu source={{ job, transcript, summary, chapters, qaHistory, notes: notes.notes }} quizzes={quizzes} />
+          <ExportMenu
+            source={{ job, transcript, summary, chapters, qaHistory, notes: notes.notes, speakerInsights: speakerInsights.insights }}
+            quizzes={quizzes}
+          />
           <div className="flex items-center gap-2 lg:hidden">
             <Button variant="outline" size="sm" onClick={() => setSourceOpen(true)}>
               <FileText className="size-4" />

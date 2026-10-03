@@ -426,3 +426,29 @@ export interface AvailableModels {
   /** Questions can also search the web (the deployment has a search service); absent from gateways that predate it. */
   webSearch?: boolean
 }
+
+/**
+ * 講者數據的 AI 判斷 (.scratch/speaker-analytics): the questions each speaker asks and possible interruptions — estimates.
+ * One per job; NONE until it's first analysed. `sourceRevision` is what the last finished analysis was based on, so it's
+ * 過時 when the transcript's revision has moved on. `items` are the last finished results (kept while re-analysing).
+ */
+export interface SpeakerInsights {
+  status: 'NONE' | 'GENERATING' | 'COMPLETED' | 'FAILED'
+  failureReason: string | null
+  sourceRevision: number
+  modelProvider: string | null
+  model: string | null
+  requestedAt: string | null
+  completedAt: string | null
+  items: SpeakerInsight[]
+}
+
+export interface SpeakerInsight {
+  kind: 'question' | 'interruption'
+  speakerLabel: string
+  /** Who was interrupted; null for a question. */
+  interruptedLabel: string | null
+  startTime: number
+  /** The segment's own words. */
+  text: string
+}

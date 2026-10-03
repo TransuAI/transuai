@@ -332,6 +332,38 @@ describe('toMarkdownReport speaker stats (講者數據)', () => {
     expect(report.indexOf('## 講者數據')).toBeGreaterThan(report.indexOf('## 章節'))
   })
 
+  it('lists the AI-judged questions and possible interruptions under the table, marked as estimates', () => {
+    const report = toMarkdownReport({
+      ...base,
+      speakerStats: {
+        speakers: [{ name: '王小明', talkSeconds: 90, share: 0.9, turns: 3, longestTurnSeconds: 45, quiet: false }],
+        speakerChanges: 3,
+        silenceSeconds: 0,
+        insights: {
+          isStale: true,
+          questions: [{ startTime: 65, speakerName: '王小明', text: '預算夠嗎' }],
+          interruptions: [{ startTime: 70, speakerName: '李小華', interruptedName: '王小明', text: '等一下' }],
+        },
+      },
+    })
+
+    expect(report).toContain(
+      [
+        '### 問題與打斷（AI 估計）',
+        '',
+        '> 逐字稿在分析後有修改，這份分析可能過時',
+        '',
+        '提出的問題：',
+        '',
+        '- [01:05] 王小明：預算夠嗎',
+        '',
+        '可能的打斷：',
+        '',
+        '- [01:10] 李小華 打斷了 王小明：等一下',
+      ].join('\n'),
+    )
+  })
+
   it('leaves the section out when speakers aren’t shown', () => {
     expect(toMarkdownReport({ ...base, speakerStats: null })).not.toContain('講者數據')
     expect(toMarkdownReport(base)).not.toContain('講者數據')
