@@ -51,6 +51,66 @@ class SetSuggestedDetailsRequest(_message.Message):
     category: str
     def __init__(self, job_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ...) -> None: ...
 
+class Note(_message.Message):
+    __slots__ = ("note_id", "job_id", "time_seconds", "text", "source", "created_at", "updated_at")
+    NOTE_ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    TIME_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    note_id: str
+    job_id: str
+    time_seconds: float
+    text: str
+    source: str
+    created_at: _timestamp_pb2.Timestamp
+    updated_at: _timestamp_pb2.Timestamp
+    def __init__(self, note_id: _Optional[str] = ..., job_id: _Optional[str] = ..., time_seconds: _Optional[float] = ..., text: _Optional[str] = ..., source: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class ListNotesRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class ListNotesResponse(_message.Message):
+    __slots__ = ("notes",)
+    NOTES_FIELD_NUMBER: _ClassVar[int]
+    notes: _containers.RepeatedCompositeFieldContainer[Note]
+    def __init__(self, notes: _Optional[_Iterable[_Union[Note, _Mapping]]] = ...) -> None: ...
+
+class CreateNoteRequest(_message.Message):
+    __slots__ = ("job_id", "time_seconds", "text", "source")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    TIME_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    time_seconds: float
+    text: str
+    source: str
+    def __init__(self, job_id: _Optional[str] = ..., time_seconds: _Optional[float] = ..., text: _Optional[str] = ..., source: _Optional[str] = ...) -> None: ...
+
+class UpdateNoteRequest(_message.Message):
+    __slots__ = ("job_id", "note_id", "text")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    NOTE_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    note_id: str
+    text: str
+    def __init__(self, job_id: _Optional[str] = ..., note_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+
+class DeleteNoteRequest(_message.Message):
+    __slots__ = ("job_id", "note_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    NOTE_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    note_id: str
+    def __init__(self, job_id: _Optional[str] = ..., note_id: _Optional[str] = ...) -> None: ...
+
 class Job(_message.Message):
     __slots__ = ("job_id", "user_id", "file_name", "file_type", "file_size_bytes", "storage_path", "duration_seconds", "status", "error_reason", "created_at", "updated_at", "transcription_language", "title", "category")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
@@ -142,12 +202,16 @@ class GetPresignedDownloadUrlResponse(_message.Message):
     def __init__(self, download_url: _Optional[str] = ..., expires_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class ListJobsRequest(_message.Message):
-    __slots__ = ("page", "page_size")
+    __slots__ = ("page", "page_size", "query", "category")
     PAGE_FIELD_NUMBER: _ClassVar[int]
     PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
+    QUERY_FIELD_NUMBER: _ClassVar[int]
+    CATEGORY_FIELD_NUMBER: _ClassVar[int]
     page: int
     page_size: int
-    def __init__(self, page: _Optional[int] = ..., page_size: _Optional[int] = ...) -> None: ...
+    query: str
+    category: str
+    def __init__(self, page: _Optional[int] = ..., page_size: _Optional[int] = ..., query: _Optional[str] = ..., category: _Optional[str] = ...) -> None: ...
 
 class ListJobsResponse(_message.Message):
     __slots__ = ("jobs", "total_count", "page", "page_size")
@@ -166,6 +230,16 @@ class DeleteJobRequest(_message.Message):
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class UpdateJobRequest(_message.Message):
+    __slots__ = ("job_id", "title", "category")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    CATEGORY_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    title: str
+    category: str
+    def __init__(self, job_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ...) -> None: ...
 
 class UpdateJobStatusRequest(_message.Message):
     __slots__ = ("job_id", "status", "error_reason")

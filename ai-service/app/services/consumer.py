@@ -10,6 +10,7 @@ from app.services.event_publisher import connection_params, publish_ai_completed
 from app.services.pipeline import process_message
 from app.services.post_meeting import process_post_meeting_requested
 from app.services.quizzes import process_quiz_requested
+from app.services.speaker_insight_runs import process_speaker_insights_requested
 from app.services.reembed import process_transcript_edited
 from app.services.regeneration import process_regeneration_requested
 from app.services.retry import RETRY_COUNT_HEADER, RetryableMessageError, retry_queue_declarations, retry_queue_for
@@ -46,6 +47,10 @@ def _handle_quiz_requested(body: bytes, _ch: BlockingChannel, retry_count: int) 
     process_quiz_requested(body, retry_count=retry_count)
 
 
+def _handle_speaker_insights_requested(body: bytes, _ch: BlockingChannel, retry_count: int) -> None:
+    process_speaker_insights_requested(body, retry_count=retry_count)
+
+
 def _handle_post_meeting_requested(body: bytes, _ch: BlockingChannel, retry_count: int) -> None:
     process_post_meeting_requested(body, retry_count=retry_count)
 
@@ -58,6 +63,7 @@ def _handlers() -> dict[str, MessageHandler]:
         settings.transcript_edited_queue: _handle_transcript_edited,
         settings.summary_regeneration_requested_queue: _handle_regeneration_requested,
         settings.quiz_requested_queue: _handle_quiz_requested,
+        settings.speaker_insights_requested_queue: _handle_speaker_insights_requested,
         settings.post_meeting_requested_queue: _handle_post_meeting_requested,
     }
 

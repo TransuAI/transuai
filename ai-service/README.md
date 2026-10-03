@@ -50,7 +50,7 @@ uv run python -m app.main
 啟動時會：
 
 1. 把 `ai_db` 的 schema 升級到最新的 Alembic migration（多個副本同時啟動時用 Postgres advisory lock 排隊）。導入 Alembic 前用 `create_all` 建的資料庫可能只有部分表（例如只有 `summaries`），baseline（`0001`）只補建缺少的表、不動既有的表跟資料，不需要刪庫重建；唯一例外是還停在 768 維的舊 `embeddings` 表，會拒絕啟動並提示整張表 DROP 掉、重跑 pipeline
-2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）跟 `post_meeting.requested`（使用者啟動會後處理）
+2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）、`speaker_insights.requested`（使用者要求分析講者的問題與打斷）跟 `post_meeting.requested`（使用者啟動會後處理）
 3. 起 gRPC server，監聽 `8084`
 
 ## Pipeline
@@ -251,6 +251,27 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 用完就是 FAILED。自有金鑰不能用時直接失敗並附原因，不改用平台模型。GENERATING 超過 5 分鐘視為卡住，`ListQuizzes` / `GetQuiz`
 回報成 FAILED（「產生逾時，請再產生一次」），使用者可以再產生一份。用量記在要求者名下，功能是 `quiz`。
 
+### 講者數據：問題與打斷（`speaker_insights.requested`）
+
+講者數據裡直接算的數字（發言時間、次數…）在前端；這裡是要 AI 判斷的兩件事——中文逐字稿幾乎沒有標點，問題數不出問號、也看不出
+上一句講完了沒有（`app/services/speaker_insights.py`、`speaker_insight_runs.py`）。
+
+```
+RequestSpeakerInsights(jobId, userId)（Gateway POST /jobs/{jobId}/speaker-insights）
+  → 一個 Job 一份（speaker_insights.job_id 唯一）：已經在分析中（還沒卡住）就直接回傳；否則改成 GENERATING 並排入
+    speaker_insights.requested { jobId, userId }（publisher confirms、短 timeout；排入失敗就恢復原狀）
+消費 speaker_insights.requested
+  → GetTranscript（revision R）→ 少於兩位講者：FAILED（「需要兩位以上講者才能分析」），不呼叫模型
+  → 每行編號「[n] [分:秒] 講者：文字」（排除已清空與沒有講者的片段）；打斷的候選由程式先挑：換了講者、離上一位停下不到 0.3 秒（含重疊）
+  → 用 userId 的預設模型，只回行號：{"questions": [n…], "interruptions": [n…]}
+  → 行號不存在的丟掉、打斷不在候選裡的丟掉；存下的原話與講者一律取那個片段本身（模型寫不出不存在的話）
+  → 完成才換掉上一次的項目（分析中照樣看得到舊的），status = COMPLETED、source_revision = R、模型
+```
+
+格式不對是永久性失敗（「模型回傳的格式不正確，請再分析一次」）；暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘回報成失敗。
+用量功能是 `speaker_insights`。結果是估計（畫面上標示）：本機 `qwen3:14b` 對一場 24 分鐘的英文會議找出 13 個問題、19 個可能的打斷，
+其中有把陳述句當成問題的。
+
 作答（`SubmitQuizAttempt`）由後端計分：每題的選擇跟正確選項比對，連同答對題數存進 `quiz_attempts`（同一份測驗可以重做，
 每次都留下）；列表的最佳成績是這份測驗所有作答裡答對題數的最大值。
 
@@ -281,6 +302,7 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: 穿插其間的 `step`（回答過程正在做的一步：`understand` 理解問題（追問時）、`retrieve` 在內容裡找段落（完成時「找到 N 段」）、`search` 查網路（寫好查詢後顯示「搜尋「…」」，完成時加上「找到 N 個網頁」，失敗是 `failed`）、`answer` 撰寫回答；同一個 id 會送好幾次：running → done／failed；第一個 chunk 可能就是步驟）、`sources` 恰好一次、帶 `web_search` 而且有設定 `TAVILY_API_KEY` 時 `web_sources` 恰好一次（網路來源，順序是回答裡 [n] 的編號；搜尋失敗是空的、`failed` 為 true）、`answered_by` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`，模型呼叫失敗時訊息點出廠商與原因）。可以帶 `model` 臨時換模型（只用在這一次，必須是提問者用得到的：平台模型、有金鑰的廠商整理好的清單，或他目前的預設模型；否則在送出任何 chunk 前回 `INVALID_ARGUMENT`），不帶就用預設模型；問題改寫與回答用同一個模型，`qa_history` 記錄回答的模型、有沒有查網路與網路來源。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk（包括步驟）送出之前——送出第一個步驟前先確認這個 job 有 embedding；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，用來記錄 `qa_history`、決定用誰的預設模型與自有金鑰，不重新驗證 |
 | `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
+| `RequestSpeakerInsights` / `GetSpeakerInsights` | 講者數據的問題與打斷（見上方）：要求分析（帶 `user_id`）立刻回傳 GENERATING；取得目前這一份（還沒分析過是 UNSPECIFIED、沒有項目），`items` 是上一次完成的結果。排入失敗回 `UNAVAILABLE` |
 | `RequestQuiz` | 要求產生一份測驗（帶 `user_id`：要求的使用者，用他的預設模型、用量記在他名下）：新增 GENERATING 的測驗、排入 `quiz.requested` 後立即回傳（不含題目）；每次都是新的一份。題數不是 5、10、20 或 ID 不合法回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
 | `ListQuizzes` | 一個 Job 的所有測驗（新的在前）：題數、狀態（GENERATING 超過 5 分鐘回報成 FAILED）、失敗原因、依據的逐字稿 revision、產生的模型、要求與完成時間、最佳成績（`best_correct_count`：所有作答裡答對最多的題數，沒作答過不設定）；不含題目 |
 | `GetQuiz` | 一份測驗含題目（題型、題目、選項、正確選項、解說、依據的片段開始時間）與最佳成績；不存在或不屬於這個 `job_id` 回 `NOT_FOUND` |
@@ -380,6 +402,8 @@ app/
   services/
     reembed.py                       消費 transcript.edited：只重算文字有變的片段的 embedding
     regeneration.py                  RequestRegeneration（排入自己的 queue）與消費 summary.regeneration.requested：重新產生摘要與章節
+    speaker_insights.py              講者數據的 AI 判斷：編號的逐字稿、打斷的候選、只收行號並對回片段
+    speaker_insight_runs.py          RequestSpeakerInsights（排入自己的 queue）與消費 speaker_insights.requested；卡住的判斷
     quizzes.py                       RequestQuiz（排入自己的 queue）與消費 quiz.requested：產生測驗、失敗與卡住的判斷；作答的計分與保存
     post_meeting.py                  會後處理：能不能跑、RequestPostMeeting（排入自己的 queue）、消費 post_meeting.requested 的 agent 迴圈、執行與重試行動提案
     scheduled_meetings.py            會後處理的「約好的會議」：問模型會議裡約好的會議，整理成行事曆活動的提案參數

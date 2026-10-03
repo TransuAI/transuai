@@ -94,6 +94,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.SetSpeakerSuggestionStatusRequest.SerializeToString,
                 response_deserializer=ai__pb2.SpeakerSuggestion.FromString,
                 _registered_method=True)
+        self.RequestSpeakerInsights = channel.unary_unary(
+                '/transuai.ai.v1.AiService/RequestSpeakerInsights',
+                request_serializer=ai__pb2.RequestSpeakerInsightsRequest.SerializeToString,
+                response_deserializer=ai__pb2.SpeakerInsights.FromString,
+                _registered_method=True)
+        self.GetSpeakerInsights = channel.unary_unary(
+                '/transuai.ai.v1.AiService/GetSpeakerInsights',
+                request_serializer=ai__pb2.GetSpeakerInsightsRequest.SerializeToString,
+                response_deserializer=ai__pb2.SpeakerInsights.FromString,
+                _registered_method=True)
         self.RequestQuiz = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestQuiz',
                 request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
@@ -305,12 +315,27 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def RequestQuiz(self, request, context):
+    def RequestSpeakerInsights(self, request, context):
         """測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
         quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
         job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
         user_id 是 Gateway 驗證過 ownership 的使用者，用他的預設模型產生、用量記在他名下。
+        講者數據的 AI 判斷（每位講者提出的問題、可能的打斷）：一個 Job 一份，再分析就取代。要求後立刻回傳「分析中」，背景用要求者的
+        預設模型分析（見 ai-service README「講者數據」）。少於兩位講者時分析會失敗並附原因。
         """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetSpeakerInsights(self, request, context):
+        """還沒分析過時 status 是 UNSPECIFIED、沒有項目。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RequestQuiz(self, request, context):
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -530,6 +555,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.SetSpeakerSuggestionStatus,
                     request_deserializer=ai__pb2.SetSpeakerSuggestionStatusRequest.FromString,
                     response_serializer=ai__pb2.SpeakerSuggestion.SerializeToString,
+            ),
+            'RequestSpeakerInsights': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestSpeakerInsights,
+                    request_deserializer=ai__pb2.RequestSpeakerInsightsRequest.FromString,
+                    response_serializer=ai__pb2.SpeakerInsights.SerializeToString,
+            ),
+            'GetSpeakerInsights': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSpeakerInsights,
+                    request_deserializer=ai__pb2.GetSpeakerInsightsRequest.FromString,
+                    response_serializer=ai__pb2.SpeakerInsights.SerializeToString,
             ),
             'RequestQuiz': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestQuiz,
@@ -933,6 +968,60 @@ class AiService:
             '/transuai.ai.v1.AiService/SetSpeakerSuggestionStatus',
             ai__pb2.SetSpeakerSuggestionStatusRequest.SerializeToString,
             ai__pb2.SpeakerSuggestion.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RequestSpeakerInsights(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/RequestSpeakerInsights',
+            ai__pb2.RequestSpeakerInsightsRequest.SerializeToString,
+            ai__pb2.SpeakerInsights.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSpeakerInsights(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/GetSpeakerInsights',
+            ai__pb2.GetSpeakerInsightsRequest.SerializeToString,
+            ai__pb2.SpeakerInsights.FromString,
             options,
             channel_credentials,
             insecure,

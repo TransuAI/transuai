@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     transcript_edited_queue: str = "transcript.edited"
     summary_regeneration_requested_queue: str = "summary.regeneration.requested"
     quiz_requested_queue: str = "quiz.requested"
+    speaker_insights_requested_queue: str = "speaker_insights.requested"
     post_meeting_requested_queue: str = "post_meeting.requested"
     # job.deleted（upload-service 的 fanout exchange）綁到這個服務自己的佇列；處理失敗（例如資料庫連不上）dead-letter 到 retry 佇列，
     # 等 deletion_retry_delay_ms 再回來，不限次數——刪除一定要做完。

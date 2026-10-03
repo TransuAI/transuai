@@ -50,6 +50,13 @@ class ProposalStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     PROPOSAL_STATUS_PROPOSED: _ClassVar[ProposalStatus]
     PROPOSAL_STATUS_DONE: _ClassVar[ProposalStatus]
     PROPOSAL_STATUS_FAILED: _ClassVar[ProposalStatus]
+
+class SpeakerInsightsStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    SPEAKER_INSIGHTS_STATUS_UNSPECIFIED: _ClassVar[SpeakerInsightsStatus]
+    SPEAKER_INSIGHTS_STATUS_GENERATING: _ClassVar[SpeakerInsightsStatus]
+    SPEAKER_INSIGHTS_STATUS_COMPLETED: _ClassVar[SpeakerInsightsStatus]
+    SPEAKER_INSIGHTS_STATUS_FAILED: _ClassVar[SpeakerInsightsStatus]
 REGENERATION_STATUS_IDLE: RegenerationStatus
 REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
@@ -73,6 +80,10 @@ PROPOSAL_STATUS_UNSPECIFIED: ProposalStatus
 PROPOSAL_STATUS_PROPOSED: ProposalStatus
 PROPOSAL_STATUS_DONE: ProposalStatus
 PROPOSAL_STATUS_FAILED: ProposalStatus
+SPEAKER_INSIGHTS_STATUS_UNSPECIFIED: SpeakerInsightsStatus
+SPEAKER_INSIGHTS_STATUS_GENERATING: SpeakerInsightsStatus
+SPEAKER_INSIGHTS_STATUS_COMPLETED: SpeakerInsightsStatus
+SPEAKER_INSIGHTS_STATUS_FAILED: SpeakerInsightsStatus
 
 class RequestQuizRequest(_message.Message):
     __slots__ = ("job_id", "user_id", "question_count")
@@ -783,3 +794,53 @@ class ListProviderKeysResponse(_message.Message):
     KEYS_FIELD_NUMBER: _ClassVar[int]
     keys: _containers.RepeatedCompositeFieldContainer[ProviderKey]
     def __init__(self, keys: _Optional[_Iterable[_Union[ProviderKey, _Mapping]]] = ...) -> None: ...
+
+class RequestSpeakerInsightsRequest(_message.Message):
+    __slots__ = ("job_id", "user_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
+
+class GetSpeakerInsightsRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class SpeakerInsights(_message.Message):
+    __slots__ = ("job_id", "status", "failure_reason", "source_revision", "model_provider", "model", "requested_at", "completed_at", "items")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    ITEMS_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    status: SpeakerInsightsStatus
+    failure_reason: str
+    source_revision: int
+    model_provider: str
+    model: str
+    requested_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    items: _containers.RepeatedCompositeFieldContainer[SpeakerInsight]
+    def __init__(self, job_id: _Optional[str] = ..., status: _Optional[_Union[SpeakerInsightsStatus, str]] = ..., failure_reason: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., items: _Optional[_Iterable[_Union[SpeakerInsight, _Mapping]]] = ...) -> None: ...
+
+class SpeakerInsight(_message.Message):
+    __slots__ = ("kind", "speaker_label", "interrupted_label", "start_time", "text")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    SPEAKER_LABEL_FIELD_NUMBER: _ClassVar[int]
+    INTERRUPTED_LABEL_FIELD_NUMBER: _ClassVar[int]
+    START_TIME_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    speaker_label: str
+    interrupted_label: str
+    start_time: float
+    text: str
+    def __init__(self, kind: _Optional[str] = ..., speaker_label: _Optional[str] = ..., interrupted_label: _Optional[str] = ..., start_time: _Optional[float] = ..., text: _Optional[str] = ...) -> None: ...

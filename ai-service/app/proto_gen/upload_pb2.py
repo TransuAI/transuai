@@ -26,7 +26,7 @@ from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0cupload.proto\x12\x12transuai.upload.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"M\n\x1aSetSuggestedDetailsRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x03 \x01(\t\"\x99\x03\n\x03Job\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x11\n\tfile_name\x18\x03 \x01(\t\x12/\n\tfile_type\x18\x04 \x01(\x0e\x32\x1c.transuai.upload.v1.FileType\x12\x17\n\x0f\x66ile_size_bytes\x18\x05 \x01(\x03\x12\x14\n\x0cstorage_path\x18\x06 \x01(\t\x12\x18\n\x10\x64uration_seconds\x18\x07 \x01(\x05\x12-\n\x06status\x18\x08 \x01(\x0e\x32\x1d.transuai.upload.v1.JobStatus\x12\x14\n\x0c\x65rror_reason\x18\t \x01(\t\x12.\n\ncreated_at\x18\n \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12.\n\nupdated_at\x18\x0b \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x1e\n\x16transcription_language\x18\x0c \x01(\t\x12\r\n\x05title\x18\r \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x0e \x01(\t\"{\n\x1cGetPresignedUploadUrlRequest\x12\x11\n\tfile_name\x18\x01 \x01(\t\x12/\n\tfile_type\x18\x02 \x01(\x0e\x32\x1c.transuai.upload.v1.FileType\x12\x17\n\x0f\x66ile_size_bytes\x18\x03 \x01(\x03\"y\n\x1dGetPresignedUploadUrlResponse\x12\x12\n\nupload_url\x18\x01 \x01(\t\x12\x14\n\x0cstorage_path\x18\x02 \x01(\t\x12.\n\nexpires_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"\xc4\x01\n\x15\x43ompleteUploadRequest\x12\x14\n\x0cstorage_path\x18\x01 \x01(\t\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12/\n\tfile_type\x18\x03 \x01(\x0e\x32\x1c.transuai.upload.v1.FileType\x12\x17\n\x0f\x66ile_size_bytes\x18\x04 \x01(\x03\x12\x18\n\x10\x64uration_seconds\x18\x05 \x01(\x05\x12\x1e\n\x16transcription_language\x18\x06 \x01(\t\"\x1f\n\rGetJobRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"G\n\x1eGetPresignedDownloadUrlRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x15\n\ras_attachment\x18\x02 \x01(\x08\"g\n\x1fGetPresignedDownloadUrlResponse\x12\x14\n\x0c\x64ownload_url\x18\x01 \x01(\t\x12.\n\nexpires_at\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"2\n\x0fListJobsRequest\x12\x0c\n\x04page\x18\x01 \x01(\x05\x12\x11\n\tpage_size\x18\x02 \x01(\x05\"o\n\x10ListJobsResponse\x12%\n\x04jobs\x18\x01 \x03(\x0b\x32\x17.transuai.upload.v1.Job\x12\x13\n\x0btotal_count\x18\x02 \x01(\x05\x12\x0c\n\x04page\x18\x03 \x01(\x05\x12\x11\n\tpage_size\x18\x04 \x01(\x05\"\"\n\x10\x44\x65leteJobRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"m\n\x16UpdateJobStatusRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12-\n\x06status\x18\x02 \x01(\x0e\x32\x1d.transuai.upload.v1.JobStatus\x12\x14\n\x0c\x65rror_reason\x18\x03 \x01(\t*;\n\x08\x46ileType\x12\x19\n\x15\x46ILE_TYPE_UNSPECIFIED\x10\x00\x12\t\n\x05\x41UDIO\x10\x01\x12\t\n\x05VIDEO\x10\x02*\xa0\x01\n\tJobStatus\x12\x1a\n\x16JOB_STATUS_UNSPECIFIED\x10\x00\x12\x0b\n\x07PENDING\x10\x01\x12\r\n\tUPLOADING\x10\x02\x12\x0c\n\x08UPLOADED\x10\x03\x12\x10\n\x0cTRANSCRIBING\x10\x04\x12\x0f\n\x0bTRANSCRIBED\x10\x05\x12\x0f\n\x0bSUMMARIZING\x10\x06\x12\r\n\tCOMPLETED\x10\x07\x12\n\n\x06\x46\x41ILED\x10\x08\x32\xd0\x04\n\rUploadService\x12|\n\x15GetPresignedUploadUrl\x12\x30.transuai.upload.v1.GetPresignedUploadUrlRequest\x1a\x31.transuai.upload.v1.GetPresignedUploadUrlResponse\x12T\n\x0e\x43ompleteUpload\x12).transuai.upload.v1.CompleteUploadRequest\x1a\x17.transuai.upload.v1.Job\x12\x44\n\x06GetJob\x12!.transuai.upload.v1.GetJobRequest\x1a\x17.transuai.upload.v1.Job\x12\x82\x01\n\x17GetPresignedDownloadUrl\x12\x32.transuai.upload.v1.GetPresignedDownloadUrlRequest\x1a\x33.transuai.upload.v1.GetPresignedDownloadUrlResponse\x12U\n\x08ListJobs\x12#.transuai.upload.v1.ListJobsRequest\x1a$.transuai.upload.v1.ListJobsResponse\x12I\n\tDeleteJob\x12$.transuai.upload.v1.DeleteJobRequest\x1a\x16.google.protobuf.Empty2\xcc\x01\n\x12InternalJobService\x12V\n\x0fUpdateJobStatus\x12*.transuai.upload.v1.UpdateJobStatusRequest\x1a\x17.transuai.upload.v1.Job\x12^\n\x13SetSuggestedDetails\x12..transuai.upload.v1.SetSuggestedDetailsRequest\x1a\x17.transuai.upload.v1.JobB\x1f\n\x1b\x63om.transuai.upload.grpc.v1P\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0cupload.proto\x12\x12transuai.upload.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"M\n\x1aSetSuggestedDetailsRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x03 \x01(\t\"\xd1\x01\n\x04Note\x12\x0f\n\x07note_id\x18\x01 \x01(\t\x12\x0e\n\x06job_id\x18\x02 \x01(\t\x12\x19\n\x0ctime_seconds\x18\x03 \x01(\x01H\x00\x88\x01\x01\x12\x0c\n\x04text\x18\x04 \x01(\t\x12\x0e\n\x06source\x18\x05 \x01(\t\x12.\n\ncreated_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12.\n\nupdated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x0f\n\r_time_seconds\"\"\n\x10ListNotesRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"<\n\x11ListNotesResponse\x12\'\n\x05notes\x18\x01 \x03(\x0b\x32\x18.transuai.upload.v1.Note\"m\n\x11\x43reateNoteRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x19\n\x0ctime_seconds\x18\x02 \x01(\x01H\x00\x88\x01\x01\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x0e\n\x06source\x18\x04 \x01(\tB\x0f\n\r_time_seconds\"B\n\x11UpdateNoteRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07note_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"4\n\x11\x44\x65leteNoteRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07note_id\x18\x02 \x01(\t\"\x99\x03\n\x03Job\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x11\n\tfile_name\x18\x03 \x01(\t\x12/\n\tfile_type\x18\x04 \x01(\x0e\x32\x1c.transuai.upload.v1.FileType\x12\x17\n\x0f\x66ile_size_bytes\x18\x05 \x01(\x03\x12\x14\n\x0cstorage_path\x18\x06 \x01(\t\x12\x18\n\x10\x64uration_seconds\x18\x07 \x01(\x05\x12-\n\x06status\x18\x08 \x01(\x0e\x32\x1d.transuai.upload.v1.JobStatus\x12\x14\n\x0c\x65rror_reason\x18\t \x01(\t\x12.\n\ncreated_at\x18\n \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12.\n\nupdated_at\x18\x0b \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x1e\n\x16transcription_language\x18\x0c \x01(\t\x12\r\n\x05title\x18\r \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x0e \x01(\t\"{\n\x1cGetPresignedUploadUrlRequest\x12\x11\n\tfile_name\x18\x01 \x01(\t\x12/\n\tfile_type\x18\x02 \x01(\x0e\x32\x1c.transuai.upload.v1.FileType\x12\x17\n\x0f\x66ile_size_bytes\x18\x03 \x01(\x03\"y\n\x1dGetPresignedUploadUrlResponse\x12\x12\n\nupload_url\x18\x01 \x01(\t\x12\x14\n\x0cstorage_path\x18\x02 \x01(\t\x12.\n\nexpires_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"\xc4\x01\n\x15\x43ompleteUploadRequest\x12\x14\n\x0cstorage_path\x18\x01 \x01(\t\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12/\n\tfile_type\x18\x03 \x01(\x0e\x32\x1c.transuai.upload.v1.FileType\x12\x17\n\x0f\x66ile_size_bytes\x18\x04 \x01(\x03\x12\x18\n\x10\x64uration_seconds\x18\x05 \x01(\x05\x12\x1e\n\x16transcription_language\x18\x06 \x01(\t\"\x1f\n\rGetJobRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"G\n\x1eGetPresignedDownloadUrlRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x15\n\ras_attachment\x18\x02 \x01(\x08\"g\n\x1fGetPresignedDownloadUrlResponse\x12\x14\n\x0c\x64ownload_url\x18\x01 \x01(\t\x12.\n\nexpires_at\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"S\n\x0fListJobsRequest\x12\x0c\n\x04page\x18\x01 \x01(\x05\x12\x11\n\tpage_size\x18\x02 \x01(\x05\x12\r\n\x05query\x18\x03 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x04 \x01(\t\"o\n\x10ListJobsResponse\x12%\n\x04jobs\x18\x01 \x03(\x0b\x32\x17.transuai.upload.v1.Job\x12\x13\n\x0btotal_count\x18\x02 \x01(\x05\x12\x0c\n\x04page\x18\x03 \x01(\x05\x12\x11\n\tpage_size\x18\x04 \x01(\x05\"\"\n\x10\x44\x65leteJobRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\"d\n\x10UpdateJobRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x12\n\x05title\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x15\n\x08\x63\x61tegory\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x08\n\x06_titleB\x0b\n\t_category\"m\n\x16UpdateJobStatusRequest\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12-\n\x06status\x18\x02 \x01(\x0e\x32\x1d.transuai.upload.v1.JobStatus\x12\x14\n\x0c\x65rror_reason\x18\x03 \x01(\t*;\n\x08\x46ileType\x12\x19\n\x15\x46ILE_TYPE_UNSPECIFIED\x10\x00\x12\t\n\x05\x41UDIO\x10\x01\x12\t\n\x05VIDEO\x10\x02*\xa0\x01\n\tJobStatus\x12\x1a\n\x16JOB_STATUS_UNSPECIFIED\x10\x00\x12\x0b\n\x07PENDING\x10\x01\x12\r\n\tUPLOADING\x10\x02\x12\x0c\n\x08UPLOADED\x10\x03\x12\x10\n\x0cTRANSCRIBING\x10\x04\x12\x0f\n\x0bTRANSCRIBED\x10\x05\x12\x0f\n\x0bSUMMARIZING\x10\x06\x12\r\n\tCOMPLETED\x10\x07\x12\n\n\x06\x46\x41ILED\x10\x08\x32\x9c\x05\n\rUploadService\x12|\n\x15GetPresignedUploadUrl\x12\x30.transuai.upload.v1.GetPresignedUploadUrlRequest\x1a\x31.transuai.upload.v1.GetPresignedUploadUrlResponse\x12T\n\x0e\x43ompleteUpload\x12).transuai.upload.v1.CompleteUploadRequest\x1a\x17.transuai.upload.v1.Job\x12\x44\n\x06GetJob\x12!.transuai.upload.v1.GetJobRequest\x1a\x17.transuai.upload.v1.Job\x12\x82\x01\n\x17GetPresignedDownloadUrl\x12\x32.transuai.upload.v1.GetPresignedDownloadUrlRequest\x1a\x33.transuai.upload.v1.GetPresignedDownloadUrlResponse\x12U\n\x08ListJobs\x12#.transuai.upload.v1.ListJobsRequest\x1a$.transuai.upload.v1.ListJobsResponse\x12I\n\tDeleteJob\x12$.transuai.upload.v1.DeleteJobRequest\x1a\x16.google.protobuf.Empty\x12J\n\tUpdateJob\x12$.transuai.upload.v1.UpdateJobRequest\x1a\x17.transuai.upload.v1.Job2\xcc\x01\n\x12InternalJobService\x12V\n\x0fUpdateJobStatus\x12*.transuai.upload.v1.UpdateJobStatusRequest\x1a\x17.transuai.upload.v1.Job\x12^\n\x13SetSuggestedDetails\x12..transuai.upload.v1.SetSuggestedDetailsRequest\x1a\x17.transuai.upload.v1.Job2\xd2\x02\n\x0bNoteService\x12X\n\tListNotes\x12$.transuai.upload.v1.ListNotesRequest\x1a%.transuai.upload.v1.ListNotesResponse\x12M\n\nCreateNote\x12%.transuai.upload.v1.CreateNoteRequest\x1a\x18.transuai.upload.v1.Note\x12M\n\nUpdateNote\x12%.transuai.upload.v1.UpdateNoteRequest\x1a\x18.transuai.upload.v1.Note\x12K\n\nDeleteNote\x12%.transuai.upload.v1.DeleteNoteRequest\x1a\x16.google.protobuf.EmptyB\x1f\n\x1b\x63om.transuai.upload.grpc.v1P\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,36 +34,52 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'upload_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'\n\033com.transuai.upload.grpc.v1P\001'
-  _globals['_FILETYPE']._serialized_start=1559
-  _globals['_FILETYPE']._serialized_end=1618
-  _globals['_JOBSTATUS']._serialized_start=1621
-  _globals['_JOBSTATUS']._serialized_end=1781
+  _globals['_FILETYPE']._serialized_start=2237
+  _globals['_FILETYPE']._serialized_end=2296
+  _globals['_JOBSTATUS']._serialized_start=2299
+  _globals['_JOBSTATUS']._serialized_end=2459
   _globals['_SETSUGGESTEDDETAILSREQUEST']._serialized_start=98
   _globals['_SETSUGGESTEDDETAILSREQUEST']._serialized_end=175
-  _globals['_JOB']._serialized_start=178
-  _globals['_JOB']._serialized_end=587
-  _globals['_GETPRESIGNEDUPLOADURLREQUEST']._serialized_start=589
-  _globals['_GETPRESIGNEDUPLOADURLREQUEST']._serialized_end=712
-  _globals['_GETPRESIGNEDUPLOADURLRESPONSE']._serialized_start=714
-  _globals['_GETPRESIGNEDUPLOADURLRESPONSE']._serialized_end=835
-  _globals['_COMPLETEUPLOADREQUEST']._serialized_start=838
-  _globals['_COMPLETEUPLOADREQUEST']._serialized_end=1034
-  _globals['_GETJOBREQUEST']._serialized_start=1036
-  _globals['_GETJOBREQUEST']._serialized_end=1067
-  _globals['_GETPRESIGNEDDOWNLOADURLREQUEST']._serialized_start=1069
-  _globals['_GETPRESIGNEDDOWNLOADURLREQUEST']._serialized_end=1140
-  _globals['_GETPRESIGNEDDOWNLOADURLRESPONSE']._serialized_start=1142
-  _globals['_GETPRESIGNEDDOWNLOADURLRESPONSE']._serialized_end=1245
-  _globals['_LISTJOBSREQUEST']._serialized_start=1247
-  _globals['_LISTJOBSREQUEST']._serialized_end=1297
-  _globals['_LISTJOBSRESPONSE']._serialized_start=1299
-  _globals['_LISTJOBSRESPONSE']._serialized_end=1410
-  _globals['_DELETEJOBREQUEST']._serialized_start=1412
-  _globals['_DELETEJOBREQUEST']._serialized_end=1446
-  _globals['_UPDATEJOBSTATUSREQUEST']._serialized_start=1448
-  _globals['_UPDATEJOBSTATUSREQUEST']._serialized_end=1557
-  _globals['_UPLOADSERVICE']._serialized_start=1784
-  _globals['_UPLOADSERVICE']._serialized_end=2376
-  _globals['_INTERNALJOBSERVICE']._serialized_start=2379
-  _globals['_INTERNALJOBSERVICE']._serialized_end=2583
+  _globals['_NOTE']._serialized_start=178
+  _globals['_NOTE']._serialized_end=387
+  _globals['_LISTNOTESREQUEST']._serialized_start=389
+  _globals['_LISTNOTESREQUEST']._serialized_end=423
+  _globals['_LISTNOTESRESPONSE']._serialized_start=425
+  _globals['_LISTNOTESRESPONSE']._serialized_end=485
+  _globals['_CREATENOTEREQUEST']._serialized_start=487
+  _globals['_CREATENOTEREQUEST']._serialized_end=596
+  _globals['_UPDATENOTEREQUEST']._serialized_start=598
+  _globals['_UPDATENOTEREQUEST']._serialized_end=664
+  _globals['_DELETENOTEREQUEST']._serialized_start=666
+  _globals['_DELETENOTEREQUEST']._serialized_end=718
+  _globals['_JOB']._serialized_start=721
+  _globals['_JOB']._serialized_end=1130
+  _globals['_GETPRESIGNEDUPLOADURLREQUEST']._serialized_start=1132
+  _globals['_GETPRESIGNEDUPLOADURLREQUEST']._serialized_end=1255
+  _globals['_GETPRESIGNEDUPLOADURLRESPONSE']._serialized_start=1257
+  _globals['_GETPRESIGNEDUPLOADURLRESPONSE']._serialized_end=1378
+  _globals['_COMPLETEUPLOADREQUEST']._serialized_start=1381
+  _globals['_COMPLETEUPLOADREQUEST']._serialized_end=1577
+  _globals['_GETJOBREQUEST']._serialized_start=1579
+  _globals['_GETJOBREQUEST']._serialized_end=1610
+  _globals['_GETPRESIGNEDDOWNLOADURLREQUEST']._serialized_start=1612
+  _globals['_GETPRESIGNEDDOWNLOADURLREQUEST']._serialized_end=1683
+  _globals['_GETPRESIGNEDDOWNLOADURLRESPONSE']._serialized_start=1685
+  _globals['_GETPRESIGNEDDOWNLOADURLRESPONSE']._serialized_end=1788
+  _globals['_LISTJOBSREQUEST']._serialized_start=1790
+  _globals['_LISTJOBSREQUEST']._serialized_end=1873
+  _globals['_LISTJOBSRESPONSE']._serialized_start=1875
+  _globals['_LISTJOBSRESPONSE']._serialized_end=1986
+  _globals['_DELETEJOBREQUEST']._serialized_start=1988
+  _globals['_DELETEJOBREQUEST']._serialized_end=2022
+  _globals['_UPDATEJOBREQUEST']._serialized_start=2024
+  _globals['_UPDATEJOBREQUEST']._serialized_end=2124
+  _globals['_UPDATEJOBSTATUSREQUEST']._serialized_start=2126
+  _globals['_UPDATEJOBSTATUSREQUEST']._serialized_end=2235
+  _globals['_UPLOADSERVICE']._serialized_start=2462
+  _globals['_UPLOADSERVICE']._serialized_end=3130
+  _globals['_INTERNALJOBSERVICE']._serialized_start=3133
+  _globals['_INTERNALJOBSERVICE']._serialized_end=3337
+  _globals['_NOTESERVICE']._serialized_start=3340
+  _globals['_NOTESERVICE']._serialized_end=3678
 # @@protoc_insertion_point(module_scope)

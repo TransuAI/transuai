@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from app.db import new_session
 from app.models import (ActionProposal, Chapter, Embedding, LlmUsage, PostMeetingRun, QaHistory, Quiz, QuizAttempt,
-                        QuizQuestion, SpeakerSuggestion, Summary, WebSearchUsage)
+                        QuizQuestion, SpeakerInsightItem, SpeakerInsightRun, SpeakerSuggestion, Summary, WebSearchUsage)
 from app.services import deletion_consumer, job_deletion
 
 
@@ -22,12 +22,13 @@ def fill(job_id: uuid.UUID) -> None:
         quiz = Quiz(job_id=job_id, user_id=user, question_count=1, status="READY")
         run = PostMeetingRun(job_id=job_id, user_id=user, status="READY", timezone="Asia/Taipei",
                              uploaded_at=datetime.now(timezone.utc))
+        insights = SpeakerInsightRun(job_id=job_id, requested_by=user, status="COMPLETED")
         session.add_all([
             Summary(job_id=job_id, summary_text="摘要"),
             Chapter(job_id=job_id, title="開場", start_time=0, sequence_no=1),
             Embedding(job_id=job_id, chunk_text="大家好", embedding=[0.0] * 1024),
             QaHistory(job_id=job_id, user_id=user, question="?", answer="!", source_timestamps=[]),
-            quiz, run,
+            quiz, run, insights,
             SpeakerSuggestion(job_id=job_id, speaker_label="1", name="王小明", evidence_start_time=0, evidence_text="我是王小明"),
             LlmUsage(job_id=job_id, user_id=user, feature="summary", provider="hf", model="m", key_source="platform", succeeded=True),
             WebSearchUsage(job_id=job_id, user_id=user, provider="tavily", succeeded=True),
@@ -38,6 +39,7 @@ def fill(job_id: uuid.UUID) -> None:
                          explanation="", source_timestamps=[]),
             QuizAttempt(quiz_id=quiz.id, user_id=user, answers=[0], correct_count=1),
             ActionProposal(run_id=run.id, position=1, service="google", tool="create_event", kind="calendar", arguments={}),
+            SpeakerInsightItem(run_id=insights.id, kind="question", speaker_label="S1", start_time=0, text="?"),
         ])
         session.commit()
 
@@ -48,6 +50,8 @@ def counts(job_id: uuid.UUID) -> dict[str, int]:
                   for model in (*job_deletion.JOB_SCOPED, LlmUsage, WebSearchUsage)}
         result["QuizQuestion"] = session.scalar(select(func.count()).select_from(QuizQuestion).join(Quiz).where(Quiz.job_id == job_id))
         result["QuizAttempt"] = session.scalar(select(func.count()).select_from(QuizAttempt).join(Quiz).where(Quiz.job_id == job_id))
+        result["SpeakerInsightItem"] = session.scalar(
+            select(func.count()).select_from(SpeakerInsightItem).join(SpeakerInsightRun).where(SpeakerInsightRun.job_id == job_id))
         result["ActionProposal"] = session.scalar(
             select(func.count()).select_from(ActionProposal).join(PostMeetingRun).where(PostMeetingRun.job_id == job_id))
         return result

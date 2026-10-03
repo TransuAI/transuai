@@ -73,6 +73,9 @@ from app.repositories.web_search_usage_repository import count_user_web_searches
 from app.services.web_search import WebSearchResult
 from app.services.web_search import is_available as web_search_available
 from app.services.qa import AnswerStep, NoEmbeddingsError, stream_answer
+from app.services.speaker_insight_runs import (
+    SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
+from app.services.speaker_insight_runs import effective_status as speaker_insights_effective_status
 from app.services.quizzes import (
     InvalidAnswers,
     InvalidQuestionCount,
@@ -85,6 +88,9 @@ from app.services.quizzes import (
 )
 from app.models import (
     ConnectionStatus,
+    SpeakerInsightItem,
+    SpeakerInsightRun,
+    SpeakerInsightsStatus,
     PostMeetingStatus,
     ProposalStatus,
     Quiz,
@@ -424,6 +430,19 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         finally:
             session.close()
 
+    def RequestSpeakerInsights(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            request_speaker_insights(job_id, user_id)
+        except SpeakerInsightsNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法分析，請稍後再試")
+        return _speaker_insights_to_proto(job_id, *find_speaker_insights(job_id))
+
+    def GetSpeakerInsights(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        return _speaker_insights_to_proto(job_id, *find_speaker_insights(job_id))
+
     def RequestQuiz(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
@@ -679,6 +698,29 @@ def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = (), *, best: 
         message.completed_at.FromDatetime(quiz.completed_at)
     if best is not None:
         message.best_correct_count = best
+    return message
+
+
+_SPEAKER_INSIGHTS_STATUS = {
+    SpeakerInsightsStatus.GENERATING: ai_pb2.SPEAKER_INSIGHTS_STATUS_GENERATING,
+    SpeakerInsightsStatus.COMPLETED: ai_pb2.SPEAKER_INSIGHTS_STATUS_COMPLETED,
+    SpeakerInsightsStatus.FAILED: ai_pb2.SPEAKER_INSIGHTS_STATUS_FAILED,
+}
+
+
+def _speaker_insights_to_proto(job_id: uuid.UUID, run: SpeakerInsightRun | None,
+                               items: Sequence[SpeakerInsightItem]) -> ai_pb2.SpeakerInsights:
+    if run is None:
+        return ai_pb2.SpeakerInsights(job_id=str(job_id))
+    status, failure_reason = speaker_insights_effective_status(run)
+    message = ai_pb2.SpeakerInsights(
+        job_id=str(job_id), status=_SPEAKER_INSIGHTS_STATUS[status], failure_reason=failure_reason or "",
+        source_revision=run.source_revision or 0, model_provider=run.model_provider or "", model=run.model or "",
+        items=[ai_pb2.SpeakerInsight(kind=i.kind, speaker_label=i.speaker_label, interrupted_label=i.interrupted_label or "",
+                                     start_time=float(i.start_time), text=i.text) for i in items])
+    message.requested_at.FromDatetime(run.requested_at)
+    if run.completed_at is not None:
+        message.completed_at.FromDatetime(run.completed_at)
     return message
 
 
