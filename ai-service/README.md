@@ -393,7 +393,8 @@ app/
     post_meeting_settings.py         會後處理的設定：Notion 的會議紀錄位置（改過的網址儲存前用 Notion 確認是頁面）、待辦去處
     quiz_generator.py                出題：組 prompt、呼叫 llm_client、驗證模型回的 JSON（格式不對 raise QuizFormatError）、過濾時間戳
     consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
-    deletion_consumer.py             刪除事件（job.deleted）：自己的佇列、retry 佇列，另一條 thread
+    deletion_consumer.py             刪除事件（job.deleted、account.deleted）：各自的佇列、retry 佇列，另一條 thread
+    account_deletion.py              刪除帳號：用量去識別化、撤銷已連結的帳號、刪個人設定
     job_deletion.py                  刪掉一個 Job 的資料；deleted_jobs 標記；guard_writes（commit 之後丟掉寫給已刪 Job 的資料）
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
@@ -445,6 +446,11 @@ upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanou
 `deleted_jobs`（保留一天）再刪資料；寫入那一邊不用各自檢查——`job_deletion.guard_writes(SessionLocal)`（啟動時掛上）在 session 上記下每次
 commit 新增或修改了哪些 Job 的資料，commit 之後查這些 Job 有沒有被刪，有就刪掉。新的資料表只要帶 `job_id` 就要加進 `job_deletion.JOB_SCOPED`。
 改到已經被刪掉的列（例如重新產生摘要寫回）會失敗（`StaleDataError`），不會把資料帶回來。
+
+刪除帳號：auth-service 發 `account.deleted { userId }`（fanout exchange `account.deleted`），這個服務綁 `account.deleted.ai`（同一個
+`deletion_consumer`，`app/services/account_deletion.py`）：已連結的帳號先撤銷授權再刪權杖（沿用中斷連結的 `connections.disconnect`，撤銷失敗只記
+log）；刪掉自有金鑰、預設模型、會後處理設定、還沒完成的連結授權；`llm_usage`、`web_search_usage` **去識別化**（`user_id` 設成 NULL）。他的 Job
+的資料由每個 Job 的 `job.deleted` 清。
 
 ## 正式環境（`APP_ENV=production`）
 

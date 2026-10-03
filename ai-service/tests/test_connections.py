@@ -412,3 +412,31 @@ def test_unlinking_an_account_whose_grant_is_already_gone_counts_as_revoked(ai_s
     response = ai_stub.DeleteConnection(ai_pb2.DeleteConnectionRequest(user_id=str(USER), service="google"))
 
     assert response.revoked is True
+
+
+# --- 刪除帳號（.scratch/account-deletion/issues/02）---
+
+
+def test_deleting_the_account_revokes_every_linked_account_and_forgets_the_tokens(ai_stub, db_session, oauth):
+    from app.services import account_deletion
+    connect(ai_stub, "google")
+    connect(ai_stub, "notion")
+    connect(ai_stub, "google", user_id=uuid.UUID(int=99))
+
+    account_deletion.delete_account_data(USER)
+
+    assert len(oauth.to(GOOGLE_REVOKE)) == 1  # 只有這位使用者的；另一位的 Google 沒被撤銷
+    assert len([r for r in oauth.to(NOTION_TOKEN) if "grant_type" not in form(r)]) == 1
+    assert statuses(ai_stub) == {"google": ai_pb2.CONNECTION_STATUS_NOT_CONNECTED,
+                                 "notion": ai_pb2.CONNECTION_STATUS_NOT_CONNECTED}
+    assert statuses(ai_stub, uuid.UUID(int=99))["google"] == ai_pb2.CONNECTION_STATUS_CONNECTED
+
+
+def test_deleting_the_account_forgets_the_tokens_even_when_revoking_fails(ai_stub, db_session, oauth):
+    from app.services import account_deletion
+    connect(ai_stub, "google")
+    oauth.revoke_status = 503
+
+    account_deletion.delete_account_data(USER)
+
+    assert db_session.execute(text("SELECT count(*) FROM oauth_connections")).scalar() == 0

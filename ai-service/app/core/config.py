@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     job_deleted_exchange: str = "job.deleted"
     job_deleted_queue: str = "job.deleted.ai"
     job_deleted_retry_queue: str = "job.deleted.ai.retry"
+    # account.deleted（auth-service 的 fanout exchange）：使用者刪除了帳號。
+    account_deleted_exchange: str = "account.deleted"
+    account_deleted_queue: str = "account.deleted.ai"
+    account_deleted_retry_queue: str = "account.deleted.ai.retry"
     deletion_retry_delay_ms: int = 30_000
 
     upload_service_grpc_target: str = "localhost:9090"
