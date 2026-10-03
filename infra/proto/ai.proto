@@ -69,6 +69,12 @@ service AiService {
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
   // job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
   // user_id 是 Gateway 驗證過 ownership 的使用者，用他的預設模型產生、用量記在他名下。
+  // 講者數據的 AI 判斷（每位講者提出的問題、可能的打斷）：一個 Job 一份，再分析就取代。要求後立刻回傳「分析中」，背景用要求者的
+  // 預設模型分析（見 ai-service README「講者數據」）。少於兩位講者時分析會失敗並附原因。
+  rpc RequestSpeakerInsights(RequestSpeakerInsightsRequest) returns (SpeakerInsights);
+  // 還沒分析過時 status 是 UNSPECIFIED、沒有項目。
+  rpc GetSpeakerInsights(GetSpeakerInsightsRequest) returns (SpeakerInsights);
+
   rpc RequestQuiz(RequestQuizRequest) returns (Quiz);
   // 一個 Job 的所有測驗（新的在前），不含題目。「產生中」超過 5 分鐘回報成 FAILED。
   rpc ListQuizzes(ListQuizzesRequest) returns (ListQuizzesResponse);
@@ -705,4 +711,47 @@ message ListProviderKeysRequest {
 
 message ListProviderKeysResponse {
   repeated ProviderKey keys = 1;
+}
+
+enum SpeakerInsightsStatus {
+  // 還沒分析過。
+  SPEAKER_INSIGHTS_STATUS_UNSPECIFIED = 0;
+  SPEAKER_INSIGHTS_STATUS_GENERATING = 1;
+  SPEAKER_INSIGHTS_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；可以再分析。
+  SPEAKER_INSIGHTS_STATUS_FAILED = 3;
+}
+
+message RequestSpeakerInsightsRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message GetSpeakerInsightsRequest {
+  string job_id = 1;
+}
+
+message SpeakerInsights {
+  string job_id = 1;
+  SpeakerInsightsStatus status = 2;
+  string failure_reason = 3;
+  // 依據的逐字稿 revision 與分析的模型（上一次完成的；還沒完成過是 0 / 空字串）——跟逐字稿目前的 revision 不同就是過時。
+  int32 source_revision = 4;
+  string model_provider = 5;
+  string model = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+  // 上一次完成的結果（再分析時舊的照樣回傳，完成才換掉），依時間排序。
+  repeated SpeakerInsight items = 9;
+}
+
+message SpeakerInsight {
+  // "question" 或 "interruption"
+  string kind = 1;
+  string speaker_label = 2;
+  // 打斷時被打斷的講者；問題是空字串。
+  string interrupted_label = 3;
+  double start_time = 4;
+  // 那個片段的原話。
+  string text = 5;
 }

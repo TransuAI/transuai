@@ -205,6 +205,9 @@ POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCou
                                          輪詢列表直到不是 GENERATING）
 GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型、最佳成績
 GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
+POST   /jobs/{jobId}/speaker-insights   講者數據的 AI 判斷（每位講者提出的問題、可能的打斷），回 202（背景分析，前端每 3 秒輪詢）；
+                                         一個 Job 一份，再分析完成才取代
+GET    /jobs/{jobId}/speaker-insights   目前這一份：狀態、依據的 revision、模型、項目（類型、講者、被打斷的講者、時間、原話）
 GET    /me/post-meeting-settings        會後處理的設定：Notion 的會議紀錄位置（沒指定是 null）、待辦去處
                                          （GOOGLE_TASKS / NOTION：放在 Notion 會議紀錄裡）
 PUT    /me/post-meeting-settings        儲存設定，body { notionMeetingsPageUrl, todoDestination }
@@ -577,6 +580,29 @@ CREATE TABLE quiz_attempts (
 );
 CREATE INDEX ix_quiz_attempts_quiz_id ON quiz_attempts (quiz_id);
 
+-- 講者數據的 AI 判斷（每位講者提出的問題、可能的打斷）：一個 Job 一份，再分析完成才換掉項目
+CREATE TABLE speaker_insights (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL UNIQUE,
+    requested_by UUID NOT NULL,             -- 最近一次要求分析的使用者（他的預設模型、用量記在他名下）
+    status VARCHAR(10) NOT NULL,            -- GENERATING / COMPLETED / FAILED
+    failure_reason TEXT,
+    source_revision INTEGER,                -- 上一次完成時依據的逐字稿 revision
+    model_provider VARCHAR(32),
+    model VARCHAR(200),
+    requested_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ
+);
+CREATE TABLE speaker_insight_items (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES speaker_insights(id) ON DELETE CASCADE,
+    kind VARCHAR(16) NOT NULL,              -- question / interruption
+    speaker_label VARCHAR(32) NOT NULL,
+    interrupted_label VARCHAR(32),          -- 打斷時被打斷的講者
+    start_time NUMERIC(10,2) NOT NULL,
+    text TEXT NOT NULL                      -- 那個片段的原話
+);
+
 -- 已連結的帳號：使用者授權平台代他存取的 Google / Notion；權杖用自有金鑰那套 AES-GCM 加密，永遠不回傳前端
 CREATE TABLE oauth_connections (
     user_id UUID NOT NULL,
@@ -688,6 +714,7 @@ CREATE TABLE export_outputs (
 | `ai.completed` | AI Service | Notification Service | `{ jobId, status }` |
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
 | `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
+| `speaker_insights.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`）；ai-service 排給自己的背景工作 |
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
 | `post_meeting.requested` | AI Service | AI Service | `{ runId, jobId, userId }`（`userId` 是觸發的使用者）——使用者啟動會後處理（`POST /jobs/{jobId}/post-meeting`）；ai-service 排給自己的背景工作 |
 | `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
