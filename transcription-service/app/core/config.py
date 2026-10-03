@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     job_deleted_exchange: str = "job.deleted"
     job_deleted_queue: str = "job.deleted.transcription"
     job_deleted_retry_queue: str = "job.deleted.transcription.retry"
+    # account.deleted（auth-service 的 fanout exchange）：使用者刪除了帳號。
+    account_deleted_exchange: str = "account.deleted"
+    account_deleted_queue: str = "account.deleted.transcription"
+    account_deleted_retry_queue: str = "account.deleted.transcription.retry"
     deletion_retry_delay_ms: int = 30_000
     # 由 transcription-service 自己宣告跟擁有，不需要共用 RabbitMQ infra 的 exchange 設定變更，
     # 見 ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md。

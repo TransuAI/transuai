@@ -177,7 +177,8 @@ app/
     transcript_controller.py       TranscriptionServiceServicer 實作（GetTranscript、UpdateSegmentText、RenameSpeaker、AssignSegmentSpeaker）
   services/
     consumer.py                      RabbitMQ consumer loop（pika）
-    deletion_consumer.py             刪除事件（job.deleted）：自己的佇列、retry 佇列，另一條 thread
+    deletion_consumer.py             刪除事件（job.deleted、account.deleted）：各自的佇列、retry 佇列，另一條 thread
+    account_deletion.py              刪除帳號：用量去識別化
     job_deletion.py                  刪掉一個 Job 的逐字稿與快取；deleted_jobs 標記與寫入後的檢查
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     storage.py                         從 MinIO/R2 下載檔案
@@ -211,6 +212,10 @@ upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanou
 刪除當下還在轉錄（或在編輯）的話，存檔可能比刪除晚：收到事件時先記下 `deleted_jobs`（保留一天）再刪資料，pipeline 存檔與三種編輯在 commit
 **之後**查它（`job_deletion.discard_if_deleted`），有就把剛寫的刪掉——pipeline 就此停下、不回報狀態也不發 `transcription.completed`，編輯回
 `NOT_FOUND`。
+
+刪除帳號：auth-service 發 `account.deleted { userId }`（fanout exchange `account.deleted`），這個服務綁 `account.deleted.transcription`（同一個
+`deletion_consumer`），把他的轉錄用量**去識別化**（`user_id` 設成 NULL，`app/services/account_deletion.py`）；他的逐字稿由每個 Job 的
+`job.deleted` 清。
 
 ## 正式環境（`APP_ENV=production`）
 

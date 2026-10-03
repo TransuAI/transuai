@@ -1,4 +1,5 @@
-"""消費刪除事件（upload-service 的 `job.deleted` fanout exchange）：綁一個這個服務自己的佇列，交給對應的 handler。
+"""消費刪除事件（upload-service 的 `job.deleted`、auth-service 的 `account.deleted`，都是 fanout exchange）：各綁一個這個服務自己的
+佇列，交給對應的 handler。
 
 跟轉錄的 consumer 分開一條 thread、一條連線：轉錄一則訊息可能要好幾分鐘，刪除不用排在它後面。處理失敗（例如資料庫連不上）就
 nack 不 requeue，dead-letter 到 retry 佇列，等 `deletion_retry_delay_ms` 再回來，不限次數——刪除一定要做完。訊息本身不合法
@@ -14,7 +15,7 @@ import pika
 from pika.adapters.blocking_connection import BlockingChannel
 
 from app.core.config import settings
-from app.services import job_deletion
+from app.services import account_deletion, job_deletion
 from app.services.consumer import run_with_reconnect
 from app.services.event_publisher import connection_params
 
@@ -44,10 +45,16 @@ def _on_job_deleted(payload: dict) -> None:
     job_deletion.delete_job_data(_uuid_field(payload, "jobId"))
 
 
+def _on_account_deleted(payload: dict) -> None:
+    account_deletion.delete_account_data(_uuid_field(payload, "userId"))
+
+
 def subscriptions() -> list[Subscription]:
     return [
         Subscription(settings.job_deleted_exchange, settings.job_deleted_queue, settings.job_deleted_retry_queue,
                      _on_job_deleted),
+        Subscription(settings.account_deleted_exchange, settings.account_deleted_queue,
+                     settings.account_deleted_retry_queue, _on_account_deleted),
     ]
 
 
