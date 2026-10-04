@@ -453,8 +453,18 @@ export interface SpeakerInsight {
   text: string
 }
 
-/** The kinds of 多格式輸出 (new documents written from a job); more come later. */
-export type OutputFormat = 'podcast_description'
+/** The kinds of 多格式輸出 (new documents written from a job). */
+export type OutputFormat = 'podcast_description' | 'youtube_description' | 'blog_post' | 'newsletter' | 'social_post'
+
+/** The platform a social post (社群貼文) is written for. */
+export type SocialPlatform = 'threads' | 'facebook' | 'instagram' | 'linkedin' | 'x'
+
+/** What to make: a social post needs a platform; the instruction is the user's own request (up to 200 characters). */
+export interface OutputRequest {
+  format: OutputFormat
+  platform?: SocialPlatform
+  instruction?: string
+}
 
 /**
  * 多格式輸出 (see ai-service CONTEXT.md): a new document written from the job's summary and chapters, in Markdown. Made in
@@ -464,6 +474,8 @@ export interface GeneratedOutput {
   id: string
   jobId: string
   format: OutputFormat
+  /** A social post's platform; null for the other kinds. */
+  platform: SocialPlatform | null
   instruction: string | null
   status: 'GENERATING' | 'COMPLETED' | 'FAILED'
   failureReason: string | null

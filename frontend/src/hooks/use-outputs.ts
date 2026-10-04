@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { outputsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
-import type { GeneratedOutput, OutputFormat } from '@/types/api'
+import type { GeneratedOutput, OutputRequest } from '@/types/api'
 
 const POLL_INTERVAL_MS = 3000
 
 export interface OutputsActions {
   outputs: GeneratedOutput[]
   isRequesting: boolean
-  request: (format: OutputFormat) => void
+  request: (params: OutputRequest) => void
 }
 
 // 多格式輸出: the job's outputs, newest first. Each is made in the background; while any is GENERATING the list is asked for
@@ -58,11 +58,11 @@ export function useOutputs(jobId: string | undefined, isCompleted: boolean, onSe
   }, [jobId, generatingIds, onSettled, list])
 
   const request = useCallback(
-    (format: OutputFormat) => {
+    (params: OutputRequest) => {
       if (!jobId || isRequesting) return
       setIsRequesting(true)
       outputsApi
-        .request(jobId, { format })
+        .request(jobId, params)
         .then((output) => {
           localChanges.current += 1
           setOutputs((prev) => [output, ...prev])

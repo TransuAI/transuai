@@ -38,7 +38,7 @@ import type {
   WebSearchResult,
   SpeakerInsights,
   GeneratedOutput,
-  OutputFormat,
+  OutputRequest,
 } from '@/types/api'
 
 export const authApi = {
@@ -230,7 +230,8 @@ export const quizApi = {
 // 多格式輸出: every request makes another one (newest first in the list). Not 匯出 — these are new documents.
 export const outputsApi = {
   list: (jobId: string) => apiFetch<GeneratedOutput[]>(`/jobs/${jobId}/outputs`),
-  request: (jobId: string, params: { format: OutputFormat; instruction?: string }) =>
+  // platform only for a social post; instruction (the user's own request) is optional
+  request: (jobId: string, params: OutputRequest) =>
     apiFetch<GeneratedOutput>(`/jobs/${jobId}/outputs`, { method: 'POST', body: params }),
 }
 

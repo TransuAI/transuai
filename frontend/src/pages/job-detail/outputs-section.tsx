@@ -1,13 +1,15 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { ArrowLeft, Copy, Download, Loader2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import type { OutputsActions } from '@/hooks/use-outputs'
 import { downloadTextFile } from '@/lib/download'
 import { exportFileName } from '@/lib/export-formats'
-import { OUTPUT_FORMAT_LABELS } from '@/lib/output-formats'
+import { OUTPUT_FORMAT_LABELS, SOCIAL_PLATFORMS, outputLabel, postLength } from '@/lib/output-formats'
 import { formatShortDateTime } from '@/lib/media'
-import type { GeneratedOutput, OutputFormat } from '@/types/api'
+import type { GeneratedOutput, OutputFormat, OutputRequest, SocialPlatform } from '@/types/api'
 
 // 多格式輸出 (see ai-service CONTEXT.md): new documents written from the job — not 匯出, which turns what's already there
 // into files. Pick a kind to make one; each is listed, newest first, and opens to read, copy or download as Markdown.
@@ -24,25 +26,98 @@ export function OutputsSection({ outputs: { outputs, isRequesting, request }, fi
     <section className="flex flex-col gap-4">
       <h3>多格式輸出</h3>
       <p className="text-sm text-muted-foreground">依這段內容的摘要與章節，用 AI 寫成要發出去的文件；產生後可以複製或下載。</p>
-      <div className="flex flex-wrap gap-2">
-        {(Object.keys(OUTPUT_FORMAT_LABELS) as OutputFormat[]).map((format) => (
-          <Button key={format} size="sm" variant="outline" disabled={isRequesting} onClick={() => request(format)}>
-            {`產生 ${OUTPUT_FORMAT_LABELS[format]}`}
-          </Button>
-        ))}
-      </div>
+      <OutputForm onRequest={request} isRequesting={isRequesting} />
 
       {outputs.length > 0 && (
         <ul aria-label="已產生的輸出" className="flex flex-col gap-2">
           {outputs.map((output) => (
             <li key={output.id}>
-              <OutputItem output={output} onOpen={() => setOpenedId(output.id)} onRetry={() => request(output.format)} isRequesting={isRequesting} />
+              <OutputItem
+                output={output}
+                onOpen={() => setOpenedId(output.id)}
+                onRetry={() => request(requestFor(output))}
+                isRequesting={isRequesting}
+              />
             </li>
           ))}
         </ul>
       )}
     </section>
   )
+}
+
+const MAX_INSTRUCTION_CHARS = 200
+
+function OutputForm({ onRequest, isRequesting }: { onRequest: (params: OutputRequest) => void; isRequesting: boolean }) {
+  const [format, setFormat] = useState<OutputFormat>('podcast_description')
+  const [platform, setPlatform] = useState<SocialPlatform>('threads')
+  const [instruction, setInstruction] = useState('')
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    onRequest({
+      format,
+      ...(format === 'social_post' && { platform }),
+      ...(instruction.trim() && { instruction: instruction.trim() }),
+    })
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3 rounded-lg border p-3">
+      <div className="flex flex-wrap gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="output-format">格式</Label>
+          <select
+            id="output-format"
+            value={format}
+            onChange={(event) => setFormat(event.target.value as OutputFormat)}
+            className="h-9 rounded-md border bg-background px-2 text-sm"
+          >
+            {(Object.keys(OUTPUT_FORMAT_LABELS) as OutputFormat[]).map((value) => (
+              <option key={value} value={value}>{OUTPUT_FORMAT_LABELS[value]}</option>
+            ))}
+          </select>
+        </div>
+        {format === 'social_post' && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="output-platform">平台</Label>
+            <select
+              id="output-platform"
+              value={platform}
+              onChange={(event) => setPlatform(event.target.value as SocialPlatform)}
+              className="h-9 rounded-md border bg-background px-2 text-sm"
+            >
+              {(Object.keys(SOCIAL_PLATFORMS) as SocialPlatform[]).map((value) => (
+                <option key={value} value={value}>{SOCIAL_PLATFORMS[value].name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="output-instruction">要求（可省略）</Label>
+        <Input
+          id="output-instruction"
+          value={instruction}
+          maxLength={MAX_INSTRUCTION_CHARS}
+          placeholder="例如：語氣輕鬆一點、寫給工程師看"
+          onChange={(event) => setInstruction(event.target.value)}
+        />
+      </div>
+      <Button type="submit" size="sm" className="w-fit" disabled={isRequesting}>
+        產生
+      </Button>
+    </form>
+  )
+}
+
+/** The same request again: what a failed output asked for. */
+function requestFor(output: GeneratedOutput): OutputRequest {
+  return {
+    format: output.format,
+    ...(output.platform && { platform: output.platform }),
+    ...(output.instruction && { instruction: output.instruction }),
+  }
 }
 
 function OutputItem({
@@ -56,7 +131,7 @@ function OutputItem({
   onRetry: () => void
   isRequesting: boolean
 }) {
-  const label = OUTPUT_FORMAT_LABELS[output.format] ?? output.format
+  const label = outputLabel(output.format, output.platform)
   const when = formatShortDateTime(output.completedAt ?? output.requestedAt)
   if (output.status === 'COMPLETED') {
     return (
@@ -97,8 +172,9 @@ function OutputItem({
 }
 
 function OutputDocument({ output, fileName, onBack }: { output: GeneratedOutput; fileName: string; onBack: () => void }) {
-  const label = OUTPUT_FORMAT_LABELS[output.format] ?? output.format
+  const label = outputLabel(output.format, output.platform)
   const content = output.content ?? ''
+  const length = output.format === 'social_post' && output.platform ? postLength(content, output.platform) : null
 
   const copy = () => {
     navigator.clipboard.writeText(content).then(
@@ -118,6 +194,14 @@ function OutputDocument({ output, fileName, onBack }: { output: GeneratedOutput;
         <h4 className="text-sm font-medium">{label}</h4>
         <div className="rounded-lg border bg-muted/30 p-3 text-sm leading-relaxed whitespace-pre-wrap">{content}</div>
       </article>
+      {length && output.platform && (
+        <p className={length.over ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
+          <span>{`字數 ${length.length} / ${length.limit}`}</span>
+          {length.over && (
+            <span className="block">{`超過 ${SOCIAL_PLATFORMS[output.platform].name} 的字數上限，請刪減後再貼`}</span>
+          )}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={copy}>
           <Copy className="size-4" />

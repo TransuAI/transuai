@@ -3753,7 +3753,7 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
 
 describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop layout)', () => {
   const generating: GeneratedOutput = {
-    id: 'out-1', jobId: 'job-1', format: 'podcast_description', instruction: null, status: 'GENERATING', failureReason: null,
+    id: 'out-1', jobId: 'job-1', format: 'podcast_description', platform: null, instruction: null, status: 'GENERATING', failureReason: null,
     content: null, sourceRevision: 0, modelProvider: null, model: null, requestedAt: '2026-10-04T01:00:00Z', completedAt: null,
     editedAt: null,
   }
@@ -3777,7 +3777,8 @@ describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop l
     await openStudioTool('多格式輸出')
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
 
-    await user.click(screen.getByRole('button', { name: '產生 Podcast 介紹' }))
+    expect(screen.getByRole('combobox', { name: '格式' })).toHaveValue('podcast_description')
+    await user.click(screen.getByRole('button', { name: '產生' }))
     expect(outputsApi.request).toHaveBeenCalledWith('job-1', { format: 'podcast_description' })
     expect(screen.getByText('產生中…')).toBeInTheDocument()
 
@@ -3823,5 +3824,49 @@ describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop l
     await user.click(screen.getByRole('button', { name: '再試一次' }))
 
     expect(outputsApi.request).toHaveBeenCalledWith('job-1', { format: 'podcast_description' })
+  })
+
+  it('writes a social post for the chosen platform, with the user’s own request', async () => {
+    stubDesktopLayout()
+    vi.mocked(outputsApi.request).mockResolvedValue({ ...generating, format: 'social_post', platform: 'x' })
+    await renderCompletedJob()
+    await openStudioTool('多格式輸出')
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    expect(screen.queryByRole('combobox', { name: '平台' })).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: '格式' }), '社群貼文')
+    await user.selectOptions(screen.getByRole('combobox', { name: '平台' }), 'X')
+    await user.type(screen.getByRole('textbox', { name: '要求（可省略）' }), '語氣輕鬆一點')
+    await user.click(screen.getByRole('button', { name: '產生' }))
+
+    expect(outputsApi.request).toHaveBeenCalledWith('job-1', { format: 'social_post', platform: 'x', instruction: '語氣輕鬆一點' })
+    expect(await screen.findByText('社群貼文（X）')).toBeInTheDocument()
+  })
+
+  it('says when a social post runs over the platform’s length limit', async () => {
+    stubDesktopLayout()
+    const long = '字'.repeat(150)
+    vi.mocked(outputsApi.list).mockResolvedValue([{ ...done, format: 'social_post', platform: 'x', content: long }])
+    await renderCompletedJob()
+    await openStudioTool('多格式輸出')
+
+    fireEvent.click(await screen.findByRole('button', { name: /^社群貼文（X）/ }))
+
+    expect(screen.getByText('字數 300 / 280')).toBeInTheDocument()
+    expect(screen.getByText('超過 X 的字數上限，請刪減後再貼')).toBeInTheDocument()
+  })
+
+  it('makes the retry with the same format, platform and request as the one that failed', async () => {
+    stubDesktopLayout()
+    vi.mocked(outputsApi.list).mockResolvedValue([
+      { ...generating, format: 'social_post', platform: 'threads', instruction: '短一點', status: 'FAILED', failureReason: '產生失敗，請再試一次' },
+    ])
+    vi.mocked(outputsApi.request).mockResolvedValue(generating)
+    await renderCompletedJob()
+    await openStudioTool('多格式輸出')
+
+    fireEvent.click(await screen.findByRole('button', { name: '再試一次' }))
+
+    expect(outputsApi.request).toHaveBeenCalledWith('job-1', { format: 'social_post', platform: 'threads', instruction: '短一點' })
   })
 })
