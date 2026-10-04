@@ -894,4 +894,6 @@ message SegmentTranslation {
   // transcription-service 的片段 id
   string segment_id = 1;
   string text = 2;
+  // 翻的時候的原文：跟片段目前的文字不一樣，就是原文改過、這句還沒重翻（編輯後自動重翻，見 RequestTranslation）。
+  string source_text = 3;
 }
