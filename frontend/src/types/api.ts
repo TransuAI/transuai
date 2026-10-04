@@ -490,6 +490,17 @@ export interface Decision {
   createdAt: string | null
 }
 
+/** What the user writes for a decision (adding or editing); a time only when adding. */
+export interface DecisionInput {
+  statement: string
+  rationale: string
+  alternatives: string[]
+  /** A speaker's label; null when it isn't clear. */
+  proposedBy: string | null
+  tentative: boolean
+  startTime?: number | null
+}
+
 /** A job's extraction (null when never extracted) and decisions, by time (those without one last). */
 export interface JobDecisions {
   extraction: DecisionExtraction | null

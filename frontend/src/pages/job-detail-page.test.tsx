@@ -28,7 +28,7 @@ vi.mock('@/lib/api', () => ({
   speakerInsightsApi: { get: vi.fn(), request: vi.fn() },
   outputsApi: { list: vi.fn(), request: vi.fn(), update: vi.fn() },
   translationsApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), delete: vi.fn() },
-  decisionsApi: { list: vi.fn(), extract: vi.fn() },
+  decisionsApi: { list: vi.fn(), extract: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
 }))
 
 // Every test renders the whole page, and this file runs ~250 of them in one jsdom: on a busy machine the later, longer
@@ -4238,6 +4238,113 @@ describe('JobDetailPage decisions (決策, COMPLETED, desktop layout)', () => {
     await openStudioTool('決策')
 
     expect(await screen.findByText('這場沒有找到做成的決定')).toBeInTheDocument()
+  })
+
+  const card = (statement: string) => screen.getByText(statement).closest('li') as HTMLElement
+
+  it('edits a decision in place, and marks it as changed', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    vi.mocked(decisionsApi.update).mockResolvedValue(
+      decision({ statement: '資料庫確定用 PostgreSQL 16', alternatives: ['MySQL', 'SQLite'], proposedBy: 'S1', tentative: true, edited: true }),
+    )
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('決策')
+    await screen.findByRole('list', { name: '這場的決策' })
+
+    await user.click(within(card('資料庫用 PostgreSQL')).getByRole('button', { name: '修改' }))
+    const form = screen.getByRole('form', { name: '修改決策' })
+    await user.clear(within(form).getByRole('textbox', { name: '決定' }))
+    await user.type(within(form).getByRole('textbox', { name: '決定' }), '資料庫確定用 PostgreSQL 16')
+    await user.type(within(form).getByRole('textbox', { name: '沒選的選項（一行一個）' }), '{Enter}SQLite')
+    await user.selectOptions(within(form).getByRole('combobox', { name: '提出的人' }), '主持人')
+    await user.click(within(form).getByRole('checkbox', { name: '暫定' }))
+    await user.click(within(form).getByRole('button', { name: '儲存' }))
+
+    expect(decisionsApi.update).toHaveBeenCalledWith('job-1', 'd1', {
+      statement: '資料庫確定用 PostgreSQL 16', rationale: '需要 pgvector', alternatives: ['MySQL', 'SQLite'], proposedBy: 'S1',
+      tentative: true,
+    })
+    await screen.findByText('資料庫確定用 PostgreSQL 16')
+    const edited = card('資料庫確定用 PostgreSQL 16')
+    expect(edited).toHaveTextContent('已修改')
+    expect(edited).toHaveTextContent('提出：主持人')
+    expect(screen.queryByRole('form', { name: '修改決策' })).toBeNull()
+  })
+
+  it('keeps what was typed when saving fails', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    vi.mocked(decisionsApi.update).mockRejectedValue(new Error('network'))
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('決策')
+    await screen.findByRole('list', { name: '這場的決策' })
+
+    await user.click(within(card('資料庫用 PostgreSQL')).getByRole('button', { name: '修改' }))
+    await user.type(screen.getByRole('textbox', { name: '理由' }), '和向量搜尋')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    expect(await screen.findByText('決策沒有存到，請再試一次')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '理由' })).toHaveValue('需要 pgvector和向量搜尋')
+  })
+
+  it('adds a decision of their own at the playing time', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    vi.mocked(decisionsApi.create).mockResolvedValue(
+      decision({ id: 'd3', statement: '週會改到週三', rationale: '', alternatives: [], proposedBy: null, startTime: 0, evidenceText: null, source: 'user' }),
+    )
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('決策')
+    await screen.findByRole('list', { name: '這場的決策' })
+
+    await user.click(screen.getByRole('button', { name: '新增決策' }))
+    const form = screen.getByRole('form', { name: '新增決策' })
+    expect(within(form).getByRole('checkbox', { name: '附上目前播放的時間（0:00）' })).toBeChecked()
+    await user.type(within(form).getByRole('textbox', { name: '決定' }), '週會改到週三')
+    await user.click(within(form).getByRole('button', { name: '儲存' }))
+
+    expect(decisionsApi.create).toHaveBeenCalledWith('job-1', {
+      statement: '週會改到週三', rationale: '', alternatives: [], proposedBy: null, tentative: false, startTime: 0,
+    })
+    await screen.findByText('週會改到週三')
+    expect(card('週會改到週三')).toHaveTextContent('自己新增')
+  })
+
+  it('deletes a decision after confirming', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    vi.mocked(decisionsApi.remove).mockResolvedValue(undefined)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('決策')
+    await screen.findByRole('list', { name: '這場的決策' })
+
+    await user.click(within(card('資料庫用 PostgreSQL')).getByRole('button', { name: '刪除' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '刪除' }))
+
+    expect(decisionsApi.remove).toHaveBeenCalledWith('job-1', 'd1')
+    await waitFor(() => expect(screen.queryByText('資料庫用 PostgreSQL')).toBeNull())
+    expect(screen.getByText('上線日期暫定月底')).toBeInTheDocument()
+  })
+
+  it('downloads the decisions as Markdown from the export menu', async () => {
+    stubDesktopLayout()
+    const downloads = captureDownloads()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '下載決策（Markdown）' }))
+
+    expect(downloads[0].fileName).toBe('interview-決策.md')
+    const markdown = await downloads[0].blob?.text()
+    expect(markdown).toContain('## 1. 資料庫用 PostgreSQL\n\n- 理由：需要 pgvector\n- 沒選：MySQL\n- 提出：講者 2\n- 時間：[00:04] 「大家好」')
+    expect(markdown).toContain('## 2. 上線日期暫定月底（暫定）')
   })
 
   it('says the decisions may be out of date once the transcript has changed, and extracts them again', async () => {

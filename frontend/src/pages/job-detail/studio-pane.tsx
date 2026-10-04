@@ -306,6 +306,7 @@ export function StudioPane({
               transcript={transcript}
               onSeek={onSeek}
               mediaAvailable={mediaAvailable}
+              currentTime={currentTime}
               decisionToOpen={decisionToOpen}
               onDecisionOpened={onDecisionOpened}
             />

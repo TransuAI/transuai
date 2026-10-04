@@ -363,7 +363,7 @@ export function CompletedWorkspace({
 
         <div className="flex items-center gap-2">
           <ExportMenu
-            source={{ job, transcript, summary, chapters, qaHistory, notes: notes.notes, speakerInsights: speakerInsights.insights }}
+            source={{ job, transcript, summary, chapters, qaHistory, notes: notes.notes, speakerInsights: speakerInsights.insights, decisions: decisions.decisions?.decisions ?? [] }}
             quizzes={quizzes}
             translations={translations.translations}
           />

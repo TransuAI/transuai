@@ -6,6 +6,7 @@ import {
   markdownReportFormat,
   toMarkdownReport,
   withTranslation,
+  toDecisionsMarkdown,
   toNotesMarkdown,
   toQuizMarkdown,
   toPlainText,
@@ -558,5 +559,42 @@ describe('translated and bilingual subtitles (譯文、雙語)', () => {
 
     expect(toPlainText(withTranslation(segments, partly, 'translated'))).toBe('主持人：Hello everyone\n小明：開始吧\n')
     expect(toSrt(withTranslation(segments, partly, 'bilingual'))).toContain('小明：開始吧\n\n')
+  })
+})
+
+describe('toDecisionsMarkdown', () => {
+  it('lists each decision with why, what else was considered, who proposed it and where it was made', () => {
+    const markdown = toDecisionsMarkdown({
+      fileName: 'meeting.mp3',
+      title: '工程週會',
+      decisions: [
+        { statement: '資料庫用 PostgreSQL', rationale: '需要 pgvector', alternatives: ['MySQL', 'MongoDB'], proposer: '講者 2',
+          tentative: false, startTime: 64, evidenceText: '那就決定用 PostgreSQL' },
+        { statement: '上線日期暫定月底', rationale: '', alternatives: [], proposer: null, tentative: true, startTime: null,
+          evidenceText: null },
+      ],
+    })
+
+    expect(markdown).toBe(
+      [
+        '# 工程週會：決策',
+        '',
+        '- 檔名：meeting.mp3',
+        '',
+        '## 1. 資料庫用 PostgreSQL',
+        '',
+        '- 理由：需要 pgvector',
+        '- 沒選：MySQL、MongoDB',
+        '- 提出：講者 2',
+        '- 時間：[01:04] 「那就決定用 PostgreSQL」',
+        '',
+        '## 2. 上線日期暫定月底（暫定）',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('says so when there are none', () => {
+    expect(toDecisionsMarkdown({ fileName: 'meeting.mp3', decisions: [] })).toBe('# meeting.mp3：決策\n\n尚無決策\n')
   })
 })

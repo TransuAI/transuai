@@ -2,7 +2,7 @@ import { speakerNameLookup, speakerNameOrLabel } from '@/lib/speakers'
 import { computeSpeakerStats, insightsByKind } from '@/lib/speaker-stats'
 import { sortNotes } from '@/lib/notes'
 import { hasSpeakerInsightResults, isSpeakerInsightsStale, isSummaryStale } from '@/lib/staleness'
-import type { Chapter, Job, Note, QuizQuestion, SpeakerInsights, Summary, Transcript, WebSource } from '@/types/api'
+import type { Chapter, Decision, Job, Note, QuizQuestion, SpeakerInsights, Summary, Transcript, WebSource } from '@/types/api'
 
 // 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
 // 這裡只負責「內容長什麼樣」，下載 / 複製由呼叫端處理。
@@ -31,6 +31,20 @@ export interface ExportContent {
   notes: ExportNote[]
   /** 講者數據; null (or absent) when speakers aren't shown. */
   speakerStats?: ExportSpeakerStats | null
+  /** 決策紀錄, by time (those without one last). */
+  decisions?: ExportDecision[]
+}
+
+/** A decision in an export: who proposed it by name. */
+export interface ExportDecision {
+  statement: string
+  rationale: string
+  alternatives: string[]
+  /** The proposer's display name; null when it isn't clear. */
+  proposer: string | null
+  tentative: boolean
+  startTime: number | null
+  evidenceText: string | null
 }
 
 /** 講者數據 in an export (see lib/speaker-stats): one row per speaker, by display order. */
@@ -79,6 +93,8 @@ export interface ExportSource {
   notes: Note[]
   /** 講者數據's AI part; left out of the report when it hasn't been analysed. */
   speakerInsights?: SpeakerInsights | null
+  /** 決策紀錄 as listed in the Studio (already in order). */
+  decisions?: Decision[]
 }
 
 export function buildExportContent(source: ExportSource): ExportContent {
@@ -110,6 +126,15 @@ export function buildExportContent(source: ExportSource): ExportContent {
       })),
     notes: sortNotes(notes).map(({ timeSeconds, text }) => ({ timeSeconds, text })),
     speakerStats: exportSpeakerStats(transcript, source.speakerInsights ?? null),
+    decisions: (source.decisions ?? []).map((decision) => ({
+      statement: decision.statement,
+      rationale: decision.rationale,
+      alternatives: decision.alternatives,
+      proposer: decision.proposedBy ? speakerName(decision.proposedBy) ?? decision.proposedBy : null,
+      tentative: decision.tentative,
+      startTime: decision.startTime,
+      evidenceText: decision.evidenceText,
+    })),
   }
 }
 
@@ -284,6 +309,34 @@ export const NOTES_MARKDOWN_FORMAT: ExportFormat = {
   fileSuffix: '-筆記.md',
   mimeType: 'text/markdown',
   render: toNotesMarkdown,
+}
+
+// 決策紀錄的 Markdown：大標「標題：決策」，有標題時多一行檔名；每個決策一節（編號、暫定的標註），下面是理由、沒選的、提出者、
+// 時間點與原話，沒有的就不寫。
+export function toDecisionsMarkdown(content: Pick<ExportContent, 'fileName' | 'title' | 'decisions'>): string {
+  const blocks: string[] = [`# ${content.title || content.fileName}：決策`]
+  if (content.title) blocks.push(`- 檔名：${content.fileName}`)
+  const decisions = content.decisions ?? []
+  if (decisions.length === 0) blocks.push('尚無決策')
+  decisions.forEach((decision, i) => {
+    blocks.push(`## ${i + 1}. ${decision.statement}${decision.tentative ? '（暫定）' : ''}`)
+    const lines = [
+      decision.rationale && `- 理由：${decision.rationale}`,
+      decision.alternatives.length > 0 && `- 沒選：${decision.alternatives.join('、')}`,
+      decision.proposer && `- 提出：${decision.proposer}`,
+      decision.startTime !== null &&
+        `- 時間：[${formatClock(decision.startTime)}]${decision.evidenceText ? ` 「${decision.evidenceText}」` : ''}`,
+    ].filter(Boolean)
+    if (lines.length > 0) blocks.push(lines.join('\n'))
+  })
+  return blocks.join('\n\n') + '\n'
+}
+
+export const DECISIONS_MARKDOWN_FORMAT: ExportFormat = {
+  label: '下載決策（Markdown）',
+  fileSuffix: '-決策.md',
+  mimeType: 'text/markdown',
+  render: toDecisionsMarkdown,
 }
 
 // Markdown 報告：標題、長度與建立時間、摘要、章節、（有的話）筆記、逐字稿，最後是（有的話）問答紀錄。每一節都是一

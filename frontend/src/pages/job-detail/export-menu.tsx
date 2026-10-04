@@ -7,6 +7,7 @@ import { downloadTextFile, openDownloadUrl, fileNameWithSuffix } from '@/lib/dow
 import {
   buildExportContent,
   markdownReportFormat,
+  DECISIONS_MARKDOWN_FORMAT,
   NOTES_MARKDOWN_FORMAT,
   PLAIN_TEXT_FORMAT,
   QUIZ_MARKDOWN,
@@ -164,6 +165,12 @@ export function ExportMenu({
         </DropdownMenuCheckboxItem>
         <DropdownMenuItem disabled={source.notes.length === 0} onSelect={() => download(NOTES_MARKDOWN_FORMAT)}>
           {NOTES_MARKDOWN_FORMAT.label}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={(source.decisions ?? []).length === 0}
+          onSelect={() => download(DECISIONS_MARKDOWN_FORMAT)}
+        >
+          {DECISIONS_MARKDOWN_FORMAT.label}
         </DropdownMenuItem>
         {doneQuizzes.length > 0 && (
           <>

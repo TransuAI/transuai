@@ -37,7 +37,9 @@ import type {
   User,
   WebSearchResult,
   SpeakerInsights,
+  Decision,
   DecisionExtraction,
+  DecisionInput,
   JobDecisions,
   GeneratedOutput,
   OutputRequest,
@@ -260,6 +262,15 @@ export const outputsApi = {
 export const decisionsApi = {
   list: (jobId: string) => apiFetch<JobDecisions>(`/jobs/${jobId}/decisions`),
   extract: (jobId: string) => apiFetch<DecisionExtraction>(`/jobs/${jobId}/decisions/extract`, { method: 'POST' }),
+  // The user's own (source user); kept when extracting again.
+  create: (jobId: string, decision: DecisionInput) =>
+    apiFetch<Decision>(`/jobs/${jobId}/decisions`, { method: 'POST', body: decision }),
+  // Edited: kept when extracting again. The time and the words it was made with stay.
+  update: (jobId: string, decisionId: string, decision: DecisionInput) =>
+    apiFetch<Decision>(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'PATCH', body: decision }),
+  // An extracted one is only hidden (extracting again doesn't bring it back); one the user added is gone.
+  remove: (jobId: string, decisionId: string) =>
+    apiFetch<void>(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'DELETE' }),
 }
 
 export const speakerInsightsApi = {
