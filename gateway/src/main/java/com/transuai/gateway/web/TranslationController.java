@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +21,7 @@ import com.transuai.gateway.web.dto.TranslationDto;
 import com.transuai.gateway.web.dto.TranslationRequestDto;
 
 import lombok.RequiredArgsConstructor;
+import transuai.ai.v1.Ai.DeleteTranslationRequest;
 import transuai.ai.v1.Ai.GetTranslationRequest;
 import transuai.ai.v1.Ai.ListTranslationsRequest;
 import transuai.ai.v1.Ai.RequestTranslationRequest;
@@ -63,6 +65,14 @@ public class TranslationController {
         jobOwnershipGuard.check(userId, jobId);
         return toDto(aiServiceStub.getTranslation(GetTranslationRequest.newBuilder()
                 .setJobId(jobId).setLanguage(language).build()), true);
+    }
+
+    // 刪掉一種語言的譯文；沒有這種語言回 404。
+    @DeleteMapping("/jobs/{jobId}/translations/{language}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@CurrentUserId UUID userId, @PathVariable String jobId, @PathVariable String language) {
+        jobOwnershipGuard.check(userId, jobId);
+        aiServiceStub.deleteTranslation(DeleteTranslationRequest.newBuilder().setJobId(jobId).setLanguage(language).build());
     }
 
     private static TranslationDto toDto(Translation translation, boolean withSegments) {

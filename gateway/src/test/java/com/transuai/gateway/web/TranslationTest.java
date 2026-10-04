@@ -32,6 +32,8 @@ import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.grpc.Status;
+import transuai.ai.v1.Ai.DeleteTranslationRequest;
+import transuai.ai.v1.Ai.DeleteTranslationResponse;
 import transuai.ai.v1.Ai.ListTranslationsResponse;
 import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.RequestTranslationRequest;
@@ -40,7 +42,7 @@ import transuai.ai.v1.Ai.Translation;
 import transuai.ai.v1.Ai.TranslationStatus;
 import transuai.ai.v1.AiServiceGrpc;
 
-/** 譯文（見 .scratch/transcript-translation/issues/01）：要求、列出、取得，先過 ownership；要求是花錢的功能。 */
+/** 譯文（見 .scratch/transcript-translation/issues/01、03）：要求、列出、取得、刪除，先過 ownership；要求是花錢的功能。 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(RedisContainerConfig.class)
@@ -111,6 +113,30 @@ class TranslationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.segments[0].segmentId").value("s1"))
                 .andExpect(jsonPath("$.segments[0].text").value("嗨。"));
+    }
+
+    @Test
+    void deletingALanguagePassesItOn() throws Exception {
+        when(aiServiceStub.deleteTranslation(any())).thenReturn(DeleteTranslationResponse.getDefaultInstance());
+
+        call(MockMvcRequestBuilders.delete("/jobs/" + JOB + "/translations/ja")).andExpect(status().isNoContent());
+
+        verify(aiServiceStub).deleteTranslation(DeleteTranslationRequest.newBuilder().setJobId(JOB).setLanguage("ja").build());
+    }
+
+    @Test
+    void deletingALanguageThatWasNeverTranslatedIsNotFound() throws Exception {
+        when(aiServiceStub.deleteTranslation(any())).thenThrow(Status.NOT_FOUND.asRuntimeException());
+
+        call(MockMvcRequestBuilders.delete("/jobs/" + JOB + "/translations/ko")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void someoneElsesTranslationCannotBeDeleted() throws Exception {
+        when(uploadServiceStub.getJob(any())).thenThrow(Status.NOT_FOUND.asRuntimeException());
+
+        call(MockMvcRequestBuilders.delete("/jobs/" + JOB + "/translations/ja")).andExpect(status().isNotFound());
+        verify(aiServiceStub, never()).deleteTranslation(any());
     }
 
     @Test
