@@ -9,7 +9,7 @@ public record TranslationDto(String language, String status, String failureReaso
         int translatedSegments, String modelProvider, String model, Instant requestedAt, Instant completedAt,
         List<Segment> segments) {
 
-    // 一個片段的譯文：segmentId 對到逐字稿的片段。
-    public record Segment(String segmentId, String text) {
+    // 一個片段的譯文：segmentId 對到逐字稿的片段；sourceText 是翻的時候的原文（跟片段目前的文字不一樣就是還沒重翻）。
+    public record Segment(String segmentId, String text, String sourceText) {
     }
 }

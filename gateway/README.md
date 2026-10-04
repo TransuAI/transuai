@@ -122,7 +122,7 @@ docker compose up -d
 | `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
 | `POST` | `/jobs/{jobId}/translations` | 翻譯逐字稿：body `{ "language": "zh-TW" \| "en" \| "ja" \| "ko" }`，回 `202` 與這種語言的譯文（`status: GENERATING`）；一種語言一份，已經在翻就直接回傳，翻好的再要求是補翻缺的；不支援的語言或沒帶回 400；轉給 `RequestTranslation`。花錢的功能、受每月平台模型上限管 |
 | `GET` | `/jobs/{jobId}/translations` | 各語言的譯文：`[{ language, status, failureReason, totalSegments, translatedSegments, modelProvider, model, requestedAt, completedAt, segments: null }]`；前端每 3 秒輪詢直到沒有 `GENERATING` |
-| `GET` | `/jobs/{jobId}/translations/{language}` | 一種語言含片段：`segments: [{ segmentId, text }]`（翻譯中也有已經翻好的）；沒有這種語言回 404 |
+| `GET` | `/jobs/{jobId}/translations/{language}` | 一種語言含片段：`segments: [{ segmentId, text, sourceText }]`（翻譯中也有已經翻好的；`sourceText` 是翻的時候的原文，跟片段目前的文字不一樣就是原文改過、還沒重翻）；沒有這種語言回 404 |
 | `DELETE` | `/jobs/{jobId}/translations/{language}` | 刪掉一種語言的譯文（翻譯中也可以），回 `204`；沒有這種語言回 404；轉給 `DeleteTranslation` |
 | `POST` | `/jobs/{jobId}/outputs` | 多格式輸出：產生一份，body `{ "format": "podcast_description" \| "youtube_description" \| "blog_post" \| "newsletter" \| "social_post", "platform"?: "threads" \| "facebook" \| "instagram" \| "linkedin" \| "x", "instruction"?: string }`（社群貼文一定要有 `platform`），回 `202` 與「產生中」的那一份；每次都是新的一份。先過 ownership 並取 Job 的標題一起帶給 `RequestOutput`；沒帶 `format` 回 400，格式不認得或要求超過 200 字也是 400。花錢的功能、受每月平台模型上限管 |
 | `GET` | `/jobs/{jobId}/outputs` | 這個 Job 的輸出（新的在前）：`[{ id, jobId, format, platform, instruction, status, failureReason, content, sourceRevision, modelProvider, model, requestedAt, completedAt, editedAt }]`；`content` 是 Markdown（完成前 `null`）；前端每 3 秒輪詢直到沒有 `GENERATING` |

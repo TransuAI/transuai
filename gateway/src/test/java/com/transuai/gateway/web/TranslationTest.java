@@ -107,12 +107,13 @@ class TranslationTest {
     @Test
     void oneLanguageComesWithItsSegments() throws Exception {
         when(aiServiceStub.getTranslation(any())).thenReturn(translating.toBuilder()
-                .addSegments(SegmentTranslation.newBuilder().setSegmentId("s1").setText("嗨。")).build());
+                .addSegments(SegmentTranslation.newBuilder().setSegmentId("s1").setText("嗨。").setSourceText("Hi.")).build());
 
         call(MockMvcRequestBuilders.get("/jobs/" + JOB + "/translations/zh-TW"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.segments[0].segmentId").value("s1"))
-                .andExpect(jsonPath("$.segments[0].text").value("嗨。"));
+                .andExpect(jsonPath("$.segments[0].text").value("嗨。"))
+                .andExpect(jsonPath("$.segments[0].sourceText").value("Hi."));
     }
 
     @Test

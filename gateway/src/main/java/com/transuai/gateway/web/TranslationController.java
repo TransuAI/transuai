@@ -83,6 +83,6 @@ public class TranslationController {
                 GrpcStrings.emptyToNull(translation.getModel()), GrpcTimestamps.toInstant(translation.getRequestedAt()),
                 translation.hasCompletedAt() ? GrpcTimestamps.toInstant(translation.getCompletedAt()) : null,
                 withSegments ? translation.getSegmentsList().stream()
-                        .map(s -> new TranslationDto.Segment(s.getSegmentId(), s.getText())).toList() : null);
+                        .map(s -> new TranslationDto.Segment(s.getSegmentId(), s.getText(), s.getSourceText())).toList() : null);
     }
 }
