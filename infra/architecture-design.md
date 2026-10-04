@@ -209,6 +209,7 @@ POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { 
                                          （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
 GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）
 GET    /jobs/{jobId}/outputs/{outputId} 一份輸出
+PATCH  /jobs/{jobId}/outputs/{outputId} 使用者修改內容 { "content" }（只有完成的可以改；改了記 editedAt）
 POST   /jobs/{jobId}/speaker-insights   講者數據的 AI 判斷（每位講者提出的問題、可能的打斷），回 202（背景分析，前端每 3 秒輪詢）；
                                          一個 Job 一份，再分析完成才取代
 GET    /jobs/{jobId}/speaker-insights   目前這一份：狀態、依據的 revision、模型、項目（類型、講者、被打斷的講者、時間、原話）

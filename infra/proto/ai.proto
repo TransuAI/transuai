@@ -73,6 +73,9 @@ service AiService {
   rpc ListOutputs(ListOutputsRequest) returns (ListOutputsResponse);
   // 一份輸出；不屬於這個 Job 回 NOT_FOUND。
   rpc GetOutput(GetOutputRequest) returns (GeneratedOutput);
+  // 使用者修改內容（只有完成的可以改）：跟原本一樣就不算修改；空白或超過 20000 字回 INVALID_ARGUMENT；還在產生或失敗的回
+  // FAILED_PRECONDITION；不屬於這個 Job 回 NOT_FOUND。
+  rpc UpdateOutput(UpdateOutputRequest) returns (GeneratedOutput);
 
   // 講者數據的 AI 判斷（每位講者提出的問題、可能的打斷）：一個 Job 一份，再分析就取代。要求後立刻回傳「分析中」，背景用要求者的
   // 預設模型分析（見 ai-service README「講者數據」）。少於兩位講者時分析會失敗並附原因。
@@ -796,6 +799,12 @@ message ListOutputsResponse {
 message GetOutputRequest {
   string job_id = 1;
   string output_id = 2;
+}
+
+message UpdateOutputRequest {
+  string job_id = 1;
+  string output_id = 2;
+  string content = 3;
 }
 
 message GeneratedOutput {
