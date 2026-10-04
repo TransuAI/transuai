@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { decisionHref } from '@/lib/decision-links'
 import { jobDate } from '@/lib/job-display'
 import type { Decision, DecisionLink } from '@/types/api'
 
@@ -24,7 +25,7 @@ export function DecisionSupersession({ decision }: { decision: Decision }) {
 
 function DecisionLinkTo({ link }: { link: DecisionLink }) {
   return (
-    <Link to={`/jobs/${link.jobId}?decision=${link.id}`} className="text-foreground/80 underline-offset-2 hover:underline">
+    <Link to={decisionHref(link.jobId, link.id)} className="text-foreground/80 underline-offset-2 hover:underline">
       {link.meetingAt && jobDate(link.meetingAt)}「{link.statement}」
     </Link>
   )

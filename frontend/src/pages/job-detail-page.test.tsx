@@ -4163,7 +4163,7 @@ describe('JobDetailPage decisions (決策, COMPLETED, desktop layout)', () => {
   const extracted = { ...extracting, status: 'COMPLETED' as const, model: 'qwen3:14b', completedAt: '2026-10-04T03:01:00Z' }
   const decision = (overrides: Partial<Decision>): Decision => ({
     id: 'd1', jobId: 'job-1', statement: '資料庫用 PostgreSQL', rationale: '需要 pgvector', alternatives: ['MySQL'],
-    proposedBy: 'S2', tentative: false, startTime: 4, evidenceText: '大家好', source: 'ai', edited: false,
+    proposedBy: 'S2', proposedByName: '講者 2', tentative: false, startTime: 4, evidenceText: '大家好', source: 'ai', edited: false,
     supersedes: null, supersededBy: [], meetingAt: null, createdAt: '2026-10-04T03:01:00Z', ...overrides,
   })
   const decisions = [
@@ -4229,6 +4229,21 @@ describe('JobDetailPage decisions (決策, COMPLETED, desktop layout)', () => {
     await vi.advanceTimersByTimeAsync(3000)
 
     await waitFor(() => expect(tile).toHaveAccessibleDescription('2 個決策'))
+  })
+
+  it('can extract them again any time, not only once the transcript has changed', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    vi.mocked(decisionsApi.extract).mockResolvedValue(extracting)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('決策')
+    await screen.findByRole('list', { name: '這場的決策' })
+
+    expect(screen.queryByText('逐字稿已修改，這些決策可能過時')).toBeNull()
+    await user.click(screen.getByRole('button', { name: '重新抽出' }))
+
+    expect(decisionsApi.extract).toHaveBeenCalledWith('job-1')
   })
 
   it('says when nothing was decided', async () => {
@@ -4426,7 +4441,7 @@ describe('JobDetailPage speaker stats and decisions (講者數據 × 決策, COM
     requestedAt: '2026-10-04T03:00:00Z', completedAt: '2026-10-04T03:01:00Z',
   }
   const decision = (overrides: Partial<Decision>): Decision => ({
-    id: 'd1', jobId: 'job-1', statement: '資料庫用 PostgreSQL', rationale: '', alternatives: [], proposedBy: 'S2',
+    id: 'd1', jobId: 'job-1', statement: '資料庫用 PostgreSQL', rationale: '', alternatives: [], proposedBy: 'S2', proposedByName: '講者 2',
     tentative: false, startTime: 4, evidenceText: '大家好', source: 'ai', edited: false, supersedes: null, supersededBy: [], meetingAt: null,
     createdAt: '2026-10-04T03:01:00Z', ...overrides,
   })
@@ -4442,11 +4457,11 @@ describe('JobDetailPage speaker stats and decisions (講者數據 × 決策, COM
     await openStudioTool('講者數據')
 
     const table = screen.getByRole('table', { name: '每位講者的發言' })
-    expect(within(table).getByRole('columnheader', { name: '決定' })).toBeInTheDocument()
+    expect(within(table).getByRole('columnheader', { name: '決策' })).toBeInTheDocument()
     expect(within(table).getByRole('row', { name: /^講者 2/ })).toHaveTextContent(/1$/)
     expect(within(table).getByRole('row', { name: /^主持人/ })).toHaveTextContent(/0$/)
-    expect(screen.getByText('這場做了 2 個決定')).toBeInTheDocument()
-    const made = screen.getByRole('list', { name: '這場的決定' })
+    expect(screen.getByText('這場有 2 個決策')).toBeInTheDocument()
+    const made = screen.getByRole('list', { name: '每位講者提出的決策' })
     expect(within(made).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       '講者 2：資料庫用 PostgreSQL', '不確定是誰：上線日期暫定月底',
     ])
@@ -4463,7 +4478,7 @@ describe('JobDetailPage speaker stats and decisions (講者數據 × 決策, COM
     const user = userEvent.setup()
     await openStudioTool('講者數據')
 
-    expect(within(screen.getByRole('table', { name: '每位講者的發言' })).queryByRole('columnheader', { name: '決定' })).toBeNull()
+    expect(within(screen.getByRole('table', { name: '每位講者的發言' })).queryByRole('columnheader', { name: '決策' })).toBeNull()
     expect(screen.getByText('還沒抽出這場的決策')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '到「決策」抽出' }))
 

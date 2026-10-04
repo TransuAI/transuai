@@ -181,7 +181,17 @@ export function DecisionsSection({
         </Button>
       )}
 
-      {found.length > 0 && extraction?.model && (
+      {status === 'COMPLETED' && !offerAgain && (
+        // Not only after an edit: e.g. to have a meeting extracted before 取代 existed looked at for it.
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground/80">
+          {extraction?.model && <span>由 {extraction.model} 抽取</span>}
+          <Button size="xs" variant="ghost" disabled={isRequesting} onClick={extract}>
+            <RefreshCw className="size-3.5" />
+            重新抽出
+          </Button>
+        </div>
+      )}
+      {status !== 'COMPLETED' && found.length > 0 && extraction?.model && (
         <p className="text-xs text-muted-foreground/80">由 {extraction.model} 抽取</p>
       )}
 

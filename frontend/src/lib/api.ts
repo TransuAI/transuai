@@ -257,7 +257,6 @@ export const outputsApi = {
     apiFetch<GeneratedOutput>(`/jobs/${jobId}/outputs/${outputId}`, { method: 'PATCH', body: { content } }),
 }
 
-// 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.
 // 決策紀錄: extracted in the background (meetings and interviews also once transcribed); extracting again only replaces
 // what the AI found and the user didn't change.
 export interface DecisionQuestionHandlers {
@@ -265,6 +264,12 @@ export interface DecisionQuestionHandlers {
   onDelta: (text: string) => void
   onError: (message: string) => void
   onModel?: (model: { provider: string; model: string }) => void
+}
+
+/** The 決策 page's filters: a category, and some jobs (none chosen: all of them). */
+export interface DecisionFilters {
+  category?: JobCategory
+  jobIds?: string[]
 }
 
 export const decisionsApi = {
@@ -277,9 +282,20 @@ export const decisionsApi = {
   update: (jobId: string, decisionId: string, decision: DecisionInput) =>
     apiFetch<Decision>(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'PATCH', body: decision }),
   // An extracted one is only hidden (extracting again doesn't bring it back); one the user added is gone.
+  remove: (jobId: string, decisionId: string) =>
+    apiFetchVoid(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'DELETE' }),
+  // The 決策 page: all the user's decisions, or within the filters; q searches the words and the meaning.
+  timeline: ({ q, category, jobIds = [] }: DecisionFilters & { q?: string }) => {
+    const search = new URLSearchParams()
+    if (q) search.set('q', q)
+    if (category) search.set('category', category)
+    for (const jobId of jobIds) search.append('jobId', jobId)
+    const query = search.toString()
+    return apiFetch<DecisionTimeline>(`/decisions${query ? `?${query}` : ''}`)
+  },
   // 問決策: answered from the user's decisions only (within the page's filters), streamed; sources come first, in the
   // order the answer numbers them [n].
-  ask: (params: { question: string; category?: JobCategory; jobId?: string }, handlers: DecisionQuestionHandlers) =>
+  ask: (params: DecisionFilters & { question: string }, handlers: DecisionQuestionHandlers) =>
     requestSse('/decisions/ask', { method: 'POST', body: params }, (event, data) => {
       switch (event) {
         case 'sources':
@@ -296,15 +312,9 @@ export const decisionsApi = {
           break
       }
     }),
-  // The 決策 page: all the user's decisions, or a category's, or one job's; q searches the words and the meaning.
-  timeline: (params: { q?: string; category?: JobCategory; jobId?: string }) => {
-    const search = new URLSearchParams(params as Record<string, string>).toString()
-    return apiFetch<DecisionTimeline>(`/decisions${search ? `?${search}` : ''}`)
-  },
-  remove: (jobId: string, decisionId: string) =>
-    apiFetchVoid(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'DELETE' }),
 }
 
+// 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.
 export const speakerInsightsApi = {
   get: (jobId: string) => apiFetch<SpeakerInsights>(`/jobs/${jobId}/speaker-insights`),
   request: (jobId: string) => apiFetch<SpeakerInsights>(`/jobs/${jobId}/speaker-insights`, { method: 'POST' }),

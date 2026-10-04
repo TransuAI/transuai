@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Download, Loader2Icon, MessageCircleQuestion, Search } from 'lucide-react'
+import { ChevronDown, Download, Loader2Icon, MessageCircleQuestion, Search } from 'lucide-react'
 import { decisionsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
+import { decisionHref } from '@/lib/decision-links'
 import { downloadTextFile } from '@/lib/download'
 import { toDecisionTimelineMarkdown, type ExportDecision } from '@/lib/export-formats'
 import { CATEGORY_LABELS, jobDate, jobDisplayName } from '@/lib/job-display'
@@ -11,6 +12,14 @@ import { formatDuration } from '@/lib/media'
 import { DecisionSupersession } from '@/components/decision-supersession'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Decision, DecisionJob, DecisionTimeline, JobCategory } from '@/types/api'
@@ -24,7 +33,7 @@ function isCategory(value: string | null): value is JobCategory {
 }
 
 // 決策 (see ai-service CONTEXT.md「決策」): every decision across the user's meetings — a timeline by meeting date
-// (the job's upload time), newest first, which can be narrowed to a category or one job, or searched by words and
+// (the job's upload time), newest first, which can be narrowed to a category or some jobs, or searched by words and
 // meaning. Each decision opens its job where it was made. The search (q) and filters live in the address, as on the
 // jobs page, so coming back from a job keeps them.
 export function DecisionsPage() {
@@ -32,11 +41,12 @@ export function DecisionsPage() {
   const query = searchParams.get('q')?.trim() ?? ''
   const rawCategory = searchParams.get('category')
   const category = isCategory(rawCategory) ? rawCategory : null
-  const jobId = searchParams.get('jobId') || null
+  const jobIdsInAddress = searchParams.getAll('jobId').join(',')
+  const jobIds = useMemo(() => (jobIdsInAddress ? jobIdsInAddress.split(',') : []), [jobIdsInAddress])
 
   const [items, setItems] = useState<Item[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  // Every job seen so far, for the job filter: picking one narrows the results to it, and it must stay pickable.
+  // Every job seen so far, for the job filter: picking some narrows the results to them, and the rest must stay pickable.
   const [jobsSeen, setJobsSeen] = useState<Map<string, DecisionJob>>(new Map())
 
   // As the jobs page: what's typed follows into the address once typing pauses.
@@ -56,6 +66,13 @@ export function DecisionsPage() {
       }, options),
     [setSearchParams],
   )
+  const chooseJobs = (chosen: string[]) =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('jobId')
+      for (const id of chosen) next.append('jobId', id)
+      return next
+    })
   // Typing replaces the address rather than adding to the history, so 上一頁 doesn't step back through half-typed words.
   useEffect(() => {
     const typed = draft.trim()
@@ -69,7 +86,7 @@ export function DecisionsPage() {
     let current = true
     setIsLoading(true)
     decisionsApi
-      .timeline({ ...(query && { q: query }), ...(category && { category }), ...(jobId && { jobId }) })
+      .timeline({ ...(query && { q: query }), ...(category && { category }), ...(jobIds.length > 0 && { jobIds }) })
       .then((timeline) => {
         if (!current) return
         setItems(timeline.items)
@@ -88,14 +105,15 @@ export function DecisionsPage() {
     return () => {
       current = false
     }
-  }, [query, category, jobId])
+  }, [query, category, jobIds])
 
   const meetings = useMemo(() => byMeeting(items), [items])
   const download = () => {
     const filters = [
       query && `搜尋：${query}`,
       category && `類型：${CATEGORY_LABELS[category]}`,
-      jobId && jobsSeen.has(jobId) && `Job：${jobDisplayName(jobsSeen.get(jobId)!)}`,
+      jobIds.length > 0 &&
+        `Job：${jobIds.map((id) => (jobsSeen.has(id) ? jobDisplayName(jobsSeen.get(id)!) : id)).join('、')}`,
     ].filter((filter): filter is string => Boolean(filter))
     downloadTextFile({
       fileName: '決策.md',
@@ -144,26 +162,38 @@ export function DecisionsPage() {
             </option>
           ))}
         </select>
-        <select
-          aria-label="Job"
-          value={jobId ?? ''}
-          onChange={(event) => setParam('jobId', event.target.value || null)}
-          className="h-9 max-w-56 rounded-md border bg-background px-2 text-sm"
-        >
-          <option value="">全部 Job</option>
-          {[...jobsSeen.values()].map((job) => (
-            <option key={job.jobId} value={job.jobId}>
-              {jobDisplayName(job)}
-            </option>
-          ))}
-        </select>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-9 font-normal">
+              {jobIds.length === 0 ? 'Job：全部' : `Job：${jobIds.length} 個`}
+              <ChevronDown className="size-4 text-muted-foreground" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-80 max-w-72 overflow-y-auto">
+            <DropdownMenuItem disabled={jobIds.length === 0} onSelect={() => chooseJobs([])}>
+              全部 Job
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {[...jobsSeen.values()].map((job) => (
+              <DropdownMenuCheckboxItem
+                key={job.jobId}
+                checked={jobIds.includes(job.jobId)}
+                onCheckedChange={(checked) =>
+                  chooseJobs(checked ? [...jobIds, job.jobId] : jobIds.filter((id) => id !== job.jobId))
+                }
+              >
+                <span className="truncate">{jobDisplayName(job)}</span>
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button variant="outline" size="sm" disabled={items.length === 0} onClick={download}>
           <Download className="size-4" />
           下載 Markdown
         </Button>
       </div>
 
-      <AskDecisions category={category} jobId={jobId} />
+      <AskDecisions category={category} jobIds={jobIds} />
 
       {isLoading && items.length === 0 ? (
         <div className="flex flex-col gap-3">
@@ -172,7 +202,7 @@ export function DecisionsPage() {
         </div>
       ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {query || category || jobId
+          {query || category || jobIds.length > 0
             ? '沒有符合的決策'
             : '還沒有決策。會議與訪談轉錄完會自動抽出決策，其他 Job 可以在工作區的 Studio「決策」抽出。'}
         </p>
@@ -210,7 +240,7 @@ export function DecisionsPage() {
 
 // 問決策: a question answered only from the user's decisions (within the page's filters) — the answer streams in, and the
 // decisions it's based on are listed under it, numbered as the answer cites them [n].
-function AskDecisions({ category, jobId }: { category: JobCategory | null; jobId: string | null }) {
+function AskDecisions({ category, jobIds }: { category: JobCategory | null; jobIds: string[] }) {
   const [question, setQuestion] = useState('')
   const [asked, setAsked] = useState<{
     question: string
@@ -231,7 +261,7 @@ function AskDecisions({ category, jobId }: { category: JobCategory | null; jobId
       setAsked((prev) => (prev ? change(prev) : prev))
     try {
       await decisionsApi.ask(
-        { question: text, ...(category && { category }), ...(jobId && { jobId }) },
+        { question: text, ...(category && { category }), ...(jobIds.length > 0 && { jobIds }) },
         {
           onSources: (sources) => update((prev) => ({ ...prev, sources })),
           onDelta: (delta) => update((prev) => ({ ...prev, answer: prev.answer + delta })),
@@ -283,7 +313,7 @@ function AskDecisions({ category, jobId }: { category: JobCategory | null; jobId
                     {jobDisplayName(job)}
                   </Link>
                   {decision.startTime !== null && (
-                    <Link to={`/jobs/${job.jobId}?t=${decision.startTime}&decision=${decision.id}`} className="font-mono hover:underline">
+                    <Link to={decisionHref(job.jobId, decision.id, decision.startTime)} className="font-mono hover:underline">
                       {formatDuration(decision.startTime)}
                     </Link>
                   )}
@@ -324,11 +354,12 @@ function DecisionCard({ decision, job, jobId = job?.jobId }: { decision: Decisio
       )}
       {decision.rationale && <p className="text-foreground/85">理由：{decision.rationale}</p>}
       {decision.alternatives.length > 0 && <p className="text-muted-foreground">沒選：{decision.alternatives.join('、')}</p>}
+      {decision.proposedByName && <p className="text-xs text-muted-foreground">提出：{decision.proposedByName}</p>}
       <DecisionSupersession decision={decision} />
       {decision.startTime !== null && (
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <Link
-            to={`/jobs/${jobId}?t=${decision.startTime}&decision=${decision.id}`}
+            to={decisionHref(jobId!, decision.id, decision.startTime)}
             className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
             {formatDuration(decision.startTime)}
@@ -355,13 +386,13 @@ function meetingHeading(job: DecisionJob): string {
   return [job.createdAt && jobDate(job.createdAt), jobDisplayName(job)].filter(Boolean).join(' ')
 }
 
-// Across jobs there are no speaker names to hand (they live in each transcript), so who proposed it is left out.
+// Across jobs who proposed it is the name stored with the decision (the transcript, with its speakers, isn't loaded here).
 function exportDecision(decision: Decision): ExportDecision {
   return {
     statement: decision.statement,
     rationale: decision.rationale,
     alternatives: decision.alternatives,
-    proposer: null,
+    proposer: decision.proposedByName,
     tentative: decision.tentative,
     startTime: decision.startTime,
     evidenceText: decision.evidenceText,

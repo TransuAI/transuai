@@ -479,6 +479,8 @@ export interface Decision {
   alternatives: string[]
   /** The speaker's label; null when it isn't clear. */
   proposedBy: string | null
+  /** That speaker's current name, for pages across jobs (no transcript there to look it up). */
+  proposedByName: string | null
   /** 暫定: said to be confirmed later. */
   tentative: boolean
   /** Where it was made, and that segment's own words; a decision the user added may have neither. */
