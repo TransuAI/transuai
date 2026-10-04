@@ -109,7 +109,8 @@ class DecisionTest {
                 .setExtraction(extracting.toBuilder().setStatus(DecisionExtractionStatus.DECISION_EXTRACTION_STATUS_COMPLETED)
                         .setSourceRevision(3))
                 .addDecisions(Decision.newBuilder().setId("d1").setJobId(JOB).setStatement("資料庫用 PostgreSQL")
-                        .setRationale("需要 pgvector").addAlternatives("MySQL").setProposedBy("S1").setStartTime(8.0)
+                        .setRationale("需要 pgvector").addAlternatives("MySQL").setProposedBy("S1").setProposedByName("主持人")
+                        .setStartTime(8.0)
                         .setEvidenceText("好 那就決定用 PostgreSQL").setSource("ai"))
                 .addDecisions(Decision.newBuilder().setId("d2").setJobId(JOB).setStatement("週會改到週三").setSource("user")
                         .setTentative(true))
@@ -122,6 +123,7 @@ class DecisionTest {
                 .andExpect(jsonPath("$.decisions[0].statement").value("資料庫用 PostgreSQL"))
                 .andExpect(jsonPath("$.decisions[0].alternatives[0]").value("MySQL"))
                 .andExpect(jsonPath("$.decisions[0].proposedBy").value("S1"))
+                .andExpect(jsonPath("$.decisions[0].proposedByName").value("主持人"))
                 .andExpect(jsonPath("$.decisions[0].startTime").value(8.0))
                 .andExpect(jsonPath("$.decisions[1].startTime").isEmpty())
                 .andExpect(jsonPath("$.decisions[1].proposedBy").isEmpty())
@@ -263,17 +265,19 @@ class DecisionTest {
     }
 
     @Test
-    void theTimelineOfOneJobAsksAboutThatJobOnly() throws Exception {
+    void theTimelineOfSomeJobsAsksAboutThoseJobsOnly() throws Exception {
         when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.newBuilder()
                 .addJobs(job("job-old", "九月週會", "2026-09-01T00:00:00Z"))
-                .addJobs(job("job-new", "十月週會", "2026-10-01T00:00:00Z")).setTotalCount(2).build());
+                .addJobs(job("job-mid", "九月中週會", "2026-09-15T00:00:00Z"))
+                .addJobs(job("job-new", "十月週會", "2026-10-01T00:00:00Z")).setTotalCount(3).build());
         when(aiServiceStub.listUserDecisions(any())).thenReturn(UserDecisions.getDefaultInstance());
 
-        call(MockMvcRequestBuilders.get("/decisions").param("jobId", "job-new")).andExpect(status().isOk());
+        call(MockMvcRequestBuilders.get("/decisions").param("jobId", "job-new", "job-old", "someone-elses"))
+                .andExpect(status().isOk());
 
         ArgumentCaptor<ListUserDecisionsRequest> sent = ArgumentCaptor.forClass(ListUserDecisionsRequest.class);
         verify(aiServiceStub).listUserDecisions(sent.capture());
-        assertThat(sent.getValue().getJobIdsList()).containsExactly("job-new");
+        assertThat(sent.getValue().getJobIdsList()).containsExactlyInAnyOrder("job-new", "job-old");
     }
 
     @Test
@@ -370,7 +374,7 @@ class DecisionTest {
                 AskDecisionsChunk.newBuilder().setDelta("當初選 MySQL 是因為團隊熟 [1]。").build()).iterator());
 
         MvcResult result = call(MockMvcRequestBuilders.post("/decisions/ask").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"question\":\"當初為什麼選 MySQL？\",\"category\":\"meeting\"}")).andReturn();
+                .content("{\"question\":\"當初為什麼選 MySQL？\",\"category\":\"meeting\",\"jobIds\":[\"job-old\"]}")).andReturn();
         result.getAsyncResult(5_000);
         String stream = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
 

@@ -130,12 +130,13 @@ public class DecisionController {
         aiServiceStub.deleteDecision(DeleteDecisionRequest.newBuilder().setJobId(jobId).setDecisionId(decisionId).build());
     }
 
-    // 決策頁：使用者所有 Job 的決策（時間軸），可以只看某個類型、某個 Job，或搜尋（字與意思）。先向 upload-service 列出使用者自己的
+    // 決策頁：使用者所有 Job 的決策（時間軸），可以只看某個類型、某些 Job（jobId 可以給好幾個），或搜尋（字與意思）。先向 upload-service 列出使用者自己的
     // Job（類型的篩選在那裡，也帶來每個決策的 Job 標題與日期），再只問 ai-service 這些 Job 的決策——ai-service 另外依 user_id 過濾。
     @GetMapping("/decisions")
     public DecisionTimelineDto timeline(@CurrentUserId UUID userId, @RequestParam(defaultValue = "") String q,
-            @RequestParam(defaultValue = "") String category, @RequestParam(defaultValue = "") String jobId) {
-        Map<String, Job> jobs = usersJobs(userId, category, jobId);
+            @RequestParam(defaultValue = "") String category,
+            @RequestParam(name = "jobId", required = false) List<String> jobIds) {
+        Map<String, Job> jobs = usersJobs(userId, category, jobIds);
         if (jobs.isEmpty()) {
             return new DecisionTimelineDto(List.of());
         }
@@ -153,15 +154,17 @@ public class DecisionController {
         return new DecisionTimelineDto(items);
     }
 
-    // The user's own jobs (of a category, or just one), by id: what may be asked about, and what each decision belongs to.
-    private Map<String, Job> usersJobs(UUID userId, String category, String jobId) {
+    // The user's own jobs (of a category; only the chosen ones when some are), by id: what may be asked about, and what each
+    // decision belongs to. Every page of them on each call — fine for now; a user with very many jobs would want this
+    // narrowed in upload-service instead.
+    private Map<String, Job> usersJobs(UUID userId, String category, List<String> chosen) {
         Map<String, Job> jobs = new LinkedHashMap<>();
         int seen = 0;
         for (int page = 1;; page++) {
             ListJobsResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId).listJobs(
                     ListJobsRequest.newBuilder().setPage(page).setPageSize(JOBS_PAGE_SIZE).setCategory(category).build());
             for (Job job : response.getJobsList()) {
-                if (jobId.isEmpty() || job.getJobId().equals(jobId)) {
+                if (chosen == null || chosen.isEmpty() || chosen.contains(job.getJobId())) {
                     jobs.put(job.getJobId(), job);
                 }
             }
@@ -194,8 +197,7 @@ public class DecisionController {
             throw new IllegalArgumentException("question is required"); // → 400 via GrpcExceptionAdvice
         }
         usageLimitGuard.requirePlatformTokensLeft(userId);
-        Map<String, Job> jobs = usersJobs(userId, body.category() == null ? "" : body.category(),
-                body.jobId() == null ? "" : body.jobId());
+        Map<String, Job> jobs = usersJobs(userId, body.category() == null ? "" : body.category(), body.jobIds());
         Iterator<AskDecisionsChunk> chunks = aiServiceStub.askDecisions(AskDecisionsRequest.newBuilder()
                 .setUserId(userId.toString()).setQuestion(body.question().strip()).addAllJobIds(jobs.keySet()).build());
         // As askQuestion: take the first chunk here, so a gRPC error still becomes an ordinary error response.
@@ -261,6 +263,7 @@ public class DecisionController {
     private static DecisionsDto.Item toDto(Decision decision) {
         return new DecisionsDto.Item(decision.getId(), decision.getJobId(), decision.getStatement(),
                 decision.getRationale(), decision.getAlternativesList(), GrpcStrings.emptyToNull(decision.getProposedBy()),
+                GrpcStrings.emptyToNull(decision.getProposedByName()),
                 decision.getTentative(), decision.hasStartTime() ? decision.getStartTime() : null,
                 GrpcStrings.emptyToNull(decision.getEvidenceText()), decision.getSource(), decision.getEdited(),
                 decision.hasSupersedes() ? toLink(decision.getSupersedes()) : null,
