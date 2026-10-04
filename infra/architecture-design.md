@@ -205,7 +205,7 @@ POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCou
                                          輪詢列表直到不是 GENERATING）
 GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型、最佳成績
 GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
-POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format": "podcast_description", "instruction"? }，回 202
+POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format", "platform"?（社群貼文必填）, "instruction"? }，回 202
                                          （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
 GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）
 GET    /jobs/{jobId}/outputs/{outputId} 一份輸出
@@ -700,7 +700,7 @@ CREATE TABLE generated_outputs (
     id UUID PRIMARY KEY,
     job_id UUID NOT NULL,
     user_id UUID NOT NULL,                  -- 要求產生的使用者（他的預設模型、用量記在他名下）
-    format VARCHAR(32) NOT NULL,            -- podcast_description（之後：youtube_description / blog_post / newsletter / social_post）
+    format VARCHAR(32) NOT NULL,            -- podcast_description / youtube_description / blog_post / newsletter / social_post
     options JSONB NOT NULL DEFAULT '{}',    -- Job 的標題、使用者的一句要求、社群貼文的平台
     status VARCHAR(10) NOT NULL,            -- GENERATING / COMPLETED / FAILED
     failure_reason TEXT,
@@ -812,7 +812,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
    consumer（ai-service/transcription-service/notification-service）連線斷線時有指數退避自動
    重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
 3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
-4. **多格式輸出**：Studio「多格式輸出」產生 Podcast 介紹（其他格式見 `.scratch/multi-format-outputs`），依摘要、章節與使用者取過名字的講者寫成 Markdown，可以複製、下載。「會議紀錄」不另外做——會後處理寫進 Notion 的會議紀錄就是它。
+4. **多格式輸出**：Studio「多格式輸出」產生 Podcast 介紹、YouTube 描述、部落格文章、電子報、社群貼文（依平台），依摘要、章節與使用者取過名字的講者寫成 Markdown，可以複製、下載。「會議紀錄」不另外做——會後處理寫進 Notion 的會議紀錄就是它。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、測驗）、複製、下載原始檔）混為一談
 5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
