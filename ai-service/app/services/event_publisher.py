@@ -100,6 +100,19 @@ def publish_output_requested(channel: BlockingChannel, output_id: str, job_id: s
     logger.info("queued output.requested for output %s of job %s", output_id, job_id)
 
 
+def publish_translation_requested(channel: BlockingChannel, job_id: str, language: str) -> None:
+    """translation.requested -> {jobId, language}：ai-service 排給自己的背景工作（翻譯逐字稿，也用在編輯後的重翻）；用量記在這份
+    譯文最近一次要求翻譯的使用者名下。"""
+    channel.queue_declare(queue=settings.translation_requested_queue, durable=True)
+    channel.basic_publish(
+        exchange="",
+        routing_key=settings.translation_requested_queue,
+        body=json.dumps({"jobId": job_id, "language": language}).encode("utf-8"),
+        properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+    )
+    logger.info("queued translation.requested for job %s (%s)", job_id, language)
+
+
 def publish_post_meeting_requested(channel: BlockingChannel, run_id: str, job_id: str, user_id: str) -> None:
     """post_meeting.requested -> {runId, jobId, userId}：ai-service 排給自己的背景工作（會後處理）；userId 是觸發的使用者，
     用他的預設模型與已連結的帳號、用量記在他名下。"""

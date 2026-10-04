@@ -11,7 +11,8 @@ from sqlalchemy import func, select
 
 from app.db import new_session
 from app.models import (ActionProposal, Chapter, Embedding, GeneratedOutput, LlmUsage, PostMeetingRun, QaHistory, Quiz, QuizAttempt,
-                        QuizQuestion, SpeakerInsightItem, SpeakerInsightRun, SpeakerSuggestion, Summary, WebSearchUsage)
+                        QuizQuestion, SegmentTranslation, SpeakerInsightItem, SpeakerInsightRun, SpeakerSuggestion, Summary,
+                        Translation, WebSearchUsage)
 from app.services import deletion_consumer, job_deletion
 
 
@@ -23,12 +24,13 @@ def fill(job_id: uuid.UUID) -> None:
         run = PostMeetingRun(job_id=job_id, user_id=user, status="READY", timezone="Asia/Taipei",
                              uploaded_at=datetime.now(timezone.utc))
         insights = SpeakerInsightRun(job_id=job_id, requested_by=user, status="COMPLETED")
+        translation = Translation(job_id=job_id, language="en", requested_by=user, status="COMPLETED")
         session.add_all([
             Summary(job_id=job_id, summary_text="摘要"),
             Chapter(job_id=job_id, title="開場", start_time=0, sequence_no=1),
             Embedding(job_id=job_id, chunk_text="大家好", embedding=[0.0] * 1024),
             QaHistory(job_id=job_id, user_id=user, question="?", answer="!", source_timestamps=[]),
-            quiz, run, insights,
+            quiz, run, insights, translation,
             GeneratedOutput(job_id=job_id, user_id=user, format="podcast_description", options={}, status="COMPLETED",
                             content="介紹"),
             SpeakerSuggestion(job_id=job_id, speaker_label="1", name="王小明", evidence_start_time=0, evidence_text="我是王小明"),
@@ -42,6 +44,7 @@ def fill(job_id: uuid.UUID) -> None:
             QuizAttempt(quiz_id=quiz.id, user_id=user, answers=[0], correct_count=1),
             ActionProposal(run_id=run.id, position=1, service="google", tool="create_event", kind="calendar", arguments={}),
             SpeakerInsightItem(run_id=insights.id, kind="question", speaker_label="S1", start_time=0, text="?"),
+            SegmentTranslation(translation_id=translation.id, segment_id=uuid.uuid4(), source_text="嗨", text="Hi"),
         ])
         session.commit()
 
@@ -54,6 +57,8 @@ def counts(job_id: uuid.UUID) -> dict[str, int]:
         result["QuizAttempt"] = session.scalar(select(func.count()).select_from(QuizAttempt).join(Quiz).where(Quiz.job_id == job_id))
         result["SpeakerInsightItem"] = session.scalar(
             select(func.count()).select_from(SpeakerInsightItem).join(SpeakerInsightRun).where(SpeakerInsightRun.job_id == job_id))
+        result["SegmentTranslation"] = session.scalar(
+            select(func.count()).select_from(SegmentTranslation).join(Translation).where(Translation.job_id == job_id))
         result["ActionProposal"] = session.scalar(
             select(func.count()).select_from(ActionProposal).join(PostMeetingRun).where(PostMeetingRun.job_id == job_id))
         return result

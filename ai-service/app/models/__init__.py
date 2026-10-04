@@ -12,6 +12,7 @@ from app.models.quiz import QuestionKind, Quiz, QuizAttempt, QuizQuestion, QuizS
 from app.models.speaker_insight import SpeakerInsightItem, SpeakerInsightRun, SpeakerInsightsStatus
 from app.models.speaker_suggestion import SpeakerSuggestion
 from app.models.summary import Base, RegenerationStatus, Summary
+from app.models.translation import SegmentTranslation, Translation, TranslationStatus
 from app.models.web_search_usage import WebSearchUsage
 
-__all__ = ["ActionProposal", "Base", "Chapter", "ConnectionStatus", "DefaultModel", "DeletedJob", "Embedding", "GeneratedOutput", "OutputStatus", "LlmUsage", "OAuthClient", "OAuthConnection", "OAuthPendingAuthorization", "PostMeetingRun", "PostMeetingSettings", "PostMeetingStatus", "ProposalStatus", "ProviderKey", "QaHistory", "QuestionKind", "Quiz", "QuizAttempt", "QuizQuestion", "QuizStatus", "RegenerationStatus", "SpeakerInsightItem", "SpeakerInsightRun", "SpeakerInsightsStatus", "SpeakerSuggestion", "Summary", "TodoDestination", "WebSearchUsage"]
+__all__ = ["ActionProposal", "Base", "Chapter", "ConnectionStatus", "DefaultModel", "DeletedJob", "Embedding", "GeneratedOutput", "OutputStatus", "LlmUsage", "OAuthClient", "OAuthConnection", "OAuthPendingAuthorization", "PostMeetingRun", "PostMeetingSettings", "PostMeetingStatus", "ProposalStatus", "ProviderKey", "QaHistory", "QuestionKind", "Quiz", "QuizAttempt", "QuizQuestion", "QuizStatus", "RegenerationStatus", "SpeakerInsightItem", "SpeakerInsightRun", "SpeakerInsightsStatus", "SpeakerSuggestion", "SegmentTranslation", "Summary", "Translation", "TranslationStatus", "TodoDestination", "WebSearchUsage"]

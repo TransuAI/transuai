@@ -77,6 +77,9 @@ from app.services.generated_outputs import (
     InvalidContent, InvalidOutputRequest, OutputNotEditable, OutputNotFound, OutputNotQueued, find_output, list_outputs,
     request_output, update_content)
 from app.services.generated_outputs import effective_status as output_effective_status
+from app.services.translations import (
+    TranslationNotQueued, TranslationProgress, UnknownLanguage, find_translation, list_translations, request_translation)
+from app.services.translations import effective_status as translation_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
 from app.services.speaker_insight_runs import effective_status as speaker_insights_effective_status
@@ -92,6 +95,7 @@ from app.services.quizzes import (
 )
 from app.models import (
     ConnectionStatus,
+    TranslationStatus,
     GeneratedOutput,
     OutputStatus,
     SpeakerInsightItem,
@@ -473,6 +477,33 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "還沒產生完成，不能修改")
         return _output_to_proto(output)
 
+    def RequestTranslation(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            request_translation(job_id, user_id, request.language)
+        except UnknownLanguage:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "不支援這種語言")
+        except TranslationNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法翻譯，請稍後再試")
+        found = find_translation(job_id, request.language)
+        return _translation_to_proto(found[0])
+
+    def ListTranslations(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        return ai_pb2.ListTranslationsResponse(
+            translations=[_translation_to_proto(progress) for progress in list_translations(job_id)])
+
+    def GetTranslation(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        found = find_translation(job_id, request.language)
+        if found is None:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "translation not found")
+        progress, segments = found
+        message = _translation_to_proto(progress)
+        message.segments.extend(ai_pb2.SegmentTranslation(segment_id=str(s.segment_id), text=s.text) for s in segments)
+        return message
+
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
@@ -741,6 +772,27 @@ def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = (), *, best: 
         message.completed_at.FromDatetime(quiz.completed_at)
     if best is not None:
         message.best_correct_count = best
+    return message
+
+
+_TRANSLATION_STATUS = {
+    TranslationStatus.GENERATING: ai_pb2.TRANSLATION_STATUS_GENERATING,
+    TranslationStatus.COMPLETED: ai_pb2.TRANSLATION_STATUS_COMPLETED,
+    TranslationStatus.FAILED: ai_pb2.TRANSLATION_STATUS_FAILED,
+}
+
+
+def _translation_to_proto(progress: TranslationProgress) -> ai_pb2.Translation:
+    translation = progress.translation
+    status, failure_reason = translation_effective_status(translation)
+    message = ai_pb2.Translation(
+        job_id=str(translation.job_id), language=translation.language, status=_TRANSLATION_STATUS[status],
+        failure_reason=failure_reason or "", total_segments=translation.total_segments,
+        translated_segments=progress.translated_segments, model_provider=translation.model_provider or "",
+        model=translation.model or "")
+    message.requested_at.FromDatetime(translation.requested_at)
+    if translation.completed_at is not None:
+        message.completed_at.FromDatetime(translation.completed_at)
     return message
 
 

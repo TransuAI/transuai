@@ -41,6 +41,7 @@ class LlmFeature(StrEnum):
     SPEAKER_NAMES = "speaker_names"  # 講者名字建議
     SPEAKER_INSIGHTS = "speaker_insights"  # 講者數據：問題與打斷
     GENERATED_OUTPUT = "generated_output"  # 多格式輸出
+    TRANSLATION = "translation"  # 譯文
 
 
 @dataclass(frozen=True)

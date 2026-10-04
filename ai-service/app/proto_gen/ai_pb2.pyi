@@ -64,6 +64,13 @@ class OutputStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     OUTPUT_STATUS_GENERATING: _ClassVar[OutputStatus]
     OUTPUT_STATUS_COMPLETED: _ClassVar[OutputStatus]
     OUTPUT_STATUS_FAILED: _ClassVar[OutputStatus]
+
+class TranslationStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    TRANSLATION_STATUS_UNSPECIFIED: _ClassVar[TranslationStatus]
+    TRANSLATION_STATUS_GENERATING: _ClassVar[TranslationStatus]
+    TRANSLATION_STATUS_COMPLETED: _ClassVar[TranslationStatus]
+    TRANSLATION_STATUS_FAILED: _ClassVar[TranslationStatus]
 REGENERATION_STATUS_IDLE: RegenerationStatus
 REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
@@ -95,6 +102,10 @@ OUTPUT_STATUS_UNSPECIFIED: OutputStatus
 OUTPUT_STATUS_GENERATING: OutputStatus
 OUTPUT_STATUS_COMPLETED: OutputStatus
 OUTPUT_STATUS_FAILED: OutputStatus
+TRANSLATION_STATUS_UNSPECIFIED: TranslationStatus
+TRANSLATION_STATUS_GENERATING: TranslationStatus
+TRANSLATION_STATUS_COMPLETED: TranslationStatus
+TRANSLATION_STATUS_FAILED: TranslationStatus
 
 class RequestQuizRequest(_message.Message):
     __slots__ = ("job_id", "user_id", "question_count")
@@ -933,3 +944,67 @@ class GeneratedOutput(_message.Message):
     edited_at: _timestamp_pb2.Timestamp
     platform: str
     def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., format: _Optional[str] = ..., instruction: _Optional[str] = ..., status: _Optional[_Union[OutputStatus, str]] = ..., failure_reason: _Optional[str] = ..., content: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., edited_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., platform: _Optional[str] = ...) -> None: ...
+
+class RequestTranslationRequest(_message.Message):
+    __slots__ = ("job_id", "user_id", "language")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    LANGUAGE_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    language: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., language: _Optional[str] = ...) -> None: ...
+
+class ListTranslationsRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class ListTranslationsResponse(_message.Message):
+    __slots__ = ("translations",)
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
+    translations: _containers.RepeatedCompositeFieldContainer[Translation]
+    def __init__(self, translations: _Optional[_Iterable[_Union[Translation, _Mapping]]] = ...) -> None: ...
+
+class GetTranslationRequest(_message.Message):
+    __slots__ = ("job_id", "language")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    LANGUAGE_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    language: str
+    def __init__(self, job_id: _Optional[str] = ..., language: _Optional[str] = ...) -> None: ...
+
+class Translation(_message.Message):
+    __slots__ = ("job_id", "language", "status", "failure_reason", "total_segments", "translated_segments", "model_provider", "model", "requested_at", "completed_at", "segments")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    LANGUAGE_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_SEGMENTS_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATED_SEGMENTS_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    SEGMENTS_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    language: str
+    status: TranslationStatus
+    failure_reason: str
+    total_segments: int
+    translated_segments: int
+    model_provider: str
+    model: str
+    requested_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    segments: _containers.RepeatedCompositeFieldContainer[SegmentTranslation]
+    def __init__(self, job_id: _Optional[str] = ..., language: _Optional[str] = ..., status: _Optional[_Union[TranslationStatus, str]] = ..., failure_reason: _Optional[str] = ..., total_segments: _Optional[int] = ..., translated_segments: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., segments: _Optional[_Iterable[_Union[SegmentTranslation, _Mapping]]] = ...) -> None: ...
+
+class SegmentTranslation(_message.Message):
+    __slots__ = ("segment_id", "text")
+    SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    segment_id: str
+    text: str
+    def __init__(self, segment_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
