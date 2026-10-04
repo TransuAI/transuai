@@ -119,7 +119,7 @@ def queue_translation(job_id: str, language: str) -> None:
 
 def process_translation_requested(body: bytes, retry_count: int = 0) -> None:
     """處理一則 translation.requested { jobId, language }：讀目前的逐字稿，刪掉已經不存在或被清空的片段的譯文，把還沒翻的、原文變了的
-    一批一批翻、每批存檔。一批的格式不對就重試那一批一次，還是不對就失敗（已經翻好的保留）；暫時性失敗且還有重試預算時
+    一批一批翻、每批存檔。一批的格式不對就切成兩半各自翻（見 _translate），一句都翻不出來才失敗（已經翻好的保留）；暫時性失敗且還有重試預算時
     raise RetryableMessageError（再跑時從沒翻的地方接著翻）。"""
     payload = json.loads(body)
     job_id, language = uuid.UUID(payload["jobId"]), payload["language"]
@@ -139,10 +139,7 @@ def process_translation_requested(body: bytes, retry_count: int = 0) -> None:
             first = position[batch[0].id]
             context = [s.text for s in spoken[max(0, first - CONTEXT_LINES):first]]
             pairs = [(s.id, s.text) for s in batch]
-            try:
-                translated = translate_batch(pairs, language, context=context, model=model, meter=meter)
-            except TranslationFormatError:
-                translated = translate_batch(pairs, language, context=context, model=model, meter=meter)
+            translated = _translate(pairs, language, context, model, meter)
             _save_batch(translation.id, batch, translated)
         _complete(translation.id, model)
     except TranslationFormatError as exc:
@@ -156,6 +153,20 @@ def process_translation_requested(body: bytes, retry_count: int = 0) -> None:
         _fail(job_id, language, str(exc) if isinstance(exc, LlmError) else "翻譯失敗，請再試一次（已經翻好的不會重翻）")
         return
     logger.info("translated job %s into %s", job_id, language)
+
+
+def _translate(pairs: list[tuple[str, str]], language: str, context: list[str], model, meter) -> dict[str, str]:
+    """翻一批；模型回的對不上（漏了、合併了幾句）就把這批切成兩半各自翻，越切越小——到只剩一句時重試一次，還是不對才 raise
+    TranslationFormatError。後半的上下文是前半的最後幾句。"""
+    try:
+        return translate_batch(pairs, language, context=context, model=model, meter=meter)
+    except TranslationFormatError:
+        if len(pairs) == 1:
+            return translate_batch(pairs, language, context=context, model=model, meter=meter)
+    middle = len(pairs) // 2
+    first, second = pairs[:middle], pairs[middle:]
+    translated = _translate(first, language, context, model, meter)
+    return translated | _translate(second, language, [text for _, text in first][-CONTEXT_LINES:], model, meter)
 
 
 def _still_generating(job_id: uuid.UUID, language: str) -> Translation | None:

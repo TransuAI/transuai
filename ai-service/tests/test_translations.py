@@ -137,26 +137,31 @@ def test_a_segment_cleared_since_loses_its_translation(ai_stub, db_session, rabb
     assert SEG[2] not in {s.segment_id for s in get(ai_stub, job_id).segments}
 
 
-def test_a_batch_that_comes_back_wrong_twice_fails_with_a_reason(ai_stub, db_session, rabbitmq, fake_llm):
+def test_a_batch_that_comes_back_wrong_is_split_in_half_and_each_half_translated(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    fake_llm.reply('[{"n": 1, "text": "合併了三句"}]')  # the model merged the lines
+    answer(fake_llm, "嗨。")  # first half: line 1
+    answer(fake_llm, "先談預算。", "好。")  # second half: lines 2–3
+
+    process(job_id)
+
+    done = get(ai_stub, job_id)
+    assert done.status == ai_pb2.TRANSLATION_STATUS_COMPLETED
+    assert {s.segment_id: s.text for s in done.segments} == {SEG[0]: "嗨。", SEG[2]: "先談預算。", SEG[3]: "好。"}
+    second_half = fake_llm.bodies()[2]["messages"][0]["content"]
+    assert "Hi." in second_half and '{"n": 1, "text": "Budget first."}' in second_half  # the first half as context
+
+
+def test_a_single_line_that_comes_back_wrong_twice_fails_with_a_reason(ai_stub, db_session, rabbitmq, fake_llm):
     job_id = uuid.uuid4()
     request(ai_stub, job_id)
     fake_llm.reply("不是 JSON")
-    fake_llm.reply('[{"n": 1, "text": "只有一句"}]')
+    fake_llm.reply("還是不是 JSON")
 
-    process(job_id)
+    process(job_id, transcript([segment(0, "Hi.")]))
 
     assert get(ai_stub, job_id).failure_reason == translations.FORMAT_REASON
-
-
-def test_a_batch_that_comes_back_wrong_once_is_retried(ai_stub, db_session, rabbitmq, fake_llm):
-    job_id = uuid.uuid4()
-    request(ai_stub, job_id)
-    fake_llm.reply("不是 JSON")
-    answer(fake_llm, "嗨。", "先談預算。", "好。")
-
-    process(job_id)
-
-    assert get(ai_stub, job_id).status == ai_pb2.TRANSLATION_STATUS_COMPLETED
 
 
 def test_a_passing_failure_is_retried_as_a_message(ai_stub, db_session, rabbitmq, fake_llm):
