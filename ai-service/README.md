@@ -261,7 +261,7 @@ RequestOutput(jobId, userId, format, title, instruction, platform)（Gateway POS
   → 新增一份 GENERATING 的輸出並存好，再排入 output.requested { outputId, jobId, userId }（排入失敗就刪掉，什麼都不留）
 消費 output.requested
   → 讀這個 Job 的摘要與章節（沒有摘要：FAILED「這個 Job 還沒有摘要，無法產生」）、GetTranscript 的 revision 與講者
-  → 講者只給使用者取過名字的（還叫「講者 N」的沒有資訊）
+  → 講者只給使用者取過名字的（還叫「講者 N」的沒有資訊）；語言跟著逐字稿（`en` 寫英文，其他寫繁體中文——不是跟著摘要，摘要一律是中文）
   → 用 userId 的預設模型、這種格式的 prompt 寫（app/services/output_generator.py）：只根據內容、不編造、不寫時間
   → 回覆轉成繁體（整份是簡體時）、刪掉開頭是時間的行（模型自己寫的時間），需要章節的格式由程式附上真的章節時間
   → content、status = COMPLETED、source_revision、模型一起寫入
@@ -336,7 +336,7 @@ RequestSpeakerInsights(jobId, userId)（Gateway POST /jobs/{jobId}/speaker-insig
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: 穿插其間的 `step`（回答過程正在做的一步：`understand` 理解問題（追問時）、`retrieve` 在內容裡找段落（完成時「找到 N 段」）、`search` 查網路（寫好查詢後顯示「搜尋「…」」，完成時加上「找到 N 個網頁」，失敗是 `failed`）、`answer` 撰寫回答；同一個 id 會送好幾次：running → done／failed；第一個 chunk 可能就是步驟）、`sources` 恰好一次、帶 `web_search` 而且有設定 `TAVILY_API_KEY` 時 `web_sources` 恰好一次（網路來源，順序是回答裡 [n] 的編號；搜尋失敗是空的、`failed` 為 true）、`answered_by` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`，模型呼叫失敗時訊息點出廠商與原因）。可以帶 `model` 臨時換模型（只用在這一次，必須是提問者用得到的：平台模型、有金鑰的廠商整理好的清單，或他目前的預設模型；否則在送出任何 chunk 前回 `INVALID_ARGUMENT`），不帶就用預設模型；問題改寫與回答用同一個模型，`qa_history` 記錄回答的模型、有沒有查網路與網路來源。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk（包括步驟）送出之前——送出第一個步驟前先確認這個 job 有 embedding；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，用來記錄 `qa_history`、決定用誰的預設模型與自有金鑰，不重新驗證 |
 | `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
 | `UpdateOutput` | 使用者修改一份完成的輸出：跟原本一樣就不算修改；空白或超過 20000 字回 `INVALID_ARGUMENT`，還在產生或失敗的回 `FAILED_PRECONDITION`，不屬於這個 Job 回 `NOT_FOUND` |
-| `RequestOutput` / `ListOutputs` / `GetOutput` | 多格式輸出（見上方）：要求產生（帶 `user_id`、`format`、Job 的 `title`、可選的 `instruction`）立刻回傳 GENERATING，每次都是新的一份；列出（新的在前，含內容）；取得一份（不屬於這個 Job 回 `NOT_FOUND`）。格式不認得或要求超過 200 字回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
+| `RequestOutput` / `ListOutputs` / `GetOutput` | 多格式輸出（見上方）：要求產生（帶 `user_id`、`format`、Job 的 `title`、可選的 `instruction`、社群貼文必填的 `platform`）立刻回傳 GENERATING，每次都是新的一份；列出（新的在前，含內容）；取得一份（不屬於這個 Job 回 `NOT_FOUND`）。格式不認得、要求超過 200 字、社群貼文沒有（或不認得）平台回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
 | `RequestSpeakerInsights` / `GetSpeakerInsights` | 講者數據的問題與打斷（見上方）：要求分析（帶 `user_id`）立刻回傳 GENERATING；取得目前這一份（還沒分析過是 UNSPECIFIED、沒有項目），`items` 是上一次完成的結果。排入失敗回 `UNAVAILABLE` |
 | `RequestQuiz` | 要求產生一份測驗（帶 `user_id`：要求的使用者，用他的預設模型、用量記在他名下）：新增 GENERATING 的測驗、排入 `quiz.requested` 後立即回傳（不含題目）；每次都是新的一份。題數不是 5、10、20 或 ID 不合法回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
 | `ListQuizzes` | 一個 Job 的所有測驗（新的在前）：題數、狀態（GENERATING 超過 5 分鐘回報成 FAILED）、失敗原因、依據的逐字稿 revision、產生的模型、要求與完成時間、最佳成績（`best_correct_count`：所有作答裡答對最多的題數，沒作答過不設定）；不含題目 |
@@ -503,7 +503,7 @@ upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanou
 問答、測驗（題目、作答跟著 cascade）、講者名字建議、講者數據的問題與打斷（項目跟著 cascade）、多格式輸出、會後處理（行動提案跟著 cascade）。**用量（`llm_usage`、`web_search_usage`）不刪**。
 可以重複處理；處理失敗 nack 到 `job.deleted.ai.retry`，30 秒後回來，不限次數；訊息本身不合法才丟掉。見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md`。
 
-刪除當下還在跑的寫入（pipeline、重算 embedding、重新產生摘要、出題、講者名字建議、講者數據分析、會後處理、問答存紀錄）可能比刪除晚：收到事件時先記下
+刪除當下還在跑的寫入（pipeline、重算 embedding、重新產生摘要、出題、講者名字建議、講者數據分析、多格式輸出、會後處理、問答存紀錄）可能比刪除晚：收到事件時先記下
 `deleted_jobs`（保留一天）再刪資料；寫入那一邊不用各自檢查——`job_deletion.guard_writes(SessionLocal)`（啟動時掛上）在 session 上記下每次
 commit 新增或修改了哪些 Job 的資料，commit 之後查這些 Job 有沒有被刪，有就刪掉。新的資料表只要帶 `job_id` 就要加進 `job_deletion.JOB_SCOPED`。
 改到已經被刪掉的列（例如重新產生摘要寫回）會失敗（`StaleDataError`），不會把資料帶回來。

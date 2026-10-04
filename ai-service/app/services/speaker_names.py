@@ -10,7 +10,7 @@ from app.repositories.speaker_suggestion_repository import SpeakerSuggestionReco
 from app.services.agent_tools import normalize_text, timed_line
 from app.services.chapter_generator import parse_json_reply
 from app.services.llm_client import ChatModel, LlmError, chat
-from app.services.speaker_context import speaker_names, spoken_segments
+from app.services.speaker_context import has_default_name, speaker_names, spoken_segments
 from app.services.usage_meter import UsageMeter
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def suggest_speaker_names(transcript: transcription_pb2.Transcript, *, model: Ch
         return None
 
     # Only speakers still called 「講者 N」: a name the user gave stays theirs.
-    unnamed = {s.display_name: s for s in transcript.speakers if s.display_name == f"講者 {s.display_order}"}
+    unnamed = {s.display_name: s for s in transcript.speakers if has_default_name(s)}
     grounded = [record for item in data if (record := _grounded(item, unnamed, segments))]
 
     # One name per speaker, one speaker per name: anything contested is dropped on both sides.

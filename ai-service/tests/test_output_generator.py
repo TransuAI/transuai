@@ -121,3 +121,32 @@ def test_the_users_own_request_goes_into_the_prompt_after_the_rules(fake_llm):
 
     prompt = fake_llm.bodies()[0]["messages"][0]["content"]
     assert prompt.index("寫作規則") < prompt.index("寫給工程師看")
+
+
+# --- review：語言跟著逐字稿、hashtag ---
+
+
+def test_an_english_recording_gets_an_english_output_and_it_isnt_converted(fake_llm):
+    fake_llm.reply("This episode covers the budget.")
+    english = OutputSource("", "討論了預算。", [], [], language="en")
+
+    content = generate_output("podcast_description", english, model=platform_chat_model(), meter=None)
+
+    assert "請用 English 寫" in fake_llm.bodies()[0]["messages"][0]["content"]
+    assert content == "This episode covers the budget.\n"
+
+
+def test_a_chinese_recording_gets_traditional_chinese(fake_llm):
+    fake_llm.reply("介紹")
+
+    generate_output("podcast_description", SOURCE, model=platform_chat_model(), meter=None)
+
+    assert "請用 繁體中文（台灣用語） 寫" in fake_llm.bodies()[0]["messages"][0]["content"]
+
+
+def test_a_social_post_is_asked_for_hashtags(fake_llm):
+    fake_llm.reply("貼文")
+
+    generate_output("social_post", SOURCE, model=platform_chat_model(), meter=None, platform="instagram")
+
+    assert "最後放兩三個 hashtag" in fake_llm.bodies()[0]["messages"][0]["content"]

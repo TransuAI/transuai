@@ -19,7 +19,7 @@ from app.services.llm_client import ChatModel, LlmError
 from app.services.output_generator import FORMATS, SOCIAL_PLATFORMS, OutputFormatError, OutputSource, generate_output
 from app.services.regeneration import STUCK_AFTER
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
-from app.services.speaker_context import speaker_names
+from app.services.speaker_context import has_default_name, speaker_names
 from app.services.transcript_client import transcript_client
 from app.services.usage_meter import LlmFeature, UsageMeter
 
@@ -106,7 +106,8 @@ def update_content(job_id: uuid.UUID, output_id: uuid.UUID, content: str) -> Gen
                                                               GeneratedOutput.id == output_id).with_for_update())
         if output is None:
             raise OutputNotFound()
-        if effective_status(output)[0] != OutputStatus.COMPLETED:
+        status, _reason = effective_status(output)
+        if status != OutputStatus.COMPLETED:
             raise OutputNotEditable()
         if content != output.content:
             output.content, output.edited_at = content, datetime.now(timezone.utc)
@@ -143,11 +144,11 @@ def process_output_requested(body: bytes, retry_count: int = 0) -> None:
             _fail(output_id, "這個 Job 還沒有摘要，無法產生")
             return
         transcript = transcript_client.get_transcript(str(job_id))
-        names = speaker_names(transcript)
+        has_multiple_speakers = speaker_names(transcript) is not None
         source = OutputSource(
             title=output.options.get("title", ""), summary=summary.summary_text, chapters=chapters,
-            speakers=_named_speakers(transcript) if names else [],
-            instruction=output.options.get("instruction", ""))
+            speakers=_named_speakers(transcript) if has_multiple_speakers else [],
+            instruction=output.options.get("instruction", ""), language=transcript.language)
         model = resolve_chat_model(user_id)
         content = generate_output(output.format, source, model=model, platform=output.options.get("platform"),
                                   meter=UsageMeter(user_id, job_id, LlmFeature.GENERATED_OUTPUT))
@@ -166,8 +167,7 @@ def process_output_requested(body: bytes, retry_count: int = 0) -> None:
 
 def _named_speakers(transcript) -> list[str]:
     """使用者取過名字的講者（依顯示順序）；還叫「講者 N」的沒有資訊，不給模型（否則會寫出「講者 1 至講者 9 參與討論」）。"""
-    return [s.display_name for s in sorted(transcript.speakers, key=lambda s: s.display_order)
-            if s.display_name != f"講者 {s.display_order}"]
+    return [s.display_name for s in sorted(transcript.speakers, key=lambda s: s.display_order) if not has_default_name(s)]
 
 
 def _still_generating(output_id: uuid.UUID) -> GeneratedOutput | None:

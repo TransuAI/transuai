@@ -20,7 +20,7 @@ from app.services import generated_outputs, job_deletion
 from app.services.retry import RetryableMessageError
 
 USER = uuid.UUID("00000000-0000-0000-0000-0000000000f0")
-TRANSCRIPT = SimpleNamespace(full_text="", revision=2, segments=[
+TRANSCRIPT = SimpleNamespace(full_text="", revision=2, language="zh-TW", segments=[
     SimpleNamespace(start_time=0, end_time=3, speaker_label="S1", text="歡迎收聽"),
     SimpleNamespace(start_time=3, end_time=6, speaker_label="S2", text="大家好"),
 ], speakers=[SimpleNamespace(label="S1", display_name="主持人", display_order=1),
@@ -132,6 +132,16 @@ def test_speakers_still_called_by_their_number_are_left_out_of_the_prompt(ai_stu
 
     prompt = fake_llm.bodies()[0]["messages"][0]["content"]
     assert "講者：主持人\n" in prompt and "講者 2" not in prompt
+
+
+def test_an_english_recording_is_written_up_in_english(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = summarized_job()
+    output = request(ai_stub, job_id)
+    fake_llm.reply("An episode about the budget.")
+
+    process(output, transcript=SimpleNamespace(**{**vars(TRANSCRIPT), "language": "en"}))
+
+    assert "請用 English 寫" in fake_llm.bodies()[0]["messages"][0]["content"]
 
 
 def test_each_request_is_another_output_listed_newest_first(ai_stub, db_session, rabbitmq):

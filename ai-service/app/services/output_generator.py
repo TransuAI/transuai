@@ -26,6 +26,12 @@ class OutputSource:
     chapters: list[tuple[str, float]]
     speakers: list[str]
     instruction: str = ""
+    # 逐字稿的語言：en 是英文，其他（zh-TW、舊資料的 Chinese）當中文。輸出跟著它寫，不是跟著摘要（摘要一律是中文）。
+    language: str = "zh-TW"
+
+    @property
+    def writes_english(self) -> bool:
+        return self.language.lower().startswith("en")
 
 
 class OutputFormatError(Exception):
@@ -60,7 +66,7 @@ SOCIAL_PLATFORMS: dict[str, SocialPlatform] = {
 
 _COMMON = (
     "寫作規則：\n"
-    "- 用跟內容相同的語言寫；中文用台灣慣用、自然的繁體中文。\n"
+    "- 請用 {language} 寫（下面的內容是中文時也一樣）；用自然、道地的說法，不要像翻譯。\n"
     "- 只根據下面的內容寫，不要編造內容裡沒有的事實、數字、人名或來賓頭銜。\n"
     "- 不要寫時間或時間戳（章節時間會由系統另外附上），不要提「逐字稿」「摘要」「錄音」。\n"
     "- 直接輸出文件本身（Markdown），不要加「以下是…」這類開場白，也不要包在 code block 裡。\n"
@@ -69,7 +75,8 @@ _COMMON = (
 FORMATS: dict[str, _Format] = {
     "podcast_description": _Format(
         "請替這一集節目寫 Podcast 節目介紹（貼在 Podcast 平台的節目說明欄）：\n"
-        "- 第一段兩三句，說這一集在談什麼、聽眾可以得到什麼，吸引人點開來聽。\n"
+        "- 第一行是一句話簡介，說這一集在談什麼，吸引人點開來聽。\n"
+        "- 接著一兩句補充聽眾可以得到什麼。\n"
         "- 接著「重點」清單，三到五點，每點一句。\n"
         "- 有來賓或多位講者時，可以一句話介紹誰參與了這一集（只用內容裡出現的名字）。\n"
         "- 全文 150 到 300 字（英文 100 到 200 words）。\n",
@@ -105,7 +112,7 @@ FORMATS: dict[str, _Format] = {
         "請替這段內容寫一則 {platform} 貼文：\n"
         "- {guidance}。\n"
         "- 字數絕對不能超過 {platform} 的上限 {limit} 字元。\n"
-        "- 最後可以放兩三個 hashtag（X 最多一個）。\n",
+        "- 最後放兩三個 hashtag（X 只放一個）。\n",
         with_chapters=False,
     ),
 }
@@ -126,7 +133,8 @@ def generate_output(format_name: str, source: OutputSource, *, model: ChatModel,
         instructions = instructions.format(platform=chosen.name, guidance=chosen.guidance, limit=chosen.limit)
     prompt = _prompt(instructions, source)
     reply = chat(model, [{"role": "user", "content": prompt}], max_tokens=_MAX_TOKENS, meter=meter)
-    body = _without_times(to_traditional(reply.text)).strip()
+    text = reply.text if source.writes_english else to_traditional(reply.text)
+    body = _without_times(text).strip()
     if not body:
         raise OutputFormatError("empty reply")
     if output_format.with_chapters and source.chapters:
@@ -138,7 +146,7 @@ def generate_output(format_name: str, source: OutputSource, *, model: ChatModel,
 
 
 def _prompt(instructions: str, source: OutputSource) -> str:
-    parts = [instructions, _COMMON]
+    parts = [instructions, _COMMON.format(language="English" if source.writes_english else "繁體中文（台灣用語）")]
     if source.instruction:
         # The user's own request comes after the rules, but can't lift them (no made-up facts, no times).
         parts.append(f"使用者另外的要求（在不違反上面規則的前提下照做）：{source.instruction}\n")

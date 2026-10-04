@@ -24,6 +24,11 @@ def speaker_names(transcript: transcription_pb2.Transcript) -> dict[str, str] | 
     return names if len(speaking) >= 2 else None
 
 
+def has_default_name(speaker: transcription_pb2.Speaker) -> bool:
+    """講者還叫預設的「講者 N」（使用者沒取過名字）：名字沒有資訊。"""
+    return speaker.display_name == f"講者 {speaker.display_order}"
+
+
 def with_speaker_name(text: str, name: str | None) -> str:
     """交給 LLM 的一行：「名稱：文字」，沒有名字時就是文字本身。"""
     return f"{name}：{text}" if name else text
