@@ -179,6 +179,11 @@ class AiServiceStub:
                 request_serializer=ai__pb2.SearchDecisionsRequest.SerializeToString,
                 response_deserializer=ai__pb2.UserDecisions.FromString,
                 _registered_method=True)
+        self.AskDecisions = channel.unary_stream(
+                '/transuai.ai.v1.AiService/AskDecisions',
+                request_serializer=ai__pb2.AskDecisionsRequest.SerializeToString,
+                response_deserializer=ai__pb2.AskDecisionsChunk.FromString,
+                _registered_method=True)
         self.RequestQuiz = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestQuiz',
                 request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
@@ -518,6 +523,15 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AskDecisions(self, request, context):
+        """問決策（決策頁的問答框）：用自然語言問，只根據這位使用者在這些 Job 的決策回答（跟 SearchDecisions 一樣找相關的決策）。先送恰好一個
+        sources（依據的決策，順序就是回答裡 [n] 的編號），接著 answered_by 與任意數量的 delta；找不到相關的決策時不呼叫模型，sources 是空的、
+        只有一個說「沒有」的 delta。中途失敗送恰好一個 error 並結束。不存紀錄。question 是空的回 INVALID_ARGUMENT。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RequestQuiz(self, request, context):
         """測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
         quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -828,6 +842,11 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.SearchDecisions,
                     request_deserializer=ai__pb2.SearchDecisionsRequest.FromString,
                     response_serializer=ai__pb2.UserDecisions.SerializeToString,
+            ),
+            'AskDecisions': grpc.unary_stream_rpc_method_handler(
+                    servicer.AskDecisions,
+                    request_deserializer=ai__pb2.AskDecisionsRequest.FromString,
+                    response_serializer=ai__pb2.AskDecisionsChunk.SerializeToString,
             ),
             'RequestQuiz': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestQuiz,
@@ -1690,6 +1709,33 @@ class AiService:
             '/transuai.ai.v1.AiService/SearchDecisions',
             ai__pb2.SearchDecisionsRequest.SerializeToString,
             ai__pb2.UserDecisions.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AskDecisions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/AskDecisions',
+            ai__pb2.AskDecisionsRequest.SerializeToString,
+            ai__pb2.AskDecisionsChunk.FromString,
             options,
             channel_credentials,
             insecure,

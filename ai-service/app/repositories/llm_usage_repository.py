@@ -12,7 +12,7 @@ from app.models import LlmUsage
 @dataclass(frozen=True)
 class LlmUsageRecord:
     user_id: uuid.UUID | None
-    job_id: uuid.UUID
+    job_id: uuid.UUID | None
     feature: str
     provider: str
     model: str

@@ -43,6 +43,7 @@ class LlmFeature(StrEnum):
     GENERATED_OUTPUT = "generated_output"  # 多格式輸出
     TRANSLATION = "translation"  # 譯文
     DECISION_EXTRACTION = "decision_extraction"  # 決策紀錄：抽出一場的決策
+    DECISION_QA = "decision_qa"  # 問決策
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ class UsageMeter:
     """把一次 LLM 呼叫的用量記在這位使用者、這個 Job、這個功能名下（見 llm_client 的 meter 參數）。"""
 
     user_id: uuid.UUID | None  # 升級當下沒帶 userId 的舊訊息是 None
-    job_id: uuid.UUID
+    job_id: uuid.UUID | None  # 問決策跨 Job，不屬於任何一個
     feature: LlmFeature
 
     def record(self, model: ChatModel, usage: TokenUsage, succeeded: bool) -> None:

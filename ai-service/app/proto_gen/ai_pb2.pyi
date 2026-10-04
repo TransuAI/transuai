@@ -1199,3 +1199,25 @@ class DecisionLink(_message.Message):
     statement: str
     meeting_at: _timestamp_pb2.Timestamp
     def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., statement: _Optional[str] = ..., meeting_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class AskDecisionsRequest(_message.Message):
+    __slots__ = ("user_id", "question", "job_ids")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
+    JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    question: str
+    job_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, user_id: _Optional[str] = ..., question: _Optional[str] = ..., job_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class AskDecisionsChunk(_message.Message):
+    __slots__ = ("sources", "delta", "error", "answered_by")
+    SOURCES_FIELD_NUMBER: _ClassVar[int]
+    DELTA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    ANSWERED_BY_FIELD_NUMBER: _ClassVar[int]
+    sources: UserDecisions
+    delta: str
+    error: str
+    answered_by: ModelChoice
+    def __init__(self, sources: _Optional[_Union[UserDecisions, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ..., answered_by: _Optional[_Union[ModelChoice, _Mapping]] = ...) -> None: ...

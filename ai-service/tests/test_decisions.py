@@ -509,3 +509,60 @@ def test_a_dismissed_decision_neither_supersedes_nor_is_shown_as_superseding(ai_
         session.commit()
 
     assert list(get(ai_stub, old_job).decisions[0].superseded_by) == []
+
+
+def ask(stub, question, job_ids, user=USER):
+    return list(stub.AskDecisions(ai_pb2.AskDecisionsRequest(user_id=str(user), question=question,
+                                                             job_ids=[str(j) for j in job_ids])))
+
+
+def test_asking_answers_from_the_users_related_decisions_only_citing_them(ai_stub, db_session, fake_llm):
+    job = uuid.uuid4()
+    postgres = stored(job, "資料庫用 PostgreSQL", rationale="需要 pgvector", embedding=axis(0))
+    stored(job, "週會改到週三", embedding=axis(1))
+    stored(job, "資料庫用 Oracle", user=OTHER_USER, embedding=axis(0))
+    fake_llm.stream(["當初選 PostgreSQL ", "是因為需要 pgvector [1]。"])
+
+    with patch.object(decisions, "embed_query", return_value=axis(0)):
+        chunks = ask(ai_stub, "當初為什麼選 PostgreSQL？", [job])
+
+    kinds = [c.WhichOneof("payload") for c in chunks]
+    assert kinds[:2] == ["sources", "answered_by"] and set(kinds[2:]) == {"delta"}
+    assert [d.id for d in chunks[0].sources.decisions] == [postgres]
+    assert "".join(c.delta for c in chunks[2:]) == "當初選 PostgreSQL 是因為需要 pgvector [1]。"
+    prompt = fake_llm.bodies()[0]["messages"][0]["content"]
+    assert "[1]" in prompt and "資料庫用 PostgreSQL" in prompt and "需要 pgvector" in prompt
+    assert "週會" not in prompt and "Oracle" not in prompt and "當初為什麼選 PostgreSQL？" in prompt
+    assert "只根據" in prompt
+    with new_session() as session:
+        assert {u.feature for u in session.scalars(select(LlmUsage).where(LlmUsage.user_id == USER))} == {"decision_qa"}
+
+
+def test_asking_about_something_never_decided_says_so_without_asking_the_model(ai_stub, db_session, fake_llm):
+    job = uuid.uuid4()
+    stored(job, "週會改到週三", embedding=axis(1))
+
+    with patch.object(decisions, "embed_query", return_value=axis(0)):
+        chunks = ask(ai_stub, "當初為什麼選 PostgreSQL？", [job])
+
+    assert [c.WhichOneof("payload") for c in chunks] == ["sources", "delta"]
+    assert list(chunks[0].sources.decisions) == [] and chunks[1].delta == decisions.NOTHING_DECIDED
+    assert fake_llm.bodies() == []
+
+
+def test_a_failure_while_answering_ends_with_an_error(ai_stub, db_session, fake_llm):
+    job = uuid.uuid4()
+    stored(job, "資料庫用 PostgreSQL", embedding=axis(0))
+    fake_llm.stream_then_fail(["當初"], "overloaded")
+
+    with patch.object(decisions, "embed_query", return_value=axis(0)):
+        chunks = ask(ai_stub, "為什麼選 PostgreSQL？", [job])
+
+    assert chunks[-1].WhichOneof("payload") == "error"
+
+
+def test_an_empty_question_is_invalid(ai_stub, db_session):
+    with pytest.raises(grpc.RpcError) as error:
+        ask(ai_stub, "  ", [uuid.uuid4()])
+
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT

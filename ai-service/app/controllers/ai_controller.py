@@ -82,9 +82,9 @@ from app.services.translations import (
     request_translation)
 from app.services.translations import effective_status as translation_effective_status
 from app.services.decisions import (
-    DecisionFields, DecisionLinks, DecisionNotFound, DecisionsNotQueued, InvalidDecision, create_decision, decision_links,
-    delete_decision, find_job_decisions, list_user_decisions, request_decision_extraction, search_decisions,
-    update_decision)
+    DecisionFields, DecisionLinks, DecisionNotFound, DecisionsNotQueued, InvalidDecision, answer_decisions,
+    create_decision, decision_links, delete_decision, find_job_decisions, list_user_decisions, request_decision_extraction,
+    search_decisions, update_decision)
 from app.services.decisions import effective_status as decision_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
@@ -580,6 +580,24 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         user_id = _parse_user_id(request.user_id, context)
         job_ids = [_parse_uuid(job_id, "job_ids", context) for job_id in request.job_ids]
         return ai_pb2.UserDecisions(decisions=_decisions_to_proto(search_decisions(user_id, request.query, job_ids)))
+
+    def AskDecisions(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        job_ids = [_parse_uuid(job_id, "job_ids", context) for job_id in request.job_ids]
+        question = request.question.strip()
+        if not question:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "question must not be empty")
+        try:
+            for kind, value in answer_decisions(user_id, question, job_ids):
+                if kind == "sources":
+                    yield ai_pb2.AskDecisionsChunk(sources=ai_pb2.UserDecisions(decisions=_decisions_to_proto(value)))
+                elif kind == "answered_by":
+                    yield ai_pb2.AskDecisionsChunk(answered_by=ai_pb2.ModelChoice(provider=value.provider, model=value.model))
+                else:
+                    yield ai_pb2.AskDecisionsChunk(delta=value)
+        except Exception as exc:
+            logger.exception("answering a question about the decisions of user %s failed", user_id)
+            yield ai_pb2.AskDecisionsChunk(error=_stream_error_message(exc))
 
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)

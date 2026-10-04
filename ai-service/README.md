@@ -370,10 +370,16 @@ ListUserDecisions / SearchDecisions（Gateway GET /decisions，決策頁：第�
   → 列出：依時間點排序（Job 的順序由 gateway 依上傳時間排）
   → 搜尋：決定、理由、沒選的選項、原話裡有這些字的（ILIKE，% 與 _ 照字面）在前、意思越近越前，接著是只有意思相近的
     （embed_query 後 cosine similarity ≥ 0.5）；最多 30 個；embedding 算不出來就只比字
+AskDecisions（Gateway POST /decisions/ask，SSE）
+  → 同 SearchDecisions 找有關的決策（最多 8 個），先送 sources（順序就是回答裡 [n] 的編號）
+  → 一個也沒有：只送「決策紀錄裡沒有找到…」，不呼叫模型（不會編）
+  → 有：每個決策一行（會議日期、決定、暫定、理由、沒選的、取代關係），prompt 要求只根據這些回答、標出 [n]、回答不了的就說沒有、
+    有取代關係時以較新的為準；用提問者的預設模型串流回答（answered_by、delta…，中文轉繁體），失敗送一個 error
+  → 用量功能是 `decision_qa`，不屬於任何一個 Job（llm_usage.job_id 是空的，只算進使用者的月用量）；不存紀錄
 ```
 
 格式不對是永久性失敗（「模型回傳的格式不正確，請再抽一次」，之前的決策保留）；暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘
-回報成失敗。用量功能是 `decision_extraction`。每個決策回傳時帶取代的連結（取代了的、被取代的，刪掉的都不算）。問決策見 `.scratch/decision-log` 之後的票。
+回報成失敗。用量功能是 `decision_extraction`。每個決策回傳時帶取代的連結（取代了的、被取代的，刪掉的都不算）。
 已知限制：只有新抽的決策往前找取代——先抽了較晚的會議、之後才抽較早的會議，兩者之間不會連起來；決策紀錄做好之前的決策沒有
 meeting_at，不會被當成候選（重新抽那一場就有）。
 
@@ -408,6 +414,7 @@ meeting_at，不會被當成候選（重新抽那一場就有）。
 | `RequestTranslation` / `ListTranslations` / `GetTranslation` / `DeleteTranslation` | 譯文（見上方）：要求翻譯（帶 `user_id`、`language`）立刻回傳 GENERATING；列出各語言的狀態與進度（`total_segments`、`translated_segments`）；取得一種語言含片段的譯文（翻譯中也取得到已經翻好的；每段帶 `source_text`，前端比對片段現在的文字就知道哪幾段還沒重翻）；刪掉一種語言的譯文（翻譯中也可以）。取得、刪除時沒有這種語言回 `NOT_FOUND`。語言不支援回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
 | `UpdateOutput` | 使用者修改一份完成的輸出：跟原本一樣就不算修改；空白或超過 20000 字回 `INVALID_ARGUMENT`，還在產生或失敗的回 `FAILED_PRECONDITION`，不屬於這個 Job 回 `NOT_FOUND` |
 | `RequestOutput` / `ListOutputs` / `GetOutput` | 多格式輸出（見上方）：要求產生（帶 `user_id`、`format`、Job 的 `title`、可選的 `instruction`、社群貼文必填的 `platform`）立刻回傳 GENERATING，每次都是新的一份；列出（新的在前，含內容）；取得一份（不屬於這個 Job 回 `NOT_FOUND`）。格式不認得、要求超過 200 字、社群貼文沒有（或不認得）平台回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
+| `AskDecisions` | 問決策（見上方，server-streaming）：只根據這位使用者在這些 Job 的決策回答；先 `sources`，再 `answered_by` 與 `delta`，失敗一個 `error`；找不到有關的決策時只有一個說「沒有」的 `delta`。`question` 是空的回 `INVALID_ARGUMENT` |
 | `ListUserDecisions` / `SearchDecisions` | 決策頁（見上方）：這位使用者在這些 Job 的決策（依時間點）／搜尋（字與意思）。`user_id` 由 gateway 從 token 帶入，`job_ids` 是使用者自己的 Job；空的 `job_ids` 回空的結果 |
 | `RequestDecisionExtraction` / `GetJobDecisions` / `CreateDecision` / `UpdateDecision` / `DeleteDecision` | 決策紀錄（見上方）：要求抽取（帶 `user_id`）立刻回傳 GENERATING 的抽取紀錄；取得這個 Job 的抽取紀錄（沒抽過就沒有 `extraction`）與決策（依時間點排序，沒有時間點的在後；刪掉的不列）；新增（帶 `user_id`，時間點可以沒有）、修改內容、刪除。排入失敗回 `UNAVAILABLE`；內容不合規則回 `INVALID_ARGUMENT`（附原因）；不是這個 Job 的決策回 `NOT_FOUND` |
 | `RequestSpeakerInsights` / `GetSpeakerInsights` | 講者數據的問題與打斷（見上方）：要求分析（帶 `user_id`）立刻回傳 GENERATING；取得目前這一份（還沒分析過是 UNSPECIFIED、沒有項目），`items` 是上一次完成的結果。排入失敗回 `UNAVAILABLE` |

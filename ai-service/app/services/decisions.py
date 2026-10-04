@@ -26,10 +26,13 @@ from app.services.decision_supersedes import Candidate, NewDecision, judge_super
 from app.services.default_models import resolve_chat_model
 from app.services.embedder import embed_documents, embed_query
 from app.services.event_publisher import connection_params, publish_decisions_requested
-from app.services.llm_client import ChatModel, LlmError
+from collections.abc import Iterator
+
+from app.services.llm_client import ChatModel, LlmError, stream_chat
 from app.services.platform_quota import LIMIT_REASON, platform_tokens_left
 from app.services.regeneration import STUCK_AFTER
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
+from app.services.traditional_chinese import TraditionalStream
 from app.services.transcript_client import transcript_client
 from app.services.usage_meter import LlmFeature, UsageMeter
 
@@ -50,6 +53,17 @@ SEARCH_LIMIT = 30
 # 只靠意思（沒有這些字）的要相近到這個程度才算找到（cosine similarity，bge-m3）。
 SEMANTIC_MIN_SIMILARITY = 0.5
 # 取代的候選：每個新的決策最多這幾個、至少這麼相近的較早決策。
+# 問決策：最多拿幾個相關的決策給模型；找不到相關的就不問模型，直接這樣回答。
+ANSWER_SOURCES = 8
+_ANSWER_MAX_TOKENS = 1500
+NOTHING_DECIDED = "決策紀錄裡沒有找到跟這個問題有關的決定。"
+_ANSWER_PROMPT = (
+    "你是使用者的決策紀錄助手。以下是從使用者的會議錄音抽出、可能跟問題有關的決策，每個以 [編號] 標示，附會議日期、"
+    "理由、考慮過但沒選的選項、是否暫定、取代關係。\n"
+    "請**只根據這些決策**，用台灣慣用的繁體中文回答問題；每個依據的句子後面標出決策的編號，例如 [1]。這些決策回答不了的部分，"
+    "就直接說決策紀錄裡沒有，不要用常識或推測補上。決策之間有取代關係時，以較新的為準，並說明是怎麼改的。\n\n"
+    "## 決策\n{decisions}\n\n## 問題\n{question}"
+)
 SUPERSEDE_CANDIDATES = 3
 SUPERSEDE_MIN_SIMILARITY = 0.5
 
@@ -142,6 +156,45 @@ def search_decisions(user_id: uuid.UUID, query: str, job_ids: list[uuid.UUID]) -
                     scores[decision.id] = (similarity, decision)
         ranked = sorted(scores.values(), key=lambda pair: pair[0], reverse=True)
         return [decision for _, decision in ranked[:SEARCH_LIMIT]]
+
+
+def answer_decisions(user_id: uuid.UUID, question: str,
+                     job_ids: list[uuid.UUID]) -> Iterator[tuple[str, object]]:
+    """問決策：找跟問題有關的決策（同 search_decisions，最多 ANSWER_SOURCES 個），只根據它們串流回答。依序 yield
+    ("sources", 決策們)、("answered_by", 模型)、("delta", 文字)…；找不到有關的決策就不問模型，只 yield 空的 sources 與 NOTHING_DECIDED。
+    模型呼叫失敗讓例外往外冒（呼叫端送 error）。"""
+    found = search_decisions(user_id, question, job_ids)[:ANSWER_SOURCES]
+    yield "sources", found
+    if not found:
+        yield "delta", NOTHING_DECIDED
+        return
+    model = resolve_chat_model(user_id)
+    links = decision_links(found)
+    listed = "\n".join(f"[{n}] {_described_for_answer(d, links[d.id])}" for n, d in enumerate(found, start=1))
+    prompt = _ANSWER_PROMPT.format(decisions=listed, question=question)
+    yield "answered_by", model
+    traditional = TraditionalStream()
+    for delta in stream_chat(model, [{"role": "user", "content": prompt}], max_tokens=_ANSWER_MAX_TOKENS,
+                             meter=UsageMeter(user_id, None, LlmFeature.DECISION_QA)):
+        if text := traditional.feed(delta):
+            yield "delta", text
+    if text := traditional.flush():
+        yield "delta", text
+
+
+def _described_for_answer(decision: Decision, links: DecisionLinks) -> str:
+    parts = [f"（{decision.meeting_at.date().isoformat()} 的會議）" if decision.meeting_at else "", decision.statement]
+    if decision.tentative:
+        parts.append("（暫定）")
+    if decision.rationale:
+        parts.append(f"。理由：{decision.rationale}")
+    if decision.alternatives:
+        parts.append(f"。沒選：{'、'.join(decision.alternatives)}")
+    if links.supersedes:
+        parts.append(f"。取代了較早的決定「{links.supersedes.statement}」")
+    if links.superseded_by:
+        parts.append(f"。後來被「{links.superseded_by[-1].statement}」取代")
+    return "".join(parts)
 
 
 def _own(user_id: uuid.UUID, job_ids: list[uuid.UUID]) -> tuple:

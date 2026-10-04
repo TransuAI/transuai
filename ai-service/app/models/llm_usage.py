@@ -17,7 +17,8 @@ class LlmUsage(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # 升級當下還在佇列裡、沒帶 userId 的舊訊息，使用者是空的。
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
-    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    # 不屬於任何一個 Job 的呼叫（問決策跨 Job）是空的：算進這位使用者的月用量，不列在任何 Job 的用量裡。
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
     # summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters
     feature: Mapped[str] = mapped_column(String(32), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
