@@ -439,9 +439,10 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
         try:
-            output = request_output(job_id, user_id, request.format, title=request.title, instruction=request.instruction)
+            output = request_output(job_id, user_id, request.format, title=request.title, instruction=request.instruction,
+                                    platform=request.platform)
         except InvalidOutputRequest:
-            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "格式不支援，或要求超過 200 字")
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "格式或平台不支援，或要求超過 200 字")
         except OutputNotQueued:
             _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法產生，請稍後再試")
         return _output_to_proto(output)
@@ -740,7 +741,8 @@ def _output_to_proto(output: GeneratedOutput) -> ai_pb2.GeneratedOutput:
     status, failure_reason = output_effective_status(output)
     message = ai_pb2.GeneratedOutput(
         id=str(output.id), job_id=str(output.job_id), format=output.format,
-        instruction=output.options.get("instruction", ""), status=_OUTPUT_STATUS[status],
+        instruction=output.options.get("instruction", ""), platform=output.options.get("platform", ""),
+        status=_OUTPUT_STATUS[status],
         failure_reason=failure_reason or "", content=output.content or "", source_revision=output.source_revision or 0,
         model_provider=output.model_provider or "", model=output.model or "")
     message.requested_at.FromDatetime(output.requested_at)

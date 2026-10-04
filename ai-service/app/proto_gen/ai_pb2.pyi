@@ -857,18 +857,20 @@ class SpeakerInsight(_message.Message):
     def __init__(self, kind: _Optional[str] = ..., speaker_label: _Optional[str] = ..., interrupted_label: _Optional[str] = ..., start_time: _Optional[float] = ..., text: _Optional[str] = ...) -> None: ...
 
 class RequestOutputRequest(_message.Message):
-    __slots__ = ("job_id", "user_id", "format", "title", "instruction")
+    __slots__ = ("job_id", "user_id", "format", "title", "instruction", "platform")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     FORMAT_FIELD_NUMBER: _ClassVar[int]
     TITLE_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
+    PLATFORM_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     user_id: str
     format: str
     title: str
     instruction: str
-    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., format: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ...) -> None: ...
+    platform: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., format: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ..., platform: _Optional[str] = ...) -> None: ...
 
 class ListOutputsRequest(_message.Message):
     __slots__ = ("job_id",)
@@ -891,7 +893,7 @@ class GetOutputRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ..., output_id: _Optional[str] = ...) -> None: ...
 
 class GeneratedOutput(_message.Message):
-    __slots__ = ("id", "job_id", "format", "instruction", "status", "failure_reason", "content", "source_revision", "model_provider", "model", "requested_at", "completed_at", "edited_at")
+    __slots__ = ("id", "job_id", "format", "instruction", "status", "failure_reason", "content", "source_revision", "model_provider", "model", "requested_at", "completed_at", "edited_at", "platform")
     ID_FIELD_NUMBER: _ClassVar[int]
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     FORMAT_FIELD_NUMBER: _ClassVar[int]
@@ -905,6 +907,7 @@ class GeneratedOutput(_message.Message):
     REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
     COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
     EDITED_AT_FIELD_NUMBER: _ClassVar[int]
+    PLATFORM_FIELD_NUMBER: _ClassVar[int]
     id: str
     job_id: str
     format: str
@@ -918,4 +921,5 @@ class GeneratedOutput(_message.Message):
     requested_at: _timestamp_pb2.Timestamp
     completed_at: _timestamp_pb2.Timestamp
     edited_at: _timestamp_pb2.Timestamp
-    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., format: _Optional[str] = ..., instruction: _Optional[str] = ..., status: _Optional[_Union[OutputStatus, str]] = ..., failure_reason: _Optional[str] = ..., content: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., edited_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    platform: str
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., format: _Optional[str] = ..., instruction: _Optional[str] = ..., status: _Optional[_Union[OutputStatus, str]] = ..., failure_reason: _Optional[str] = ..., content: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., edited_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., platform: _Optional[str] = ...) -> None: ...

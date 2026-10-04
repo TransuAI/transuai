@@ -16,7 +16,7 @@ from app.repositories.summary_repository import find_by_job_id as find_summary
 from app.services.default_models import resolve_chat_model
 from app.services.event_publisher import connection_params, publish_output_requested
 from app.services.llm_client import ChatModel, LlmError
-from app.services.output_generator import FORMATS, OutputFormatError, OutputSource, generate_output
+from app.services.output_generator import FORMATS, SOCIAL_PLATFORMS, OutputFormatError, OutputSource, generate_output
 from app.services.regeneration import STUCK_AFTER
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
 from app.services.speaker_context import speaker_names
@@ -30,7 +30,7 @@ MAX_INSTRUCTION_CHARS = 200
 
 
 class InvalidOutputRequest(Exception):
-    """Unknown format, or an instruction that's too long."""
+    """Unknown format, an instruction that's too long, or a social post without a known platform."""
 
 
 class OutputNotQueued(Exception):
@@ -46,12 +46,16 @@ def effective_status(output: GeneratedOutput, now: datetime | None = None) -> tu
 
 
 def request_output(job_id: uuid.UUID, user_id: uuid.UUID, format_name: str, *, title: str = "",
-                   instruction: str = "") -> GeneratedOutput:
-    """建立一份「產生中」的輸出並排入 queue，立即回傳。排入失敗時把它刪掉（raise OutputNotQueued）。"""
+                   instruction: str = "", platform: str = "") -> GeneratedOutput:
+    """建立一份「產生中」的輸出並排入 queue，立即回傳。社群貼文要有認得的平台，其他格式忽略平台。排入失敗時把它刪掉
+    （raise OutputNotQueued）。"""
     instruction = instruction.strip()
     if format_name not in FORMATS or len(instruction) > MAX_INSTRUCTION_CHARS:
         raise InvalidOutputRequest()
-    options = {"title": title.strip()} | ({"instruction": instruction} if instruction else {})
+    if format_name == "social_post" and platform not in SOCIAL_PLATFORMS:
+        raise InvalidOutputRequest()
+    options = ({"title": title.strip()} | ({"instruction": instruction} if instruction else {})
+               | ({"platform": platform} if format_name == "social_post" else {}))
     with new_session() as session:
         output = GeneratedOutput(job_id=job_id, user_id=user_id, format=format_name, options=options,
                                  status=OutputStatus.GENERATING, requested_at=datetime.now(timezone.utc))
@@ -115,7 +119,7 @@ def process_output_requested(body: bytes, retry_count: int = 0) -> None:
             speakers=_named_speakers(transcript) if names else [],
             instruction=output.options.get("instruction", ""))
         model = resolve_chat_model(user_id)
-        content = generate_output(output.format, source, model=model,
+        content = generate_output(output.format, source, model=model, platform=output.options.get("platform"),
                                   meter=UsageMeter(user_id, job_id, LlmFeature.GENERATED_OUTPUT))
         _save(output_id, content, transcript.revision, model)
     except OutputFormatError:

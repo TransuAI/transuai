@@ -256,8 +256,8 @@ RequestQuiz(jobId, userId, questionCount)（Gateway POST /jobs/{jobId}/quizzes�
 依一個 Job 的摘要、章節與講者，寫成一份要發出去的文件（Markdown）。跟「匯出」不同：匯出是把既有內容轉成檔案（見 CONTEXT.md）。
 
 ```
-RequestOutput(jobId, userId, format, title, instruction)（Gateway POST /jobs/{jobId}/outputs，title 是 Gateway 取來的 Job 標題）
-  → format 不認得、instruction 超過 200 字：INVALID_ARGUMENT
+RequestOutput(jobId, userId, format, title, instruction, platform)（Gateway POST /jobs/{jobId}/outputs，title 是 Gateway 取來的 Job 標題）
+  → format 不認得、instruction 超過 200 字、社群貼文沒有（或不認得）platform：INVALID_ARGUMENT
   → 新增一份 GENERATING 的輸出並存好，再排入 output.requested { outputId, jobId, userId }（排入失敗就刪掉，什麼都不留）
 消費 output.requested
   → 讀這個 Job 的摘要與章節（沒有摘要：FAILED「這個 Job 還沒有摘要，無法產生」）、GetTranscript 的 revision 與講者
@@ -267,7 +267,17 @@ RequestOutput(jobId, userId, format, title, instruction)（Gateway POST /jobs/{j
   → content、status = COMPLETED、source_revision、模型一起寫入
 ```
 
-格式：`podcast_description`（Podcast 節目介紹：開場兩三句、三到五個重點、有名字的參與者、最後是章節）。模型回空的是永久性失敗；
+格式（`app/services/output_generator.py` 的 `FORMATS`）：
+
+| format | 內容 | 附章節 |
+|---|---|---|
+| `podcast_description` | Podcast 節目介紹：開場兩三句、三到五個重點、有名字的參與者 | 有 |
+| `youtube_description` | YouTube 說明欄：前兩行是簡介、一段補充、三到五個 hashtag | 有，第一個改成 0:00（YouTube 才認得是章節） |
+| `blog_post` | 部落格文章：一級標題、開頭、幾個二級標題小節、總結，800–1500 字 | 沒有 |
+| `newsletter` | 電子報：標題、開頭、三到五個粗體重點、行動呼籲，300–600 字 | 沒有 |
+| `social_post` | 社群貼文：依平台（`platform` 必填：threads / facebook / instagram / linkedin / x，`SOCIAL_PLATFORMS`）的語氣與字數上限寫 | 沒有 |
+
+使用者的一句要求（`instruction`，最多 200 字）放在寫作規則之後，不能推翻規則（不編造、不寫時間）。社群貼文的字數上限寫在 prompt；超過時不截斷，前端顯示字數與提醒。模型回空的是永久性失敗；
 暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘回報成失敗。用量功能是 `generated_output`。本機 `qwen3:14b` 對一場 24 分鐘的會議
 約 1 分鐘寫完。
 
@@ -541,7 +551,7 @@ uvx pip-audit --no-deps --disable-pip -r /tmp/requirements.txt
   沒有任何後續動作（不會有 `job.failed` 事件），但會記錄一則高嚴重度、帶 `AI_SERVICE_TERMINAL_FAILURE_REPORT_LOST`
   marker 的 log，方便跟一般 log 區分、手動搜尋處理——沒有額外的 dead-letter queue 或事件記錄這類遺失的回報，
   這是目前接受的已知限制，之後若證明是實際的維運痛點再處理
-- 多格式輸出目前只有 Podcast 介紹一種格式（其他格式見 `.scratch/multi-format-outputs`）
+- 多格式輸出還不能在網站上修改產生的內容，也不會標示過時（見 `.scratch/multi-format-outputs/issues/03`）
 - `embeddings` 沒有建 ivfflat 向量索引：MVP 資料量小、查詢一定先用 `job_id` 過濾縮小範圍，先不做這層優化；資料量大了之後要補
 - 章節分段的 prompt 沒有做輸出格式驗證，模型回傳非預期 JSON（缺欄位、型別不對）時整個 job 會直接標成 `FAILED`，不會重試或降級成「沒有章節」
 - 對話記憶只取最近 5 輪（`app/services/qa.py` 的 `_MEMORY_TURNS`），沒有依 token 數動態調整；長對話裡更早的內容不會被 LLM 看到

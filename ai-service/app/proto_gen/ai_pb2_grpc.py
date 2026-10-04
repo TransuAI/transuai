@@ -332,7 +332,7 @@ class AiServiceServicer:
 
     def RequestOutput(self, request, context):
         """多格式輸出（見 ai-service CONTEXT.md「多格式輸出」）：依一個 Job 的摘要、章節與講者產生一份要發出去的文件（Markdown）。要求後
-        立刻回傳「產生中」，背景用要求者的預設模型產生；每次都是新的一份。format 不認得、instruction 太長回 INVALID_ARGUMENT；
+        立刻回傳「產生中」，背景用要求者的預設模型產生；每次都是新的一份。format 不認得、instruction 太長、社群貼文沒有（或不認得）platform 回 INVALID_ARGUMENT；
         排不進 queue 回 UNAVAILABLE（什麼都沒建立）。title 是 Job 的標題（Gateway 從 upload-service 取來），沒有就空字串。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)

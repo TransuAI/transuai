@@ -72,3 +72,52 @@ def test_an_unknown_format_is_refused_before_asking_the_model(fake_llm):
     with pytest.raises(ValueError):
         generate_output("press_release", SOURCE, model=platform_chat_model(), meter=None)
     assert fake_llm.bodies() == []
+
+
+# --- 02：YouTube 描述、部落格文章、電子報、社群貼文 ---
+
+
+def test_a_youtube_description_starts_its_chapters_at_0_00_so_youtube_reads_them_as_chapters(fake_llm):
+    fake_llm.reply("影片簡介")
+    late_start = OutputSource("", "摘要", [("開場", 2.0), ("預算", 125.0)], [])
+
+    content = generate_output("youtube_description", late_start, model=platform_chat_model(), meter=None)
+
+    assert content.endswith("## 章節\n\n00:00 開場\n02:05 預算\n")
+
+
+@pytest.mark.parametrize("format_name", ["blog_post", "newsletter"])
+def test_a_blog_post_or_newsletter_has_no_chapter_list(fake_llm, format_name):
+    fake_llm.reply("# 標題\n\n內文")
+
+    content = generate_output(format_name, SOURCE, model=platform_chat_model(), meter=None)
+
+    assert content == "# 標題\n\n內文\n"
+
+
+def test_a_social_post_is_written_for_the_chosen_platform_and_its_length(fake_llm):
+    fake_llm.reply("貼文 #預算")
+
+    content = generate_output("social_post", SOURCE, model=platform_chat_model(), meter=None, platform="threads")
+
+    prompt = fake_llm.bodies()[0]["messages"][0]["content"]
+    assert "Threads" in prompt and "500" in prompt
+    assert content == "貼文 #預算\n"
+
+
+def test_a_social_post_needs_a_known_platform(fake_llm):
+    with pytest.raises(ValueError):
+        generate_output("social_post", SOURCE, model=platform_chat_model(), meter=None, platform="myspace")
+    with pytest.raises(ValueError):
+        generate_output("social_post", SOURCE, model=platform_chat_model(), meter=None)
+    assert fake_llm.bodies() == []
+
+
+def test_the_users_own_request_goes_into_the_prompt_after_the_rules(fake_llm):
+    fake_llm.reply("文章")
+    source = OutputSource("", "摘要", [], [], instruction="寫給工程師看")
+
+    generate_output("blog_post", source, model=platform_chat_model(), meter=None)
+
+    prompt = fake_llm.bodies()[0]["messages"][0]["content"]
+    assert prompt.index("寫作規則") < prompt.index("寫給工程師看")

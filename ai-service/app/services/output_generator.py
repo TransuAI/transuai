@@ -37,6 +37,25 @@ class _Format:
     instructions: str
     # 最後附上章節清單（標題前面是時間）
     with_chapters: bool
+    # YouTube 要第一個章節是 0:00 才會把清單認成影片章節。
+    chapters_from_zero: bool = False
+
+
+@dataclass(frozen=True)
+class SocialPlatform:
+    name: str
+    # 平台的字數上限（X 的中日韓字算兩個，上限 280 等於約 140 個中文字；前端照同樣的算法顯示字數）
+    limit: int
+    guidance: str
+
+
+SOCIAL_PLATFORMS: dict[str, SocialPlatform] = {
+    "threads": SocialPlatform("Threads", 500, "口語、像在跟朋友聊天，一兩段就好，可以用一個問題收尾引人回覆"),
+    "facebook": SocialPlatform("Facebook", 63206, "150 到 300 字，第一句要抓住注意力，分段好讀"),
+    "instagram": SocialPlatform("Instagram", 2200, "100 到 200 字，第一句是重點（後面會被摺疊），可以用少量 emoji"),
+    "linkedin": SocialPlatform("LinkedIn", 3000, "專業但不生硬，150 到 300 字，分享一個觀點或學到的事"),
+    "x": SocialPlatform("X", 280, "一則推文：中文 120 字以內（英文 260 字元以內），一個重點"),
+}
 
 
 _COMMON = (
@@ -56,25 +75,70 @@ FORMATS: dict[str, _Format] = {
         "- 全文 150 到 300 字（英文 100 到 200 words）。\n",
         with_chapters=True,
     ),
+    "youtube_description": _Format(
+        "請替這支影片寫 YouTube 影片說明欄：\n"
+        "- 前兩行（約 100 字）是最重要的簡介：在搜尋結果與摺疊前就看得到，要讓人想點開。\n"
+        "- 接著一段補充影片內容（兩三句）。\n"
+        "- 最後一行放三到五個跟內容相關的 hashtag。\n",
+        with_chapters=True,
+        chapters_from_zero=True,
+    ),
+    "blog_post": _Format(
+        "請把這段內容寫成一篇部落格文章：\n"
+        "- 第一行是文章標題（Markdown 一級標題 #）。\n"
+        "- 開頭一段說明這篇在談什麼、為什麼值得讀。\n"
+        "- 內文依主題分成幾個小節，每節用二級標題（##），段落完整、有前後連貫，不是條列重點。\n"
+        "- 最後一段做總結或給讀者的建議。\n"
+        "- 全文 800 到 1500 字（英文 500 到 1000 words）。\n",
+        with_chapters=False,
+    ),
+    "newsletter": _Format(
+        "請把這段內容寫成一期電子報：\n"
+        "- 第一行是這期的標題（Markdown 一級標題 #）。\n"
+        "- 開頭兩三句跟讀者打招呼、帶出這期主題。\n"
+        "- 三到五個重點，每點一個粗體小標加兩三句說明。\n"
+        "- 最後一段是行動呼籲（例如收聽完整內容、回信分享想法）。\n"
+        "- 全文 300 到 600 字（英文 200 到 400 words）。\n",
+        with_chapters=False,
+    ),
+    "social_post": _Format(
+        "請替這段內容寫一則 {platform} 貼文：\n"
+        "- {guidance}。\n"
+        "- 字數絕對不能超過 {platform} 的上限 {limit} 字元。\n"
+        "- 最後可以放兩三個 hashtag（X 最多一個）。\n",
+        with_chapters=False,
+    ),
 }
 
 
-def generate_output(format_name: str, source: OutputSource, *, model: ChatModel, meter: UsageSink | None) -> str:
-    """產生一份輸出的 Markdown。格式不認得 raise ValueError（不呼叫模型）；模型回空的 raise OutputFormatError；模型呼叫失敗的例外照樣往外冒。"""
+def generate_output(format_name: str, source: OutputSource, *, model: ChatModel, meter: UsageSink | None,
+                    platform: str | None = None) -> str:
+    """產生一份輸出的 Markdown。格式不認得、社群貼文沒有（或不認得）平台 raise ValueError（不呼叫模型）；模型回空的 raise
+    OutputFormatError；模型呼叫失敗的例外照樣往外冒。"""
     if format_name not in FORMATS:
         raise ValueError(f"unknown output format: {format_name}")
     output_format = FORMATS[format_name]
-    reply = chat(model, [{"role": "user", "content": _prompt(output_format, source)}], max_tokens=_MAX_TOKENS, meter=meter)
+    instructions = output_format.instructions
+    if format_name == "social_post":
+        if platform not in SOCIAL_PLATFORMS:
+            raise ValueError(f"unknown social platform: {platform}")
+        chosen = SOCIAL_PLATFORMS[platform]
+        instructions = instructions.format(platform=chosen.name, guidance=chosen.guidance, limit=chosen.limit)
+    prompt = _prompt(instructions, source)
+    reply = chat(model, [{"role": "user", "content": prompt}], max_tokens=_MAX_TOKENS, meter=meter)
     body = _without_times(to_traditional(reply.text)).strip()
     if not body:
         raise OutputFormatError("empty reply")
     if output_format.with_chapters and source.chapters:
-        body += "\n\n## 章節\n\n" + "\n".join(f"{clock(start)} {title}" for title, start in source.chapters)
+        chapters = list(source.chapters)
+        if output_format.chapters_from_zero:
+            chapters[0] = (chapters[0][0], 0.0)
+        body += "\n\n## 章節\n\n" + "\n".join(f"{clock(start)} {title}" for title, start in chapters)
     return body + "\n"
 
 
-def _prompt(output_format: _Format, source: OutputSource) -> str:
-    parts = [output_format.instructions, _COMMON]
+def _prompt(instructions: str, source: OutputSource) -> str:
+    parts = [instructions, _COMMON]
     if source.instruction:
         # The user's own request comes after the rules, but can't lift them (no made-up facts, no times).
         parts.append(f"使用者另外的要求（在不違反上面規則的前提下照做）：{source.instruction}\n")

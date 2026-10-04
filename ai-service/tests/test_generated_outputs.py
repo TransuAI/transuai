@@ -39,9 +39,9 @@ def published(channel):
     return [(c.kwargs["routing_key"], json.loads(c.kwargs["body"])) for c in channel.basic_publish.call_args_list]
 
 
-def request(stub, job_id, format_name="podcast_description", instruction="", title="產品週會"):
+def request(stub, job_id, format_name="podcast_description", instruction="", title="產品週會", platform=""):
     return stub.RequestOutput(ai_pb2.RequestOutputRequest(
-        job_id=str(job_id), user_id=str(USER), format=format_name, title=title, instruction=instruction))
+        job_id=str(job_id), user_id=str(USER), format=format_name, title=title, instruction=instruction, platform=platform))
 
 
 def summarized_job():
@@ -77,6 +77,30 @@ def test_an_unknown_format_or_a_too_long_instruction_is_invalid(ai_stub, db_sess
 
     assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
     assert published(rabbitmq) == []
+
+
+@pytest.mark.parametrize("platform", ["", "myspace"])
+def test_a_social_post_needs_a_known_platform(ai_stub, db_session, rabbitmq, platform):
+    with pytest.raises(grpc.RpcError) as error:
+        request(ai_stub, uuid.uuid4(), "social_post", platform=platform)
+
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_a_social_post_is_written_for_its_platform(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = summarized_job()
+    output = request(ai_stub, job_id, "social_post", platform="linkedin")
+    assert output.platform == "linkedin"
+    fake_llm.reply("貼文")
+
+    process(output)
+
+    assert "LinkedIn" in fake_llm.bodies()[0]["messages"][0]["content"]
+    assert ai_stub.GetOutput(ai_pb2.GetOutputRequest(job_id=str(job_id), output_id=output.id)).content == "貼文\n"
+
+
+def test_other_formats_ignore_a_platform(ai_stub, db_session, rabbitmq):
+    assert request(ai_stub, uuid.uuid4(), "blog_post", platform="x").platform == ""
 
 
 def test_generating_writes_the_document_from_the_summary_chapters_and_speakers(ai_stub, db_session, rabbitmq, fake_llm):
