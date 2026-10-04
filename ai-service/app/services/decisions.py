@@ -1,10 +1,14 @@
 """決策紀錄要怎麼跑（抽取本身見 decision_extractor.py）：要求時把這個 Job 的抽取紀錄改成「抽取中」並排入 ai-service 自己的
 decision.requested queue，背景用要求者的預設模型抽，完成才換掉 AI 上一次抽的（使用者改過或自己新增的保留）。類型是會議、訪談的 Job
-轉錄完由 pipeline 自動要求（extract_after_transcription）。做法照講者數據（speaker_insight_runs.py）。"""
+轉錄完由 pipeline 自動要求（extract_after_transcription）。做法照講者數據（speaker_insight_runs.py）。
+
+使用者可以改（edited）、自己新增（source = user）、刪掉決策；AI 抽的被刪掉只是隱藏（dismissed）。重新抽時這些都留著，而且新抽到的
+如果跟它們在同一個片段（同一個時間點）就不收——改過的不會多出一份原本的、刪掉的不會再出現。"""
 
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from pika import BlockingConnection
@@ -33,8 +37,34 @@ STUCK_REASON = "抽取逾時，請再抽一次"
 FORMAT_REASON = "模型回傳的格式不正確，請再抽一次"
 
 
+MAX_STATEMENT_CHARS = 300
+MAX_RATIONALE_CHARS = 1000
+MAX_ALTERNATIVES = 10
+MAX_ALTERNATIVE_CHARS = 200
+_MAX_SPEAKER_LABEL_CHARS = 32
+
+
 class DecisionsNotQueued(Exception):
     """The request couldn't be put on the queue; nothing changed."""
+
+
+class InvalidDecision(Exception):
+    """The decision the user wrote breaks a rule; the message says which, for the user."""
+
+
+class DecisionNotFound(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class DecisionFields:
+    """決策可以改的內容。"""
+
+    statement: str
+    rationale: str
+    alternatives: list[str]
+    proposed_by: str | None
+    tentative: bool
 
 
 def effective_status(extraction: DecisionExtraction,
@@ -50,7 +80,7 @@ def find_job_decisions(job_id: uuid.UUID) -> tuple[DecisionExtraction | None, li
     """抽取紀錄（沒抽過是 None）與決策：依時間點排序，沒有時間點的（使用者新增的）在後。"""
     with new_session() as session:
         extraction = session.scalar(select(DecisionExtraction).where(DecisionExtraction.job_id == job_id))
-        found = session.scalars(select(Decision).where(Decision.job_id == job_id)
+        found = session.scalars(select(Decision).where(Decision.job_id == job_id, Decision.dismissed.is_(False))
                                 .order_by(Decision.start_time.asc().nulls_last(), Decision.created_at)).all()
         return extraction, list(found)
 
@@ -83,6 +113,80 @@ def request_decision_extraction(job_id: uuid.UUID, user_id: uuid.UUID) -> Decisi
             session.commit()
             raise DecisionsNotQueued() from exc
         return extraction
+
+
+def create_decision(job_id: uuid.UUID, user_id: uuid.UUID, fields: DecisionFields,
+                    start_time: float | None) -> Decision:
+    """使用者自己新增的決策（source = user）；時間點可以沒有。內容不合規則 raise InvalidDecision。"""
+    fields = _validated(fields)
+    if start_time is not None and start_time < 0:
+        raise InvalidDecision("時間點不能是負的")
+    with new_session() as session:
+        decision = Decision(job_id=job_id, user_id=user_id, statement=fields.statement, rationale=fields.rationale,
+                            alternatives=fields.alternatives, proposed_by=fields.proposed_by, tentative=fields.tentative,
+                            start_time=start_time, source=DecisionSource.USER, embedding=_embedding_or_none(fields))
+        session.add(decision)
+        session.commit()
+        return decision
+
+
+def update_decision(job_id: uuid.UUID, decision_id: uuid.UUID, fields: DecisionFields) -> Decision:
+    """改決策的內容（時間點與原話不變），標記 edited。不是這個 Job 的（或刪掉了）raise DecisionNotFound。"""
+    fields = _validated(fields)
+    with new_session() as session:
+        decision = _one(session, job_id, decision_id)
+        if (decision.statement, decision.rationale) != (fields.statement, fields.rationale):
+            decision.embedding = _embedding_or_none(fields)
+        decision.statement, decision.rationale, decision.alternatives = (
+            fields.statement, fields.rationale, fields.alternatives)
+        decision.proposed_by, decision.tentative = fields.proposed_by, fields.tentative
+        decision.edited, decision.updated_at = True, datetime.now(timezone.utc)
+        session.commit()
+        return decision
+
+
+def delete_decision(job_id: uuid.UUID, decision_id: uuid.UUID) -> None:
+    """AI 抽的只是隱藏（重新抽時不再出現），使用者新增的直接刪掉。不是這個 Job 的 raise DecisionNotFound。"""
+    with new_session() as session:
+        decision = _one(session, job_id, decision_id)
+        if decision.source == DecisionSource.USER:
+            session.delete(decision)
+        else:
+            decision.dismissed, decision.updated_at = True, datetime.now(timezone.utc)
+        session.commit()
+
+
+def _one(session, job_id: uuid.UUID, decision_id: uuid.UUID) -> Decision:
+    decision = session.scalar(select(Decision).where(
+        Decision.id == decision_id, Decision.job_id == job_id, Decision.dismissed.is_(False)).with_for_update())
+    if decision is None:
+        raise DecisionNotFound()
+    return decision
+
+
+def _validated(fields: DecisionFields) -> DecisionFields:
+    statement, rationale = fields.statement.strip(), fields.rationale.strip()
+    alternatives = [a.strip() for a in fields.alternatives if a.strip()]
+    if not statement:
+        raise InvalidDecision("決定不能是空的")
+    if len(statement) > MAX_STATEMENT_CHARS:
+        raise InvalidDecision(f"決定最多 {MAX_STATEMENT_CHARS} 字")
+    if len(rationale) > MAX_RATIONALE_CHARS:
+        raise InvalidDecision(f"理由最多 {MAX_RATIONALE_CHARS} 字")
+    if len(alternatives) > MAX_ALTERNATIVES or any(len(a) > MAX_ALTERNATIVE_CHARS for a in alternatives):
+        raise InvalidDecision(f"沒選的選項最多 {MAX_ALTERNATIVES} 個、每個 {MAX_ALTERNATIVE_CHARS} 字")
+    if fields.proposed_by and len(fields.proposed_by) > _MAX_SPEAKER_LABEL_CHARS:
+        raise InvalidDecision("不認得這位講者")
+    return DecisionFields(statement, rationale, alternatives, fields.proposed_by or None, fields.tentative)
+
+
+def _embedding_or_none(fields: DecisionFields) -> list[float] | None:
+    """使用者改或新增時就算好 embedding；算不出來先存沒有的（決策本身比搜不搜得到重要）。"""
+    try:
+        return embed_documents([embedding_text(fields.statement, fields.rationale)])[0]
+    except Exception:
+        logger.exception("could not embed a decision, saving it without")
+        return None
 
 
 def extract_after_transcription(job_id: uuid.UUID, user_id: uuid.UUID | None, category: str | None,
@@ -179,13 +283,17 @@ def _save(job_id: uuid.UUID, user_id: uuid.UUID, found: list[ExtractedDecision],
         if extraction is None:
             return
         session.execute(delete(Decision).where(
-            Decision.job_id == job_id, Decision.source == DecisionSource.AI, Decision.edited.is_(False)))
+            Decision.job_id == job_id, Decision.source == DecisionSource.AI, Decision.edited.is_(False),
+            Decision.dismissed.is_(False)))
+        # What stays (edited, added, dismissed) holds its segment: a new one made there is the same decision again.
+        held = {float(t) for t in session.scalars(select(Decision.start_time).where(
+            Decision.job_id == job_id, Decision.start_time.is_not(None)))}
         session.add_all([
             Decision(job_id=job_id, user_id=user_id, statement=d.statement, rationale=d.rationale,
                      alternatives=d.alternatives, proposed_by=d.proposed_by, tentative=d.tentative,
                      start_time=d.start_time, evidence_text=d.evidence_text, source=DecisionSource.AI,
                      embedding=vector, source_revision=source_revision)
-            for d, vector in zip(found, vectors)])
+            for d, vector in zip(found, vectors) if d.start_time not in held])
         extraction.status, extraction.failure_reason = DecisionExtractionStatus.COMPLETED, None
         extraction.source_revision, extraction.model_provider, extraction.model = (
             source_revision, model.provider, model.model)

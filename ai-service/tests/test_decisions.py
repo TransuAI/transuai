@@ -231,3 +231,109 @@ def test_a_decision_superseding_one_from_a_deleted_job_loses_the_link(db_session
 
     with new_session() as session:
         assert session.get(Decision, later_id).supersedes_id is None
+
+
+def fields(**overrides):
+    values = {"statement": "週會改到週三", "rationale": "週一大家都在趕進度", "alternatives": ["週五"], "proposed_by": "S1",
+              "tentative": False} | overrides
+    return ai_pb2.DecisionInput(**values)
+
+
+def create(stub, job_id, start_time=None, **overrides):
+    request = ai_pb2.CreateDecisionRequest(job_id=str(job_id), user_id=str(USER), decision=fields(**overrides))
+    if start_time is not None:
+        request.start_time = start_time
+    return stub.CreateDecision(request)
+
+
+def extracted_job(ai_stub, fake_llm, *items):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, *items)
+    process(job_id)
+    return job_id
+
+
+def test_a_decision_the_user_adds_is_theirs_and_found_by_its_meaning(ai_stub, db_session, rabbitmq, embedder):
+    job_id = uuid.uuid4()
+
+    added = create(ai_stub, job_id, start_time=12.0)
+
+    assert (added.statement, added.source, added.start_time, list(added.alternatives)) == ("週會改到週三", "user", 12.0, ["週五"])
+    assert [d.id for d in get(ai_stub, job_id).decisions] == [added.id]
+    assert embedder.call_args.args[0] == ["週會改到週三\n週一大家都在趕進度"]
+    with new_session() as session:
+        assert session.get(Decision, uuid.UUID(added.id)).user_id == USER
+
+
+def test_a_decision_without_a_time_is_fine_but_one_without_a_statement_is_not(ai_stub, db_session, rabbitmq, embedder):
+    assert not create(ai_stub, uuid.uuid4()).HasField("start_time")
+
+    for bad in ({"statement": "  "}, {"statement": "長" * 301}, {"alternatives": ["x"] * 11}):
+        with pytest.raises(grpc.RpcError) as error:
+            create(ai_stub, uuid.uuid4(), **bad)
+        assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_editing_an_extracted_decision_marks_it_edited_and_extracting_again_keeps_it_without_a_copy(
+        ai_stub, db_session, rabbitmq, fake_llm, embedder):
+    job_id = extracted_job(ai_stub, fake_llm, POSTGRES)
+    [postgres] = get(ai_stub, job_id).decisions
+
+    edited = ai_stub.UpdateDecision(ai_pb2.UpdateDecisionRequest(
+        job_id=str(job_id), decision_id=postgres.id,
+        decision=fields(statement="資料庫確定用 PostgreSQL 16", rationale="需要 pgvector", alternatives=[], proposed_by="S2",
+                        tentative=True)))
+
+    assert (edited.statement, edited.edited, edited.tentative, edited.proposed_by) == ("資料庫確定用 PostgreSQL 16", True, True, "S2")
+    assert (edited.start_time, edited.evidence_text) == (8.0, "好 那就決定用 PostgreSQL")  # where it was made stays
+    request(ai_stub, job_id)
+    answer(fake_llm, POSTGRES, LAUNCH)  # the same decision comes back, in the same segment
+    process(job_id)
+    assert [d.statement for d in get(ai_stub, job_id).decisions] == ["資料庫確定用 PostgreSQL 16", "上線日期暫定月底"]
+
+
+def test_a_deleted_extracted_decision_does_not_come_back_when_extracting_again(ai_stub, db_session, rabbitmq, fake_llm,
+                                                                               embedder):
+    job_id = extracted_job(ai_stub, fake_llm, POSTGRES, LAUNCH)
+    postgres = get(ai_stub, job_id).decisions[0]
+
+    ai_stub.DeleteDecision(ai_pb2.DeleteDecisionRequest(job_id=str(job_id), decision_id=postgres.id))
+
+    assert [d.statement for d in get(ai_stub, job_id).decisions] == ["上線日期暫定月底"]
+    request(ai_stub, job_id)
+    answer(fake_llm, POSTGRES, LAUNCH)
+    process(job_id)
+    assert [d.statement for d in get(ai_stub, job_id).decisions] == ["上線日期暫定月底"]
+
+
+def test_a_decision_the_user_added_is_deleted_for_good(ai_stub, db_session, rabbitmq, embedder):
+    job_id = uuid.uuid4()
+    added = create(ai_stub, job_id)
+
+    ai_stub.DeleteDecision(ai_pb2.DeleteDecisionRequest(job_id=str(job_id), decision_id=added.id))
+
+    with new_session() as session:
+        assert session.get(Decision, uuid.UUID(added.id)) is None
+
+
+def test_a_decision_of_another_job_is_not_found(ai_stub, db_session, rabbitmq, embedder):
+    added = create(ai_stub, uuid.uuid4())
+    other_job = str(uuid.uuid4())
+
+    for call in (
+        lambda: ai_stub.UpdateDecision(ai_pb2.UpdateDecisionRequest(job_id=other_job, decision_id=added.id, decision=fields())),
+        lambda: ai_stub.DeleteDecision(ai_pb2.DeleteDecisionRequest(job_id=other_job, decision_id=added.id)),
+    ):
+        with pytest.raises(grpc.RpcError) as error:
+            call()
+        assert error.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_a_decision_is_saved_even_when_its_embedding_cannot_be_made(ai_stub, db_session, rabbitmq, embedder):
+    embedder.side_effect = RuntimeError("HF is down")
+
+    added = create(ai_stub, uuid.uuid4())
+
+    with new_session() as session:
+        assert session.get(Decision, uuid.UUID(added.id)).embedding is None

@@ -1076,6 +1076,54 @@ class JobDecisions(_message.Message):
     decisions: _containers.RepeatedCompositeFieldContainer[Decision]
     def __init__(self, extraction: _Optional[_Union[DecisionExtraction, _Mapping]] = ..., decisions: _Optional[_Iterable[_Union[Decision, _Mapping]]] = ...) -> None: ...
 
+class DecisionInput(_message.Message):
+    __slots__ = ("statement", "rationale", "alternatives", "proposed_by", "tentative")
+    STATEMENT_FIELD_NUMBER: _ClassVar[int]
+    RATIONALE_FIELD_NUMBER: _ClassVar[int]
+    ALTERNATIVES_FIELD_NUMBER: _ClassVar[int]
+    PROPOSED_BY_FIELD_NUMBER: _ClassVar[int]
+    TENTATIVE_FIELD_NUMBER: _ClassVar[int]
+    statement: str
+    rationale: str
+    alternatives: _containers.RepeatedScalarFieldContainer[str]
+    proposed_by: str
+    tentative: bool
+    def __init__(self, statement: _Optional[str] = ..., rationale: _Optional[str] = ..., alternatives: _Optional[_Iterable[str]] = ..., proposed_by: _Optional[str] = ..., tentative: _Optional[bool] = ...) -> None: ...
+
+class CreateDecisionRequest(_message.Message):
+    __slots__ = ("job_id", "user_id", "decision", "start_time")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    DECISION_FIELD_NUMBER: _ClassVar[int]
+    START_TIME_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    decision: DecisionInput
+    start_time: float
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., decision: _Optional[_Union[DecisionInput, _Mapping]] = ..., start_time: _Optional[float] = ...) -> None: ...
+
+class UpdateDecisionRequest(_message.Message):
+    __slots__ = ("job_id", "decision_id", "decision")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    DECISION_ID_FIELD_NUMBER: _ClassVar[int]
+    DECISION_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    decision_id: str
+    decision: DecisionInput
+    def __init__(self, job_id: _Optional[str] = ..., decision_id: _Optional[str] = ..., decision: _Optional[_Union[DecisionInput, _Mapping]] = ...) -> None: ...
+
+class DeleteDecisionRequest(_message.Message):
+    __slots__ = ("job_id", "decision_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    DECISION_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    decision_id: str
+    def __init__(self, job_id: _Optional[str] = ..., decision_id: _Optional[str] = ...) -> None: ...
+
+class DeleteDecisionResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
 class Decision(_message.Message):
     __slots__ = ("id", "job_id", "statement", "rationale", "alternatives", "proposed_by", "tentative", "start_time", "evidence_text", "source", "edited", "supersedes_id", "created_at")
     ID_FIELD_NUMBER: _ClassVar[int]

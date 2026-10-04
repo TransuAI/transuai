@@ -58,6 +58,8 @@ class Decision(Base):
     evidence_text: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(8), nullable=False, default=DecisionSource.AI)
     edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # AI 抽的被使用者刪掉：不顯示，但留著讓重新抽時不再出現（同一個片段的不再收）。使用者新增的是直接刪掉。
+    dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # 這個決策取代了較早的哪一個（見 CONTEXT.md「取代」）；那個被刪掉（例如刪 Job）就變回空的。
     supersedes_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("decisions.id", ondelete="SET NULL"))

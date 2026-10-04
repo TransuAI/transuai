@@ -81,7 +81,9 @@ from app.services.translations import (
     TranslationNotQueued, TranslationProgress, UnknownLanguage, delete_translation, find_translation, list_translations,
     request_translation)
 from app.services.translations import effective_status as translation_effective_status
-from app.services.decisions import DecisionsNotQueued, find_job_decisions, request_decision_extraction
+from app.services.decisions import (
+    DecisionFields, DecisionNotFound, DecisionsNotQueued, InvalidDecision, create_decision, delete_decision,
+    find_job_decisions, request_decision_extraction, update_decision)
 from app.services.decisions import effective_status as decision_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
@@ -537,6 +539,36 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             message.extraction.CopyFrom(_decision_extraction_to_proto(extraction))
         return message
 
+    def CreateDecision(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            decision = create_decision(job_id, user_id, _decision_fields(request.decision),
+                                       request.start_time if request.HasField("start_time") else None)
+        except InvalidDecision as exc:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        return _decision_to_proto(decision)
+
+    def UpdateDecision(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        decision_id = _parse_uuid(request.decision_id, "decision_id", context)
+        try:
+            decision = update_decision(job_id, decision_id, _decision_fields(request.decision))
+        except InvalidDecision as exc:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        except DecisionNotFound:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "decision not found")
+        return _decision_to_proto(decision)
+
+    def DeleteDecision(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        decision_id = _parse_uuid(request.decision_id, "decision_id", context)
+        try:
+            delete_decision(job_id, decision_id)
+        except DecisionNotFound:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "decision not found")
+        return ai_pb2.DeleteDecisionResponse()
+
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
@@ -832,6 +864,12 @@ def _decision_extraction_to_proto(extraction: DecisionExtraction) -> ai_pb2.Deci
     if extraction.completed_at is not None:
         message.completed_at.FromDatetime(extraction.completed_at)
     return message
+
+
+def _decision_fields(message: ai_pb2.DecisionInput) -> DecisionFields:
+    return DecisionFields(statement=message.statement, rationale=message.rationale,
+                          alternatives=list(message.alternatives), proposed_by=message.proposed_by or None,
+                          tentative=message.tentative)
 
 
 def _decision_to_proto(decision: Decision) -> ai_pb2.Decision:

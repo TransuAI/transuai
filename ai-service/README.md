@@ -354,12 +354,17 @@ RequestDecisionExtraction(jobId, userId)（Gateway POST /jobs/{jobId}/decisions/
   → 驗證：line 要存在、quote（正規化後）要出現在那一行或前後一行，對不上整筆丟掉；proposed_by 對不上講者只是不知道是誰；
     文字一律轉繁體；存下的原話與時間點取那個片段本身
   → statement＋rationale 的 embedding（跟逐字稿片段同一個模型）；暫時連不上而且還能重試就整則重試，不然先存沒有 embedding 的
-  → 刪掉 AI 抽的、使用者沒改過的（source = ai 且 edited = false），存新的（user_id = userId）；COMPLETED、source_revision = R、模型
+  → 刪掉 AI 抽的、使用者沒改過、沒刪掉的（source = ai、edited = false、dismissed = false）；留下來的（改過的、自己新增的、刪掉的）
+    佔著它們的片段——新抽到的在同一個時間點就是同一個決策，不收（改過的不會多一份原本的、刪掉的不會再出現）；
+    其他的存起來（user_id = userId）；COMPLETED、source_revision = R、模型
+CreateDecision / UpdateDecision / DeleteDecision（Gateway POST / PATCH / DELETE /jobs/{jobId}/decisions…）
+  → 新增：source = user，時間點可以沒有；修改：只改內容（時間點與原話不變），edited = true；都當場算 embedding（算不出來先存沒有的）
+  → 刪除：AI 抽的只標 dismissed（不顯示、重新抽時佔著那個片段），使用者新增的直接刪掉
+  → 決定是空的或超過 300 字、理由超過 1000 字、沒選的選項超過 10 個或每個超過 200 字：INVALID_ARGUMENT（附給使用者看的原因）
 ```
 
 格式不對是永久性失敗（「模型回傳的格式不正確，請再抽一次」，之前的決策保留）；暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘
-回報成失敗。用量功能是 `decision_extraction`。`supersedes_id`（取代）、`source = user`、`edited` 已經有欄位，修改、新增、跨會議的
-時間軸、取代與問決策見 `.scratch/decision-log` 之後的票。
+回報成失敗。用量功能是 `decision_extraction`。`supersedes_id`（取代）已經有欄位；跨會議的時間軸、取代與問決策見 `.scratch/decision-log` 之後的票。
 
 ### 逐字稿被編輯之後（`transcript.edited`）
 
@@ -392,7 +397,7 @@ RequestDecisionExtraction(jobId, userId)（Gateway POST /jobs/{jobId}/decisions/
 | `RequestTranslation` / `ListTranslations` / `GetTranslation` / `DeleteTranslation` | 譯文（見上方）：要求翻譯（帶 `user_id`、`language`）立刻回傳 GENERATING；列出各語言的狀態與進度（`total_segments`、`translated_segments`）；取得一種語言含片段的譯文（翻譯中也取得到已經翻好的；每段帶 `source_text`，前端比對片段現在的文字就知道哪幾段還沒重翻）；刪掉一種語言的譯文（翻譯中也可以）。取得、刪除時沒有這種語言回 `NOT_FOUND`。語言不支援回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
 | `UpdateOutput` | 使用者修改一份完成的輸出：跟原本一樣就不算修改；空白或超過 20000 字回 `INVALID_ARGUMENT`，還在產生或失敗的回 `FAILED_PRECONDITION`，不屬於這個 Job 回 `NOT_FOUND` |
 | `RequestOutput` / `ListOutputs` / `GetOutput` | 多格式輸出（見上方）：要求產生（帶 `user_id`、`format`、Job 的 `title`、可選的 `instruction`、社群貼文必填的 `platform`）立刻回傳 GENERATING，每次都是新的一份；列出（新的在前，含內容）；取得一份（不屬於這個 Job 回 `NOT_FOUND`）。格式不認得、要求超過 200 字、社群貼文沒有（或不認得）平台回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
-| `RequestDecisionExtraction` / `GetJobDecisions` | 決策紀錄（見上方）：要求抽取（帶 `user_id`）立刻回傳 GENERATING 的抽取紀錄；取得這個 Job 的抽取紀錄（沒抽過就沒有 `extraction`）與決策（依時間點排序，沒有時間點的在後）。排入失敗回 `UNAVAILABLE` |
+| `RequestDecisionExtraction` / `GetJobDecisions` / `CreateDecision` / `UpdateDecision` / `DeleteDecision` | 決策紀錄（見上方）：要求抽取（帶 `user_id`）立刻回傳 GENERATING 的抽取紀錄；取得這個 Job 的抽取紀錄（沒抽過就沒有 `extraction`）與決策（依時間點排序，沒有時間點的在後；刪掉的不列）；新增（帶 `user_id`，時間點可以沒有）、修改內容、刪除。排入失敗回 `UNAVAILABLE`；內容不合規則回 `INVALID_ARGUMENT`（附原因）；不是這個 Job 的決策回 `NOT_FOUND` |
 | `RequestSpeakerInsights` / `GetSpeakerInsights` | 講者數據的問題與打斷（見上方）：要求分析（帶 `user_id`）立刻回傳 GENERATING；取得目前這一份（還沒分析過是 UNSPECIFIED、沒有項目），`items` 是上一次完成的結果。排入失敗回 `UNAVAILABLE` |
 | `RequestQuiz` | 要求產生一份測驗（帶 `user_id`：要求的使用者，用他的預設模型、用量記在他名下）：新增 GENERATING 的測驗、排入 `quiz.requested` 後立即回傳（不含題目）；每次都是新的一份。題數不是 5、10、20 或 ID 不合法回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
 | `ListQuizzes` | 一個 Job 的所有測驗（新的在前）：題數、狀態（GENERATING 超過 5 分鐘回報成 FAILED）、失敗原因、依據的逐字稿 revision、產生的模型、要求與完成時間、最佳成績（`best_correct_count`：所有作答裡答對最多的題數，沒作答過不設定）；不含題目 |
@@ -499,7 +504,7 @@ app/
     output_generator.py              多格式輸出的產生：每種格式一份 prompt、刪掉模型寫的時間、附上章節
     generated_outputs.py             RequestOutput（排入自己的 queue）與消費 output.requested；卡住的判斷
     decision_extractor.py            抽出決策：有行號的逐字稿、照抄的原話要對得上那一行或前後一行
-    decisions.py                     RequestDecisionExtraction（排入自己的 queue）、轉錄完自動抽、消費 decision.requested
+    decisions.py                     RequestDecisionExtraction（排入自己的 queue）、轉錄完自動抽、消費 decision.requested；新增、修改、刪除
     speaker_insights.py              講者數據的 AI 判斷：編號的逐字稿、打斷的候選、只收行號並對回片段
     speaker_insight_runs.py          RequestSpeakerInsights（排入自己的 queue）與消費 speaker_insights.requested；卡住的判斷
     quizzes.py                       RequestQuiz（排入自己的 queue）與消費 quiz.requested：產生測驗、失敗與卡住的判斷；作答的計分與保存
