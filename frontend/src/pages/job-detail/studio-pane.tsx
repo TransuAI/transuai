@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
-import { ArrowLeft, ChartBarBig, ClipboardList, Gauge, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ChartBarBig, FileText, ClipboardList, Gauge, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
 import type { NotesActions } from '@/hooks/use-notes'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
+import type { OutputsActions } from '@/hooks/use-outputs'
 import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
 import { formatCount, formatMinutes } from '@/lib/usage-format'
@@ -11,13 +12,14 @@ import { NotesSection, type NoteToOpen } from '@/pages/job-detail/notes-section'
 import { PostMeetingSection } from '@/pages/job-detail/post-meeting-section'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
 import { SpeakerStatsSection } from '@/pages/job-detail/speaker-stats-section'
+import { OutputsSection } from '@/pages/job-detail/outputs-section'
 import { computeSpeakerStats, speakerStatsStatus } from '@/lib/speaker-stats'
 import { UsageSection } from '@/pages/job-detail/usage-section'
 import { cn } from '@/lib/utils'
 import type { Chapter, ConfirmedProposal, JobUsage, PostMeeting, Quiz, Summary, Transcript } from '@/types/api'
 
 /** A Studio tool; the pane shows either the tiles of all tools (none picked) or one tool. */
-export type StudioTool = 'summary' | 'chapters' | 'notes' | 'quiz' | 'speaker-stats' | 'post-meeting' | 'usage'
+export type StudioTool = 'summary' | 'chapters' | 'notes' | 'quiz' | 'outputs' | 'speaker-stats' | 'post-meeting' | 'usage'
 
 interface StudioPaneProps {
   jobId: string
@@ -39,6 +41,9 @@ interface StudioPaneProps {
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
   speakerInsights: SpeakerInsightsActions
+  outputs: OutputsActions
+  /** The uploaded file's name: what downloaded outputs are named after. */
+  fileName: string
   postMeeting: PostMeeting | null
   onStartPostMeeting: () => void
   isStartingPostMeeting: boolean
@@ -75,6 +80,8 @@ export function StudioPane({
   isRequestingQuiz,
   onQuizAttempted,
   speakerInsights,
+  outputs,
+  fileName,
   postMeeting,
   onStartPostMeeting,
   isStartingPostMeeting,
@@ -200,6 +207,9 @@ export function StudioPane({
                       ? '產生中…'
                       : `${quizzes.length} 份測驗`}
                 </ToolTile>
+                <ToolTile tool="outputs" onOpen={onToolChange} attention={outputs.outputs.some((o) => o.status === 'GENERATING')}>
+                  {outputsStatus(outputs)}
+                </ToolTile>
                 {speakerStats && (
                   <ToolTile tool="speaker-stats" onOpen={onToolChange}>
                     {speakerStatsStatus(speakerStats)}
@@ -279,6 +289,8 @@ export function StudioPane({
             />
           )}
 
+          {tool === 'outputs' && <OutputsSection outputs={outputs} fileName={fileName} />}
+
           {tool === 'speaker-stats' && speakerStats && transcript && (
             <SpeakerStatsSection
               stats={speakerStats}
@@ -323,9 +335,16 @@ const TOOLS: Record<StudioTool, { title: string; icon: LucideIcon }> = {
   chapters: { title: '章節', icon: List },
   notes: { title: '筆記', icon: NotebookPen },
   quiz: { title: '測驗', icon: GraduationCap },
+  outputs: { title: '多格式輸出', icon: FileText },
   'speaker-stats': { title: '講者數據', icon: ChartBarBig },
   'post-meeting': { title: '會後處理', icon: ClipboardList },
   usage: { title: '用量', icon: Gauge },
+}
+
+function outputsStatus({ outputs }: OutputsActions): string {
+  if (outputs.some((output) => output.status === 'GENERATING')) return '產生中…'
+  const done = outputs.filter((output) => output.status === 'COMPLETED').length
+  return done > 0 ? `${done} 份` : 'Podcast 介紹等文件'
 }
 
 function usageStatus(usage: JobUsage | null): string {

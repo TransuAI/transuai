@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
+import type { OutputsActions } from '@/hooks/use-outputs'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, BookmarkPlus, FileText, PanelLeftOpen, PanelRightOpen, Sparkles, type LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -58,6 +59,7 @@ interface CompletedWorkspaceProps {
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
   speakerInsights: SpeakerInsightsActions
+  outputs: OutputsActions
   postMeeting: PostMeeting | null
   onStartPostMeeting: () => void
   isStartingPostMeeting: boolean
@@ -162,6 +164,7 @@ export function CompletedWorkspace({
   isRequestingQuiz,
   onQuizAttempted,
   speakerInsights,
+  outputs,
   postMeeting,
   onStartPostMeeting,
   isStartingPostMeeting,
@@ -306,6 +309,8 @@ export function CompletedWorkspace({
       isRequestingQuiz={isRequestingQuiz}
       onQuizAttempted={onQuizAttempted}
       speakerInsights={speakerInsights}
+      outputs={outputs}
+      fileName={job.fileName}
       postMeeting={postMeeting}
       onStartPostMeeting={onStartPostMeeting}
       isStartingPostMeeting={isStartingPostMeeting}

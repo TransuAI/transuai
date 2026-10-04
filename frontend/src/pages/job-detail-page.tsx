@@ -14,6 +14,7 @@ import { useNotes } from '@/hooks/use-notes'
 import { usePostMeeting } from '@/hooks/use-post-meeting'
 import { useQuizzes } from '@/hooks/use-quizzes'
 import { useSpeakerInsights } from '@/hooks/use-speaker-insights'
+import { useOutputs } from '@/hooks/use-outputs'
 import { useSummaryRegeneration } from '@/hooks/use-summary-regeneration'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Button } from '@/components/ui/button'
@@ -205,6 +206,7 @@ export function JobDetailPage() {
   const regeneration = useSummaryRegeneration(jobId, summary, setSummary, reloadAfterRegeneration)
   const quizzes = useQuizzes(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const speakerInsights = useSpeakerInsights(jobId, jobStatus === 'COMPLETED', reloadUsage)
+  const outputs = useOutputs(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const postMeeting = usePostMeeting(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const notes = useNotes(jobId, jobStatus === 'COMPLETED')
   // Capped at the recorded length: a media element can report a little past it at the very end, and a note's time must
@@ -471,6 +473,7 @@ export function JobDetailPage() {
       isRequestingQuiz={quizzes.isRequesting}
       onQuizAttempted={quizzes.reload}
       speakerInsights={speakerInsights}
+      outputs={outputs}
       postMeeting={postMeeting.postMeeting}
       onStartPostMeeting={postMeeting.start}
       isStartingPostMeeting={postMeeting.isStarting}

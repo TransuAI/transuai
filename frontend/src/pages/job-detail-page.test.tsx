@@ -4,8 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi } from '@/lib/api'
-import type { SpeakerInsights, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
+import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi, outputsApi } from '@/lib/api'
+import type { GeneratedOutput, SpeakerInsights, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -26,6 +26,7 @@ vi.mock('@/lib/api', () => ({
   quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), submitAttempt: vi.fn() },
   postMeetingApi: { get: vi.fn(), start: vi.fn(), execute: vi.fn(), retry: vi.fn() },
   speakerInsightsApi: { get: vi.fn(), request: vi.fn() },
+  outputsApi: { list: vi.fn(), request: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -49,6 +50,7 @@ beforeEach(() => {
   vi.mocked(modelsApi.getDefault).mockResolvedValue(platformModel)
   vi.mocked(quizApi.list).mockResolvedValue([])
   vi.mocked(speakerInsightsApi.get).mockResolvedValue(noInsights)
+  vi.mocked(outputsApi.list).mockResolvedValue([])
   vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([])
   vi.mocked(notesApi.list).mockResolvedValue([])
   vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], earlierRuns: [], latestRun: null })
@@ -364,7 +366,7 @@ describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
     await renderCompletedJob()
 
     const tiles = within(await screen.findByRole('list', { name: 'Studio 功能' })).getAllByRole('button')
-    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '筆記還沒', '測驗還沒', '會後處理', '用量尚無'])
+    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '筆記還沒', '測驗還沒', '多格式輸', '會後處理', '用量尚無'])
     expect(screen.getByRole('button', { name: '章節' })).toHaveAccessibleDescription('1 個章節')
     expect(screen.queryByRole('button', { name: '0:12開場' })).not.toBeInTheDocument()
   })
@@ -2183,22 +2185,22 @@ describe('JobDetailPage usage (COMPLETED, desktop layout)', () => {
   })
 })
 
-describe('JobDetailPage export menu', () => {
-  // jsdom doesn't navigate on link clicks: capture what would have been downloaded.
-  function captureDownloads() {
-    const blobsByUrl = new Map<string, Blob>()
-    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
-      const url = `blob:export-${blobsByUrl.size}`
-      blobsByUrl.set(url, blob as Blob)
-      return url
-    })
-    const downloads: { fileName: string; blob: Blob | undefined }[] = []
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-      downloads.push({ fileName: this.download, blob: blobsByUrl.get(this.href) })
-    })
-    return downloads
-  }
+// jsdom doesn't navigate on link clicks: capture what would have been downloaded.
+function captureDownloads() {
+  const blobsByUrl = new Map<string, Blob>()
+  vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+    const url = `blob:export-${blobsByUrl.size}`
+    blobsByUrl.set(url, blob as Blob)
+    return url
+  })
+  const downloads: { fileName: string; blob: Blob | undefined }[] = []
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    downloads.push({ fileName: this.download, blob: blobsByUrl.get(this.href) })
+  })
+  return downloads
+}
 
+describe('JobDetailPage export menu', () => {
   it('is offered in the workspace of a COMPLETED job', async () => {
     await renderCompletedJob()
 
@@ -3746,5 +3748,80 @@ describe('JobDetailPage post-meeting processing (會後處理)', () => {
     await user.click(await within(card()).findByRole('button', { name: '開始會後處理' }))
 
     expect(await screen.findByText('Google 連結已失效，請到設定頁重新連結')).toBeInTheDocument()
+  })
+})
+
+describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop layout)', () => {
+  const generating: GeneratedOutput = {
+    id: 'out-1', jobId: 'job-1', format: 'podcast_description', instruction: null, status: 'GENERATING', failureReason: null,
+    content: null, sourceRevision: 0, modelProvider: null, model: null, requestedAt: '2026-10-04T01:00:00Z', completedAt: null,
+    editedAt: null,
+  }
+  const done: GeneratedOutput = {
+    ...generating, status: 'COMPLETED', content: '這一集聊預算。\n\n## 章節\n\n00:12 開場\n', sourceRevision: 0,
+    model: 'qwen3:14b', completedAt: '2026-10-04T01:00:30Z',
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('generates a podcast description in the background and lists it when done', async () => {
+    stubDesktopLayout()
+    vi.mocked(outputsApi.request).mockResolvedValue(generating)
+    await renderCompletedJob()
+    await openStudioTool('多格式輸出')
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    await user.click(screen.getByRole('button', { name: '產生 Podcast 介紹' }))
+    expect(outputsApi.request).toHaveBeenCalledWith('job-1', { format: 'podcast_description' })
+    expect(screen.getByText('產生中…')).toBeInTheDocument()
+
+    vi.mocked(outputsApi.list).mockResolvedValue([done])
+    await vi.advanceTimersByTimeAsync(3000)
+
+    const item = await screen.findByRole('button', { name: /^Podcast 介紹/ })
+    expect(item).toHaveTextContent('這一集聊預算。')
+  })
+
+  it('opens one to read, copy and download as Markdown', async () => {
+    stubDesktopLayout()
+    const downloads = captureDownloads()
+    vi.mocked(outputsApi.list).mockResolvedValue([done])
+    await renderCompletedJob()
+    await openStudioTool('多格式輸出')
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    // After setup: user-event puts its own clipboard in place.
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    await user.click(await screen.findByRole('button', { name: /^Podcast 介紹/ }))
+    const document = screen.getByRole('article', { name: 'Podcast 介紹' })
+    expect(document).toHaveTextContent('## 章節')
+    expect(screen.getByText('由 qwen3:14b 產生')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '複製' }))
+    expect(writeText).toHaveBeenCalledWith(done.content)
+
+    await user.click(screen.getByRole('button', { name: '下載 Markdown' }))
+    expect(downloads[0].fileName).toBe('interview-Podcast 介紹.md')
+    expect(await downloads[0].blob!.text()).toBe(done.content)
+  })
+
+  it('shows why one failed and makes another of the same kind', async () => {
+    stubDesktopLayout()
+    vi.mocked(outputsApi.list).mockResolvedValue([{ ...generating, status: 'FAILED', failureReason: '這個 Job 還沒有摘要，無法產生' }])
+    vi.mocked(outputsApi.request).mockResolvedValue(generating)
+    await renderCompletedJob()
+    await openStudioTool('多格式輸出')
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    expect(await screen.findByText('這個 Job 還沒有摘要，無法產生')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '再試一次' }))
+
+    expect(outputsApi.request).toHaveBeenCalledWith('job-1', { format: 'podcast_description' })
   })
 })

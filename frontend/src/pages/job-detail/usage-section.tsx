@@ -19,6 +19,7 @@ const FEATURE_LABELS: Record<string, string> = {
   job_title: '標題',
   speaker_names: '講者名字建議',
   speaker_insights: '講者數據分析',
+  generated_output: '多格式輸出',
 }
 
 function tokens(value: number) {

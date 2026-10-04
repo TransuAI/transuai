@@ -452,3 +452,26 @@ export interface SpeakerInsight {
   /** The segment's own words. */
   text: string
 }
+
+/** The kinds of 多格式輸出 (new documents written from a job); more come later. */
+export type OutputFormat = 'podcast_description'
+
+/**
+ * 多格式輸出 (see ai-service CONTEXT.md): a new document written from the job's summary and chapters, in Markdown. Made in
+ * the background; a job can have many. `sourceRevision` is the transcript revision it was based on (過時 once that moves on).
+ */
+export interface GeneratedOutput {
+  id: string
+  jobId: string
+  format: OutputFormat
+  instruction: string | null
+  status: 'GENERATING' | 'COMPLETED' | 'FAILED'
+  failureReason: string | null
+  content: string | null
+  sourceRevision: number
+  modelProvider: string | null
+  model: string | null
+  requestedAt: string
+  completedAt: string | null
+  editedAt: string | null
+}

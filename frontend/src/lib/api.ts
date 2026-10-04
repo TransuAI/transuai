@@ -37,6 +37,8 @@ import type {
   User,
   WebSearchResult,
   SpeakerInsights,
+  GeneratedOutput,
+  OutputFormat,
 } from '@/types/api'
 
 export const authApi = {
@@ -223,6 +225,13 @@ export const quizApi = {
   // 後端計分並保存；answers 依題目順序，每題選的選項位置（從 0 開始）
   submitAttempt: (jobId: string, quizId: string, answers: number[]) =>
     apiFetch<QuizAttemptResult>(`/jobs/${jobId}/quizzes/${quizId}/attempts`, { method: 'POST', body: { answers } }),
+}
+
+// 多格式輸出: every request makes another one (newest first in the list). Not 匯出 — these are new documents.
+export const outputsApi = {
+  list: (jobId: string) => apiFetch<GeneratedOutput[]>(`/jobs/${jobId}/outputs`),
+  request: (jobId: string, params: { format: OutputFormat; instruction?: string }) =>
+    apiFetch<GeneratedOutput>(`/jobs/${jobId}/outputs`, { method: 'POST', body: params }),
 }
 
 // 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.
