@@ -1,6 +1,10 @@
 package com.transuai.gateway.web;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -10,16 +14,24 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcStrings;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.DecisionInputDto;
+import com.transuai.gateway.web.dto.DecisionTimelineDto;
 import com.transuai.gateway.web.dto.DecisionsDto;
+
+import com.transuai.upload.grpc.v1.Job;
+import com.transuai.upload.grpc.v1.ListJobsRequest;
+import com.transuai.upload.grpc.v1.ListJobsResponse;
+import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.CreateDecisionRequest;
@@ -29,7 +41,9 @@ import transuai.ai.v1.Ai.DecisionInput;
 import transuai.ai.v1.Ai.DeleteDecisionRequest;
 import transuai.ai.v1.Ai.GetJobDecisionsRequest;
 import transuai.ai.v1.Ai.JobDecisions;
+import transuai.ai.v1.Ai.ListUserDecisionsRequest;
 import transuai.ai.v1.Ai.RequestDecisionExtractionRequest;
+import transuai.ai.v1.Ai.SearchDecisionsRequest;
 import transuai.ai.v1.Ai.UpdateDecisionRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
@@ -39,7 +53,11 @@ import transuai.ai.v1.AiServiceGrpc;
 @RequiredArgsConstructor
 public class DecisionController {
 
+    // upload-service 一頁最多 100 個 Job。
+    private static final int JOBS_PAGE_SIZE = 100;
+
     private final AiServiceGrpc.AiServiceBlockingStub aiServiceStub;
+    private final UploadServiceGrpc.UploadServiceBlockingStub uploadServiceStub;
     private final JobOwnershipGuard jobOwnershipGuard;
     private final UsageLimitGuard usageLimitGuard;
 
@@ -91,6 +109,55 @@ public class DecisionController {
     public void delete(@CurrentUserId UUID userId, @PathVariable String jobId, @PathVariable String decisionId) {
         jobOwnershipGuard.check(userId, jobId);
         aiServiceStub.deleteDecision(DeleteDecisionRequest.newBuilder().setJobId(jobId).setDecisionId(decisionId).build());
+    }
+
+    // 決策頁：使用者所有 Job 的決策（時間軸），可以只看某個類型、某個 Job，或搜尋（字與意思）。先向 upload-service 列出使用者自己的
+    // Job（類型的篩選在那裡，也帶來每個決策的 Job 標題與日期），再只問 ai-service 這些 Job 的決策——ai-service 另外依 user_id 過濾。
+    @GetMapping("/decisions")
+    public DecisionTimelineDto timeline(@CurrentUserId UUID userId, @RequestParam(defaultValue = "") String q,
+            @RequestParam(defaultValue = "") String category, @RequestParam(defaultValue = "") String jobId) {
+        Map<String, Job> jobs = new LinkedHashMap<>();
+        for (Job job : usersJobs(userId, category)) {
+            if (jobId.isEmpty() || job.getJobId().equals(jobId)) {
+                jobs.put(job.getJobId(), job);
+            }
+        }
+        if (jobs.isEmpty()) {
+            return new DecisionTimelineDto(List.of());
+        }
+        List<Decision> found = q.isBlank()
+                ? aiServiceStub.listUserDecisions(ListUserDecisionsRequest.newBuilder().setUserId(userId.toString())
+                        .addAllJobIds(jobs.keySet()).build()).getDecisionsList()
+                : aiServiceStub.searchDecisions(SearchDecisionsRequest.newBuilder().setUserId(userId.toString())
+                        .setQuery(q.strip()).addAllJobIds(jobs.keySet()).build()).getDecisionsList();
+        List<DecisionTimelineDto.Item> items = new ArrayList<>(found.stream()
+                .filter(decision -> jobs.containsKey(decision.getJobId()))
+                .map(decision -> new DecisionTimelineDto.Item(toSummary(jobs.get(decision.getJobId())), toDto(decision)))
+                .toList());
+        if (q.isBlank()) {
+            // Newest meeting first; within one, the order ai-service gave (by time). The sort is stable.
+            items.sort(Comparator.comparing((DecisionTimelineDto.Item item) -> item.job().createdAt(),
+                    Comparator.nullsLast(Comparator.reverseOrder())));
+        }
+        return new DecisionTimelineDto(items);
+    }
+
+    private List<Job> usersJobs(UUID userId, String category) {
+        List<Job> all = new ArrayList<>();
+        for (int page = 1;; page++) {
+            ListJobsResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId).listJobs(
+                    ListJobsRequest.newBuilder().setPage(page).setPageSize(JOBS_PAGE_SIZE).setCategory(category).build());
+            all.addAll(response.getJobsList());
+            if (response.getJobsCount() == 0 || all.size() >= response.getTotalCount()) {
+                return all;
+            }
+        }
+    }
+
+    private static DecisionTimelineDto.JobSummary toSummary(Job job) {
+        return new DecisionTimelineDto.JobSummary(job.getJobId(), GrpcStrings.emptyToNull(job.getTitle()),
+                job.getFileName(), GrpcStrings.emptyToNull(job.getCategory()),
+                job.hasCreatedAt() ? GrpcTimestamps.toInstant(job.getCreatedAt()) : null);
     }
 
     private static DecisionInput toInput(DecisionInputDto body) {

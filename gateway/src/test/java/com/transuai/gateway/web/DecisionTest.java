@@ -29,6 +29,8 @@ import com.transuai.gateway.RedisContainerConfig;
 import com.transuai.gateway.TestAuth;
 import com.transuai.gateway.security.JwtProperties;
 import com.transuai.upload.grpc.v1.Job;
+import com.transuai.upload.grpc.v1.ListJobsRequest;
+import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.grpc.Status;
@@ -39,9 +41,12 @@ import transuai.ai.v1.Ai.DecisionExtractionStatus;
 import transuai.ai.v1.Ai.DeleteDecisionRequest;
 import transuai.ai.v1.Ai.DeleteDecisionResponse;
 import transuai.ai.v1.Ai.JobDecisions;
+import transuai.ai.v1.Ai.ListUserDecisionsRequest;
 import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.RequestDecisionExtractionRequest;
+import transuai.ai.v1.Ai.SearchDecisionsRequest;
 import transuai.ai.v1.Ai.UpdateDecisionRequest;
+import transuai.ai.v1.Ai.UserDecisions;
 import transuai.ai.v1.AiServiceGrpc;
 
 /** 決策紀錄（見 .scratch/decision-log/issues/01、02）：抽取、列出、新增、修改、刪除一個 Job 的決策，先過 ownership；抽取是花錢的功能。 */
@@ -203,6 +208,114 @@ class DecisionTest {
         when(aiServiceStub.deleteDecision(any())).thenThrow(Status.NOT_FOUND.asRuntimeException());
 
         call(MockMvcRequestBuilders.delete("/jobs/" + JOB + "/decisions/d9")).andExpect(status().isNotFound());
+    }
+
+    private static Job job(String id, String title, String createdAt) {
+        java.time.Instant at = java.time.Instant.parse(createdAt);
+        return Job.newBuilder().setJobId(id).setTitle(title).setFileName(id + ".mp3").setCategory("meeting")
+                .setCreatedAt(com.google.protobuf.Timestamp.newBuilder().setSeconds(at.getEpochSecond())).build();
+    }
+
+    private static Decision decision(String id, String jobId, String statement) {
+        return Decision.newBuilder().setId(id).setJobId(jobId).setStatement(statement).setSource("ai").build();
+    }
+
+    @Test
+    void theTimelineHasTheNewestMeetingFirstWithItsDecisionsInOrder() throws Exception {
+        when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.newBuilder()
+                .addJobs(job("job-old", "九月週會", "2026-09-01T00:00:00Z"))
+                .addJobs(job("job-new", "十月週會", "2026-10-01T00:00:00Z")).setTotalCount(2).build());
+        when(aiServiceStub.listUserDecisions(any())).thenReturn(UserDecisions.newBuilder()
+                .addDecisions(decision("a1", "job-old", "資料庫用 MySQL"))
+                .addDecisions(decision("b1", "job-new", "資料庫改用 PostgreSQL"))
+                .addDecisions(decision("a2", "job-old", "週會改到週三")).build());
+
+        call(MockMvcRequestBuilders.get("/decisions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].decision.id").value("b1"))
+                .andExpect(jsonPath("$.items[0].job.title").value("十月週會"))
+                .andExpect(jsonPath("$.items[1].decision.id").value("a1"))
+                .andExpect(jsonPath("$.items[2].decision.id").value("a2"))
+                .andExpect(jsonPath("$.items[2].job.jobId").value("job-old"))
+                .andExpect(jsonPath("$.items[2].job.category").value("meeting"));
+
+        ArgumentCaptor<ListUserDecisionsRequest> sent = ArgumentCaptor.forClass(ListUserDecisionsRequest.class);
+        verify(aiServiceStub).listUserDecisions(sent.capture());
+        assertThat(sent.getValue().getUserId()).isEqualTo(user.toString());
+        assertThat(sent.getValue().getJobIdsList()).containsExactlyInAnyOrder("job-old", "job-new");
+    }
+
+    @Test
+    void theTimelineOnlyAsksAboutTheUsersOwnJobsOfTheChosenCategory() throws Exception {
+        when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.newBuilder()
+                .addJobs(job("job-old", "九月週會", "2026-09-01T00:00:00Z")).setTotalCount(1).build());
+        when(aiServiceStub.listUserDecisions(any())).thenReturn(UserDecisions.getDefaultInstance());
+
+        call(MockMvcRequestBuilders.get("/decisions").param("category", "meeting")).andExpect(status().isOk());
+
+        ArgumentCaptor<ListJobsRequest> jobs = ArgumentCaptor.forClass(ListJobsRequest.class);
+        verify(uploadServiceStub).listJobs(jobs.capture());
+        assertThat(jobs.getValue().getCategory()).isEqualTo("meeting");
+    }
+
+    @Test
+    void theTimelineOfOneJobAsksAboutThatJobOnly() throws Exception {
+        when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.newBuilder()
+                .addJobs(job("job-old", "九月週會", "2026-09-01T00:00:00Z"))
+                .addJobs(job("job-new", "十月週會", "2026-10-01T00:00:00Z")).setTotalCount(2).build());
+        when(aiServiceStub.listUserDecisions(any())).thenReturn(UserDecisions.getDefaultInstance());
+
+        call(MockMvcRequestBuilders.get("/decisions").param("jobId", "job-new")).andExpect(status().isOk());
+
+        ArgumentCaptor<ListUserDecisionsRequest> sent = ArgumentCaptor.forClass(ListUserDecisionsRequest.class);
+        verify(aiServiceStub).listUserDecisions(sent.capture());
+        assertThat(sent.getValue().getJobIdsList()).containsExactly("job-new");
+    }
+
+    @Test
+    void searchingKeepsTheOrderOfHowWellTheyMatch() throws Exception {
+        when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.newBuilder()
+                .addJobs(job("job-old", "九月週會", "2026-09-01T00:00:00Z"))
+                .addJobs(job("job-new", "十月週會", "2026-10-01T00:00:00Z")).setTotalCount(2).build());
+        when(aiServiceStub.searchDecisions(any())).thenReturn(UserDecisions.newBuilder()
+                .addDecisions(decision("a1", "job-old", "資料庫用 MySQL"))
+                .addDecisions(decision("b1", "job-new", "資料庫改用 PostgreSQL")).build());
+
+        call(MockMvcRequestBuilders.get("/decisions").param("q", "資料庫"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].decision.id").value("a1"))
+                .andExpect(jsonPath("$.items[1].decision.id").value("b1"));
+
+        ArgumentCaptor<SearchDecisionsRequest> sent = ArgumentCaptor.forClass(SearchDecisionsRequest.class);
+        verify(aiServiceStub).searchDecisions(sent.capture());
+        assertThat(sent.getValue().getQuery()).isEqualTo("資料庫");
+        assertThat(sent.getValue().getUserId()).isEqualTo(user.toString());
+    }
+
+    @Test
+    void allOfTheUsersJobsAreLookedAtPageByPage() throws Exception {
+        ListJobsResponse.Builder first = ListJobsResponse.newBuilder().setTotalCount(101);
+        for (int i = 0; i < 100; i++) {
+            first.addJobs(job("job-" + i, "週會 " + i, "2026-09-01T00:00:00Z"));
+        }
+        when(uploadServiceStub.listJobs(any())).thenReturn(first.build(), ListJobsResponse.newBuilder()
+                .addJobs(job("job-100", "最後一場", "2026-10-01T00:00:00Z")).setTotalCount(101).build());
+        when(aiServiceStub.listUserDecisions(any())).thenReturn(UserDecisions.getDefaultInstance());
+
+        call(MockMvcRequestBuilders.get("/decisions")).andExpect(status().isOk());
+
+        ArgumentCaptor<ListUserDecisionsRequest> sent = ArgumentCaptor.forClass(ListUserDecisionsRequest.class);
+        verify(aiServiceStub).listUserDecisions(sent.capture());
+        assertThat(sent.getValue().getJobIdsList()).hasSize(101);
+    }
+
+    @Test
+    void withoutJobsNothingIsAsked() throws Exception {
+        when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.getDefaultInstance());
+
+        call(MockMvcRequestBuilders.get("/decisions")).andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+
+        verify(aiServiceStub, never()).listUserDecisions(any());
     }
 
     @Test

@@ -129,6 +129,7 @@ docker compose up -d
 | `GET` | `/jobs/{jobId}/outputs/{outputId}` | 一份輸出；不屬於這個 Job 回 404 |
 | `PATCH` | `/jobs/{jobId}/outputs/{outputId}` | 修改內容，body `{ "content": string }`；回修改後的那一份（改了的話 `editedAt` 有值）；沒帶或空白、超過 20000 字回 400，還沒產生完成回 409；轉給 `UpdateOutput` |
 | `POST` | `/jobs/{jobId}/decisions/extract` | 抽出（或重新抽出）這場的決策，回 `202` 與抽取紀錄（`status: GENERATING`）；已經在抽就直接回傳；轉給 `RequestDecisionExtraction`，帶上當下使用者。花錢的功能、受每月平台模型上限管 |
+| `GET` | `/decisions?q=&category=&jobId=` | 決策頁（跨 Job）：`{ items: [{ job: { jobId, title, fileName, category, createdAt }, decision: {…同上} }] }`。先向 upload-service 列出使用者自己的 Job（`category` 篩在那裡、一頁 100 個一路取完；`jobId` 只留那一個），只問 ai-service 這些 Job 的決策（`ListUserDecisions`，有 `q` 時 `SearchDecisions`），帶上 token 的 `userId`。沒有 `q`：依 Job 的建立時間由新到舊、同一個 Job 依時間點；有 `q`：依符合程度。沒有 Job 時不問 ai-service |
 | `POST` | `/jobs/{jobId}/decisions` | 使用者自己新增一個決策，body `{ statement, rationale?, alternatives?, proposedBy?, tentative?, startTime? }`（`proposedBy` 是講者標籤；`startTime` 可以沒有），回 `201` 與那一個（`source: "user"`）；內容不合規則（決定是空的或太長…）回 400 與原因；轉給 `CreateDecision` |
 | `PATCH` | `/jobs/{jobId}/decisions/{decisionId}` | 修改決策的內容，body 同上（`startTime` 不用，時間點與原話不變）；回修改後的那一個（`edited: true`），之後重新抽也保留；不是這個 Job 的回 404；轉給 `UpdateDecision` |
 | `DELETE` | `/jobs/{jobId}/decisions/{decisionId}` | 刪除一個決策，回 `204`：AI 抽的只是隱藏（重新抽時不再出現），使用者新增的直接刪掉；不是這個 Job 的回 404；轉給 `DeleteDecision` |
