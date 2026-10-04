@@ -3,6 +3,7 @@
 
 import json
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -409,3 +410,102 @@ def test_searching_for_percent_signs_is_not_a_wildcard(ai_stub, db_session):
 
     with patch.object(decisions, "embed_query", side_effect=RuntimeError("no embeddings")):
         assert searched(ai_stub, "%", [job]) == ["毛利率目標 40%"]
+
+
+SEPTEMBER, OCTOBER, NOVEMBER = (datetime(2026, m, 1, tzinfo=timezone.utc) for m in (9, 10, 11))
+
+
+def earlier(job_id, statement, meeting_at, embedding, user=USER, rationale=""):
+    with new_session() as session:
+        decision = Decision(job_id=job_id, user_id=user, statement=statement, rationale=rationale, embedding=embedding,
+                            meeting_at=meeting_at, start_time=30)
+        session.add(decision)
+        session.commit()
+        return str(decision.id)
+
+
+def process_meeting(job_id, meeting_at):
+    with patch.object(decisions, "transcript_client") as client:
+        client.get_transcript.return_value = TRANSCRIPT
+        decisions.process_decisions_requested(json.dumps(
+            {"jobId": str(job_id), "userId": str(USER), "meetingAt": meeting_at.isoformat()}).encode())
+
+
+def test_a_decision_changing_one_from_an_earlier_meeting_supersedes_it(ai_stub, db_session, rabbitmq, fake_llm, embedder):
+    embedder.side_effect = lambda texts: [axis(0) for _ in texts]
+    mysql = earlier(uuid.uuid4(), "資料庫用 MySQL", SEPTEMBER, axis(0), rationale="團隊熟")
+    earlier(uuid.uuid4(), "資料庫用 SQLite", NOVEMBER, axis(0))  # a later meeting: not a candidate
+    earlier(uuid.uuid4(), "週會改到週三", SEPTEMBER, axis(1))  # not about the same thing
+    earlier(uuid.uuid4(), "資料庫用 Oracle", SEPTEMBER, axis(0), user=OTHER_USER)  # someone else's
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, POSTGRES)
+    fake_llm.reply('[{"decision": 1, "supersedes": "A"}]')
+
+    process_meeting(job_id, OCTOBER)
+
+    prompt = fake_llm.bodies()[1]["messages"][0]["content"]
+    assert "資料庫用 PostgreSQL" in prompt and "A. （2026-09-01）資料庫用 MySQL（理由：團隊熟）" in prompt
+    assert "SQLite" not in prompt and "週會" not in prompt and "Oracle" not in prompt
+    [postgres] = get(ai_stub, job_id).decisions
+    assert postgres.supersedes.id == mysql and postgres.supersedes.statement == "資料庫用 MySQL"
+    assert postgres.meeting_at.ToDatetime(tzinfo=timezone.utc) == OCTOBER
+    with new_session() as session:
+        old_job = session.get(Decision, uuid.UUID(mysql)).job_id
+    [old] = get(ai_stub, old_job).decisions
+    assert [link.id for link in old.superseded_by] == [postgres.id]
+
+
+def test_the_model_can_only_point_at_a_decision_it_was_shown(ai_stub, db_session, rabbitmq, fake_llm, embedder):
+    embedder.side_effect = lambda texts: [axis(0) for _ in texts]
+    earlier(uuid.uuid4(), "資料庫用 MySQL", SEPTEMBER, axis(0))
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, POSTGRES)
+    fake_llm.reply('[{"decision": 1, "supersedes": "D"}]')
+
+    process_meeting(job_id, OCTOBER)
+
+    assert not get(ai_stub, job_id).decisions[0].HasField("supersedes")
+
+
+def test_without_earlier_decisions_on_the_same_thing_nothing_more_is_asked(ai_stub, db_session, rabbitmq, fake_llm,
+                                                                           embedder):
+    embedder.side_effect = lambda texts: [axis(0) for _ in texts]
+    earlier(uuid.uuid4(), "週會改到週三", SEPTEMBER, axis(1))
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, POSTGRES)
+
+    process_meeting(job_id, OCTOBER)
+
+    assert len(fake_llm.bodies()) == 1
+    assert get(ai_stub, job_id).extraction.status == ai_pb2.DECISION_EXTRACTION_STATUS_COMPLETED
+
+
+def test_a_failed_judgement_only_leaves_the_decisions_without_links(ai_stub, db_session, rabbitmq, fake_llm, embedder):
+    embedder.side_effect = lambda texts: [axis(0) for _ in texts]
+    earlier(uuid.uuid4(), "資料庫用 MySQL", SEPTEMBER, axis(0))
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, POSTGRES)
+    fake_llm.reply("不是 JSON")
+
+    process_meeting(job_id, OCTOBER)
+
+    found = get(ai_stub, job_id)
+    assert found.extraction.status == ai_pb2.DECISION_EXTRACTION_STATUS_COMPLETED
+    assert [d.statement for d in found.decisions] == ["資料庫用 PostgreSQL"]
+    assert not found.decisions[0].HasField("supersedes")
+
+
+def test_a_dismissed_decision_neither_supersedes_nor_is_shown_as_superseding(ai_stub, db_session, rabbitmq, fake_llm,
+                                                                             embedder):
+    old_job, new_job = uuid.uuid4(), uuid.uuid4()
+    mysql = earlier(old_job, "資料庫用 MySQL", SEPTEMBER, axis(0))
+    with new_session() as session:
+        session.add(Decision(job_id=new_job, user_id=USER, statement="資料庫改用 PostgreSQL", supersedes_id=uuid.UUID(mysql),
+                             dismissed=True, meeting_at=OCTOBER))
+        session.commit()
+
+    assert list(get(ai_stub, old_job).decisions[0].superseded_by) == []

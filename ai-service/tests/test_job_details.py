@@ -3,12 +3,14 @@ Seam 是 process_message()：模型是假的 AI 廠商（HTTP 層），gRPC clie
 
 import json
 import uuid
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import grpc
 
+from app.proto_gen import upload_pb2
 from app.services import pipeline, usage_meter
 
 JOB_ID = str(uuid.uuid4())
@@ -142,10 +144,13 @@ def test_decisions_are_extracted_by_the_category_the_job_ends_up_with(fake_llm, 
     answers(fake_llm, '{"title": "產品週會", "category": "lecture"}')
 
     with patch.object(pipeline, "extract_after_transcription") as extract, running_the_pipeline(owner) as job_status_client:
-        job_status_client.set_suggested_details.return_value = "meeting"  # the user had already called it a meeting
+        uploaded = upload_pb2.Job(category="meeting")  # the user had already called it a meeting
+        uploaded.created_at.FromDatetime(datetime(2026, 10, 1, tzinfo=timezone.utc))
+        job_status_client.set_suggested_details.return_value = uploaded
 
-    job_id, user_id, category, model = extract.call_args.args
+    job_id, user_id, category, model, meeting_at = extract.call_args.args
     assert (job_id, user_id, category, model.provider) == (uuid.UUID(JOB_ID), owner, "meeting", "platform")
+    assert meeting_at == datetime(2026, 10, 1, tzinfo=timezone.utc)  # what earlier meetings are earlier than
 
 
 def test_without_a_title_the_category_is_unknown_and_nothing_is_extracted(fake_llm, db_session):

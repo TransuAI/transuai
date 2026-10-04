@@ -1035,12 +1035,14 @@ class SegmentTranslation(_message.Message):
     def __init__(self, segment_id: _Optional[str] = ..., text: _Optional[str] = ..., source_text: _Optional[str] = ...) -> None: ...
 
 class RequestDecisionExtractionRequest(_message.Message):
-    __slots__ = ("job_id", "user_id")
+    __slots__ = ("job_id", "user_id", "meeting_at")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
+    MEETING_AT_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     user_id: str
-    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
+    meeting_at: _timestamp_pb2.Timestamp
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., meeting_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class GetJobDecisionsRequest(_message.Message):
     __slots__ = ("job_id",)
@@ -1091,16 +1093,18 @@ class DecisionInput(_message.Message):
     def __init__(self, statement: _Optional[str] = ..., rationale: _Optional[str] = ..., alternatives: _Optional[_Iterable[str]] = ..., proposed_by: _Optional[str] = ..., tentative: _Optional[bool] = ...) -> None: ...
 
 class CreateDecisionRequest(_message.Message):
-    __slots__ = ("job_id", "user_id", "decision", "start_time")
+    __slots__ = ("job_id", "user_id", "decision", "start_time", "meeting_at")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     DECISION_FIELD_NUMBER: _ClassVar[int]
     START_TIME_FIELD_NUMBER: _ClassVar[int]
+    MEETING_AT_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     user_id: str
     decision: DecisionInput
     start_time: float
-    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., decision: _Optional[_Union[DecisionInput, _Mapping]] = ..., start_time: _Optional[float] = ...) -> None: ...
+    meeting_at: _timestamp_pb2.Timestamp
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., decision: _Optional[_Union[DecisionInput, _Mapping]] = ..., start_time: _Optional[float] = ..., meeting_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class UpdateDecisionRequest(_message.Message):
     __slots__ = ("job_id", "decision_id", "decision")
@@ -1149,7 +1153,7 @@ class UserDecisions(_message.Message):
     def __init__(self, decisions: _Optional[_Iterable[_Union[Decision, _Mapping]]] = ...) -> None: ...
 
 class Decision(_message.Message):
-    __slots__ = ("id", "job_id", "statement", "rationale", "alternatives", "proposed_by", "tentative", "start_time", "evidence_text", "source", "edited", "supersedes_id", "created_at")
+    __slots__ = ("id", "job_id", "statement", "rationale", "alternatives", "proposed_by", "tentative", "start_time", "evidence_text", "source", "edited", "supersedes_id", "created_at", "supersedes", "superseded_by", "meeting_at")
     ID_FIELD_NUMBER: _ClassVar[int]
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     STATEMENT_FIELD_NUMBER: _ClassVar[int]
@@ -1163,6 +1167,9 @@ class Decision(_message.Message):
     EDITED_FIELD_NUMBER: _ClassVar[int]
     SUPERSEDES_ID_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    SUPERSEDES_FIELD_NUMBER: _ClassVar[int]
+    SUPERSEDED_BY_FIELD_NUMBER: _ClassVar[int]
+    MEETING_AT_FIELD_NUMBER: _ClassVar[int]
     id: str
     job_id: str
     statement: str
@@ -1176,4 +1183,19 @@ class Decision(_message.Message):
     edited: bool
     supersedes_id: str
     created_at: _timestamp_pb2.Timestamp
-    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., statement: _Optional[str] = ..., rationale: _Optional[str] = ..., alternatives: _Optional[_Iterable[str]] = ..., proposed_by: _Optional[str] = ..., tentative: _Optional[bool] = ..., start_time: _Optional[float] = ..., evidence_text: _Optional[str] = ..., source: _Optional[str] = ..., edited: _Optional[bool] = ..., supersedes_id: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    supersedes: DecisionLink
+    superseded_by: _containers.RepeatedCompositeFieldContainer[DecisionLink]
+    meeting_at: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., statement: _Optional[str] = ..., rationale: _Optional[str] = ..., alternatives: _Optional[_Iterable[str]] = ..., proposed_by: _Optional[str] = ..., tentative: _Optional[bool] = ..., start_time: _Optional[float] = ..., evidence_text: _Optional[str] = ..., source: _Optional[str] = ..., edited: _Optional[bool] = ..., supersedes_id: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., supersedes: _Optional[_Union[DecisionLink, _Mapping]] = ..., superseded_by: _Optional[_Iterable[_Union[DecisionLink, _Mapping]]] = ..., meeting_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class DecisionLink(_message.Message):
+    __slots__ = ("id", "job_id", "statement", "meeting_at")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    STATEMENT_FIELD_NUMBER: _ClassVar[int]
+    MEETING_AT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    job_id: str
+    statement: str
+    meeting_at: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., statement: _Optional[str] = ..., meeting_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...

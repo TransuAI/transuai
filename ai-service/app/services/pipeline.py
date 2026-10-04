@@ -1,9 +1,11 @@
 import json
 import logging
 import uuid
+from datetime import timezone
 from typing import Callable
 
 from app.db import new_session
+from app.proto_gen import upload_pb2
 from app.repositories.chapter_repository import save_chapters
 from app.repositories.embedding_repository import save_embeddings
 from app.repositories.speaker_suggestion_repository import save_speaker_suggestions
@@ -83,12 +85,13 @@ def process_message(
         finally:
             session.close()
 
-        category = _suggest_title_and_category(job_id, summary_text, chapters, model=model,
-                                               meter=UsageMeter(user_id, job_uuid, LlmFeature.JOB_TITLE))
+        job = _suggest_title_and_category(job_id, summary_text, chapters, model=model,
+                                          meter=UsageMeter(user_id, job_uuid, LlmFeature.JOB_TITLE))
         _suggest_speaker_names(job_uuid, transcript, model=model,
                                meter=UsageMeter(user_id, job_uuid, LlmFeature.SPEAKER_NAMES))
         # Queued for later (its own background work): the job doesn't wait for its decisions.
-        extract_after_transcription(job_uuid, user_id, category, model)
+        uploaded_at = job.created_at.ToDatetime(tzinfo=timezone.utc) if job and job.HasField("created_at") else None
+        extract_after_transcription(job_uuid, user_id, job.category if job else None, model, uploaded_at)
         job_status_client.update_status(job_id, "COMPLETED")
         publish_completed(job_id)
         logger.info("job %s summarized successfully", job_id)
@@ -115,9 +118,9 @@ def process_message(
 
 
 def _suggest_title_and_category(job_id: str, summary: str, chapters: list[tuple[str, float]], *, model: ChatModel,
-                                meter: UsageMeter) -> str | None:
-    """替 Job 取標題、判斷類型並回寫（在 COMPLETED 之前，列表一完成就看得到），回傳 Job 最後的類型（使用者設定過就是他的；
-    不知道是 None）。只是方便找檔案的附加功能：任何失敗只記 log，不重試、不讓 Job 失敗。"""
+                                meter: UsageMeter) -> upload_pb2.Job | None:
+    """替 Job 取標題、判斷類型並回寫（在 COMPLETED 之前，列表一完成就看得到），回傳寫完之後的 Job（類型是最後的：使用者設定過就是
+    他的；不知道是 None）。只是方便找檔案的附加功能：任何失敗只記 log，不重試、不讓 Job 失敗。"""
     try:
         details = suggest_details(summary, chapters, model=model, meter=meter)
         if details:

@@ -66,6 +66,8 @@ class Decision(Base):
     # statement＋rationale 的 embedding（跟逐字稿片段同一個模型），搜尋與找取代的候選用；算不出來時是空的。
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
     source_revision: Mapped[int | None] = mapped_column(Integer)
+    # 會議的日期（Job 的上傳時間，跟決策頁的時間軸一樣）：找「較早的」會議裡可能被取代的決策用。舊的列沒有。
+    meeting_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(

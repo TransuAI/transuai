@@ -82,8 +82,9 @@ from app.services.translations import (
     request_translation)
 from app.services.translations import effective_status as translation_effective_status
 from app.services.decisions import (
-    DecisionFields, DecisionNotFound, DecisionsNotQueued, InvalidDecision, create_decision, delete_decision,
-    find_job_decisions, list_user_decisions, request_decision_extraction, search_decisions, update_decision)
+    DecisionFields, DecisionLinks, DecisionNotFound, DecisionsNotQueued, InvalidDecision, create_decision, decision_links,
+    delete_decision, find_job_decisions, list_user_decisions, request_decision_extraction, search_decisions,
+    update_decision)
 from app.services.decisions import effective_status as decision_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
@@ -525,7 +526,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
         try:
-            request_decision_extraction(job_id, user_id)
+            request_decision_extraction(job_id, user_id, _timestamp_or_none(request, "meeting_at"))
         except DecisionsNotQueued:
             _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法抽取決策，請稍後再試")
         extraction, _ = find_job_decisions(job_id)
@@ -534,7 +535,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
     def GetJobDecisions(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         extraction, decisions = find_job_decisions(job_id)
-        message = ai_pb2.JobDecisions(decisions=[_decision_to_proto(d) for d in decisions])
+        message = ai_pb2.JobDecisions(decisions=_decisions_to_proto(decisions))
         if extraction is not None:
             message.extraction.CopyFrom(_decision_extraction_to_proto(extraction))
         return message
@@ -544,10 +545,11 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         user_id = _parse_user_id(request.user_id, context)
         try:
             decision = create_decision(job_id, user_id, _decision_fields(request.decision),
-                                       request.start_time if request.HasField("start_time") else None)
+                                       request.start_time if request.HasField("start_time") else None,
+                                       _timestamp_or_none(request, "meeting_at"))
         except InvalidDecision as exc:
             _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        return _decision_to_proto(decision)
+        return _decisions_to_proto([decision])[0]
 
     def UpdateDecision(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
@@ -558,7 +560,7 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
         except DecisionNotFound:
             _abort(context, grpc.StatusCode.NOT_FOUND, "decision not found")
-        return _decision_to_proto(decision)
+        return _decisions_to_proto([decision])[0]
 
     def DeleteDecision(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
@@ -572,13 +574,12 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
     def ListUserDecisions(self, request, context):
         user_id = _parse_user_id(request.user_id, context)
         job_ids = [_parse_uuid(job_id, "job_ids", context) for job_id in request.job_ids]
-        return ai_pb2.UserDecisions(decisions=[_decision_to_proto(d) for d in list_user_decisions(user_id, job_ids)])
+        return ai_pb2.UserDecisions(decisions=_decisions_to_proto(list_user_decisions(user_id, job_ids)))
 
     def SearchDecisions(self, request, context):
         user_id = _parse_user_id(request.user_id, context)
         job_ids = [_parse_uuid(job_id, "job_ids", context) for job_id in request.job_ids]
-        return ai_pb2.UserDecisions(
-            decisions=[_decision_to_proto(d) for d in search_decisions(user_id, request.query, job_ids)])
+        return ai_pb2.UserDecisions(decisions=_decisions_to_proto(search_decisions(user_id, request.query, job_ids)))
 
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
@@ -883,7 +884,23 @@ def _decision_fields(message: ai_pb2.DecisionInput) -> DecisionFields:
                           tentative=message.tentative)
 
 
-def _decision_to_proto(decision: Decision) -> ai_pb2.Decision:
+def _timestamp_or_none(request, field: str):
+    return getattr(request, field).ToDatetime(tzinfo=timezone.utc) if request.HasField(field) else None
+
+
+def _decisions_to_proto(decisions: list[Decision]) -> list[ai_pb2.Decision]:
+    links = decision_links(decisions)
+    return [_decision_to_proto(d, links[d.id]) for d in decisions]
+
+
+def _decision_link(decision: Decision) -> ai_pb2.DecisionLink:
+    link = ai_pb2.DecisionLink(id=str(decision.id), job_id=str(decision.job_id), statement=decision.statement)
+    if decision.meeting_at is not None:
+        link.meeting_at.FromDatetime(decision.meeting_at)
+    return link
+
+
+def _decision_to_proto(decision: Decision, links: DecisionLinks) -> ai_pb2.Decision:
     message = ai_pb2.Decision(
         id=str(decision.id), job_id=str(decision.job_id), statement=decision.statement, rationale=decision.rationale,
         alternatives=decision.alternatives, proposed_by=decision.proposed_by or "", tentative=decision.tentative,
@@ -892,6 +909,11 @@ def _decision_to_proto(decision: Decision) -> ai_pb2.Decision:
     if decision.start_time is not None:
         message.start_time = float(decision.start_time)
     message.created_at.FromDatetime(decision.created_at)
+    if decision.meeting_at is not None:
+        message.meeting_at.FromDatetime(decision.meeting_at)
+    if links.supersedes is not None:
+        message.supersedes.CopyFrom(_decision_link(links.supersedes))
+    message.superseded_by.extend(_decision_link(d) for d in links.superseded_by)
     return message
 
 

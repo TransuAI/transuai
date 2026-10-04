@@ -342,11 +342,12 @@ RequestSpeakerInsights(jobId, userId)（Gateway POST /jobs/{jobId}/speaker-insig
 從一場會議或訪談抽出與會者做成的決定（見 CONTEXT.md「決策」「暫定」；`app/services/decision_extractor.py`、`decisions.py`）。
 
 ```
-RequestDecisionExtraction(jobId, userId)（Gateway POST /jobs/{jobId}/decisions/extract）
-轉錄完的 pipeline：取完標題與類型之後，Job 最後的類型（使用者設定過就是他的）是 meeting / interview 才自動要求，用 Job 擁有者；
+RequestDecisionExtraction(jobId, userId, meetingAt)（Gateway POST /jobs/{jobId}/decisions/extract，meetingAt 是 Job 的上傳時間）
+轉錄完的 pipeline：取完標題與類型之後，Job 最後的類型（使用者設定過就是他的）是 meeting / interview 才自動要求，用 Job 擁有者
+                   （meetingAt 是 SetSuggestedDetails 回來的 Job 的上傳時間）；
                    不知道擁有者、平台模型這個月已經到上限就跳過（之後可以手動抽）；失敗只記 log，Job 照樣完成
   → 一個 Job 一份抽取紀錄（decision_extractions.job_id 唯一）：已經在抽（還沒卡住）就直接回傳；否則改成 GENERATING 並排入
-    decision.requested { jobId, userId }（publisher confirms、短 timeout；排入失敗就恢復原狀）
+    decision.requested { jobId, userId, meetingAt }（publisher confirms、短 timeout；排入失敗就恢復原狀）
 消費 decision.requested
   → 用 userId 的預設模型；平台模型這個月已經到上限：FAILED（附原因），不呼叫模型
   → GetTranscript（revision R）、摘要、章節；逐字稿每行編號「[n] [分:秒] 講者：文字」（排除已清空片段；兩位以上講者才帶名字）
@@ -354,9 +355,12 @@ RequestDecisionExtraction(jobId, userId)（Gateway POST /jobs/{jobId}/decisions/
   → 驗證：line 要存在、quote（正規化後）要出現在那一行或前後一行，對不上整筆丟掉；proposed_by 對不上講者只是不知道是誰；
     文字一律轉繁體；存下的原話與時間點取那個片段本身
   → statement＋rationale 的 embedding（跟逐字稿片段同一個模型）；暫時連不上而且還能重試就整則重試，不然先存沒有 embedding 的
+  → 取代（有 meetingAt 才找，decision_supersedes.py）：每個新的決策找這位使用者**較早的會議**（meeting_at 更早、別的 Job、沒刪掉、
+    有 embedding）裡最相近的 3 個（cosine similarity ≥ 0.5）當候選；有候選才再問一次模型（同一個用量功能），候選用代號 A、B、C，
+    模型只能指向給它看的其中一個，其他的不收；判斷失敗只記 log（決策照樣存，沒有連結）
   → 刪掉 AI 抽的、使用者沒改過、沒刪掉的（source = ai、edited = false、dismissed = false）；留下來的（改過的、自己新增的、刪掉的）
     佔著它們的片段——新抽到的在同一個時間點就是同一個決策，不收（改過的不會多一份原本的、刪掉的不會再出現）；
-    其他的存起來（user_id = userId）；COMPLETED、source_revision = R、模型
+    其他的存起來（user_id = userId、meeting_at、supersedes_id）；COMPLETED、source_revision = R、模型
 CreateDecision / UpdateDecision / DeleteDecision（Gateway POST / PATCH / DELETE /jobs/{jobId}/decisions…）
   → 新增：source = user，時間點可以沒有；修改：只改內容（時間點與原話不變），edited = true；都當場算 embedding（算不出來先存沒有的）
   → 刪除：AI 抽的只標 dismissed（不顯示、重新抽時佔著那個片段），使用者新增的直接刪掉
@@ -369,7 +373,9 @@ ListUserDecisions / SearchDecisions（Gateway GET /decisions，決策頁：第�
 ```
 
 格式不對是永久性失敗（「模型回傳的格式不正確，請再抽一次」，之前的決策保留）；暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘
-回報成失敗。用量功能是 `decision_extraction`。`supersedes_id`（取代）已經有欄位；取代與問決策見 `.scratch/decision-log` 之後的票。
+回報成失敗。用量功能是 `decision_extraction`。每個決策回傳時帶取代的連結（取代了的、被取代的，刪掉的都不算）。問決策見 `.scratch/decision-log` 之後的票。
+已知限制：只有新抽的決策往前找取代——先抽了較晚的會議、之後才抽較早的會議，兩者之間不會連起來；決策紀錄做好之前的決策沒有
+meeting_at，不會被當成候選（重新抽那一場就有）。
 
 ### 逐字稿被編輯之後（`transcript.edited`）
 
@@ -510,6 +516,7 @@ app/
     output_generator.py              多格式輸出的產生：每種格式一份 prompt、刪掉模型寫的時間、附上章節
     generated_outputs.py             RequestOutput（排入自己的 queue）與消費 output.requested；卡住的判斷
     decision_extractor.py            抽出決策：有行號的逐字稿、照抄的原話要對得上那一行或前後一行
+    decision_supersedes.py           取代：新的決策取代了哪一個較早的候選（只收給模型看的候選之一）
     decisions.py                     RequestDecisionExtraction（排入自己的 queue）、轉錄完自動抽、消費 decision.requested；新增、修改、刪除
     speaker_insights.py              講者數據的 AI 判斷：編號的逐字稿、打斷的候選、只收行號並對回片段
     speaker_insight_runs.py          RequestSpeakerInsights（排入自己的 queue）與消費 speaker_insights.requested；卡住的判斷
