@@ -21,3 +21,10 @@ export function downloadTextFile({ fileName, content, mimeType }: { fileName: st
   // Revoke after the click has been handled, not synchronously inside it.
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
+
+// A downloaded file's name: the uploaded file's name without its extension, plus a suffix (e.g. `.srt`, `-Podcast 介紹.md`).
+export function fileNameWithSuffix(originalFileName: string, suffix: string): string {
+  const dot = originalFileName.lastIndexOf('.')
+  const baseName = dot > 0 ? originalFileName.slice(0, dot) : originalFileName
+  return baseName + suffix
+}

@@ -3870,7 +3870,7 @@ describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop l
     const user = await openDone()
     vi.mocked(outputsApi.update).mockResolvedValue({ ...done, content: '我改過的介紹', editedAt: '2026-10-04T02:00:00Z' })
 
-    await user.click(screen.getByRole('button', { name: '編輯' }))
+    await user.click(screen.getByRole('button', { name: '修改' }))
     const editor = screen.getByRole('textbox', { name: 'Podcast 介紹的內容' })
     expect(editor).toHaveValue(done.content)
     await user.clear(editor)
@@ -3888,7 +3888,7 @@ describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop l
     const user = await openDone()
     vi.mocked(outputsApi.update).mockRejectedValue(new Error('network'))
 
-    await user.click(screen.getByRole('button', { name: '編輯' }))
+    await user.click(screen.getByRole('button', { name: '修改' }))
     await user.type(screen.getByRole('textbox', { name: 'Podcast 介紹的內容' }), '加一句')
     await user.click(screen.getByRole('button', { name: '儲存' }))
 
@@ -3898,6 +3898,14 @@ describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop l
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('textbox', { name: 'Podcast 介紹的內容' })).not.toBeInTheDocument()
     expect(screen.getByRole('article', { name: 'Podcast 介紹' })).toHaveTextContent('這一集聊預算。')
+  })
+
+  it('shows the user’s own request in the list and the document', async () => {
+    await openDone({ ...done, instruction: '語氣輕鬆一點' })
+
+    expect(screen.getByText('要求：語氣輕鬆一點')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '所有輸出' }))
+    expect(screen.getByRole('button', { name: /^Podcast 介紹/ })).toHaveTextContent('要求：語氣輕鬆一點')
   })
 
   it('says an output may be out of date once the transcript has changed', async () => {

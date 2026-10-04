@@ -3,10 +3,9 @@ import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { jobsApi, quizApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
-import { downloadTextFile, openDownloadUrl } from '@/lib/download'
+import { downloadTextFile, openDownloadUrl, fileNameWithSuffix } from '@/lib/download'
 import {
   buildExportContent,
-  exportFileName,
   markdownReportFormat,
   NOTES_MARKDOWN_FORMAT,
   PLAIN_TEXT_FORMAT,
@@ -43,7 +42,7 @@ export function ExportMenu({ source, quizzes }: { source: ExportSource; quizzes:
   const download = (format: ExportFormat) => {
     const content = buildExportContent(source)
     downloadTextFile({
-      fileName: exportFileName(content.fileName, format.fileSuffix),
+      fileName: fileNameWithSuffix(content.fileName, format.fileSuffix),
       content: format.render(content),
       mimeType: format.mimeType,
     })
@@ -58,7 +57,7 @@ export function ExportMenu({ source, quizzes }: { source: ExportSource; quizzes:
           return
         }
         downloadTextFile({
-          fileName: exportFileName(source.job.fileName, QUIZ_MARKDOWN.fileSuffix),
+          fileName: fileNameWithSuffix(source.job.fileName, QUIZ_MARKDOWN.fileSuffix),
           content: toQuizMarkdown({
             fileName: source.job.fileName,
             madeAt: full.completedAt ?? full.requestedAt,

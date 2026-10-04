@@ -439,8 +439,3 @@ export function markdownReportFormat({ includeQa, includeNotes }: { includeQa: b
 }
 
 // 匯出檔名：原始檔名去掉最後一個副檔名，再接上格式自己的結尾（例如 `.srt`、`-含時間戳.txt`）。
-export function exportFileName(originalFileName: string, suffix: string): string {
-  const dot = originalFileName.lastIndexOf('.')
-  const baseName = dot > 0 ? originalFileName.slice(0, dot) : originalFileName
-  return baseName + suffix
-}

@@ -1,6 +1,6 @@
+import { fileNameWithSuffix } from '@/lib/download'
 import { describe, expect, it } from 'vitest'
 import {
-  exportFileName,
   formatClock,
   buildExportContent,
   markdownReportFormat,
@@ -70,17 +70,17 @@ describe('toSrt shared export rules', () => {
   })
 })
 
-describe('exportFileName', () => {
+describe('fileNameWithSuffix', () => {
   it.each([
     ['interview.mp3', 'interview.srt'],
     ['週會 2026.09.25.m4a', '週會 2026.09.25.srt'],
     ['no-extension', 'no-extension.srt'],
   ])('names the export after the uploaded file without its extension (%s)', (original, expected) => {
-    expect(exportFileName(original, '.srt')).toBe(expected)
+    expect(fileNameWithSuffix(original, '.srt')).toBe(expected)
   })
 
   it('appends a suffix before the extension when one format has two variants', () => {
-    expect(exportFileName('interview.mp3', '-含時間戳.txt')).toBe('interview-含時間戳.txt')
+    expect(fileNameWithSuffix('interview.mp3', '-含時間戳.txt')).toBe('interview-含時間戳.txt')
   })
 })
 

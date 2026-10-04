@@ -5,8 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { OutputsActions } from '@/hooks/use-outputs'
-import { downloadTextFile } from '@/lib/download'
-import { exportFileName } from '@/lib/export-formats'
+import { downloadTextFile, fileNameWithSuffix } from '@/lib/download'
 import { OUTPUT_FORMAT_LABELS, SOCIAL_PLATFORMS, outputLabel, postLength } from '@/lib/output-formats'
 import { formatShortDateTime } from '@/lib/media'
 import { isOutputStale } from '@/lib/staleness'
@@ -175,6 +174,7 @@ function OutputItem({
           <span className="text-xs font-normal text-muted-foreground">{when}</span>
         </span>
         <Marks output={output} isStale={isStale} />
+        {output.instruction && <span className="text-xs text-muted-foreground">{`要求：${output.instruction}`}</span>}
         <span className="line-clamp-2 text-sm text-muted-foreground">{output.content}</span>
       </button>
     )
@@ -264,6 +264,7 @@ function OutputDocument({
           {label}
           <Marks output={output} isStale={false} />
         </h4>
+        {output.instruction && <p className="text-xs text-muted-foreground">{`要求：${output.instruction}`}</p>}
         {draft === null ? (
           <div className="rounded-lg border bg-muted/30 p-3 text-sm leading-relaxed whitespace-pre-wrap">{content}</div>
         ) : (
@@ -292,7 +293,7 @@ function OutputDocument({
         {draft === null ? (
           <Button size="sm" variant="outline" onClick={() => setDraft(content)}>
             <Pencil className="size-4" />
-            編輯
+            修改
           </Button>
         ) : (
           <>
@@ -312,7 +313,7 @@ function OutputDocument({
           size="sm"
           variant="outline"
           onClick={() =>
-            downloadTextFile({ fileName: exportFileName(fileName, `-${label}.md`), content, mimeType: 'text/markdown' })}
+            downloadTextFile({ fileName: fileNameWithSuffix(fileName, `-${label}.md`), content, mimeType: 'text/markdown' })}
         >
           <Download className="size-4" />
           下載 Markdown
