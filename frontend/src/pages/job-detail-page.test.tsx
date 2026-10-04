@@ -4,8 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi, outputsApi, translationsApi, decisionsApi } from '@/lib/api'
-import type { Decision, DecisionExtraction, GeneratedOutput, SpeakerInsights, TranslationSummary, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
+import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi, outputsApi, translationsApi, decisionsApi, factCheckApi } from '@/lib/api'
+import type { Claim, Decision, DecisionExtraction, FactCheckExtraction, GeneratedOutput, SpeakerInsights, TranslationSummary, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -29,6 +29,7 @@ vi.mock('@/lib/api', () => ({
   outputsApi: { list: vi.fn(), request: vi.fn(), update: vi.fn() },
   translationsApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), delete: vi.fn() },
   decisionsApi: { list: vi.fn(), extract: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
+  factCheckApi: { get: vi.fn(), find: vi.fn(), verify: vi.fn() },
 }))
 
 // Every test renders the whole page, and this file runs ~250 of them in one jsdom: on a busy machine the later, longer
@@ -59,6 +60,7 @@ beforeEach(() => {
   vi.mocked(outputsApi.list).mockResolvedValue([])
   vi.mocked(translationsApi.list).mockResolvedValue([])
   vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: null, decisions: [] })
+  vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: null, claims: [] })
   vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([])
   vi.mocked(notesApi.list).mockResolvedValue([])
   vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], earlierRuns: [], latestRun: null })
@@ -374,7 +376,7 @@ describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
     await renderCompletedJob()
 
     const tiles = within(await screen.findByRole('list', { name: 'Studio 功能' })).getAllByRole('button')
-    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '筆記還沒', '決策找出', '測驗還沒', '多格式輸', '會後處理', '用量尚無'])
+    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '筆記還沒', '決策找出', '事實查核', '測驗還沒', '多格式輸', '會後處理', '用量尚無'])
     expect(screen.getByRole('button', { name: '章節' })).toHaveAccessibleDescription('1 個章節')
     expect(screen.queryByRole('button', { name: '0:12開場' })).not.toBeInTheDocument()
   })
@@ -4483,5 +4485,111 @@ describe('JobDetailPage speaker stats and decisions (講者數據 × 決策, COM
     await user.click(screen.getByRole('button', { name: '到「決策」抽出' }))
 
     expect(await screen.findByRole('button', { name: '抽出決策' })).toBeInTheDocument()
+  })
+})
+
+describe('JobDetailPage fact check (事實查核, COMPLETED, desktop layout)', () => {
+  // multiSpeakerTranscript: S1 主持人 / S2 講者 2; 大家好 at 0:04 is S2's, 先聊聊近況 at 0:06 is S1's
+  const finding: FactCheckExtraction = {
+    status: 'GENERATING', failureReason: null, sourceRevision: 0, modelProvider: null, model: null,
+    requestedAt: '2026-10-04T03:00:00Z', completedAt: null,
+  }
+  const found = { ...finding, status: 'COMPLETED' as const, model: 'qwen3:14b', completedAt: '2026-10-04T03:01:00Z' }
+  const claim = (overrides: Partial<Claim>): Claim => ({
+    id: 'c1', jobId: 'job-1', speakerLabel: 'S2', startTime: 4, text: '大家好', claim: '台灣約有 30% 的人每天收聽 Podcast',
+    kind: 'number', verdict: null, explanation: null, sources: [], checkedAt: null, checkModel: null, checking: false,
+    checkError: null, sourceRevision: 0, ...overrides,
+  })
+  const claims = [
+    claim({}),
+    claim({ id: 'c2', speakerLabel: 'S1', startTime: 6, text: '先聊聊近況', claim: '主持人最近很忙', kind: 'fact', verdict: 'not_checkable' }),
+  ]
+  const row = (text: string) => screen.getByText(text).closest('[data-segment-index]') as HTMLElement
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('finds the checkable claims in the background, listing what was said by whom and where', async () => {
+    stubDesktopLayout()
+    vi.mocked(factCheckApi.find).mockResolvedValue(finding)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('事實查核')
+
+    await user.click(screen.getByRole('button', { name: '找出主張' }))
+    expect(factCheckApi.find).toHaveBeenCalledWith('job-1')
+    expect(screen.getByText('找主張中…')).toBeInTheDocument()
+
+    vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: found, claims })
+    await vi.advanceTimersByTimeAsync(3000)
+
+    const list = await screen.findByRole('list', { name: '這場的主張' })
+    const [podcast, busy] = within(list).getAllByRole('listitem')
+    expect(podcast).toHaveTextContent('台灣約有 30% 的人每天收聽 Podcast')
+    expect(podcast).toHaveTextContent('數字')
+    expect(podcast).toHaveTextContent('講者 2')
+    expect(podcast).toHaveTextContent('「大家好」')
+    expect(within(busy).getByText('無法查核')).toBeInTheDocument()
+    expect(busy).toHaveTextContent('事實')
+    fireEvent.click(within(podcast).getByRole('button', { name: '0:04' }))
+    expect(renderedMediaElement().currentTime).toBe(4)
+  })
+
+  it('shows on the tile how many claims there are', async () => {
+    stubDesktopLayout()
+    vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: found, claims })
+    await renderCompletedJob(multiSpeakerTranscript)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '事實查核' })).toHaveAccessibleDescription('2 條主張'))
+  })
+
+  it('marks where a claim was said in the transcript, opening it in 事實查核', async () => {
+    stubDesktopLayout()
+    vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: found, claims })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    const mark = await within(row('大家好')).findByRole('button', { name: '主張：台灣約有 30% 的人每天收聽 Podcast' })
+    expect(within(row('歡迎收聽')).queryByRole('button', { name: /^主張：/ })).toBeNull()
+    await user.click(mark)
+
+    const list = await screen.findByRole('list', { name: '這場的主張' })
+    expect(within(list).getAllByRole('listitem')[0]).toHaveAttribute('data-highlighted')
+  })
+
+  it('says which claims come from an older transcript, and finds them again', async () => {
+    stubDesktopLayout()
+    vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: found, claims })
+    vi.mocked(factCheckApi.find).mockResolvedValue(finding)
+    await renderCompletedJob({ ...multiSpeakerTranscript, revision: 2 })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('事實查核')
+
+    expect(await screen.findByText('逐字稿已修改，這些主張可能過時')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: '這場的主張' })).getAllByText('依據舊版逐字稿')).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: '重新找出' }))
+
+    expect(factCheckApi.find).toHaveBeenCalledWith('job-1')
+  })
+
+  it('shows why finding them failed and offers to try again', async () => {
+    stubDesktopLayout()
+    vi.mocked(factCheckApi.get).mockResolvedValue({
+      extraction: { ...finding, status: 'FAILED', failureReason: '模型回傳的格式不正確，請再標出一次' }, claims: [],
+    })
+    vi.mocked(factCheckApi.find).mockResolvedValue(finding)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('事實查核')
+
+    expect(await screen.findByText('模型回傳的格式不正確，請再標出一次')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '再找一次' }))
+
+    expect(factCheckApi.find).toHaveBeenCalledWith('job-1')
   })
 })

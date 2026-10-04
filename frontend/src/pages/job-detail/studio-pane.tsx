@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
-import { ArrowLeft, ChartBarBig, FileText, ClipboardList, Gauge, Gavel, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ChartBarBig, FileText, ClipboardList, Gauge, Gavel, SearchCheck, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
 import type { NotesActions } from '@/hooks/use-notes'
 import type { DecisionsActions } from '@/hooks/use-decisions'
+import type { FactCheckActions } from '@/hooks/use-fact-check'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import type { OutputsActions } from '@/hooks/use-outputs'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import { formatCount, formatMinutes } from '@/lib/usage-format'
 import { Card } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { DecisionsSection } from '@/pages/job-detail/decisions-section'
+import { FactCheckSection } from '@/pages/job-detail/fact-check-section'
 import { NotesSection, type NoteToOpen } from '@/pages/job-detail/notes-section'
 import { PostMeetingSection } from '@/pages/job-detail/post-meeting-section'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
@@ -26,6 +28,7 @@ export type StudioTool =
   | 'chapters'
   | 'notes'
   | 'decisions'
+  | 'fact-check'
   | 'quiz'
   | 'outputs'
   | 'speaker-stats'
@@ -53,6 +56,10 @@ interface StudioPaneProps {
   onQuizAttempted: () => void
   speakerInsights: SpeakerInsightsActions
   decisions: DecisionsActions
+  factCheck: FactCheckActions
+  /** The claim 事實查核 should scroll to and highlight (picked on the transcript). */
+  claimToOpen: string | null
+  onClaimOpened: () => void
   outputs: OutputsActions
   /** The uploaded file's name: what downloaded outputs are named after. */
   fileName: string
@@ -98,6 +105,9 @@ export function StudioPane({
   onQuizAttempted,
   speakerInsights,
   decisions,
+  factCheck,
+  claimToOpen,
+  onClaimOpened,
   outputs,
   fileName,
   postMeeting,
@@ -224,6 +234,9 @@ export function StudioPane({
                 <ToolTile tool="decisions" onOpen={onToolChange} attention={decisions.decisions?.extraction?.status === 'GENERATING'}>
                   {decisionsStatus(decisions.decisions)}
                 </ToolTile>
+                <ToolTile tool="fact-check" onOpen={onToolChange} attention={factCheckBusy(factCheck)}>
+                  {factCheckStatus(factCheck)}
+                </ToolTile>
                 <ToolTile tool="quiz" onOpen={onToolChange} attention={quizzes.some((quiz) => quiz.status === 'GENERATING')}>
                   {quizzes.length === 0
                     ? '還沒有測驗'
@@ -312,6 +325,17 @@ export function StudioPane({
             />
           )}
 
+          {tool === 'fact-check' && (
+            <FactCheckSection
+              factCheck={factCheck}
+              transcript={transcript}
+              onSeek={onSeek}
+              mediaAvailable={mediaAvailable}
+              claimToOpen={claimToOpen}
+              onClaimOpened={onClaimOpened}
+            />
+          )}
+
           {tool === 'quiz' && (
             <QuizSection
               jobId={jobId}
@@ -373,6 +397,7 @@ const TOOLS: Record<StudioTool, { title: string; icon: LucideIcon }> = {
   chapters: { title: '章節', icon: List },
   notes: { title: '筆記', icon: NotebookPen },
   decisions: { title: '決策', icon: Gavel },
+  'fact-check': { title: '事實查核', icon: SearchCheck },
   quiz: { title: '測驗', icon: GraduationCap },
   outputs: { title: '多格式輸出', icon: FileText },
   'speaker-stats': { title: '講者數據', icon: ChartBarBig },
@@ -394,6 +419,19 @@ function decisionsStatus(decisions: DecisionsActions['decisions']): string {
   if (count > 0) return `${count} 個決策`
   if (status === 'FAILED') return '上次抽取失敗'
   return status === 'COMPLETED' ? '沒有找到決定' : '找出這場做成的決定'
+}
+
+function factCheckBusy({ factCheck }: FactCheckActions): boolean {
+  return factCheck?.extraction?.status === 'GENERATING' || (factCheck?.claims.some((claim) => claim.checking) ?? false)
+}
+
+function factCheckStatus({ factCheck }: FactCheckActions): string {
+  if (factCheck?.extraction?.status === 'GENERATING') return '找主張中…'
+  if (factCheck?.claims.some((claim) => claim.checking)) return '查核中…'
+  const count = factCheck?.claims.length ?? 0
+  if (count > 0) return `${count} 條主張`
+  if (factCheck?.extraction?.status === 'FAILED') return '上次找主張失敗'
+  return factCheck?.extraction?.status === 'COMPLETED' ? '沒有可以查核的說法' : '找出可以查核的數字與說法'
 }
 
 function usageStatus(usage: JobUsage | null): string {

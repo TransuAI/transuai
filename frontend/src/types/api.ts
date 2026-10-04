@@ -539,6 +539,61 @@ export interface JobDecisions {
   decisions: Decision[]
 }
 
+/**
+ * 事實查核: a job's finding of claims — GENERATING / COMPLETED / FAILED (failureReason for the user; the claims found
+ * earlier stay). sourceRevision / model: the last finished one's, 0 / null before that.
+ */
+export interface FactCheckExtraction {
+  status: 'GENERATING' | 'COMPLETED' | 'FAILED'
+  failureReason: string | null
+  sourceRevision: number
+  modelProvider: string | null
+  model: string | null
+  requestedAt: string | null
+  completedAt: string | null
+}
+
+/** 查核's conclusion — never 正確／錯誤. not_checkable is decided when the claim is found (only the speaker knows). */
+export type Verdict = 'supported' | 'disputed' | 'no_reliable_source' | 'not_checkable'
+
+/** A web page a 查核 rests on; the order is the [n] the explanation cites. */
+export interface ClaimSource {
+  title: string
+  url: string
+  excerpt: string | null
+}
+
+/** 主張: something said in the recording that outside sources could check, and — once checked — what they say. */
+export interface Claim {
+  id: string
+  jobId: string
+  /** Who said it, where, and that segment's own words. */
+  speakerLabel: string | null
+  startTime: number
+  text: string
+  /** Put as one complete, searchable sentence: what a 查核 searches for. */
+  claim: string
+  kind: 'number' | 'fact'
+  /** Null: not checked yet. */
+  verdict: Verdict | null
+  explanation: string | null
+  sources: ClaimSource[]
+  checkedAt: string | null
+  checkModel: string | null
+  /** Being checked right now. */
+  checking: boolean
+  /** Why the last check failed (the claim stays unchecked). */
+  checkError: string | null
+  /** The transcript revision it was found in: 過時 once the transcript has moved on. */
+  sourceRevision: number
+}
+
+/** A job's finding of claims (null when never done) and the claims, by time. */
+export interface JobFactCheck {
+  extraction: FactCheckExtraction | null
+  claims: Claim[]
+}
+
 /** The kinds of 多格式輸出 (new documents written from a job). */
 export type OutputFormat = 'podcast_description' | 'youtube_description' | 'blog_post' | 'newsletter' | 'social_post'
 

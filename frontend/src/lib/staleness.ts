@@ -1,4 +1,4 @@
-import type { DecisionExtraction, GeneratedOutput, Quiz, SpeakerInsights, Summary, Transcript } from '@/types/api'
+import type { Claim, DecisionExtraction, FactCheckExtraction, GeneratedOutput, Quiz, SpeakerInsights, Summary, Transcript } from '@/types/api'
 
 // 過時（見 ai-service CONTEXT.md）：摘要跟章節是依據逐字稿的某個 revision 產生的；逐字稿之後又被編輯
 // （revision 變大）就代表它們可能沒反映那些修改。章節跟摘要永遠一起產生，所以共用這個判斷。
@@ -30,4 +30,14 @@ export function isOutputStale(output: GeneratedOutput, transcript: Transcript | 
 export function isDecisionsStale(extraction: DecisionExtraction | null, transcript: Transcript | null): boolean {
   return extraction !== null && extraction.completedAt !== null && transcript !== null
     && extraction.sourceRevision < transcript.revision
+}
+
+// 事實查核：標出主張依據的逐字稿 revision 比目前的小，這次標出的（與每條主張、它的查核結果）就是依據舊版的。
+export function isFactCheckStale(extraction: FactCheckExtraction | null, transcript: Transcript | null): boolean {
+  return extraction !== null && extraction.completedAt !== null && transcript !== null
+    && extraction.sourceRevision < transcript.revision
+}
+
+export function isClaimStale(claim: Claim, transcript: Transcript | null): boolean {
+  return transcript !== null && claim.sourceRevision < transcript.revision
 }

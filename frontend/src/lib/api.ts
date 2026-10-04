@@ -38,6 +38,8 @@ import type {
   SpeakerInsights,
   Decision,
   DecisionExtraction,
+  FactCheckExtraction,
+  JobFactCheck,
   DecisionInput,
   DecisionTimeline,
   JobCategory,
@@ -312,6 +314,12 @@ export const decisionsApi = {
           break
       }
     }),
+}
+
+// 事實查核: claims are found in the background (no web searches spent); finding them again keeps the checked ones.
+export const factCheckApi = {
+  get: (jobId: string) => apiFetch<JobFactCheck>(`/jobs/${jobId}/fact-check`),
+  find: (jobId: string) => apiFetch<FactCheckExtraction>(`/jobs/${jobId}/fact-check`, { method: 'POST' }),
 }
 
 // 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.

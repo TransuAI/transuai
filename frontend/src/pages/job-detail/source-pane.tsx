@@ -12,7 +12,7 @@ import { NameInput } from '@/pages/job-detail/name-input'
 import { SpeakerPanel, type SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
 import { TranscriptView } from '@/pages/job-detail/transcript-view'
 import { cn } from '@/lib/utils'
-import type { Job, JobCategory, JobUpdate, Note, SpeakerAssignment, Transcript } from '@/types/api'
+import type { Claim, Job, JobCategory, JobUpdate, Note, SpeakerAssignment, Transcript } from '@/types/api'
 
 interface SourcePaneProps {
   job: Job
@@ -33,6 +33,9 @@ interface SourcePaneProps {
   notes: Note[]
   onAddNoteAt: (seconds: number) => void
   onOpenNote: (noteId: string) => void
+  /** 事實查核's 主張, marked on the transcript; opening one shows it in the Studio. */
+  claims: Claim[]
+  onOpenClaim: (claimId: string) => void
   /** 譯文: what the transcript shows, and translating it. */
   translations: TranslationsActions
   /** Folds the pane into a rail (desktop grid only). */
@@ -56,6 +59,8 @@ export function SourcePane({
   notes,
   onAddNoteAt,
   onOpenNote,
+  claims,
+  onOpenClaim,
   translations,
   onCollapse,
   className,
@@ -115,6 +120,8 @@ export function SourcePane({
             notes={notes}
             onAddNoteAt={onAddNoteAt}
             onOpenNote={onOpenNote}
+            claims={claims}
+            onOpenClaim={onOpenClaim}
             translation={display.mode === 'original' ? null : { mode: display.mode, texts }}
           />
         ) : (

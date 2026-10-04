@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BookmarkPlus, Pencil, StickyNote, Undo2 } from 'lucide-react'
+import { BookmarkPlus, Pencil, SearchCheck, StickyNote, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { handleEditorKeys } from '@/lib/editor-keys'
 import { formatDuration } from '@/lib/media'
@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/button'
 import { SegmentSpeakerMenu } from '@/pages/job-detail/segment-speaker-menu'
 import { NameInput } from '@/pages/job-detail/name-input'
 import { SpeakerDot } from '@/pages/job-detail/speaker-dot'
-import type { Note, Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
+
+const NO_CLAIMS: Claim[] = []
+import type { Claim, Note, Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
 
 function HighlightedText({ text, matches, activeStart }: { text: string; matches: TranscriptMatch[]; activeStart: number | null }) {
   const parts = []
@@ -57,6 +59,9 @@ interface SegmentRowProps {
   /** 在這裡加筆記: a note at the segment's start. */
   onAddNote: () => void
   onOpenNote: (noteId: string) => void
+  /** 事實查核's 主張 said in this segment, marked by its timestamp. */
+  claims?: Claim[]
+  onOpenClaim?: (claimId: string) => void
   /** 雙語: the segment's translation, shown under its text. */
   translation?: string | null
   /** Where the selected search match starts, when it's in the translation. */
@@ -87,6 +92,8 @@ export function SegmentRow({
   notes,
   onAddNote,
   onOpenNote,
+  claims = NO_CLAIMS,
+  onOpenClaim = () => {},
   translation = null,
   activeTranslationMatchStart = null,
   textEditable = true,
@@ -166,6 +173,23 @@ export function SegmentRow({
         >
           {formatDuration(segment.startTime)}
         </button>
+        {claims.length > 0 && (
+          // One mark per claim, the claim on hover; clicking opens it in the Studio's 事實查核.
+          <div className="flex flex-wrap justify-center gap-0.5">
+            {claims.map((claim) => (
+              <button
+                key={claim.id}
+                type="button"
+                aria-label={`主張：${claim.claim}`}
+                title={claim.claim}
+                onClick={() => onOpenClaim(claim.id)}
+                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <SearchCheck className="size-3.5" />
+              </button>
+            ))}
+          </div>
+        )}
         {notes.length > 0 && (
           // One mark per note, its text on hover; clicking opens it in the Studio.
           <div className="flex flex-wrap justify-center gap-0.5">

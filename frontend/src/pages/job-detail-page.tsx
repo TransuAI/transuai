@@ -17,6 +17,7 @@ import { useSpeakerInsights } from '@/hooks/use-speaker-insights'
 import { useOutputs } from '@/hooks/use-outputs'
 import { useTranslations } from '@/hooks/use-translations'
 import { useDecisions } from '@/hooks/use-decisions'
+import { useFactCheck } from '@/hooks/use-fact-check'
 import { useSummaryRegeneration } from '@/hooks/use-summary-regeneration'
 import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Button } from '@/components/ui/button'
@@ -209,6 +210,7 @@ export function JobDetailPage() {
   const quizzes = useQuizzes(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const speakerInsights = useSpeakerInsights(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const decisions = useDecisions(jobId, jobStatus === 'COMPLETED', reloadUsage)
+  const factCheck = useFactCheck(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const outputs = useOutputs(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const translations = useTranslations(jobId, jobStatus === 'COMPLETED', reloadUsage, transcript)
   const postMeeting = usePostMeeting(jobId, jobStatus === 'COMPLETED', reloadUsage)
@@ -490,6 +492,7 @@ export function JobDetailPage() {
       onQuizAttempted={quizzes.reload}
       speakerInsights={speakerInsights}
       decisions={decisions}
+      factCheck={factCheck}
       outputs={outputs}
       translations={translations}
       postMeeting={postMeeting.postMeeting}

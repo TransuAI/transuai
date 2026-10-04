@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DecisionsActions } from '@/hooks/use-decisions'
+import type { FactCheckActions } from '@/hooks/use-fact-check'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import type { OutputsActions } from '@/hooks/use-outputs'
 import type { TranslationsActions } from '@/hooks/use-translations'
@@ -22,7 +23,9 @@ import { shownSpeakerOf } from '@/lib/speakers'
 import { MiniPlayer } from '@/pages/job-detail/mini-player'
 import { StudioPane, type StudioTool } from '@/pages/job-detail/studio-pane'
 import { cn } from '@/lib/utils'
-import type { Chapter, ConfirmedProposal, Job, JobUpdate, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
+
+const NO_CLAIMS: Claim[] = []
+import type { Chapter, Claim, ConfirmedProposal, Job, JobUpdate, JobUsage, ModelChoice, PostMeeting, Quiz, SpeakerAssignment, Summary, Transcript } from '@/types/api'
 
 interface CompletedWorkspaceProps {
   job: Job
@@ -62,6 +65,7 @@ interface CompletedWorkspaceProps {
   onQuizAttempted: () => void
   speakerInsights: SpeakerInsightsActions
   decisions: DecisionsActions
+  factCheck: FactCheckActions
   outputs: OutputsActions
   translations: TranslationsActions
   postMeeting: PostMeeting | null
@@ -169,6 +173,7 @@ export function CompletedWorkspace({
   onQuizAttempted,
   speakerInsights,
   decisions,
+  factCheck,
   outputs,
   translations,
   postMeeting,
@@ -227,6 +232,18 @@ export function CompletedWorkspace({
     setDecisionToOpen(decisionId)
   }
   const onDecisionOpened = useCallback(() => setDecisionToOpen(null), [])
+  // A claim marked on the transcript opens in the Studio's 事實查核.
+  const [claimToOpen, setClaimToOpen] = useState<string | null>(null)
+  const openClaim = (claimId: string) => {
+    setStudioTool('fact-check')
+    setStudioCollapsed(false)
+    if (!isDesktop) {
+      setSourceOpen(false)
+      setStudioOpen(true)
+    }
+    setClaimToOpen(claimId)
+  }
+  const onClaimOpened = useCallback(() => setClaimToOpen(null), [])
   const [searchParams] = useSearchParams()
   const decisionInAddress = searchParams.get('decision')
   const [openedFromAddress, setOpenedFromAddress] = useState<string | null>(null)
@@ -287,6 +304,8 @@ export function CompletedWorkspace({
     notes: notes.notes,
     onAddNoteAt: (seconds: number) => void addNoteAt(seconds),
     onOpenNote: (noteId: string) => openNote(noteId, false),
+    claims: factCheck.factCheck?.claims ?? NO_CLAIMS,
+    onOpenClaim: openClaim,
   }
   const desktopPlayer = mediaUrl && (
     <div className="flex flex-col gap-1.5">
@@ -340,6 +359,9 @@ export function CompletedWorkspace({
       onQuizAttempted={onQuizAttempted}
       speakerInsights={speakerInsights}
       decisions={decisions}
+      factCheck={factCheck}
+      claimToOpen={claimToOpen}
+      onClaimOpened={onClaimOpened}
       outputs={outputs}
       fileName={job.fileName}
       postMeeting={postMeeting}

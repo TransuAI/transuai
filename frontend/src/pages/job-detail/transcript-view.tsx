@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import { LocateFixed } from 'lucide-react'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
 import { useTranscriptSearch } from '@/hooks/use-transcript-search'
+import { claimsBySegment } from '@/lib/claims'
 import { notesBySegment } from '@/lib/notes'
 import { speakersAtTurns, speakersWithSegments } from '@/lib/speakers'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SegmentRow } from '@/pages/job-detail/segment-row'
 import { TranscriptSearchBar } from '@/pages/job-detail/transcript-search-bar'
-import type { Note, Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
+import type { Claim, Note, Speaker, SpeakerAssignment, TranscriptSegment } from '@/types/api'
 
 // Markup of the shadcn ScrollArea (components/ui/scroll-area.tsx) this view relies on.
 const VIEWPORT_SELECTOR = '[data-slot="scroll-area-viewport"]'
@@ -32,6 +33,7 @@ function centerIfOutsideMiddleBand(viewport: HTMLElement, segment: HTMLElement, 
 }
 
 const NO_NOTES: Note[] = []
+const NO_CLAIMS: Claim[] = []
 
 interface TranscriptViewProps {
   segments: TranscriptSegment[]
@@ -45,6 +47,9 @@ interface TranscriptViewProps {
   notes: Note[]
   onAddNoteAt: (seconds: number) => void
   onOpenNote: (noteId: string) => void
+  /** 事實查核's 主張, marked where they were said. */
+  claims?: Claim[]
+  onOpenClaim?: (claimId: string) => void
   /** 譯文 shown in place of each segment's text, or under it (雙語); null shows the original. */
   translation?: { mode: 'translated' | 'bilingual'; texts: Map<string, string> } | null
 }
@@ -70,6 +75,8 @@ export function TranscriptView({
   notes,
   onAddNoteAt,
   onOpenNote,
+  claims = NO_CLAIMS,
+  onOpenClaim,
   translation = null,
 }: TranscriptViewProps) {
   const { isFollowing, pause, resume } = autoFollow
@@ -90,6 +97,7 @@ export function TranscriptView({
   // The same speakers as the speaker panel lists, even for a single-speaker recording.
   const speakerChoices = useMemo(() => speakersWithSegments(segments, speakers), [segments, speakers])
   const segmentNotes = useMemo(() => notesBySegment(notes, segments), [notes, segments])
+  const segmentClaims = useMemo(() => claimsBySegment(claims, segments), [claims, segments])
 
   // Clicking the transcript text should give the viewport keyboard focus, so that a
   // following PageDown/Space — which the browser uses to scroll the viewport — also reaches
@@ -182,6 +190,8 @@ export function TranscriptView({
               notes={segmentNotes.get(i) ?? NO_NOTES}
               onAddNote={() => onAddNoteAt(segment.startTime)}
               onOpenNote={onOpenNote}
+              claims={segmentClaims.get(i) ?? NO_CLAIMS}
+              onOpenClaim={onOpenClaim}
               translation={bilingualTexts?.[i] ?? null}
               textEditable={!showsTranslationInstead}
             />
