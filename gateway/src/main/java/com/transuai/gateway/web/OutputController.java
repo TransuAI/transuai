@@ -53,6 +53,7 @@ public class OutputController {
                 .setFormat(request.format())
                 .setTitle(title)
                 .setInstruction(request.instruction() == null ? "" : request.instruction())
+                .setPlatform(request.platform() == null ? "" : request.platform())
                 .build()));
     }
 
@@ -72,7 +73,7 @@ public class OutputController {
 
     private static GeneratedOutputDto toDto(GeneratedOutput output) {
         return new GeneratedOutputDto(output.getId(), output.getJobId(), output.getFormat(),
-                GrpcStrings.emptyToNull(output.getInstruction()), output.getStatus().name().replace("OUTPUT_STATUS_", ""),
+                GrpcStrings.emptyToNull(output.getPlatform()), GrpcStrings.emptyToNull(output.getInstruction()), output.getStatus().name().replace("OUTPUT_STATUS_", ""),
                 GrpcStrings.emptyToNull(output.getFailureReason()), GrpcStrings.emptyToNull(output.getContent()),
                 output.getSourceRevision(), GrpcStrings.emptyToNull(output.getModelProvider()),
                 GrpcStrings.emptyToNull(output.getModel()), GrpcTimestamps.toInstant(output.getRequestedAt()),

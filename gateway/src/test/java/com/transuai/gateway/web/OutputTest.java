@@ -94,6 +94,19 @@ class OutputTest {
     }
 
     @Test
+    void aSocialPostsPlatformIsPassedOnAndReturned() throws Exception {
+        when(aiServiceStub.requestOutput(any())).thenReturn(done.toBuilder().setFormat("social_post").setPlatform("threads").build());
+
+        post("{\"format\":\"social_post\",\"platform\":\"threads\"}")
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.platform").value("threads"));
+
+        ArgumentCaptor<RequestOutputRequest> sent = ArgumentCaptor.forClass(RequestOutputRequest.class);
+        verify(aiServiceStub).requestOutput(sent.capture());
+        assertThat(sent.getValue().getPlatform()).isEqualTo("threads");
+    }
+
+    @Test
     void theOutputsAreListedWithTheirContent() throws Exception {
         when(aiServiceStub.listOutputs(any())).thenReturn(ListOutputsResponse.newBuilder().addOutputs(done).build());
 
