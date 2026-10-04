@@ -80,11 +80,14 @@ service AiService {
   // 譯文（見 ai-service CONTEXT.md「譯文」）：把一個 Job 的逐字稿翻成另一種語言，每個片段一句（保留時間與講者）。一個 Job 每種語言一份。
   // 要求後立刻回傳「翻譯中」，背景用要求者的預設模型一批一批翻、每批存檔；已經翻好的再要求一次是補翻缺的、原文改過的。
   // language 是 zh-TW / en / ja / ko，其他回 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒變）。
+  // 原文片段被編輯後（transcript.edited），翻好的語言自動只重翻改過的片段、清空的刪掉（不算使用者的限流）。
   rpc RequestTranslation(RequestTranslationRequest) returns (Translation);
   // 這個 Job 各種語言的譯文（狀態與進度，不含片段）。
   rpc ListTranslations(ListTranslationsRequest) returns (ListTranslationsResponse);
   // 一種語言的譯文含片段；沒有這種語言回 NOT_FOUND。
   rpc GetTranslation(GetTranslationRequest) returns (Translation);
+  // 刪掉一種語言的譯文（翻譯中也可以，背景翻好的那批不會再存）；沒有這種語言回 NOT_FOUND。
+  rpc DeleteTranslation(DeleteTranslationRequest) returns (DeleteTranslationResponse);
 
   // 講者數據的 AI 判斷（每位講者提出的問題、可能的打斷）：一個 Job 一份，再分析就取代。要求後立刻回傳「分析中」，背景用要求者的
   // 預設模型分析（見 ai-service README「講者數據」）。少於兩位講者時分析會失敗並附原因。
@@ -863,6 +866,13 @@ message GetTranslationRequest {
   string job_id = 1;
   string language = 2;
 }
+
+message DeleteTranslationRequest {
+  string job_id = 1;
+  string language = 2;
+}
+
+message DeleteTranslationResponse {}
 
 message Translation {
   string job_id = 1;

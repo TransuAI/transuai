@@ -170,7 +170,7 @@ PUT    /transcripts/{jobId}/segments/{segmentId}/speaker   改片段的講者，
 - `PUT …/segments/{segmentId}/speaker` → `AssignSegmentSpeaker`：把片段改成另一位講者，或新增講者給它。
 
 每次實際改動都讓 `revision` +1，並發出 `transcript.edited`（見 5.）：ai-service 比對片段文字，只重算文字有變的
-embedding——改名、改講者不動文字，所以不用重算；摘要、章節與測驗則因為 `revision` 變大被標示為過時。轉錄本身完全是
+embedding、只重翻譯文裡文字有變的片段（清空的譯文刪掉）——改名、改講者不動文字，所以不用重算；摘要、章節與測驗則因為 `revision` 變大被標示為過時。轉錄本身完全是
 **MQ 驅動**（消費 `transcription.requested`），沒有另外開一支「觸發轉錄」的 API。
 
 逐字稿回傳格式範例（`language` 是轉錄時指定的語言代碼，例如 `zh-TW`；講者分離之前的舊 Job 存的是 Whisper
@@ -209,6 +209,7 @@ POST   /jobs/{jobId}/translations       譯文：翻譯逐字稿，body { "langu
                                          前端每 3 秒輪詢）；一種語言一份，翻好的再要求是補翻缺的
 GET    /jobs/{jobId}/translations       各語言的狀態與進度
 GET    /jobs/{jobId}/translations/{language}  一種語言含片段的譯文（翻譯中也有已經翻好的）
+DELETE /jobs/{jobId}/translations/{language}  刪掉一種語言的譯文（翻譯中也可以），回 204；沒有這種語言回 404
 POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format", "platform"?（社群貼文必填）, "instruction"? }，回 202
                                          （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
 GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）
@@ -763,7 +764,7 @@ CREATE INDEX ix_generated_outputs_job_id ON generated_outputs (job_id);
 | `speaker_insights.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`）；ai-service 排給自己的背景工作 |
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
 | `post_meeting.requested` | AI Service | AI Service | `{ runId, jobId, userId }`（`userId` 是觸發的使用者）——使用者啟動會後處理（`POST /jobs/{jobId}/post-meeting`）；ai-service 排給自己的背景工作 |
-| `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
+| `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding，翻好的譯文只重翻文字有變的片段（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
 | `account.deleted`（**fanout exchange**） | Auth Service（outbox） | Upload Service（`account.deleted.upload`）、AI Service（`account.deleted.ai`）、Transcription Service（`account.deleted.transcription`） | `{ userId }`——使用者刪除了帳號：upload-service 刪掉他所有的 Job（每個再發 `job.deleted`），ai-service 撤銷並刪掉已連結的帳號、自有金鑰與個人設定，兩個服務把用量去識別化（`user_id` 設 NULL） |
 | `job.deleted`（**fanout exchange**） | Upload Service（outbox） | Transcription Service（`job.deleted.transcription`）、AI Service（`job.deleted.ai`） | `{ jobId, userId }`——Job 刪掉了，各服務清掉自己手上這個 Job 的資料（用量不刪）；見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md` |
 
