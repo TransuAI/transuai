@@ -926,6 +926,8 @@ enum DecisionExtractionStatus {
 message RequestDecisionExtractionRequest {
   string job_id = 1;
   string user_id = 2;
+  // 會議的日期（Job 的上傳時間）：找較早的會議裡可能被取代的決策；沒帶就不找。
+  google.protobuf.Timestamp meeting_at = 3;
 }
 
 message GetJobDecisionsRequest {
@@ -966,6 +968,8 @@ message CreateDecisionRequest {
   string user_id = 2;
   DecisionInput decision = 3;
   optional double start_time = 4;
+  // 會議的日期（Job 的上傳時間）。
+  google.protobuf.Timestamp meeting_at = 5;
 }
 
 message UpdateDecisionRequest {
@@ -1019,4 +1023,17 @@ message Decision {
   // 這個決策取代了較早的哪一個；沒有是空字串。
   string supersedes_id = 12;
   google.protobuf.Timestamp created_at = 13;
+  // 取代了的那個（被刪掉的不算），與取代了這一個的後來的決策（被刪掉的不列）。
+  optional DecisionLink supersedes = 14;
+  repeated DecisionLink superseded_by = 15;
+  // 會議的日期（Job 的上傳時間）；舊的決策沒有。
+  google.protobuf.Timestamp meeting_at = 16;
+}
+
+// 另一個決策（通常在別的 Job）：顯示「取代了…」「已被…取代」並連過去用。
+message DecisionLink {
+  string id = 1;
+  string job_id = 2;
+  string statement = 3;
+  google.protobuf.Timestamp meeting_at = 4;
 }

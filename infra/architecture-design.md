@@ -215,7 +215,8 @@ GET    /jobs/{jobId}/translations/{language}  一種語言含片段的譯文（�
 DELETE /jobs/{jobId}/translations/{language}  刪掉一種語言的譯文（翻譯中也可以），回 204；沒有這種語言回 404
 POST   /jobs/{jobId}/decisions/extract  決策紀錄：抽出（或重新抽出）這場的決策，回 202（背景抽，前端每 3 秒輪詢）；會議、訪談
                                          轉錄完也會自動抽；重新抽只換掉 AI 抽的、使用者沒改過的
-GET    /jobs/{jobId}/decisions          這個 Job 的抽取紀錄（沒抽過是 null）與決策（決定、理由、沒選的選項、提出者、暫定、時間點與原話）
+GET    /jobs/{jobId}/decisions          這個 Job 的抽取紀錄（沒抽過是 null）與決策（決定、理由、沒選的選項、提出者、暫定、時間點與原話、
+                                         取代了較早會議的哪一個、被後來的哪些取代）
 POST   /jobs/{jobId}/decisions          使用者自己新增一個決策（時間點可以沒有），回 201
 PATCH  /jobs/{jobId}/decisions/{id}     修改決策的內容（時間點與原話不變），之後重新抽也保留
 DELETE /jobs/{jobId}/decisions/{id}     刪除：AI 抽的只是隱藏（重新抽時不再出現），使用者新增的直接刪掉，回 204
@@ -770,6 +771,7 @@ CREATE TABLE decisions (
     supersedes_id UUID REFERENCES decisions(id) ON DELETE SET NULL,  -- 取代了較早的哪一個
     embedding vector(1024),                 -- statement＋rationale
     source_revision INTEGER,
+    meeting_at TIMESTAMPTZ,                 -- 會議的日期（Job 的上傳時間）：找較早的會議裡被取代的決策
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
@@ -809,7 +811,7 @@ CREATE INDEX ix_generated_outputs_job_id ON generated_outputs (job_id);
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
 | `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
 | `translation.requested` | AI Service | AI Service | `{ jobId, language }`——使用者要求翻譯逐字稿（`POST /jobs/{jobId}/translations`）；ai-service 排給自己的背景工作，一批一批翻、每批存檔 |
-| `decision.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求抽出決策（`POST /jobs/{jobId}/decisions/extract`），或會議、訪談轉錄完由 pipeline 自動要求（`userId` 是 Job 擁有者）；ai-service 排給自己的背景工作 |
+| `decision.requested` | AI Service | AI Service | `{ jobId, userId, meetingAt }`（`meetingAt` 是 Job 的上傳時間，找較早的會議裡被取代的決策用）——使用者要求抽出決策（`POST /jobs/{jobId}/decisions/extract`），或會議、訪談轉錄完由 pipeline 自動要求（`userId` 是 Job 擁有者）；ai-service 排給自己的背景工作 |
 | `output.requested` | AI Service | AI Service | `{ outputId, jobId, userId }`——使用者要求產生一份多格式輸出（`POST /jobs/{jobId}/outputs`）；ai-service 排給自己的背景工作 |
 | `speaker_insights.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`）；ai-service 排給自己的背景工作 |
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
