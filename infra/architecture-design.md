@@ -95,6 +95,9 @@ MQ 事件外互不直接呼叫，也不會有即時跨庫 join。
 > job，這種情境目前假設不存在（下游服務只監聽 cluster 內部網路）。
 > 唯一不經 Gateway、直接對外的 notification-service（WebSocket）自己做同樣的事：驗 access token，再問 upload-service 的
 > `GetJob`（見 3.5）。
+>
+> 跨 Job 的查詢（決策頁 `GET /decisions`，見 `.scratch/decision-log`）沒有單一的 job 可以檢查：Gateway 先向 upload-service 列出**目前
+> 使用者自己的** Job，只把那些 job id 交給 ai-service，再加上從 token 來的 `user_id`；ai-service 依 `user_id` 與 job id 兩個條件過濾。
 
 ---
 
@@ -216,6 +219,9 @@ GET    /jobs/{jobId}/decisions          這個 Job 的抽取紀錄（沒抽過�
 POST   /jobs/{jobId}/decisions          使用者自己新增一個決策（時間點可以沒有），回 201
 PATCH  /jobs/{jobId}/decisions/{id}     修改決策的內容（時間點與原話不變），之後重新抽也保留
 DELETE /jobs/{jobId}/decisions/{id}     刪除：AI 抽的只是隱藏（重新抽時不再出現），使用者新增的直接刪掉，回 204
+GET    /decisions?q=&category=&jobId=   決策頁：使用者所有 Job 的決策（每個帶 Job 的標題、類型、上傳時間），沒有 q 時依上傳時間由新到舊
+                                         的時間軸，有 q 時是搜尋（字與意思，依符合程度）；Gateway 先向 upload-service 列出使用者自己的
+                                         Job（類型的篩選在那裡），只問 ai-service 這些 Job 的決策，ai-service 再依 user_id 過濾
 POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format", "platform"?（社群貼文必填）, "instruction"? }，回 202
                                          （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
 GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）

@@ -106,6 +106,11 @@ service AiService {
   rpc UpdateDecision(UpdateDecisionRequest) returns (Decision);
   // 刪掉一個決策：AI 抽的只是隱藏（重新抽時不會再出現），使用者新增的直接刪掉。不是這個 Job 的回 NOT_FOUND。
   rpc DeleteDecision(DeleteDecisionRequest) returns (DeleteDecisionResponse);
+  // 跨 Job 的決策（時間軸）：這位使用者在這些 Job 的決策（刪掉的不列），依時間點排序。job_ids 由 gateway 從使用者自己的 Job 帶來
+  // （類型、Job 的篩選在那裡）；ai-service 再依 user_id 過濾，只回這個人的。job_ids 是空的就是空的結果。
+  rpc ListUserDecisions(ListUserDecisionsRequest) returns (UserDecisions);
+  // 搜尋決策：決定、理由、沒選的選項、原話裡有這些字的在前，接著是意思相近的（embedding）；embedding 算不出來就只比字。範圍同上。
+  rpc SearchDecisions(SearchDecisionsRequest) returns (UserDecisions);
 
   // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -975,6 +980,21 @@ message DeleteDecisionRequest {
 }
 
 message DeleteDecisionResponse {}
+
+message ListUserDecisionsRequest {
+  string user_id = 1;
+  repeated string job_ids = 2;
+}
+
+message SearchDecisionsRequest {
+  string user_id = 1;
+  string query = 2;
+  repeated string job_ids = 3;
+}
+
+message UserDecisions {
+  repeated Decision decisions = 1;
+}
 
 message Decision {
   string id = 1;
