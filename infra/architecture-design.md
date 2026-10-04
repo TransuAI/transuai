@@ -79,7 +79,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號與簽出去的 refresh token（`users`、`refresh_tokens`：只存雜湊，用來輪替與作廢）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理、網路搜尋用量、講者名字建議、講者數據、刪掉的 Job（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` / `web_search_usage` / `speaker_name_suggestions` / `speaker_insights` / `speaker_insight_items` / `deleted_jobs` / `generated_outputs` / `translations` / `segment_translations` 二十四張表）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理、網路搜尋用量、講者名字建議、講者數據、刪掉的 Job、多格式輸出、譯文（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` / `web_search_usage` / `speaker_name_suggestions` / `speaker_insights` / `speaker_insight_items` / `deleted_jobs` / `generated_outputs` / `translations` / `segment_translations` 二十四張表）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -271,7 +271,7 @@ GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省�
 [`docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](./docs/adr/0001-sse-via-gateway-for-streaming-qa.md)。
 「對話」的範圍是整個 job，沒有獨立的 conversation/thread 概念，見
 [`ai-service/docs/adr/0002-single-conversation-per-job.md`](../ai-service/docs/adr/0002-single-conversation-per-job.md)。
-多格式輸出（LLM 依摘要與章節寫成要發出去的新文件）的路徑是 `/jobs/{jobId}/outputs`（見下）——刻意**不用** `/export`：「匯出」這個詞已經指前端把既有內容（逐字稿、摘要、章節、問答、測驗、原始檔）轉成檔案下載，
+多格式輸出（LLM 依摘要與章節寫成要發出去的新文件）的路徑是 `/jobs/{jobId}/outputs`（見下）——刻意**不用** `/export`：「匯出」這個詞已經指前端把既有內容（逐字稿、譯文、摘要、章節、問答、測驗、原始檔）轉成檔案下載，
 兩者不同（見 `frontend/CONTEXT.md`、`ai-service/CONTEXT.md`）。文字格式的匯出（TXT/SRT/VTT/Markdown、複製）
 在前端產生、沒有後端 API；唯一跟後端有關的是「下載原始檔」用的 media-url `download` 參數（見 3.2）。
 
@@ -847,7 +847,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
    重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
 3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
 4. **多格式輸出**：Studio「多格式輸出」產生 Podcast 介紹、YouTube 描述、部落格文章、電子報、社群貼文（依平台），依摘要、章節與使用者取過名字的講者寫成 Markdown，可以複製、下載。「會議紀錄」不另外做——會後處理寫進 Notion 的會議紀錄就是它。
-   不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、測驗）、複製、下載原始檔）混為一談
+   不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、測驗），含譯文與雙語字幕、複製、下載原始檔）混為一談
 5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
 7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。用量已記錄（每一次 LLM 呼叫與轉錄都記在使用者與 Job 名下，Job 工作區逐筆列出、設定頁看得到每月依模型加總）；每位使用者每月有用量上限（轉錄分鐘數、平台模型 token，見 `gateway/README.md`「每月用量上限」），用量告警仍是缺口
