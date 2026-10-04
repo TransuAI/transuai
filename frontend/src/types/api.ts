@@ -486,8 +486,20 @@ export interface Decision {
   evidenceText: string | null
   source: 'ai' | 'user'
   edited: boolean
-  supersedesId: string | null
+  /** 取代: what it changed from an earlier meeting (a deleted one doesn't count), and later decisions that changed it. */
+  supersedes: DecisionLink | null
+  supersededBy: DecisionLink[]
+  /** The meeting's date (its job's upload time); null on older decisions. */
+  meetingAt: string | null
   createdAt: string | null
+}
+
+/** Another decision (usually in another job), to link to. */
+export interface DecisionLink {
+  id: string
+  jobId: string
+  statement: string
+  meetingAt: string | null
 }
 
 /** What the user writes for a decision (adding or editing); a time only when adding. */

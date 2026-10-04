@@ -4164,7 +4164,7 @@ describe('JobDetailPage decisions (決策, COMPLETED, desktop layout)', () => {
   const decision = (overrides: Partial<Decision>): Decision => ({
     id: 'd1', jobId: 'job-1', statement: '資料庫用 PostgreSQL', rationale: '需要 pgvector', alternatives: ['MySQL'],
     proposedBy: 'S2', tentative: false, startTime: 4, evidenceText: '大家好', source: 'ai', edited: false,
-    supersedesId: null, createdAt: '2026-10-04T03:01:00Z', ...overrides,
+    supersedes: null, supersededBy: [], meetingAt: null, createdAt: '2026-10-04T03:01:00Z', ...overrides,
   })
   const decisions = [
     decision({}),
@@ -4363,6 +4363,28 @@ describe('JobDetailPage decisions (決策, COMPLETED, desktop layout)', () => {
     expect(screen.getByText('資料庫用 PostgreSQL')).toBeInTheDocument() // the earlier ones stay meanwhile
   })
 
+  it('shows what a decision changed from an earlier meeting, and what later changed it, linking to them', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({
+      extraction: extracted,
+      decisions: [
+        decision({
+          supersedes: { id: 'old', jobId: 'job-sep', statement: '資料庫用 MySQL', meetingAt: '2026-09-01T04:00:00Z' },
+          supersededBy: [{ id: 'newer', jobId: 'job-nov', statement: '資料庫改回 MySQL', meetingAt: '2026-11-01T04:00:00Z' }],
+        }),
+      ],
+    })
+    await renderCompletedJob(multiSpeakerTranscript)
+    await openStudioTool('決策')
+
+    const item = within(await screen.findByRole('list', { name: '這場的決策' })).getByRole('listitem')
+    expect(within(item).getByText('已被取代')).toBeInTheDocument()
+    expect(item).toHaveTextContent('取代了：2026/9/1「資料庫用 MySQL」')
+    expect(within(item).getByRole('link', { name: '2026/9/1「資料庫用 MySQL」' })).toHaveAttribute('href', '/jobs/job-sep?decision=old')
+    expect(item).toHaveTextContent('已被取代：2026/11/1「資料庫改回 MySQL」')
+    expect(within(item).getByRole('link', { name: '2026/11/1「資料庫改回 MySQL」' })).toHaveAttribute('href', '/jobs/job-nov?decision=newer')
+  })
+
   it('opens at the time and the decision the address points to (from the 決策 page)', async () => {
     stubDesktopLayout()
     vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
@@ -4405,7 +4427,7 @@ describe('JobDetailPage speaker stats and decisions (講者數據 × 決策, COM
   }
   const decision = (overrides: Partial<Decision>): Decision => ({
     id: 'd1', jobId: 'job-1', statement: '資料庫用 PostgreSQL', rationale: '', alternatives: [], proposedBy: 'S2',
-    tentative: false, startTime: 4, evidenceText: '大家好', source: 'ai', edited: false, supersedesId: null,
+    tentative: false, startTime: 4, evidenceText: '大家好', source: 'ai', edited: false, supersedes: null, supersededBy: [], meetingAt: null,
     createdAt: '2026-10-04T03:01:00Z', ...overrides,
   })
 

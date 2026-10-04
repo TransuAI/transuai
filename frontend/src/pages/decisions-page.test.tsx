@@ -13,7 +13,7 @@ const october = { jobId: 'job-b', title: null, fileName: 'oct.mp3', category: 'i
 
 const decision = (overrides: Partial<Decision>): Decision => ({
   id: 'd1', jobId: 'job-a', statement: '資料庫用 MySQL', rationale: '團隊熟', alternatives: ['PostgreSQL'], proposedBy: 'S1',
-  tentative: false, startTime: 8, evidenceText: '那就用 MySQL', source: 'ai', edited: false, supersedesId: null,
+  tentative: false, startTime: 8, evidenceText: '那就用 MySQL', source: 'ai', edited: false, supersedes: null, supersededBy: [], meetingAt: null,
   createdAt: '2026-09-01T05:00:00Z', ...overrides,
 })
 
@@ -62,6 +62,16 @@ describe('DecisionsPage', () => {
     expect(wednesday).toHaveTextContent('自己新增')
     expect(within(meetings[0]).getByText('暫定')).toBeInTheDocument()
     expect(decisionsApi.timeline).toHaveBeenCalledWith({})
+  })
+
+  it('shows what a decision superseded', async () => {
+    vi.mocked(decisionsApi.timeline).mockResolvedValue({
+      items: [{ job: october, decision: decision({ id: 'd3', jobId: 'job-b', statement: '資料庫改用 PostgreSQL',
+        supersedes: { id: 'd1', jobId: 'job-a', statement: '資料庫用 MySQL', meetingAt: '2026-09-01T04:00:00Z' } }) }],
+    })
+    renderPage()
+
+    expect(await screen.findByRole('link', { name: '2026/9/1「資料庫用 MySQL」' })).toHaveAttribute('href', '/jobs/job-a?decision=d1')
   })
 
   it('opens a decision where it was made in its job', async () => {

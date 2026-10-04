@@ -8,6 +8,7 @@ import { downloadTextFile } from '@/lib/download'
 import { toDecisionTimelineMarkdown, type ExportDecision } from '@/lib/export-formats'
 import { CATEGORY_LABELS, jobDate, jobDisplayName } from '@/lib/job-display'
 import { formatDuration } from '@/lib/media'
+import { DecisionSupersession } from '@/components/decision-supersession'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -212,6 +213,7 @@ function DecisionCard({ decision, job, jobId = job?.jobId }: { decision: Decisio
       <div className="flex items-start gap-2">
         <p className="flex-1 font-medium leading-relaxed">{decision.statement}</p>
         <span className="flex shrink-0 items-center gap-1">
+          {decision.supersededBy.length > 0 && <Badge variant="outline">已被取代</Badge>}
           {decision.tentative && <Badge variant="outline">暫定</Badge>}
           {decision.source === 'user' ? (
             <Badge variant="secondary">自己新增</Badge>
@@ -230,6 +232,7 @@ function DecisionCard({ decision, job, jobId = job?.jobId }: { decision: Decisio
       )}
       {decision.rationale && <p className="text-foreground/85">理由：{decision.rationale}</p>}
       {decision.alternatives.length > 0 && <p className="text-muted-foreground">沒選：{decision.alternatives.join('、')}</p>}
+      <DecisionSupersession decision={decision} />
       {decision.startTime !== null && (
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <Link

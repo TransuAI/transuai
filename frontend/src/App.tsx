@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { AuthProvider } from '@/context/auth-context'
 import { ProtectedRoute } from '@/components/protected-route'
@@ -26,7 +26,7 @@ function App() {
             <Route element={<AppShell />}>
               <Route path="/" element={<Navigate to="/jobs" replace />} />
               <Route path="/jobs" element={<JobsPage />} />
-              <Route path="/jobs/:jobId" element={<JobDetailPage />} />
+              <Route path="/jobs/:jobId" element={<JobDetailPageOfJob />} />
               <Route path="/decisions" element={<DecisionsPage />} />
               <Route path="/upload" element={<UploadPage />} />
               <Route path="/settings" element={<SettingsPage />} />
@@ -42,3 +42,9 @@ function App() {
 }
 
 export default App
+
+// One page per job: following a link from one job to another (取代 links do) starts the page afresh.
+function JobDetailPageOfJob() {
+  const { jobId } = useParams<{ jobId: string }>()
+  return <JobDetailPage key={jobId} />
+}
