@@ -39,7 +39,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`/`post_meeting_settings`、網路搜尋用量的 `web_search_usage`、講者名字建議的 `speaker_name_suggestions`、講者數據的 `speaker_insights`/`speaker_insight_items`、刪掉的 Job 的 `deleted_jobs`、多格式輸出的 `generated_outputs`、譯文的 `translations`/`segment_translations`）。還沒做的見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`/`post_meeting_settings`、網路搜尋用量的 `web_search_usage`、講者名字建議的 `speaker_name_suggestions`、講者數據的 `speaker_insights`/`speaker_insight_items`、刪掉的 Job 的 `deleted_jobs`、多格式輸出的 `generated_outputs`、譯文的 `translations`/`segment_translations`、決策紀錄的 `decisions`/`decision_extractions`）。還沒做的見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 >
 > **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
@@ -79,7 +79,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號與簽出去的 refresh token（`users`、`refresh_tokens`：只存雜湊，用來輪替與作廢）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理、網路搜尋用量、講者名字建議、講者數據、刪掉的 Job、多格式輸出、譯文（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` / `web_search_usage` / `speaker_name_suggestions` / `speaker_insights` / `speaker_insight_items` / `deleted_jobs` / `generated_outputs` / `translations` / `segment_translations` 二十四張表）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理、網路搜尋用量、講者名字建議、講者數據、刪掉的 Job、多格式輸出、譯文、決策（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` / `web_search_usage` / `speaker_name_suggestions` / `speaker_insights` / `speaker_insight_items` / `deleted_jobs` / `generated_outputs` / `translations` / `segment_translations` / `decisions` / `decision_extractions` 二十六張表）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -210,6 +210,9 @@ POST   /jobs/{jobId}/translations       譯文：翻譯逐字稿，body { "langu
 GET    /jobs/{jobId}/translations       各語言的狀態與進度
 GET    /jobs/{jobId}/translations/{language}  一種語言含片段的譯文（翻譯中也有已經翻好的）
 DELETE /jobs/{jobId}/translations/{language}  刪掉一種語言的譯文（翻譯中也可以），回 204；沒有這種語言回 404
+POST   /jobs/{jobId}/decisions/extract  決策紀錄：抽出（或重新抽出）這場的決策，回 202（背景抽，前端每 3 秒輪詢）；會議、訪談
+                                         轉錄完也會自動抽；重新抽只換掉 AI 抽的、使用者沒改過的
+GET    /jobs/{jobId}/decisions          這個 Job 的抽取紀錄（沒抽過是 null）與決策（決定、理由、沒選的選項、提出者、暫定、時間點與原話）
 POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format", "platform"?（社群貼文必填）, "instruction"? }，回 202
                                          （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
 GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）
@@ -489,7 +492,7 @@ CREATE TABLE llm_usage (
     id UUID PRIMARY KEY,
     user_id UUID,                           -- Job 擁有者 / 提問者；升級前排入的舊訊息沒有
     job_id UUID NOT NULL,
-    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting / job_title / speaker_names / speaker_insights / generated_output / translation
+    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting / job_title / speaker_names / speaker_insights / generated_output / translation / decision_extraction
     provider VARCHAR(32) NOT NULL,          -- platform 或廠商名稱
     model VARCHAR(200) NOT NULL,
     key_source VARCHAR(16) NOT NULL,        -- platform / own_key
@@ -726,6 +729,42 @@ CREATE TABLE segment_translations (
 );
 ```
 
+決策紀錄：每個 Job 一份抽取紀錄，決策一筆一列（`user_id` 是 Job 擁有者，跨 Job 的時間軸、搜尋只查自己的）：
+
+```sql
+CREATE TABLE decision_extractions (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL UNIQUE,
+    requested_by UUID NOT NULL,             -- 最近一次要求的使用者（自動抽是 Job 擁有者）
+    status VARCHAR(10) NOT NULL,            -- GENERATING / COMPLETED / FAILED
+    failure_reason TEXT,
+    source_revision INTEGER,                -- 上一次完成的依據 revision（過時判斷）
+    model_provider VARCHAR(32),
+    model VARCHAR(200),
+    requested_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ
+);
+CREATE TABLE decisions (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    statement TEXT NOT NULL,                -- 決定了什麼
+    rationale TEXT NOT NULL DEFAULT '',     -- 為什麼（錄音裡講到的）
+    alternatives JSONB NOT NULL DEFAULT '[]',  -- 考慮過但沒選的
+    proposed_by VARCHAR(32),                -- 講者標籤
+    tentative BOOLEAN NOT NULL DEFAULT false,  -- 暫定
+    start_time NUMERIC(10,2),               -- 做成決定的時間點（使用者新增的可以沒有）
+    evidence_text TEXT,                     -- 那個片段的原話
+    source VARCHAR(8) NOT NULL DEFAULT 'ai',   -- ai / user
+    edited BOOLEAN NOT NULL DEFAULT false,  -- 使用者改過：重新抽時保留
+    supersedes_id UUID REFERENCES decisions(id) ON DELETE SET NULL,  -- 取代了較早的哪一個
+    embedding vector(1024),                 -- statement＋rationale
+    source_revision INTEGER,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+```
+
 多格式輸出（原本規劃叫 `export_outputs`，改名避免跟「匯出」混淆；同一種格式可以有很多份，沒有 UNIQUE）：
 
 ```sql
@@ -760,6 +799,7 @@ CREATE INDEX ix_generated_outputs_job_id ON generated_outputs (job_id);
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
 | `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
 | `translation.requested` | AI Service | AI Service | `{ jobId, language }`——使用者要求翻譯逐字稿（`POST /jobs/{jobId}/translations`）；ai-service 排給自己的背景工作，一批一批翻、每批存檔 |
+| `decision.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求抽出決策（`POST /jobs/{jobId}/decisions/extract`），或會議、訪談轉錄完由 pipeline 自動要求（`userId` 是 Job 擁有者）；ai-service 排給自己的背景工作 |
 | `output.requested` | AI Service | AI Service | `{ outputId, jobId, userId }`——使用者要求產生一份多格式輸出（`POST /jobs/{jobId}/outputs`）；ai-service 排給自己的背景工作 |
 | `speaker_insights.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`）；ai-service 排給自己的背景工作 |
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
@@ -880,7 +920,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
       靠背景清理排除）。transcription_db／ai_db 的資料由 `job.deleted` 事件清掉（2026-10-03，見 5.）：逐字稿、片段、講者、
-      摘要、章節、embedding、問答、測驗、講者名字建議、講者數據的問題與打斷、多格式輸出、譯文、會後處理；用量紀錄保留。刪除當下還在跑的寫入晚到也會被丟掉
+      摘要、章節、embedding、問答、測驗、講者名字建議、講者數據的問題與打斷、決策（別的 Job 取代它的連結跟著消失）、多格式輸出、譯文、會後處理；用量紀錄保留。刪除當下還在跑的寫入晚到也會被丟掉
 - [x] 授權缺口：使用者只能存取自己的 job——**已解決**：Gateway 在轉發 Transcription/AI 的查詢
       前先呼叫 upload-service 的 `GetJob` 做 ownership 檢查（見 2.1），但 transcription-service /
       ai-service 本身仍不驗證 `x-user-id`，這個決定維持不變（見 2.1 授權模型）

@@ -95,6 +95,12 @@ service AiService {
   // 還沒分析過時 status 是 UNSPECIFIED、沒有項目。
   rpc GetSpeakerInsights(GetSpeakerInsightsRequest) returns (SpeakerInsights);
 
+  // 決策紀錄（見 ai-service CONTEXT.md「決策」「暫定」）：從一場會議或訪談抽出與會者做成的決定。一個 Job 一份抽取紀錄；要求後立刻回傳
+  // 「抽取中」，背景用要求者的預設模型抽（類型是會議、訪談的 Job 轉錄完也會自動抽）。重新抽只換掉 AI 抽的、使用者沒改過的決策。
+  rpc RequestDecisionExtraction(RequestDecisionExtractionRequest) returns (DecisionExtraction);
+  // 這個 Job 的抽取紀錄（沒抽過就沒有）與決策（依時間點排序，沒有時間點的在後）。
+  rpc GetJobDecisions(GetJobDecisionsRequest) returns (JobDecisions);
+
   // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
   // job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
@@ -896,4 +902,64 @@ message SegmentTranslation {
   string text = 2;
   // 翻的時候的原文：跟片段目前的文字不一樣，就是原文改過、這句還沒重翻（編輯後自動重翻，見 RequestTranslation）。
   string source_text = 3;
+}
+
+enum DecisionExtractionStatus {
+  DECISION_EXTRACTION_STATUS_UNSPECIFIED = 0;
+  DECISION_EXTRACTION_STATUS_GENERATING = 1;
+  DECISION_EXTRACTION_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；之前抽好的決策照樣保留。
+  DECISION_EXTRACTION_STATUS_FAILED = 3;
+}
+
+message RequestDecisionExtractionRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message GetJobDecisionsRequest {
+  string job_id = 1;
+}
+
+message DecisionExtraction {
+  string job_id = 1;
+  DecisionExtractionStatus status = 2;
+  string failure_reason = 3;
+  // 依據的逐字稿 revision 與抽取的模型（上一次完成的；還沒完成過是 0 / 空字串）——跟逐字稿目前的 revision 不同就是過時。
+  int32 source_revision = 4;
+  string model_provider = 5;
+  string model = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+}
+
+message JobDecisions {
+  // 沒抽過就沒有。
+  optional DecisionExtraction extraction = 1;
+  repeated Decision decisions = 2;
+}
+
+message Decision {
+  string id = 1;
+  string job_id = 2;
+  // 決定了什麼。
+  string statement = 3;
+  // 為什麼（錄音裡講到的理由）；沒講是空字串。
+  string rationale = 4;
+  // 考慮過但沒選的選項。
+  repeated string alternatives = 5;
+  // 提出或拍板的講者標籤；不知道是空字串。
+  string proposed_by = 6;
+  // 暫定：明確說了之後還要再確認。
+  bool tentative = 7;
+  // 做成決定的時間點與那個片段的原話；使用者自己新增時可以沒有。
+  optional double start_time = 8;
+  string evidence_text = 9;
+  // "ai"（抽出來的）或 "user"（使用者自己新增的）。
+  string source = 10;
+  // 使用者改過（重新抽時保留）。
+  bool edited = 11;
+  // 這個決策取代了較早的哪一個；沒有是空字串。
+  string supersedes_id = 12;
+  google.protobuf.Timestamp created_at = 13;
 }
