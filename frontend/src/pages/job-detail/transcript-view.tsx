@@ -45,10 +45,21 @@ interface TranscriptViewProps {
   notes: Note[]
   onAddNoteAt: (seconds: number) => void
   onOpenNote: (noteId: string) => void
+  /** 譯文 shown in place of each segment's text, or under it (雙語); null shows the original. */
+  translation?: { mode: 'translated' | 'bilingual'; texts: Map<string, string> } | null
+}
+
+// 譯文 in place of the text: search, highlighting and the rest work on what's shown. Not yet translated segments keep the
+// original; the original-text marker (已編輯) is left out — the shown text isn't the transcript's own.
+function translatedSegments(segments: TranscriptSegment[], texts: Map<string, string>): TranscriptSegment[] {
+  return segments.map((segment) => {
+    const text = texts.get(segment.id)
+    return text === undefined || segment.text === '' ? segment : { ...segment, text, originalText: text }
+  })
 }
 
 export function TranscriptView({
-  segments,
+  segments: transcriptSegments,
   speakers,
   currentSegmentIndex,
   autoFollow,
@@ -59,8 +70,14 @@ export function TranscriptView({
   notes,
   onAddNoteAt,
   onOpenNote,
+  translation = null,
 }: TranscriptViewProps) {
   const { isFollowing, pause, resume } = autoFollow
+  const showsTranslationInstead = translation?.mode === 'translated'
+  const segments = useMemo(
+    () => (showsTranslationInstead ? translatedSegments(transcriptSegments, translation.texts) : transcriptSegments),
+    [showsTranslationInstead, transcriptSegments, translation],
+  )
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const search = useTranscriptSearch(segments, pause)
   const { activeMatch, matchesBySegment } = search
@@ -160,6 +177,8 @@ export function TranscriptView({
               notes={segmentNotes.get(i) ?? NO_NOTES}
               onAddNote={() => onAddNoteAt(segment.startTime)}
               onOpenNote={onOpenNote}
+              translation={translation?.mode === 'bilingual' ? (translation.texts.get(segment.id) ?? null) : null}
+              textEditable={!showsTranslationInstead}
             />
           ))}
         </div>

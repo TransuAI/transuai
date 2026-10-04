@@ -487,3 +487,28 @@ export interface GeneratedOutput {
   completedAt: string | null
   editedAt: string | null
 }
+
+/** The languages a transcript can be translated into (譯文). */
+export type TranslationLanguage = 'zh-TW' | 'en' | 'ja' | 'ko'
+
+/**
+ * 譯文 (see ai-service CONTEXT.md): a job's transcript in another language, one line per segment. One per language;
+ * translated in batches in the background, so `translatedSegments` of `totalSegments` are ready while it's GENERATING.
+ * A failed one keeps what was translated; asking again translates the rest.
+ */
+export interface TranslationSummary {
+  language: TranslationLanguage
+  status: 'GENERATING' | 'COMPLETED' | 'FAILED'
+  failureReason: string | null
+  totalSegments: number
+  translatedSegments: number
+  modelProvider: string | null
+  model: string | null
+  requestedAt: string
+  completedAt: string | null
+}
+
+export interface TranslationDetail extends TranslationSummary {
+  /** One per translated segment, by the transcript segment's id. */
+  segments: { segmentId: string; text: string }[]
+}

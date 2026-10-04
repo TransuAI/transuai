@@ -4,8 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi, outputsApi } from '@/lib/api'
-import type { GeneratedOutput, SpeakerInsights, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
+import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi, outputsApi, translationsApi } from '@/lib/api'
+import type { GeneratedOutput, SpeakerInsights, TranslationSummary, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -27,6 +27,7 @@ vi.mock('@/lib/api', () => ({
   postMeetingApi: { get: vi.fn(), start: vi.fn(), execute: vi.fn(), retry: vi.fn() },
   speakerInsightsApi: { get: vi.fn(), request: vi.fn() },
   outputsApi: { list: vi.fn(), request: vi.fn(), update: vi.fn() },
+  translationsApi: { list: vi.fn(), request: vi.fn(), get: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -51,6 +52,7 @@ beforeEach(() => {
   vi.mocked(quizApi.list).mockResolvedValue([])
   vi.mocked(speakerInsightsApi.get).mockResolvedValue(noInsights)
   vi.mocked(outputsApi.list).mockResolvedValue([])
+  vi.mocked(translationsApi.list).mockResolvedValue([])
   vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([])
   vi.mocked(notesApi.list).mockResolvedValue([])
   vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], earlierRuns: [], latestRun: null })
@@ -3926,5 +3928,80 @@ describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop l
     fireEvent.click(await screen.findByRole('button', { name: '再試一次' }))
 
     expect(outputsApi.request).toHaveBeenCalledWith('job-1', { format: 'social_post', platform: 'threads', instruction: '短一點' })
+  })
+})
+
+describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => {
+  // multiSpeakerTranscript: 歡迎收聽 / 今天請到來賓 / 大家好 / 先聊聊近況
+  const translating: TranslationSummary = {
+    language: 'ja', status: 'GENERATING', failureReason: null, totalSegments: 4, translatedSegments: 0, modelProvider: null,
+    model: null, requestedAt: '2026-10-04T03:00:00Z', completedAt: null,
+  }
+  const done = { ...translating, status: 'COMPLETED' as const, translatedSegments: 4, model: 'qwen3:14b', completedAt: '2026-10-04T03:01:00Z' }
+  const segments = [
+    { segmentId: 'seg-d1', text: 'お聞きいただきありがとうございます' },
+    { segmentId: 'seg-d2', text: '今日はゲストをお迎えしました' },
+    { segmentId: 'seg-d3', text: 'こんにちは' },
+    { segmentId: 'seg-d4', text: 'まず近況から' },
+  ]
+  const row = (text: string) => screen.getByText(text).closest('[data-segment-index]') as HTMLElement
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('translates in the background, showing progress, then shows the translation in place of the original', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.request).mockResolvedValue(translating)
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...translating, segments: [] })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    await user.selectOptions(screen.getByRole('combobox', { name: '翻譯成' }), '日本語')
+    expect(translationsApi.request).toHaveBeenCalledWith('job-1', 'ja')
+    expect(await screen.findByText('翻譯成日本語中… 0/4')).toBeInTheDocument()
+
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(await screen.findByText('こんにちは')).toBeInTheDocument()
+    expect(screen.queryByText('大家好')).not.toBeInTheDocument()
+    expect(row('こんにちは')).toHaveTextContent('講者 2：こんにちは') // speakers stay
+    expect(within(row('こんにちは')).queryByRole('button', { name: '編輯片段' })).not.toBeInTheDocument()
+  })
+
+  it('shows original and translation together, still editable, in 雙語', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '雙語（日本語）')
+
+    expect(await screen.findByText('こんにちは')).toBeInTheDocument()
+    expect(row('大家好')).toHaveTextContent('こんにちは')
+    expect(within(row('大家好')).getByRole('button', { name: '編輯片段' })).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '原文')
+    expect(screen.queryByText('こんにちは')).not.toBeInTheDocument()
+  })
+
+  it('shows why a translation failed and asks again', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.list).mockResolvedValue([{ ...translating, status: 'FAILED', translatedSegments: 2, failureReason: '翻譯失敗，請再試一次（已經翻好的不會重翻）' }])
+    vi.mocked(translationsApi.request).mockResolvedValue(translating)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    expect(await screen.findByText('翻譯失敗，請再試一次（已經翻好的不會重翻）')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '再翻譯一次' }))
+
+    expect(translationsApi.request).toHaveBeenCalledWith('job-1', 'ja')
   })
 })

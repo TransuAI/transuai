@@ -39,6 +39,9 @@ import type {
   SpeakerInsights,
   GeneratedOutput,
   OutputRequest,
+  TranslationDetail,
+  TranslationLanguage,
+  TranslationSummary,
 } from '@/types/api'
 
 export const authApi = {
@@ -225,6 +228,15 @@ export const quizApi = {
   // 後端計分並保存；answers 依題目順序，每題選的選項位置（從 0 開始）
   submitAttempt: (jobId: string, quizId: string, answers: number[]) =>
     apiFetch<QuizAttemptResult>(`/jobs/${jobId}/quizzes/${quizId}/attempts`, { method: 'POST', body: { answers } }),
+}
+
+// 譯文: one per language. Asking again for one that's done translates what's missing or changed.
+export const translationsApi = {
+  list: (jobId: string) => apiFetch<TranslationSummary[]>(`/jobs/${jobId}/translations`),
+  request: (jobId: string, language: TranslationLanguage) =>
+    apiFetch<TranslationSummary>(`/jobs/${jobId}/translations`, { method: 'POST', body: { language } }),
+  get: (jobId: string, language: TranslationLanguage) =>
+    apiFetch<TranslationDetail>(`/jobs/${jobId}/translations/${language}`),
 }
 
 // 多格式輸出: every request makes another one (newest first in the list). Not 匯出 — these are new documents.

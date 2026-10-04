@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import type { OutputsActions } from '@/hooks/use-outputs'
+import type { TranslationsActions } from '@/hooks/use-translations'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, BookmarkPlus, FileText, PanelLeftOpen, PanelRightOpen, Sparkles, type LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -60,6 +61,7 @@ interface CompletedWorkspaceProps {
   onQuizAttempted: () => void
   speakerInsights: SpeakerInsightsActions
   outputs: OutputsActions
+  translations: TranslationsActions
   postMeeting: PostMeeting | null
   onStartPostMeeting: () => void
   isStartingPostMeeting: boolean
@@ -165,6 +167,7 @@ export function CompletedWorkspace({
   onQuizAttempted,
   speakerInsights,
   outputs,
+  translations,
   postMeeting,
   onStartPostMeeting,
   isStartingPostMeeting,
@@ -246,6 +249,7 @@ export function CompletedWorkspace({
   }, [mediaAvailable])
 
   const sourcePaneProps = {
+    translations,
     job,
     transcript,
     currentSegmentIndex,

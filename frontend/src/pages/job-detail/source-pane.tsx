@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from 'react'
+import type { TranslationsActions } from '@/hooks/use-translations'
+import { TranslationBar } from '@/pages/job-detail/translation-bar'
 import { FileAudio, FileText, FileVideo, PanelLeftClose, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { CATEGORY_LABELS, jobDisplayName } from '@/lib/job-display'
@@ -31,6 +33,8 @@ interface SourcePaneProps {
   notes: Note[]
   onAddNoteAt: (seconds: number) => void
   onOpenNote: (noteId: string) => void
+  /** 譯文: what the transcript shows, and translating it. */
+  translations: TranslationsActions
   /** Folds the pane into a rail (desktop grid only). */
   onCollapse?: () => void
   className?: string
@@ -52,9 +56,11 @@ export function SourcePane({
   notes,
   onAddNoteAt,
   onOpenNote,
+  translations,
   onCollapse,
   className,
 }: SourcePaneProps) {
+  const { display, texts } = translations
   const FileIcon = job.fileType === 'VIDEO' ? FileVideo : FileAudio
   return (
     <Card className={cn('flex h-full min-h-0 flex-col gap-0 py-0', className)}>
@@ -95,6 +101,7 @@ export function SourcePane({
         </div>
       )}
       <div className="min-h-0 flex-1 px-4 pt-3">
+        {transcript && <TranslationBar translations={translations} />}
         {transcript ? (
           <TranscriptView
             segments={transcript.segments}
@@ -108,6 +115,7 @@ export function SourcePane({
             notes={notes}
             onAddNoteAt={onAddNoteAt}
             onOpenNote={onOpenNote}
+            translation={display.mode === 'original' ? null : { mode: display.mode, texts }}
           />
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">

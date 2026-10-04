@@ -57,6 +57,10 @@ interface SegmentRowProps {
   /** 在這裡加筆記: a note at the segment's start. */
   onAddNote: () => void
   onOpenNote: (noteId: string) => void
+  /** 雙語: the segment's translation, shown under its text. */
+  translation?: string | null
+  /** False while a translation is shown in place of the text (譯文): editing it would edit the original unseen. */
+  textEditable?: boolean
 }
 
 // One 片段 of the transcript: its timestamp (click to seek), its text (search matches
@@ -81,6 +85,8 @@ export function SegmentRow({
   notes,
   onAddNote,
   onOpenNote,
+  translation = null,
+  textEditable = true,
 }: SegmentRowProps) {
   // When the editor closes, give keyboard focus back to this segment's edit button rather than
   // letting it fall to <body>.
@@ -205,7 +211,7 @@ export function SegmentRow({
       ) : isCleared ? (
         <p className="col-start-2 row-start-2 leading-relaxed text-muted-foreground/70">
           <span>已清空</span>
-          {canRestoreCleared && (
+          {canRestoreCleared && textEditable && (
             <>
               {' · '}
               <button
@@ -225,7 +231,7 @@ export function SegmentRow({
         <>
           <p className="col-start-2 row-start-2 leading-relaxed break-words">
             <HighlightedText text={segment.text} matches={matches} activeStart={activeMatchStart} />
-            {isEdited && (
+            {isEdited && textEditable && (
               // inline-block: an inline box holding the sr-only parentheses can break into a stray
               // empty fragment on the next line.
               <span className="ml-1.5 inline-block rounded bg-muted px-1 align-middle text-xs leading-5 whitespace-nowrap text-muted-foreground">
@@ -234,6 +240,9 @@ export function SegmentRow({
               </span>
             )}
           </p>
+          {translation && (
+            <p className="col-start-2 row-start-3 leading-relaxed break-words text-muted-foreground">{translation}</p>
+          )}
           <div
             className={cn(
               'absolute top-1 right-1 flex items-center gap-0.5 rounded-md bg-popover p-0.5 shadow-sm ring-1 ring-foreground/10 transition-opacity',
@@ -241,7 +250,7 @@ export function SegmentRow({
               !speakerMenuOpen && toolbarHidden,
             )}
           >
-            {isEdited && (
+            {isEdited && textEditable && (
               <button
                 type="button"
                 aria-label="還原成原始文字"
@@ -265,9 +274,11 @@ export function SegmentRow({
             <button type="button" aria-label="在這裡加筆記" title="在這裡加筆記" onClick={onAddNote} className={toolbarButton}>
               <BookmarkPlus className="size-3.5" />
             </button>
-            <button ref={editButtonRef} type="button" aria-label="編輯片段" onClick={onStartEdit} className={toolbarButton}>
-              <Pencil className="size-3.5" />
-            </button>
+            {textEditable && (
+              <button ref={editButtonRef} type="button" aria-label="編輯片段" onClick={onStartEdit} className={toolbarButton}>
+                <Pencil className="size-3.5" />
+              </button>
+            )}
           </div>
         </>
       )}
