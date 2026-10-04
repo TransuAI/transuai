@@ -233,6 +233,9 @@ export const outputsApi = {
   // platform only for a social post; instruction (the user's own request) is optional
   request: (jobId: string, params: OutputRequest) =>
     apiFetch<GeneratedOutput>(`/jobs/${jobId}/outputs`, { method: 'POST', body: params }),
+  // The user's own changes to a finished one (marks it 已修改 unless nothing changed)
+  update: (jobId: string, outputId: string, content: string) =>
+    apiFetch<GeneratedOutput>(`/jobs/${jobId}/outputs/${outputId}`, { method: 'PATCH', body: { content } }),
 }
 
 // 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.

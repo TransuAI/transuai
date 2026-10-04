@@ -289,7 +289,7 @@ export function StudioPane({
             />
           )}
 
-          {tool === 'outputs' && <OutputsSection outputs={outputs} fileName={fileName} />}
+          {tool === 'outputs' && <OutputsSection outputs={outputs} fileName={fileName} transcript={transcript} />}
 
           {tool === 'speaker-stats' && speakerStats && transcript && (
             <SpeakerStatsSection

@@ -10,6 +10,8 @@ export interface OutputsActions {
   outputs: GeneratedOutput[]
   isRequesting: boolean
   request: (params: OutputRequest) => void
+  /** Saves the user's changes to a finished output; rejects when it couldn't (the caller keeps what was typed). */
+  update: (outputId: string, content: string) => Promise<void>
 }
 
 // 多格式輸出: the job's outputs, newest first. Each is made in the background; while any is GENERATING the list is asked for
@@ -73,5 +75,14 @@ export function useOutputs(jobId: string | undefined, isCompleted: boolean, onSe
     [jobId, isRequesting],
   )
 
-  return { outputs, isRequesting, request }
+  const update = useCallback(
+    async (outputId: string, content: string) => {
+      if (!jobId) return
+      const saved = await outputsApi.update(jobId, outputId, content)
+      setOutputs((prev) => prev.map((output) => (output.id === outputId ? saved : output)))
+    },
+    [jobId],
+  )
+
+  return { outputs, isRequesting, request, update }
 }

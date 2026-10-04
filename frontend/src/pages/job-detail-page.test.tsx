@@ -26,7 +26,7 @@ vi.mock('@/lib/api', () => ({
   quizApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), submitAttempt: vi.fn() },
   postMeetingApi: { get: vi.fn(), start: vi.fn(), execute: vi.fn(), retry: vi.fn() },
   speakerInsightsApi: { get: vi.fn(), request: vi.fn() },
-  outputsApi: { list: vi.fn(), request: vi.fn() },
+  outputsApi: { list: vi.fn(), request: vi.fn(), update: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -3854,6 +3854,56 @@ describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop l
 
     expect(screen.getByText('字數 300 / 280')).toBeInTheDocument()
     expect(screen.getByText('超過 X 的字數上限，請刪減後再貼')).toBeInTheDocument()
+  })
+
+  async function openDone(output: GeneratedOutput = done, transcript?: Transcript) {
+    stubDesktopLayout()
+    vi.mocked(outputsApi.list).mockResolvedValue([output])
+    await renderCompletedJob(transcript)
+    await openStudioTool('多格式輸出')
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.click(await screen.findByRole('button', { name: /^Podcast 介紹/ }))
+    return user
+  }
+
+  it('edits the content in place and marks it as changed', async () => {
+    const user = await openDone()
+    vi.mocked(outputsApi.update).mockResolvedValue({ ...done, content: '我改過的介紹', editedAt: '2026-10-04T02:00:00Z' })
+
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+    const editor = screen.getByRole('textbox', { name: 'Podcast 介紹的內容' })
+    expect(editor).toHaveValue(done.content)
+    await user.clear(editor)
+    await user.type(editor, '我改過的介紹')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    expect(outputsApi.update).toHaveBeenCalledWith('job-1', 'out-1', '我改過的介紹')
+    expect(await screen.findByText('我改過的介紹')).toBeInTheDocument()
+    expect(screen.getByText('已修改')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '所有輸出' }))
+    expect(screen.getByRole('button', { name: /^Podcast 介紹/ })).toHaveTextContent('已修改')
+  })
+
+  it('keeps what was typed when saving fails, and cancelling changes nothing', async () => {
+    const user = await openDone()
+    vi.mocked(outputsApi.update).mockRejectedValue(new Error('network'))
+
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+    await user.type(screen.getByRole('textbox', { name: 'Podcast 介紹的內容' }), '加一句')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    expect(await screen.findByText('修改沒有存到，請再試一次')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Podcast 介紹的內容' })).toHaveValue(done.content + '加一句')
+
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('textbox', { name: 'Podcast 介紹的內容' })).not.toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Podcast 介紹' })).toHaveTextContent('這一集聊預算。')
+  })
+
+  it('says an output may be out of date once the transcript has changed', async () => {
+    await openDone(done, { ...mockTranscript, revision: 3 })
+
+    expect(screen.getByText('逐字稿已修改，這份可能過時')).toBeInTheDocument()
   })
 
   it('makes the retry with the same format, platform and request as the one that failed', async () => {
