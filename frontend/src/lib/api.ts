@@ -242,7 +242,7 @@ export const translationsApi = {
   get: (jobId: string, language: TranslationLanguage) =>
     apiFetch<TranslationDetail>(`/jobs/${jobId}/translations/${language}`),
   delete: (jobId: string, language: TranslationLanguage) =>
-    apiFetch<void>(`/jobs/${jobId}/translations/${language}`, { method: 'DELETE' }),
+    apiFetchVoid(`/jobs/${jobId}/translations/${language}`, { method: 'DELETE' }),
 }
 
 // 多格式輸出: every request makes another one (newest first in the list). Not 匯出 — these are new documents.
@@ -270,7 +270,7 @@ export const decisionsApi = {
     apiFetch<Decision>(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'PATCH', body: decision }),
   // An extracted one is only hidden (extracting again doesn't bring it back); one the user added is gone.
   remove: (jobId: string, decisionId: string) =>
-    apiFetch<void>(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'DELETE' }),
+    apiFetchVoid(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'DELETE' }),
 }
 
 export const speakerInsightsApi = {
