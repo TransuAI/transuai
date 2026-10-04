@@ -169,6 +169,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.DeleteDecisionRequest.SerializeToString,
                 response_deserializer=ai__pb2.DeleteDecisionResponse.FromString,
                 _registered_method=True)
+        self.ListUserDecisions = channel.unary_unary(
+                '/transuai.ai.v1.AiService/ListUserDecisions',
+                request_serializer=ai__pb2.ListUserDecisionsRequest.SerializeToString,
+                response_deserializer=ai__pb2.UserDecisions.FromString,
+                _registered_method=True)
+        self.SearchDecisions = channel.unary_unary(
+                '/transuai.ai.v1.AiService/SearchDecisions',
+                request_serializer=ai__pb2.SearchDecisionsRequest.SerializeToString,
+                response_deserializer=ai__pb2.UserDecisions.FromString,
+                _registered_method=True)
         self.RequestQuiz = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestQuiz',
                 request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
@@ -493,6 +503,21 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListUserDecisions(self, request, context):
+        """跨 Job 的決策（時間軸）：這位使用者在這些 Job 的決策（刪掉的不列），依時間點排序。job_ids 由 gateway 從使用者自己的 Job 帶來
+        （類型、Job 的篩選在那裡）；ai-service 再依 user_id 過濾，只回這個人的。job_ids 是空的就是空的結果。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SearchDecisions(self, request, context):
+        """搜尋決策：決定、理由、沒選的選項、原話裡有這些字的在前，接著是意思相近的（embedding）；embedding 算不出來就只比字。範圍同上。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RequestQuiz(self, request, context):
         """測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
         quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -793,6 +818,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.DeleteDecision,
                     request_deserializer=ai__pb2.DeleteDecisionRequest.FromString,
                     response_serializer=ai__pb2.DeleteDecisionResponse.SerializeToString,
+            ),
+            'ListUserDecisions': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListUserDecisions,
+                    request_deserializer=ai__pb2.ListUserDecisionsRequest.FromString,
+                    response_serializer=ai__pb2.UserDecisions.SerializeToString,
+            ),
+            'SearchDecisions': grpc.unary_unary_rpc_method_handler(
+                    servicer.SearchDecisions,
+                    request_deserializer=ai__pb2.SearchDecisionsRequest.FromString,
+                    response_serializer=ai__pb2.UserDecisions.SerializeToString,
             ),
             'RequestQuiz': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestQuiz,
@@ -1601,6 +1636,60 @@ class AiService:
             '/transuai.ai.v1.AiService/DeleteDecision',
             ai__pb2.DeleteDecisionRequest.SerializeToString,
             ai__pb2.DeleteDecisionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListUserDecisions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/ListUserDecisions',
+            ai__pb2.ListUserDecisionsRequest.SerializeToString,
+            ai__pb2.UserDecisions.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SearchDecisions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/SearchDecisions',
+            ai__pb2.SearchDecisionsRequest.SerializeToString,
+            ai__pb2.UserDecisions.FromString,
             options,
             channel_credentials,
             insecure,

@@ -83,7 +83,7 @@ from app.services.translations import (
 from app.services.translations import effective_status as translation_effective_status
 from app.services.decisions import (
     DecisionFields, DecisionNotFound, DecisionsNotQueued, InvalidDecision, create_decision, delete_decision,
-    find_job_decisions, request_decision_extraction, update_decision)
+    find_job_decisions, list_user_decisions, request_decision_extraction, search_decisions, update_decision)
 from app.services.decisions import effective_status as decision_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
@@ -568,6 +568,17 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         except DecisionNotFound:
             _abort(context, grpc.StatusCode.NOT_FOUND, "decision not found")
         return ai_pb2.DeleteDecisionResponse()
+
+    def ListUserDecisions(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        job_ids = [_parse_uuid(job_id, "job_ids", context) for job_id in request.job_ids]
+        return ai_pb2.UserDecisions(decisions=[_decision_to_proto(d) for d in list_user_decisions(user_id, job_ids)])
+
+    def SearchDecisions(self, request, context):
+        user_id = _parse_user_id(request.user_id, context)
+        job_ids = [_parse_uuid(job_id, "job_ids", context) for job_id in request.job_ids]
+        return ai_pb2.UserDecisions(
+            decisions=[_decision_to_proto(d) for d in search_decisions(user_id, request.query, job_ids)])
 
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)

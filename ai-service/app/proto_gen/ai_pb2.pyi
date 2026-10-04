@@ -1124,6 +1124,30 @@ class DeleteDecisionResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
+class ListUserDecisionsRequest(_message.Message):
+    __slots__ = ("user_id", "job_ids")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    job_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, user_id: _Optional[str] = ..., job_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class SearchDecisionsRequest(_message.Message):
+    __slots__ = ("user_id", "query", "job_ids")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    QUERY_FIELD_NUMBER: _ClassVar[int]
+    JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    query: str
+    job_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, user_id: _Optional[str] = ..., query: _Optional[str] = ..., job_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class UserDecisions(_message.Message):
+    __slots__ = ("decisions",)
+    DECISIONS_FIELD_NUMBER: _ClassVar[int]
+    decisions: _containers.RepeatedCompositeFieldContainer[Decision]
+    def __init__(self, decisions: _Optional[_Iterable[_Union[Decision, _Mapping]]] = ...) -> None: ...
+
 class Decision(_message.Message):
     __slots__ = ("id", "job_id", "statement", "rationale", "alternatives", "proposed_by", "tentative", "start_time", "evidence_text", "source", "edited", "supersedes_id", "created_at")
     ID_FIELD_NUMBER: _ClassVar[int]

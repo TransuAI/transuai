@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from pika import BlockingConnection
-from sqlalchemy import delete, select
+from sqlalchemy import Text, cast, delete, or_, select
 
 from app.db import new_session
 from app.models import Decision, DecisionExtraction, DecisionExtractionStatus, DecisionSource
@@ -20,7 +20,7 @@ from app.repositories.chapter_repository import find_by_job_id as find_chapters
 from app.repositories.summary_repository import find_by_job_id as find_summary
 from app.services.decision_extractor import DecisionFormatError, ExtractedDecision, extract_decisions
 from app.services.default_models import resolve_chat_model
-from app.services.embedder import embed_documents
+from app.services.embedder import embed_documents, embed_query
 from app.services.event_publisher import connection_params, publish_decisions_requested
 from app.services.llm_client import ChatModel, LlmError
 from app.services.platform_quota import LIMIT_REASON, platform_tokens_left
@@ -42,6 +42,9 @@ MAX_RATIONALE_CHARS = 1000
 MAX_ALTERNATIVES = 10
 MAX_ALTERNATIVE_CHARS = 200
 _MAX_SPEAKER_LABEL_CHARS = 32
+SEARCH_LIMIT = 30
+# 只靠意思（沒有這些字）的要相近到這個程度才算找到（cosine similarity，bge-m3）。
+SEMANTIC_MIN_SIMILARITY = 0.5
 
 
 class DecisionsNotQueued(Exception):
@@ -83,6 +86,51 @@ def find_job_decisions(job_id: uuid.UUID) -> tuple[DecisionExtraction | None, li
         found = session.scalars(select(Decision).where(Decision.job_id == job_id, Decision.dismissed.is_(False))
                                 .order_by(Decision.start_time.asc().nulls_last(), Decision.created_at)).all()
         return extraction, list(found)
+
+
+def list_user_decisions(user_id: uuid.UUID, job_ids: list[uuid.UUID]) -> list[Decision]:
+    """跨 Job 的時間軸：這位使用者在這些 Job 的決策（刪掉的不列），依時間點排序（Job 的順序由呼叫端決定）。"""
+    if not job_ids:
+        return []
+    with new_session() as session:
+        return list(session.scalars(select(Decision).where(*_own(user_id, job_ids))
+                                    .order_by(Decision.start_time.asc().nulls_last(), Decision.created_at)))
+
+
+def search_decisions(user_id: uuid.UUID, query: str, job_ids: list[uuid.UUID]) -> list[Decision]:
+    """搜尋這位使用者在這些 Job 的決策：決定、理由、沒選的選項、原話裡有這些字的在前（意思越近越前），接著是只有意思相近的
+    （至少 SEMANTIC_MIN_SIMILARITY）；最多 SEARCH_LIMIT 個。embedding 算不出來就只比字。"""
+    query = query.strip()
+    if not query or not job_ids:
+        return []
+    pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    words = or_(*(column.ilike(pattern, escape="\\") for column in (
+        Decision.statement, Decision.rationale, Decision.evidence_text, cast(Decision.alternatives, Text))))
+    try:
+        vector = embed_query(query)
+    except Exception:
+        logger.exception("could not embed a decision search, matching the words only")
+        vector = None
+    with new_session() as session:
+        scores: dict[uuid.UUID, tuple[float, Decision]] = {}
+        for decision in session.scalars(select(Decision).where(*_own(user_id, job_ids), words).limit(SEARCH_LIMIT)):
+            scores[decision.id] = (1.0, decision)  # a match on the words outranks any match on meaning alone
+        if vector is not None:
+            distance = Decision.embedding.cosine_distance(vector)
+            for decision, d in session.execute(
+                    select(Decision, distance).where(*_own(user_id, job_ids), Decision.embedding.is_not(None))
+                    .order_by(distance).limit(SEARCH_LIMIT)):
+                similarity = 1.0 - float(d)
+                if decision.id in scores:
+                    scores[decision.id] = (1.0 + similarity, decision)
+                elif similarity >= SEMANTIC_MIN_SIMILARITY:
+                    scores[decision.id] = (similarity, decision)
+        ranked = sorted(scores.values(), key=lambda pair: pair[0], reverse=True)
+        return [decision for _, decision in ranked[:SEARCH_LIMIT]]
+
+
+def _own(user_id: uuid.UUID, job_ids: list[uuid.UUID]) -> tuple:
+    return Decision.user_id == user_id, Decision.job_id.in_(job_ids), Decision.dismissed.is_(False)
 
 
 def request_decision_extraction(job_id: uuid.UUID, user_id: uuid.UUID) -> DecisionExtraction:

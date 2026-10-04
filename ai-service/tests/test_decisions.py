@@ -337,3 +337,75 @@ def test_a_decision_is_saved_even_when_its_embedding_cannot_be_made(ai_stub, db_
 
     with new_session() as session:
         assert session.get(Decision, uuid.UUID(added.id)).embedding is None
+
+
+OTHER_USER = uuid.UUID("00000000-0000-0000-0000-0000000000ee")
+
+
+def stored(job_id, statement, *, user=USER, start_time=None, embedding=None, dismissed=False, rationale=""):
+    with new_session() as session:
+        decision = Decision(job_id=job_id, user_id=user, statement=statement, rationale=rationale, start_time=start_time,
+                            embedding=embedding, dismissed=dismissed)
+        session.add(decision)
+        session.commit()
+        return str(decision.id)
+
+
+def axis(i):
+    return [1.0 if n == i else 0.0 for n in range(1024)]
+
+
+def listed(stub, job_ids, user=USER):
+    return [d.statement for d in stub.ListUserDecisions(
+        ai_pb2.ListUserDecisionsRequest(user_id=str(user), job_ids=[str(j) for j in job_ids])).decisions]
+
+
+def searched(stub, query, job_ids, user=USER):
+    return [d.statement for d in stub.SearchDecisions(
+        ai_pb2.SearchDecisionsRequest(user_id=str(user), query=query, job_ids=[str(j) for j in job_ids])).decisions]
+
+
+def test_a_users_decisions_across_their_jobs_and_only_theirs(ai_stub, db_session):
+    first, second, not_asked = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    stored(first, "資料庫用 PostgreSQL", start_time=8)
+    stored(first, "上線日期定在月底", start_time=2)
+    stored(second, "週會改到週三")
+    stored(second, "抽錯的", dismissed=True)
+    stored(not_asked, "別的 Job 的")
+    stored(first, "別人的決策", user=OTHER_USER)
+
+    assert listed(ai_stub, [first, second]) == ["上線日期定在月底", "資料庫用 PostgreSQL", "週會改到週三"]
+    assert listed(ai_stub, []) == []
+
+
+def test_searching_finds_the_words_and_the_meaning_closest_first(ai_stub, db_session):
+    job = uuid.uuid4()
+    stored(job, "資料庫用 PostgreSQL", rationale="需要 pgvector", embedding=axis(0))
+    stored(job, "向量檢索放在同一個資料庫", embedding=[0.8 if n == 0 else (0.6 if n == 1 else 0.0) for n in range(1024)])
+    stored(job, "週會改到週三", embedding=axis(1))
+    stored(job, "PostgreSQL 的備份每天一次", embedding=axis(2))
+    stored(job, "別人的 PostgreSQL 決策", user=OTHER_USER, embedding=axis(0))
+
+    with patch.object(decisions, "embed_query", return_value=axis(0)):
+        found = searched(ai_stub, "postgresql", [job])
+
+    # The words first (closest in meaning among them first), then what only means the same; 週會 is neither.
+    assert found == ["資料庫用 PostgreSQL", "PostgreSQL 的備份每天一次", "向量檢索放在同一個資料庫"]
+
+
+def test_searching_still_finds_the_words_when_the_embedding_service_is_down(ai_stub, db_session):
+    job = uuid.uuid4()
+    stored(job, "資料庫用 PostgreSQL", embedding=axis(0))
+    stored(job, "週會改到週三", embedding=axis(1))
+
+    with patch.object(decisions, "embed_query", side_effect=RuntimeError("HF is down")):
+        assert searched(ai_stub, "PostgreSQL", [job]) == ["資料庫用 PostgreSQL"]
+
+
+def test_searching_for_percent_signs_is_not_a_wildcard(ai_stub, db_session):
+    job = uuid.uuid4()
+    stored(job, "毛利率目標 40%")
+    stored(job, "週會改到週三")
+
+    with patch.object(decisions, "embed_query", side_effect=RuntimeError("no embeddings")):
+        assert searched(ai_stub, "%", [job]) == ["毛利率目標 40%"]
