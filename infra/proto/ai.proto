@@ -116,6 +116,12 @@ service AiService {
   // 只有一個說「沒有」的 delta。中途失敗送恰好一個 error 並結束。不存紀錄。question 是空的回 INVALID_ARGUMENT。
   rpc AskDecisions(AskDecisionsRequest) returns (stream AskDecisionsChunk);
 
+  // 事實查核（見 ai-service CONTEXT.md「主張」「查核」）：先標出一個 Job 可以查核的主張（不花搜尋次數），使用者再勾選要查的。一個 Job
+  // 一筆標出主張的紀錄；要求後立刻回傳「標出中」，背景用要求者的預設模型標。重新標出時查核過的主張保留，其他的換掉。
+  rpc RequestFactCheck(RequestFactCheckRequest) returns (FactCheck);
+  // 這個 Job 標出主張的紀錄（沒標過就沒有）與主張（依時間點排序）。
+  rpc GetFactCheck(GetFactCheckRequest) returns (JobFactCheck);
+
   // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
   // job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
@@ -1057,4 +1063,71 @@ message AskDecisionsChunk {
     string error = 3;
     ModelChoice answered_by = 4;
   }
+}
+
+enum FactCheckStatus {
+  FACT_CHECK_STATUS_UNSPECIFIED = 0;
+  FACT_CHECK_STATUS_GENERATING = 1;
+  FACT_CHECK_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；之前標出的主張照樣保留。
+  FACT_CHECK_STATUS_FAILED = 3;
+}
+
+message RequestFactCheckRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message GetFactCheckRequest {
+  string job_id = 1;
+}
+
+message FactCheck {
+  string job_id = 1;
+  FactCheckStatus status = 2;
+  string failure_reason = 3;
+  // 依據的逐字稿 revision 與標出的模型（上一次完成的；還沒完成過是 0 / 空字串）。
+  int32 source_revision = 4;
+  string model_provider = 5;
+  string model = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+}
+
+message JobFactCheck {
+  // 沒標過就沒有。
+  optional FactCheck extraction = 1;
+  repeated Claim claims = 2;
+}
+
+message Claim {
+  string id = 1;
+  string job_id = 2;
+  // 說這句話的講者標籤與時間點、那個片段的原話。
+  string speaker_label = 3;
+  double start_time = 4;
+  string text = 5;
+  // 整理成一句完整、可以搜尋的陳述（查核時只送這一句）。
+  string claim = 6;
+  // "number" 或 "fact"。
+  string kind = 7;
+  // 查核的結論：supported / disputed / no_reliable_source / not_checkable；空字串是還沒查。
+  string verdict = 8;
+  string explanation = 9;
+  repeated ClaimSource sources = 10;
+  google.protobuf.Timestamp checked_at = 11;
+  string check_model = 12;
+  // 查核中。
+  bool checking = 13;
+  // 上一次查核失敗的原因（那一條保持還沒查）；沒有是空字串。
+  string check_error = 14;
+  // 標出這條主張時的逐字稿 revision：比目前的小就是依據舊版的。
+  int32 source_revision = 15;
+}
+
+// 查核依據的一個網頁；順序就是說明裡 [n] 的編號。
+message ClaimSource {
+  string title = 1;
+  string url = 2;
+  string excerpt = 3;
 }

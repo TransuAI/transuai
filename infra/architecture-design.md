@@ -39,7 +39,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`/`post_meeting_settings`、網路搜尋用量的 `web_search_usage`、講者名字建議的 `speaker_name_suggestions`、講者數據的 `speaker_insights`/`speaker_insight_items`、刪掉的 Job 的 `deleted_jobs`、多格式輸出的 `generated_outputs`、譯文的 `translations`/`segment_translations`、決策紀錄的 `decisions`/`decision_extractions`）。還沒做的見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`/`post_meeting_settings`、網路搜尋用量的 `web_search_usage`、講者名字建議的 `speaker_name_suggestions`、講者數據的 `speaker_insights`/`speaker_insight_items`、刪掉的 Job 的 `deleted_jobs`、多格式輸出的 `generated_outputs`、譯文的 `translations`/`segment_translations`、決策紀錄的 `decisions`/`decision_extractions`、事實查核的 `fact_checks`/`claims`）。還沒做的見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 >
 > **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
@@ -79,7 +79,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號與簽出去的 refresh token（`users`、`refresh_tokens`：只存雜湊，用來輪替與作廢）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理、網路搜尋用量、講者名字建議、講者數據、刪掉的 Job、多格式輸出、譯文、決策（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` / `web_search_usage` / `speaker_name_suggestions` / `speaker_insights` / `speaker_insight_items` / `deleted_jobs` / `generated_outputs` / `translations` / `segment_translations` / `decisions` / `decision_extractions` 二十六張表）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理、網路搜尋用量、講者名字建議、講者數據、刪掉的 Job、多格式輸出、譯文、決策、事實查核（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` / `web_search_usage` / `speaker_name_suggestions` / `speaker_insights` / `speaker_insight_items` / `deleted_jobs` / `generated_outputs` / `translations` / `segment_translations` / `decisions` / `decision_extractions` / `fact_checks` / `claims` 二十八張表）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -226,6 +226,9 @@ POST   /decisions/ask                   問決策（SSE，跟問答一樣經 Gat
 GET    /decisions?q=&category=&jobId=… 決策頁（jobId 可以給好幾個）：使用者所有 Job 的決策（每個帶 Job 的標題、類型、上傳時間），沒有 q 時依上傳時間由新到舊
                                          的時間軸，有 q 時是搜尋（字與意思，依符合程度）；Gateway 先向 upload-service 列出使用者自己的
                                          Job（類型的篩選在那裡），只問 ai-service 這些 Job 的決策，ai-service 再依 user_id 過濾
+POST   /jobs/{jobId}/fact-check         事實查核：標出這個 Job 可以查核的主張（不花搜尋次數），回 202（背景標，前端每 3 秒輪詢）；
+                                         重新標出時查核過的保留
+GET    /jobs/{jobId}/fact-check         標出主張的紀錄（沒標過是 null）與主張（講者、時間點、原話、整理過的陳述、種類、查核的結論）
 POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format", "platform"?（社群貼文必填）, "instruction"? }，回 202
                                          （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
 GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）
@@ -505,7 +508,7 @@ CREATE TABLE llm_usage (
     id UUID PRIMARY KEY,
     user_id UUID,                           -- Job 擁有者 / 提問者；升級前排入的舊訊息沒有
     job_id UUID,                            -- 不屬於任何一個 Job 的呼叫（問決策跨 Job）是空的：算進使用者的月用量，不列在任何 Job 的用量裡
-    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting / job_title / speaker_names / speaker_insights / generated_output / translation / decision_extraction / decision_qa
+    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting / job_title / speaker_names / speaker_insights / generated_output / translation / decision_extraction / decision_qa / fact_check
     provider VARCHAR(32) NOT NULL,          -- platform 或廠商名稱
     model VARCHAR(200) NOT NULL,
     key_source VARCHAR(16) NOT NULL,        -- platform / own_key
@@ -781,6 +784,42 @@ CREATE TABLE decisions (
 );
 ```
 
+事實查核：每個 Job 一筆標出主張的紀錄，主張一條一列，查核的結果記在那一條上：
+
+```sql
+CREATE TABLE fact_checks (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL UNIQUE,
+    requested_by UUID NOT NULL,
+    status VARCHAR(10) NOT NULL,            -- GENERATING / COMPLETED / FAILED
+    failure_reason TEXT,
+    source_revision INTEGER,
+    model_provider VARCHAR(32),
+    model VARCHAR(200),
+    requested_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ
+);
+CREATE TABLE claims (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL,
+    speaker_label VARCHAR(32),
+    start_time NUMERIC(10,2) NOT NULL,
+    text TEXT NOT NULL,                     -- 那個片段的原話
+    claim TEXT NOT NULL,                    -- 整理成一句完整、可以搜尋的陳述（查核時只送這一句）
+    kind VARCHAR(8) NOT NULL,               -- number / fact
+    verdict VARCHAR(24),                    -- supported / disputed / no_reliable_source / not_checkable；空的是還沒查
+    explanation TEXT,
+    sources JSONB NOT NULL DEFAULT '[]',    -- [{title, url, excerpt}]，順序就是說明裡 [n] 的編號
+    checked_at TIMESTAMPTZ,
+    check_model_provider VARCHAR(32),
+    check_model VARCHAR(200),
+    checking_since TIMESTAMPTZ,             -- 查核中
+    check_error TEXT,                       -- 上一次查核失敗的原因（那一條保持還沒查）
+    source_revision INTEGER,                -- 標出時的逐字稿 revision
+    created_at TIMESTAMPTZ NOT NULL
+);
+```
+
 多格式輸出（原本規劃叫 `export_outputs`，改名避免跟「匯出」混淆；同一種格式可以有很多份，沒有 UNIQUE）：
 
 ```sql
@@ -815,6 +854,7 @@ CREATE INDEX ix_generated_outputs_job_id ON generated_outputs (job_id);
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
 | `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
 | `translation.requested` | AI Service | AI Service | `{ jobId, language }`——使用者要求翻譯逐字稿（`POST /jobs/{jobId}/translations`）；ai-service 排給自己的背景工作，一批一批翻、每批存檔 |
+| `fact_check.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求標出可以查核的主張（`POST /jobs/{jobId}/fact-check`）；ai-service 排給自己的背景工作 |
 | `decision.requested` | AI Service | AI Service | `{ jobId, userId, meetingAt }`（`meetingAt` 是 Job 的上傳時間，找較早的會議裡被取代的決策用）——使用者要求抽出決策（`POST /jobs/{jobId}/decisions/extract`），或會議、訪談轉錄完由 pipeline 自動要求（`userId` 是 Job 擁有者）；ai-service 排給自己的背景工作 |
 | `output.requested` | AI Service | AI Service | `{ outputId, jobId, userId }`——使用者要求產生一份多格式輸出（`POST /jobs/{jobId}/outputs`）；ai-service 排給自己的背景工作 |
 | `speaker_insights.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`）；ai-service 排給自己的背景工作 |
@@ -936,7 +976,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
       靠背景清理排除）。transcription_db／ai_db 的資料由 `job.deleted` 事件清掉（2026-10-03，見 5.）：逐字稿、片段、講者、
-      摘要、章節、embedding、問答、測驗、講者名字建議、講者數據的問題與打斷、決策（別的 Job 取代它的連結跟著消失）、多格式輸出、譯文、會後處理；用量紀錄保留。刪除當下還在跑的寫入晚到也會被丟掉
+      摘要、章節、embedding、問答、測驗、講者名字建議、講者數據的問題與打斷、決策（別的 Job 取代它的連結跟著消失）、事實查核的主張、多格式輸出、譯文、會後處理；用量紀錄保留。刪除當下還在跑的寫入晚到也會被丟掉
 - [x] 授權缺口：使用者只能存取自己的 job——**已解決**：Gateway 在轉發 Transcription/AI 的查詢
       前先呼叫 upload-service 的 `GetJob` 做 ownership 檢查（見 2.1），但 transcription-service /
       ai-service 本身仍不驗證 `x-user-id`，這個決定維持不變（見 2.1 授權模型）
