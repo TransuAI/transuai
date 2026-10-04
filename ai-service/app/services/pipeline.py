@@ -9,6 +9,7 @@ from app.repositories.embedding_repository import save_embeddings
 from app.repositories.speaker_suggestion_repository import save_speaker_suggestions
 from app.repositories.summary_repository import save_summary
 from app.services.chapter_generator import generate_chapters
+from app.services.decisions import extract_after_transcription
 from app.services.default_models import resolve_chat_model
 from app.services.embedder import embed_documents
 from app.services.job_details import suggest_details
@@ -82,10 +83,12 @@ def process_message(
         finally:
             session.close()
 
-        _suggest_title_and_category(job_id, summary_text, chapters, model=model,
-                                    meter=UsageMeter(user_id, job_uuid, LlmFeature.JOB_TITLE))
+        category = _suggest_title_and_category(job_id, summary_text, chapters, model=model,
+                                               meter=UsageMeter(user_id, job_uuid, LlmFeature.JOB_TITLE))
         _suggest_speaker_names(job_uuid, transcript, model=model,
                                meter=UsageMeter(user_id, job_uuid, LlmFeature.SPEAKER_NAMES))
+        # Queued for later (its own background work): the job doesn't wait for its decisions.
+        extract_after_transcription(job_uuid, user_id, category, model)
         job_status_client.update_status(job_id, "COMPLETED")
         publish_completed(job_id)
         logger.info("job %s summarized successfully", job_id)
@@ -112,15 +115,16 @@ def process_message(
 
 
 def _suggest_title_and_category(job_id: str, summary: str, chapters: list[tuple[str, float]], *, model: ChatModel,
-                                meter: UsageMeter) -> None:
-    """替 Job 取標題、判斷類型並回寫（在 COMPLETED 之前，列表一完成就看得到）。只是方便找檔案的附加功能：任何失敗
-    只記 log，不重試、不讓 Job 失敗。"""
+                                meter: UsageMeter) -> str | None:
+    """替 Job 取標題、判斷類型並回寫（在 COMPLETED 之前，列表一完成就看得到），回傳 Job 最後的類型（使用者設定過就是他的；
+    不知道是 None）。只是方便找檔案的附加功能：任何失敗只記 log，不重試、不讓 Job 失敗。"""
     try:
         details = suggest_details(summary, chapters, model=model, meter=meter)
         if details:
-            job_status_client.set_suggested_details(job_id, details.title, details.category)
+            return job_status_client.set_suggested_details(job_id, details.title, details.category)
     except Exception:
         logger.exception("job %s: could not give it a title, it keeps its file name", job_id)
+    return None
 
 
 def _suggest_speaker_names(job_uuid: uuid.UUID, transcript, *, model: ChatModel, meter: UsageMeter) -> None:

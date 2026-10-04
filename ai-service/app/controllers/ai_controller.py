@@ -81,6 +81,8 @@ from app.services.translations import (
     TranslationNotQueued, TranslationProgress, UnknownLanguage, delete_translation, find_translation, list_translations,
     request_translation)
 from app.services.translations import effective_status as translation_effective_status
+from app.services.decisions import DecisionsNotQueued, find_job_decisions, request_decision_extraction
+from app.services.decisions import effective_status as decision_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
 from app.services.speaker_insight_runs import effective_status as speaker_insights_effective_status
@@ -96,6 +98,9 @@ from app.services.quizzes import (
 )
 from app.models import (
     ConnectionStatus,
+    Decision,
+    DecisionExtraction,
+    DecisionExtractionStatus,
     TranslationStatus,
     GeneratedOutput,
     OutputStatus,
@@ -514,6 +519,24 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             _abort(context, grpc.StatusCode.NOT_FOUND, "translation not found")
         return ai_pb2.DeleteTranslationResponse()
 
+    def RequestDecisionExtraction(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            request_decision_extraction(job_id, user_id)
+        except DecisionsNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法抽取決策，請稍後再試")
+        extraction, _ = find_job_decisions(job_id)
+        return _decision_extraction_to_proto(extraction)
+
+    def GetJobDecisions(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        extraction, decisions = find_job_decisions(job_id)
+        message = ai_pb2.JobDecisions(decisions=[_decision_to_proto(d) for d in decisions])
+        if extraction is not None:
+            message.extraction.CopyFrom(_decision_extraction_to_proto(extraction))
+        return message
+
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
@@ -790,6 +813,37 @@ _TRANSLATION_STATUS = {
     TranslationStatus.COMPLETED: ai_pb2.TRANSLATION_STATUS_COMPLETED,
     TranslationStatus.FAILED: ai_pb2.TRANSLATION_STATUS_FAILED,
 }
+
+
+_DECISION_EXTRACTION_STATUS = {
+    DecisionExtractionStatus.GENERATING: ai_pb2.DECISION_EXTRACTION_STATUS_GENERATING,
+    DecisionExtractionStatus.COMPLETED: ai_pb2.DECISION_EXTRACTION_STATUS_COMPLETED,
+    DecisionExtractionStatus.FAILED: ai_pb2.DECISION_EXTRACTION_STATUS_FAILED,
+}
+
+
+def _decision_extraction_to_proto(extraction: DecisionExtraction) -> ai_pb2.DecisionExtraction:
+    status, failure_reason = decision_effective_status(extraction)
+    message = ai_pb2.DecisionExtraction(
+        job_id=str(extraction.job_id), status=_DECISION_EXTRACTION_STATUS[status], failure_reason=failure_reason or "",
+        source_revision=extraction.source_revision or 0, model_provider=extraction.model_provider or "",
+        model=extraction.model or "")
+    message.requested_at.FromDatetime(extraction.requested_at)
+    if extraction.completed_at is not None:
+        message.completed_at.FromDatetime(extraction.completed_at)
+    return message
+
+
+def _decision_to_proto(decision: Decision) -> ai_pb2.Decision:
+    message = ai_pb2.Decision(
+        id=str(decision.id), job_id=str(decision.job_id), statement=decision.statement, rationale=decision.rationale,
+        alternatives=decision.alternatives, proposed_by=decision.proposed_by or "", tentative=decision.tentative,
+        evidence_text=decision.evidence_text or "", source=decision.source, edited=decision.edited,
+        supersedes_id=str(decision.supersedes_id) if decision.supersedes_id else "")
+    if decision.start_time is not None:
+        message.start_time = float(decision.start_time)
+    message.created_at.FromDatetime(decision.created_at)
+    return message
 
 
 def _translation_to_proto(progress: TranslationProgress) -> ai_pb2.Translation:

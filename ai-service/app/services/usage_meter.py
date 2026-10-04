@@ -42,6 +42,7 @@ class LlmFeature(StrEnum):
     SPEAKER_INSIGHTS = "speaker_insights"  # 講者數據：問題與打斷
     GENERATED_OUTPUT = "generated_output"  # 多格式輸出
     TRANSLATION = "translation"  # 譯文
+    DECISION_EXTRACTION = "decision_extraction"  # 決策紀錄：抽出一場的決策
 
 
 @dataclass(frozen=True)

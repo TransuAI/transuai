@@ -71,6 +71,13 @@ class TranslationStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     TRANSLATION_STATUS_GENERATING: _ClassVar[TranslationStatus]
     TRANSLATION_STATUS_COMPLETED: _ClassVar[TranslationStatus]
     TRANSLATION_STATUS_FAILED: _ClassVar[TranslationStatus]
+
+class DecisionExtractionStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    DECISION_EXTRACTION_STATUS_UNSPECIFIED: _ClassVar[DecisionExtractionStatus]
+    DECISION_EXTRACTION_STATUS_GENERATING: _ClassVar[DecisionExtractionStatus]
+    DECISION_EXTRACTION_STATUS_COMPLETED: _ClassVar[DecisionExtractionStatus]
+    DECISION_EXTRACTION_STATUS_FAILED: _ClassVar[DecisionExtractionStatus]
 REGENERATION_STATUS_IDLE: RegenerationStatus
 REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
@@ -106,6 +113,10 @@ TRANSLATION_STATUS_UNSPECIFIED: TranslationStatus
 TRANSLATION_STATUS_GENERATING: TranslationStatus
 TRANSLATION_STATUS_COMPLETED: TranslationStatus
 TRANSLATION_STATUS_FAILED: TranslationStatus
+DECISION_EXTRACTION_STATUS_UNSPECIFIED: DecisionExtractionStatus
+DECISION_EXTRACTION_STATUS_GENERATING: DecisionExtractionStatus
+DECISION_EXTRACTION_STATUS_COMPLETED: DecisionExtractionStatus
+DECISION_EXTRACTION_STATUS_FAILED: DecisionExtractionStatus
 
 class RequestQuizRequest(_message.Message):
     __slots__ = ("job_id", "user_id", "question_count")
@@ -1022,3 +1033,75 @@ class SegmentTranslation(_message.Message):
     text: str
     source_text: str
     def __init__(self, segment_id: _Optional[str] = ..., text: _Optional[str] = ..., source_text: _Optional[str] = ...) -> None: ...
+
+class RequestDecisionExtractionRequest(_message.Message):
+    __slots__ = ("job_id", "user_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
+
+class GetJobDecisionsRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class DecisionExtraction(_message.Message):
+    __slots__ = ("job_id", "status", "failure_reason", "source_revision", "model_provider", "model", "requested_at", "completed_at")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    status: DecisionExtractionStatus
+    failure_reason: str
+    source_revision: int
+    model_provider: str
+    model: str
+    requested_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    def __init__(self, job_id: _Optional[str] = ..., status: _Optional[_Union[DecisionExtractionStatus, str]] = ..., failure_reason: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class JobDecisions(_message.Message):
+    __slots__ = ("extraction", "decisions")
+    EXTRACTION_FIELD_NUMBER: _ClassVar[int]
+    DECISIONS_FIELD_NUMBER: _ClassVar[int]
+    extraction: DecisionExtraction
+    decisions: _containers.RepeatedCompositeFieldContainer[Decision]
+    def __init__(self, extraction: _Optional[_Union[DecisionExtraction, _Mapping]] = ..., decisions: _Optional[_Iterable[_Union[Decision, _Mapping]]] = ...) -> None: ...
+
+class Decision(_message.Message):
+    __slots__ = ("id", "job_id", "statement", "rationale", "alternatives", "proposed_by", "tentative", "start_time", "evidence_text", "source", "edited", "supersedes_id", "created_at")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    STATEMENT_FIELD_NUMBER: _ClassVar[int]
+    RATIONALE_FIELD_NUMBER: _ClassVar[int]
+    ALTERNATIVES_FIELD_NUMBER: _ClassVar[int]
+    PROPOSED_BY_FIELD_NUMBER: _ClassVar[int]
+    TENTATIVE_FIELD_NUMBER: _ClassVar[int]
+    START_TIME_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_TEXT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    EDITED_FIELD_NUMBER: _ClassVar[int]
+    SUPERSEDES_ID_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    job_id: str
+    statement: str
+    rationale: str
+    alternatives: _containers.RepeatedScalarFieldContainer[str]
+    proposed_by: str
+    tentative: bool
+    start_time: float
+    evidence_text: str
+    source: str
+    edited: bool
+    supersedes_id: str
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., statement: _Optional[str] = ..., rationale: _Optional[str] = ..., alternatives: _Optional[_Iterable[str]] = ..., proposed_by: _Optional[str] = ..., tentative: _Optional[bool] = ..., start_time: _Optional[float] = ..., evidence_text: _Optional[str] = ..., source: _Optional[str] = ..., edited: _Optional[bool] = ..., supersedes_id: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...

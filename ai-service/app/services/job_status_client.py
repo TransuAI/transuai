@@ -27,10 +27,12 @@ class JobStatusClient:
         self._stub.UpdateJobStatus(request)
         logger.info("job %s status -> %s", job_id, status)
 
-    def set_suggested_details(self, job_id: str, title: str, category: str) -> None:
-        """AI 依內容建議的標題與類型（InternalJobService.SetSuggestedDetails）；使用者改過的欄位 upload-service 不會動。"""
-        self._stub.SetSuggestedDetails(upload_pb2.SetSuggestedDetailsRequest(job_id=job_id, title=title, category=category))
+    def set_suggested_details(self, job_id: str, title: str, category: str) -> str:
+        """AI 依內容建議的標題與類型（InternalJobService.SetSuggestedDetails）；使用者改過的欄位 upload-service 不會動。回傳 Job
+        最後的類型（使用者設定過就是他設定的）。"""
+        job = self._stub.SetSuggestedDetails(upload_pb2.SetSuggestedDetailsRequest(job_id=job_id, title=title, category=category))
         logger.info("job %s title and category suggested", job_id)
+        return job.category
 
     def close(self) -> None:
         self._channel.close()

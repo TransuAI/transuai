@@ -29,7 +29,7 @@ TRANSCRIPT = SimpleNamespace(
 
 
 @contextmanager
-def running_the_pipeline():
+def running_the_pipeline(owner: uuid.UUID | None = None):
     """Runs one transcription.completed message; yields the mocked upload-service client (job_status_client)."""
     with (
         patch.object(pipeline, "job_status_client") as job_status_client,
@@ -42,7 +42,8 @@ def running_the_pipeline():
     ):
         transcript_client.get_transcript.return_value = TRANSCRIPT
         yield job_status_client
-        pipeline.process_message(json.dumps({"jobId": JOB_ID}).encode(), MagicMock(), MagicMock())
+        message = {"jobId": JOB_ID} | ({"userId": str(owner)} if owner else {})
+        pipeline.process_message(json.dumps(message).encode(), MagicMock(), MagicMock())
 
 
 def answers(fake_llm, details: str) -> None:
@@ -134,3 +135,23 @@ def test_the_call_is_recorded_as_the_titles_usage(fake_llm):
         pass
 
     assert [c.args[0].feature for c in save_llm_usage.call_args_list] == ["summary", "chapters", "job_title"]
+
+
+def test_decisions_are_extracted_by_the_category_the_job_ends_up_with(fake_llm, db_session):
+    owner = uuid.uuid4()
+    answers(fake_llm, '{"title": "產品週會", "category": "lecture"}')
+
+    with patch.object(pipeline, "extract_after_transcription") as extract, running_the_pipeline(owner) as job_status_client:
+        job_status_client.set_suggested_details.return_value = "meeting"  # the user had already called it a meeting
+
+    job_id, user_id, category, model = extract.call_args.args
+    assert (job_id, user_id, category, model.provider) == (uuid.UUID(JOB_ID), owner, "meeting", "platform")
+
+
+def test_without_a_title_the_category_is_unknown_and_nothing_is_extracted(fake_llm, db_session):
+    answers(fake_llm, "不是 JSON")
+
+    with patch.object(pipeline, "extract_after_transcription") as extract, running_the_pipeline(uuid.uuid4()):
+        pass
+
+    assert extract.call_args.args[2] is None

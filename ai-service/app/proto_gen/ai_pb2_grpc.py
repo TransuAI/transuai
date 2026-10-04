@@ -144,6 +144,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.GetSpeakerInsightsRequest.SerializeToString,
                 response_deserializer=ai__pb2.SpeakerInsights.FromString,
                 _registered_method=True)
+        self.RequestDecisionExtraction = channel.unary_unary(
+                '/transuai.ai.v1.AiService/RequestDecisionExtraction',
+                request_serializer=ai__pb2.RequestDecisionExtractionRequest.SerializeToString,
+                response_deserializer=ai__pb2.DecisionExtraction.FromString,
+                _registered_method=True)
+        self.GetJobDecisions = channel.unary_unary(
+                '/transuai.ai.v1.AiService/GetJobDecisions',
+                request_serializer=ai__pb2.GetJobDecisionsRequest.SerializeToString,
+                response_deserializer=ai__pb2.JobDecisions.FromString,
+                _registered_method=True)
         self.RequestQuiz = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestQuiz',
                 request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
@@ -432,6 +442,21 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RequestDecisionExtraction(self, request, context):
+        """決策紀錄（見 ai-service CONTEXT.md「決策」「暫定」）：從一場會議或訪談抽出與會者做成的決定。一個 Job 一份抽取紀錄；要求後立刻回傳
+        「抽取中」，背景用要求者的預設模型抽（類型是會議、訪談的 Job 轉錄完也會自動抽）。重新抽只換掉 AI 抽的、使用者沒改過的決策。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetJobDecisions(self, request, context):
+        """這個 Job 的抽取紀錄（沒抽過就沒有）與決策（依時間點排序，沒有時間點的在後）。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RequestQuiz(self, request, context):
         """測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
         quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -707,6 +732,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.GetSpeakerInsights,
                     request_deserializer=ai__pb2.GetSpeakerInsightsRequest.FromString,
                     response_serializer=ai__pb2.SpeakerInsights.SerializeToString,
+            ),
+            'RequestDecisionExtraction': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestDecisionExtraction,
+                    request_deserializer=ai__pb2.RequestDecisionExtractionRequest.FromString,
+                    response_serializer=ai__pb2.DecisionExtraction.SerializeToString,
+            ),
+            'GetJobDecisions': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetJobDecisions,
+                    request_deserializer=ai__pb2.GetJobDecisionsRequest.FromString,
+                    response_serializer=ai__pb2.JobDecisions.SerializeToString,
             ),
             'RequestQuiz': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestQuiz,
@@ -1380,6 +1415,60 @@ class AiService:
             '/transuai.ai.v1.AiService/GetSpeakerInsights',
             ai__pb2.GetSpeakerInsightsRequest.SerializeToString,
             ai__pb2.SpeakerInsights.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RequestDecisionExtraction(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/RequestDecisionExtraction',
+            ai__pb2.RequestDecisionExtractionRequest.SerializeToString,
+            ai__pb2.DecisionExtraction.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetJobDecisions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/GetJobDecisions',
+            ai__pb2.GetJobDecisionsRequest.SerializeToString,
+            ai__pb2.JobDecisions.FromString,
             options,
             channel_credentials,
             insecure,

@@ -1,5 +1,6 @@
 from app.models.chapter import Chapter
 from app.models.connection import ConnectionStatus, OAuthClient, OAuthConnection, OAuthPendingAuthorization
+from app.models.decision import Decision, DecisionExtraction, DecisionExtractionStatus, DecisionSource
 from app.models.default_model import DefaultModel
 from app.models.deleted_job import DeletedJob
 from app.models.embedding import Embedding
@@ -15,4 +16,4 @@ from app.models.summary import Base, RegenerationStatus, Summary
 from app.models.translation import SegmentTranslation, Translation, TranslationStatus
 from app.models.web_search_usage import WebSearchUsage
 
-__all__ = ["ActionProposal", "Base", "Chapter", "ConnectionStatus", "DefaultModel", "DeletedJob", "Embedding", "GeneratedOutput", "LlmUsage", "OAuthClient", "OAuthConnection", "OAuthPendingAuthorization", "OutputStatus", "PostMeetingRun", "PostMeetingSettings", "PostMeetingStatus", "ProposalStatus", "ProviderKey", "QaHistory", "QuestionKind", "Quiz", "QuizAttempt", "QuizQuestion", "QuizStatus", "RegenerationStatus", "SegmentTranslation", "SpeakerInsightItem", "SpeakerInsightRun", "SpeakerInsightsStatus", "SpeakerSuggestion", "Summary", "TodoDestination", "Translation", "TranslationStatus", "WebSearchUsage"]
+__all__ = ["ActionProposal", "Base", "Chapter", "ConnectionStatus", "Decision", "DecisionExtraction", "DecisionExtractionStatus", "DecisionSource", "DefaultModel", "DeletedJob", "Embedding", "GeneratedOutput", "LlmUsage", "OAuthClient", "OAuthConnection", "OAuthPendingAuthorization", "OutputStatus", "PostMeetingRun", "PostMeetingSettings", "PostMeetingStatus", "ProposalStatus", "ProviderKey", "QaHistory", "QuestionKind", "Quiz", "QuizAttempt", "QuizQuestion", "QuizStatus", "RegenerationStatus", "SegmentTranslation", "SpeakerInsightItem", "SpeakerInsightRun", "SpeakerInsightsStatus", "SpeakerSuggestion", "Summary", "TodoDestination", "Translation", "TranslationStatus", "WebSearchUsage"]
