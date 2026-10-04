@@ -120,6 +120,9 @@ docker compose up -d
 | `GET` | `/summary/{jobId}` | 取得摘要（含 `sourceRevision`，前端跟逐字稿的 `revision` 比對判斷過時；`regenerationStatus`：`IDLE`／`RUNNING`／`FAILED`；`modelProvider` / `model`：產生它的模型，記錄模型之前的摘要是 `null`） |
 | `POST` | `/summary/{jobId}/regenerate` | 在背景依最新逐字稿重新產生摘要與章節，回 `202` 與目前的摘要；轉給 `RequestRegeneration`，帶上當下使用者（用量記在他名下；Job 狀態不變） |
 | `GET` | `/chapters/{jobId}` | 取得章節列表（依 `sequence_no` 排序），沒有章節時回空陣列 |
+| `POST` | `/jobs/{jobId}/translations` | 翻譯逐字稿：body `{ "language": "zh-TW" \| "en" \| "ja" \| "ko" }`，回 `202` 與這種語言的譯文（`status: GENERATING`）；一種語言一份，已經在翻就直接回傳，翻好的再要求是補翻缺的；不支援的語言或沒帶回 400；轉給 `RequestTranslation`。花錢的功能、受每月平台模型上限管 |
+| `GET` | `/jobs/{jobId}/translations` | 各語言的譯文：`[{ language, status, failureReason, totalSegments, translatedSegments, modelProvider, model, requestedAt, completedAt, segments: null }]`；前端每 3 秒輪詢直到沒有 `GENERATING` |
+| `GET` | `/jobs/{jobId}/translations/{language}` | 一種語言含片段：`segments: [{ segmentId, text }]`（翻譯中也有已經翻好的）；沒有這種語言回 404 |
 | `POST` | `/jobs/{jobId}/outputs` | 多格式輸出：產生一份，body `{ "format": "podcast_description" \| "youtube_description" \| "blog_post" \| "newsletter" \| "social_post", "platform"?: "threads" \| "facebook" \| "instagram" \| "linkedin" \| "x", "instruction"?: string }`（社群貼文一定要有 `platform`），回 `202` 與「產生中」的那一份；每次都是新的一份。先過 ownership 並取 Job 的標題一起帶給 `RequestOutput`；沒帶 `format` 回 400，格式不認得或要求超過 200 字也是 400。花錢的功能、受每月平台模型上限管 |
 | `GET` | `/jobs/{jobId}/outputs` | 這個 Job 的輸出（新的在前）：`[{ id, jobId, format, platform, instruction, status, failureReason, content, sourceRevision, modelProvider, model, requestedAt, completedAt, editedAt }]`；`content` 是 Markdown（完成前 `null`）；前端每 3 秒輪詢直到沒有 `GENERATING` |
 | `GET` | `/jobs/{jobId}/outputs/{outputId}` | 一份輸出；不屬於這個 Job 回 404 |
@@ -193,6 +196,7 @@ docker compose up -d
 | 產生測驗（`POST /jobs/{jobId}/quizzes`） | 每人每小時 10 份 | |
 | 分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`） | 每人每小時 10 次 | `RATE_LIMIT_SPEAKER_INSIGHTS` |
 | 產生多格式輸出（`POST /jobs/{jobId}/outputs`） | 每人每小時 20 份 | `RATE_LIMIT_OUTPUT` |
+| 翻譯逐字稿（`POST /jobs/{jobId}/translations`） | 每人每小時 10 次 | `RATE_LIMIT_TRANSLATION` |
 | 重新產生摘要（`POST /summary/{jobId}/regenerate`） | 每人每小時 5 次 | |
 | 開始會後處理（`POST /jobs/{jobId}/post-meeting`） | 每人每小時 10 次 | 一次最多 10 次 AI 呼叫 |
 | 存自有金鑰（`PUT /me/provider-keys/{provider}`） | 每人每小時 10 次 | 每次都向 AI 廠商驗證：不讓人拿平台去試偷來的金鑰 |
