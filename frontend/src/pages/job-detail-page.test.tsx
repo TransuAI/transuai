@@ -4272,3 +4272,55 @@ describe('JobDetailPage decisions (決策, COMPLETED, desktop layout)', () => {
     expect(decisionsApi.extract).toHaveBeenCalledWith('job-1')
   })
 })
+
+describe('JobDetailPage speaker stats and decisions (講者數據 × 決策, COMPLETED, desktop layout)', () => {
+  // multiSpeakerTranscript: S1 主持人 / S2 講者 2
+  const extracted: DecisionExtraction = {
+    status: 'COMPLETED', failureReason: null, sourceRevision: 0, modelProvider: 'platform', model: 'qwen3:14b',
+    requestedAt: '2026-10-04T03:00:00Z', completedAt: '2026-10-04T03:01:00Z',
+  }
+  const decision = (overrides: Partial<Decision>): Decision => ({
+    id: 'd1', jobId: 'job-1', statement: '資料庫用 PostgreSQL', rationale: '', alternatives: [], proposedBy: 'S2',
+    tentative: false, startTime: 4, evidenceText: '大家好', source: 'ai', edited: false, supersedesId: null,
+    createdAt: '2026-10-04T03:01:00Z', ...overrides,
+  })
+
+  it('counts the decisions each speaker proposed, and opens one in 決策', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({
+      extraction: extracted,
+      decisions: [decision({}), decision({ id: 'd2', statement: '上線日期暫定月底', proposedBy: null, startTime: 6 })],
+    })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup()
+    await openStudioTool('講者數據')
+
+    const table = screen.getByRole('table', { name: '每位講者的發言' })
+    expect(within(table).getByRole('columnheader', { name: '決定' })).toBeInTheDocument()
+    expect(within(table).getByRole('row', { name: /^講者 2/ })).toHaveTextContent(/1$/)
+    expect(within(table).getByRole('row', { name: /^主持人/ })).toHaveTextContent(/0$/)
+    expect(screen.getByText('這場做了 2 個決定')).toBeInTheDocument()
+    const made = screen.getByRole('list', { name: '這場的決定' })
+    expect(within(made).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      '講者 2：資料庫用 PostgreSQL', '不確定是誰：上線日期暫定月底',
+    ])
+
+    await user.click(within(made).getByRole('button', { name: '講者 2：資料庫用 PostgreSQL' }))
+
+    const decisions = await screen.findByRole('list', { name: '這場的決策' })
+    expect(within(decisions).getAllByRole('listitem')[0]).toHaveAttribute('data-highlighted')
+  })
+
+  it('offers to extract them in 決策 when there are none yet', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup()
+    await openStudioTool('講者數據')
+
+    expect(within(screen.getByRole('table', { name: '每位講者的發言' })).queryByRole('columnheader', { name: '決定' })).toBeNull()
+    expect(screen.getByText('還沒抽出這場的決策')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '到「決策」抽出' }))
+
+    expect(await screen.findByRole('button', { name: '抽出決策' })).toBeInTheDocument()
+  })
+})

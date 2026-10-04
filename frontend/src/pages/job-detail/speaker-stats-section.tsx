@@ -6,7 +6,7 @@ import { speakerColour, speakerNameOrLabel } from '@/lib/speakers'
 import { insightsByKind, type MeetingStats } from '@/lib/speaker-stats'
 import { hasSpeakerInsightResults, isSpeakerInsightsStale } from '@/lib/staleness'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
-import type { SpeakerInsight, Transcript } from '@/types/api'
+import type { JobDecisions, SpeakerInsight, Transcript } from '@/types/api'
 
 // 講者數據 (.scratch/speaker-analytics): who talked how much, worked out straight from the transcript, so it follows
 // speaker edits at once. Only shown with two or more speakers (the tile isn't there otherwise).
@@ -14,15 +14,28 @@ export function SpeakerStatsSection({
   stats,
   transcript,
   insights,
+  decisions,
+  onOpenDecision,
   onSeek,
   mediaAvailable,
 }: {
   stats: MeetingStats
   transcript: Transcript
   insights: SpeakerInsightsActions
+  /** 決策紀錄 of this job; null until loaded. */
+  decisions: JobDecisions | null
+  /** Opens 決策 at that decision, or just opens it (null) to extract them. */
+  onOpenDecision: (decisionId: string | null) => void
   onSeek: (seconds: number) => void
   mediaAvailable: boolean
 }) {
+  // Only once extracted (at least once): before that there's no count to give, not even zero.
+  const decided = decisions?.extraction?.completedAt ? decisions.decisions : null
+  const proposedBy = new Map<string, number>()
+  for (const decision of decided ?? []) {
+    if (decision.proposedBy) proposedBy.set(decision.proposedBy, (proposedBy.get(decision.proposedBy) ?? 0) + 1)
+  }
+
   return (
     <section className="flex flex-col gap-4">
       <h3>講者數據</h3>
@@ -51,6 +64,7 @@ export function SpeakerStatsSection({
             <th scope="col" className="py-1 pl-3 text-right font-normal">次數</th>
             <th scope="col" className="py-1 pl-3 text-right font-normal">最長一次</th>
             <th scope="col" className="py-1 pl-3 text-right font-normal">平均</th>
+            {decided && <th scope="col" className="py-1 pl-3 text-right font-normal">決定</th>}
           </tr>
         </thead>
         <tbody>
@@ -74,6 +88,9 @@ export function SpeakerStatsSection({
               <td className="py-1.5 pl-3 text-right tabular-nums">{row.turns}</td>
               <td className="py-1.5 pl-3 text-right tabular-nums">{formatClock(row.longestTurnSeconds)}</td>
               <td className="py-1.5 pl-3 text-right tabular-nums">{formatClock(row.averageTurnSeconds)}</td>
+              {decided && (
+                <td className="py-1.5 pl-3 text-right tabular-nums">{proposedBy.get(row.speaker.label) ?? 0}</td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -84,11 +101,61 @@ export function SpeakerStatsSection({
         {stats.silenceSeconds > 0 && <li>{`無人說話共 ${formatClock(stats.silenceSeconds)}`}</li>}
       </ul>
       <p className="text-xs text-muted-foreground/80">
-        依逐字稿的時間計算；講者分得不對時，改片段的講者後會重新計算。「次數」是輪到這位講者說話的次數，「平均」是平均一次說多久，「發言很少」是少於平均每人的四分之一。
+        依逐字稿的時間計算；講者分得不對時，改片段的講者後會重新計算。「次數」是輪到這位講者說話的次數，「平均」是平均一次說多久，「發言很少」是少於平均每人的四分之一。{decided && '「決定」是 AI 從錄音抽出、由這位講者提出或拍板的決策數。'}
       </p>
+
+      <Decided transcript={transcript} decided={decided} onOpenDecision={onOpenDecision} />
 
       <QuestionsAndInterruptions transcript={transcript} insights={insights} onSeek={onSeek} mediaAvailable={mediaAvailable} />
     </section>
+  )
+}
+
+// 決策紀錄 from the speakers' side: how many decisions were made and who proposed each, each one opening in 決策.
+function Decided({
+  transcript,
+  decided,
+  onOpenDecision,
+}: {
+  transcript: Transcript
+  decided: JobDecisions['decisions'] | null
+  onOpenDecision: (decisionId: string | null) => void
+}) {
+  const nameOf = speakerNameOrLabel(transcript.speakers)
+  return (
+    <div className="flex flex-col gap-2 border-t pt-4">
+      <h4 className="text-sm font-medium">決定</h4>
+      {decided === null ? (
+        <>
+          <p className="text-sm text-muted-foreground">還沒抽出這場的決策</p>
+          <Button size="sm" variant="outline" className="w-fit" onClick={() => onOpenDecision(null)}>
+            到「決策」抽出
+          </Button>
+        </>
+      ) : decided.length === 0 ? (
+        <p className="text-sm text-muted-foreground">這場沒有找到做成的決定</p>
+      ) : (
+        <>
+          <p className="text-sm">{`這場做了 ${decided.length} 個決定`}</p>
+          <ul aria-label="這場的決定" className="-mx-2 flex flex-col">
+            {decided.map((decision) => (
+              <li key={decision.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenDecision(decision.id)}
+                  className="w-full rounded-md px-2 py-1 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                >
+                  <span className="text-muted-foreground">
+                    {decision.proposedBy ? nameOf(decision.proposedBy) : '不確定是誰'}：
+                  </span>
+                  {decision.statement}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
   )
 }
 

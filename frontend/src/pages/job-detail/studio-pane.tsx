@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, ChartBarBig, FileText, ClipboardList, Gauge, Gavel, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
 import type { NotesActions } from '@/hooks/use-notes'
 import type { DecisionsActions } from '@/hooks/use-decisions'
@@ -162,6 +162,14 @@ export function StudioPane({
     if (tool === 'speaker-stats' && !speakerStats) onToolChange(null)
   }, [tool, speakerStats, onToolChange])
 
+  // 講者數據 links to a decision: 決策 opens at it.
+  const [decisionToOpen, setDecisionToOpen] = useState<string | null>(null)
+  const openDecision = (decisionId: string | null) => {
+    setDecisionToOpen(decisionId)
+    onToolChange('decisions')
+  }
+  const onDecisionOpened = useCallback(() => setDecisionToOpen(null), [])
+
   const shown = tool ? TOOLS[tool] : null
   const pendingProposals =
     postMeeting?.latestRun?.proposals.filter((proposal) => proposal.status === 'PROPOSED').length ?? 0
@@ -293,7 +301,14 @@ export function StudioPane({
           )}
 
           {tool === 'decisions' && (
-            <DecisionsSection decisions={decisions} transcript={transcript} onSeek={onSeek} mediaAvailable={mediaAvailable} />
+            <DecisionsSection
+              decisions={decisions}
+              transcript={transcript}
+              onSeek={onSeek}
+              mediaAvailable={mediaAvailable}
+              decisionToOpen={decisionToOpen}
+              onDecisionOpened={onDecisionOpened}
+            />
           )}
 
           {tool === 'quiz' && (
@@ -316,6 +331,8 @@ export function StudioPane({
               stats={speakerStats}
               transcript={transcript}
               insights={speakerInsights}
+              decisions={decisions.decisions}
+              onOpenDecision={openDecision}
               onSeek={onSeek}
               mediaAvailable={mediaAvailable}
             />

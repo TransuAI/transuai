@@ -1,9 +1,11 @@
+import { useEffect, useRef, useState } from 'react'
 import { History, Loader2Icon, RefreshCw } from 'lucide-react'
 import type { DecisionsActions } from '@/hooks/use-decisions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { speakerNameOrLabel } from '@/lib/speakers'
 import { isDecisionsStale } from '@/lib/staleness'
+import { cn } from '@/lib/utils'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
 import type { Decision, Transcript } from '@/types/api'
 
@@ -15,12 +17,32 @@ export function DecisionsSection({
   transcript,
   onSeek,
   mediaAvailable,
+  decisionToOpen = null,
+  onDecisionOpened = () => {},
 }: {
   decisions: DecisionsActions
   transcript: Transcript | null
   onSeek: (seconds: number) => void
   mediaAvailable: boolean
+  /** A decision picked elsewhere (講者數據): scrolled to and briefly highlighted. */
+  decisionToOpen?: string | null
+  onDecisionOpened?: () => void
 }) {
+  // As notes: the decision just opened from elsewhere, briefly highlighted so the eye finds it in the list.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  useEffect(() => {
+    if (!decisionToOpen) return
+    setHighlightedId(decisionToOpen)
+    onDecisionOpened()
+  }, [decisionToOpen, onDecisionOpened])
+  useEffect(() => {
+    if (!highlightedId) return
+    listRef.current?.querySelector(`[data-decision-id="${highlightedId}"]`)?.scrollIntoView?.({ block: 'nearest' })
+    const timer = setTimeout(() => setHighlightedId(null), 2000)
+    return () => clearTimeout(timer)
+  }, [highlightedId])
+
   const extraction = decisions?.extraction ?? null
   const found = decisions?.decisions ?? []
   const status = extraction?.status ?? 'NONE'
@@ -68,12 +90,13 @@ export function DecisionsSection({
       )}
 
       {found.length > 0 ? (
-        <ul aria-label="這場的決策" className="flex flex-col gap-3">
+        <ul ref={listRef} aria-label="這場的決策" className="flex flex-col gap-3">
           {found.map((decision) => (
             <DecisionItem
               key={decision.id}
               decision={decision}
               proposer={decision.proposedBy ? nameOf(decision.proposedBy) : null}
+              highlighted={decision.id === highlightedId}
               onSeek={onSeek}
               mediaAvailable={mediaAvailable}
             />
@@ -92,16 +115,22 @@ export function DecisionsSection({
 function DecisionItem({
   decision,
   proposer,
+  highlighted,
   onSeek,
   mediaAvailable,
 }: {
   decision: Decision
   proposer: string | null
+  highlighted: boolean
   onSeek: (seconds: number) => void
   mediaAvailable: boolean
 }) {
   return (
-    <li className="flex flex-col gap-1.5 rounded-lg border p-3 text-sm">
+    <li
+      data-decision-id={decision.id}
+      data-highlighted={highlighted || undefined}
+      className={cn('flex flex-col gap-1.5 rounded-lg border p-3 text-sm transition-colors', highlighted && 'bg-primary/10')}
+    >
       <p className="flex items-start gap-2 font-medium leading-relaxed">
         <span className="flex-1">{decision.statement}</span>
         {decision.tentative && <Badge variant="outline">暫定</Badge>}
