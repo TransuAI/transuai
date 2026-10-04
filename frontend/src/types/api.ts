@@ -509,6 +509,7 @@ export interface TranslationSummary {
 }
 
 export interface TranslationDetail extends TranslationSummary {
-  /** One per translated segment, by the transcript segment's id. */
-  segments: { segmentId: string; text: string }[]
+  /** One per translated segment, by the transcript segment's id. sourceText is what it was translated from: when the
+   *  segment's text has since been edited, the translation is out of date until ai-service re-translates it. */
+  segments: { segmentId: string; text: string; sourceText: string }[]
 }

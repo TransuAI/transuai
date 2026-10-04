@@ -3939,10 +3939,10 @@ describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => 
   }
   const done = { ...translating, status: 'COMPLETED' as const, translatedSegments: 4, model: 'qwen3:14b', completedAt: '2026-10-04T03:01:00Z' }
   const segments = [
-    { segmentId: 'seg-d1', text: 'お聞きいただきありがとうございます' },
-    { segmentId: 'seg-d2', text: '今日はゲストをお迎えしました' },
-    { segmentId: 'seg-d3', text: 'こんにちは' },
-    { segmentId: 'seg-d4', text: 'まず近況から' },
+    { segmentId: 'seg-d1', text: 'お聞きいただきありがとうございます', sourceText: '歡迎收聽' },
+    { segmentId: 'seg-d2', text: '今日はゲストをお迎えしました', sourceText: '今天請到來賓' },
+    { segmentId: 'seg-d3', text: 'こんにちは', sourceText: '大家好' },
+    { segmentId: 'seg-d4', text: 'まず近況から', sourceText: '先聊聊近況' },
   ]
   const row = (text: string) => screen.getByText(text).closest('[data-segment-index]') as HTMLElement
 
@@ -4027,6 +4027,40 @@ describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => 
 
     expect(await screen.findByText('無法刪除譯文，請稍後再試')).toBeInTheDocument()
     expect(screen.getByText('こんにちは')).toBeInTheDocument()
+  })
+
+  it('follows an edit: the edited segment drops its old translation until the re-translation is ready', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    vi.mocked(transcriptApi.updateSegmentText).mockResolvedValue({
+      segment: { id: 'seg-d3', startTime: 4, endTime: 6, speakerLabel: 'S2', text: '大家好啊', originalText: '大家好' },
+      revision: 1,
+    })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '雙語（日本語）')
+    await screen.findByText('こんにちは')
+
+    await user.click(within(row('大家好')).getByRole('button', { name: '編輯片段' }))
+    const editor = screen.getByRole('textbox', { name: '編輯片段文字' })
+    await user.clear(editor)
+    await user.type(editor, '大家好啊{Enter}')
+
+    expect(await screen.findByText('大家好啊')).toBeInTheDocument()
+    expect(screen.queryByText('こんにちは')).not.toBeInTheDocument() // translated from the old text
+    expect(row('先聊聊近況')).toHaveTextContent('まず近況から') // the others stay
+
+    // ai-service re-translates the edited segment in the background; the page keeps asking for a while after an edit.
+    const retranslated = { ...done, completedAt: '2026-10-04T03:05:00Z' }
+    vi.mocked(translationsApi.list).mockResolvedValue([retranslated])
+    vi.mocked(translationsApi.get).mockResolvedValue({
+      ...retranslated,
+      segments: segments.map((s) => (s.segmentId === 'seg-d3' ? { ...s, text: 'みなさん、こんにちは', sourceText: '大家好啊' } : s)),
+    })
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(await screen.findByText('みなさん、こんにちは')).toBeInTheDocument()
   })
 
   it('searches the translation too in 雙語, highlighting it under the original', async () => {

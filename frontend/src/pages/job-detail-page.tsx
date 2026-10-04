@@ -208,7 +208,7 @@ export function JobDetailPage() {
   const quizzes = useQuizzes(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const speakerInsights = useSpeakerInsights(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const outputs = useOutputs(jobId, jobStatus === 'COMPLETED', reloadUsage)
-  const translations = useTranslations(jobId, jobStatus === 'COMPLETED', reloadUsage)
+  const translations = useTranslations(jobId, jobStatus === 'COMPLETED', reloadUsage, transcript)
   const postMeeting = usePostMeeting(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const notes = useNotes(jobId, jobStatus === 'COMPLETED')
   // Capped at the recorded length: a media element can report a little past it at the very end, and a note's time must

@@ -29,6 +29,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { currentTranslations } from '@/lib/current-translations'
 import { TRANSLATION_LANGUAGES } from '@/lib/translation-languages'
 import type { Quiz, TranslationLanguage, TranslationSummary } from '@/types/api'
 
@@ -93,7 +94,7 @@ export function ExportMenu({
   const downloadTranslated = (language: TranslationLanguage, choice: (typeof TRANSLATED_FORMATS)[number]) =>
     translationsApi.get(source.job.jobId, language).then(
       (detail) => {
-        const texts = new Map(detail.segments.map((s) => [s.segmentId, s.text]))
+        const texts = currentTranslations(detail.segments, source.transcript)
         const byPosition = new Map<number, string>()
         source.transcript?.segments.forEach((segment, i) => {
           const text = texts.get(segment.id)
