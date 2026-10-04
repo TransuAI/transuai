@@ -21,6 +21,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
@@ -34,6 +35,8 @@ import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.grpc.Status;
+import transuai.ai.v1.Ai.AskDecisionsChunk;
+import transuai.ai.v1.Ai.AskDecisionsRequest;
 import transuai.ai.v1.Ai.CreateDecisionRequest;
 import transuai.ai.v1.Ai.Decision;
 import transuai.ai.v1.Ai.DecisionExtraction;
@@ -354,6 +357,39 @@ class DecisionTest {
                 .andExpect(jsonPath("$.decisions[0].supersededBy[0].meetingAt").isEmpty())
                 .andExpect(jsonPath("$.decisions[1].supersedes").isEmpty())
                 .andExpect(jsonPath("$.decisions[1].supersededBy").isEmpty());
+    }
+
+    @Test
+    void askingStreamsTheAnswerWithTheDecisionsItIsBasedOnAndTheirMeetings() throws Exception {
+        when(uploadServiceStub.listJobs(any())).thenReturn(ListJobsResponse.newBuilder()
+                .addJobs(job("job-old", "九月週會", "2026-09-01T00:00:00Z")).setTotalCount(1).build());
+        when(aiServiceStub.askDecisions(any())).thenReturn(java.util.List.of(
+                AskDecisionsChunk.newBuilder().setSources(UserDecisions.newBuilder()
+                        .addDecisions(decision("a1", "job-old", "資料庫用 MySQL"))).build(),
+                AskDecisionsChunk.newBuilder().setAnsweredBy(ModelChoice.newBuilder().setProvider("platform").setModel("qwen3:14b")).build(),
+                AskDecisionsChunk.newBuilder().setDelta("當初選 MySQL 是因為團隊熟 [1]。").build()).iterator());
+
+        MvcResult result = call(MockMvcRequestBuilders.post("/decisions/ask").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"question\":\"當初為什麼選 MySQL？\",\"category\":\"meeting\"}")).andReturn();
+        result.getAsyncResult(5_000);
+        String stream = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(stream).containsSubsequence("event:sources", "event:model", "event:delta");
+        assertThat(stream).contains("\"job\":{\"jobId\":\"job-old\",\"title\":\"九月週會\"");
+        assertThat(stream).contains("\"createdAt\":\"2026-09-01T00:00:00Z\"");
+        assertThat(stream).contains("data:\"當初選 MySQL 是因為團隊熟 [1]。\"");
+        ArgumentCaptor<AskDecisionsRequest> sent = ArgumentCaptor.forClass(AskDecisionsRequest.class);
+        verify(aiServiceStub).askDecisions(sent.capture());
+        assertThat(sent.getValue().getUserId()).isEqualTo(user.toString());
+        assertThat(sent.getValue().getQuestion()).isEqualTo("當初為什麼選 MySQL？");
+        assertThat(sent.getValue().getJobIdsList()).containsExactly("job-old");
+    }
+
+    @Test
+    void aQuestionIsRequired() throws Exception {
+        call(MockMvcRequestBuilders.post("/decisions/ask").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+        verify(aiServiceStub, never()).askDecisions(any());
     }
 
     @Test

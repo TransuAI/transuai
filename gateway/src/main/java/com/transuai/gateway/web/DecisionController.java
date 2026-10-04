@@ -1,13 +1,16 @@
 package com.transuai.gateway.web;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -17,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcStrings;
@@ -25,6 +29,7 @@ import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.DecisionInputDto;
+import com.transuai.gateway.web.dto.DecisionQuestionDto;
 import com.transuai.gateway.web.dto.DecisionTimelineDto;
 import com.transuai.gateway.web.dto.DecisionsDto;
 
@@ -34,6 +39,10 @@ import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import tools.jackson.databind.json.JsonMapper;
+import transuai.ai.v1.Ai.AskDecisionsChunk;
+import transuai.ai.v1.Ai.AskDecisionsRequest;
 import transuai.ai.v1.Ai.CreateDecisionRequest;
 import transuai.ai.v1.Ai.Decision;
 import transuai.ai.v1.Ai.DecisionExtraction;
@@ -52,10 +61,12 @@ import transuai.ai.v1.AiServiceGrpc;
 // GENERATING。
 @RestController
 @RequiredArgsConstructor
+@Slf4j
 public class DecisionController {
 
     // upload-service 一頁最多 100 個 Job。
     private static final int JOBS_PAGE_SIZE = 100;
+    private static final JsonMapper JSON = JsonMapper.shared();
 
     private final AiServiceGrpc.AiServiceBlockingStub aiServiceStub;
     private final UploadServiceGrpc.UploadServiceBlockingStub uploadServiceStub;
@@ -124,12 +135,7 @@ public class DecisionController {
     @GetMapping("/decisions")
     public DecisionTimelineDto timeline(@CurrentUserId UUID userId, @RequestParam(defaultValue = "") String q,
             @RequestParam(defaultValue = "") String category, @RequestParam(defaultValue = "") String jobId) {
-        Map<String, Job> jobs = new LinkedHashMap<>();
-        for (Job job : usersJobs(userId, category)) {
-            if (jobId.isEmpty() || job.getJobId().equals(jobId)) {
-                jobs.put(job.getJobId(), job);
-            }
-        }
+        Map<String, Job> jobs = usersJobs(userId, category, jobId);
         if (jobs.isEmpty()) {
             return new DecisionTimelineDto(List.of());
         }
@@ -138,10 +144,7 @@ public class DecisionController {
                         .addAllJobIds(jobs.keySet()).build()).getDecisionsList()
                 : aiServiceStub.searchDecisions(SearchDecisionsRequest.newBuilder().setUserId(userId.toString())
                         .setQuery(q.strip()).addAllJobIds(jobs.keySet()).build()).getDecisionsList();
-        List<DecisionTimelineDto.Item> items = new ArrayList<>(found.stream()
-                .filter(decision -> jobs.containsKey(decision.getJobId()))
-                .map(decision -> new DecisionTimelineDto.Item(toSummary(jobs.get(decision.getJobId())), toDto(decision)))
-                .toList());
+        List<DecisionTimelineDto.Item> items = new ArrayList<>(timelineItems(found, jobs));
         if (q.isBlank()) {
             // Newest meeting first; within one, the order ai-service gave (by time). The sort is stable.
             items.sort(Comparator.comparing((DecisionTimelineDto.Item item) -> item.job().createdAt(),
@@ -150,22 +153,83 @@ public class DecisionController {
         return new DecisionTimelineDto(items);
     }
 
-    private List<Job> usersJobs(UUID userId, String category) {
-        List<Job> all = new ArrayList<>();
+    // The user's own jobs (of a category, or just one), by id: what may be asked about, and what each decision belongs to.
+    private Map<String, Job> usersJobs(UUID userId, String category, String jobId) {
+        Map<String, Job> jobs = new LinkedHashMap<>();
+        int seen = 0;
         for (int page = 1;; page++) {
             ListJobsResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId).listJobs(
                     ListJobsRequest.newBuilder().setPage(page).setPageSize(JOBS_PAGE_SIZE).setCategory(category).build());
-            all.addAll(response.getJobsList());
-            if (response.getJobsCount() == 0 || all.size() >= response.getTotalCount()) {
-                return all;
+            for (Job job : response.getJobsList()) {
+                if (jobId.isEmpty() || job.getJobId().equals(jobId)) {
+                    jobs.put(job.getJobId(), job);
+                }
+            }
+            seen += response.getJobsCount();
+            if (response.getJobsCount() == 0 || seen >= response.getTotalCount()) {
+                return jobs;
             }
         }
+    }
+
+    private static List<DecisionTimelineDto.Item> timelineItems(List<Decision> decisions, Map<String, Job> jobs) {
+        return decisions.stream()
+                .filter(decision -> jobs.containsKey(decision.getJobId()))
+                .map(decision -> new DecisionTimelineDto.Item(toSummary(jobs.get(decision.getJobId())), toDto(decision)))
+                .toList();
     }
 
     private static DecisionTimelineDto.JobSummary toSummary(Job job) {
         return new DecisionTimelineDto.JobSummary(job.getJobId(), GrpcStrings.emptyToNull(job.getTitle()),
                 job.getFileName(), GrpcStrings.emptyToNull(job.getCategory()),
                 job.hasCreatedAt() ? GrpcTimestamps.toInstant(job.getCreatedAt()) : null);
+    }
+
+    // 問決策（SSE，跟問答一樣經 Gateway 轉發，見 AiController.askQuestion）：只根據使用者自己的決策回答（範圍跟決策頁的篩選一樣），
+    // 先送 sources（依據的決策，帶它們的 Job；順序就是回答裡 [n] 的編號），再送 model 與 delta；失敗送 error。
+    @CostlyFeature("decision-question")
+    @PostMapping(value = "/decisions/ask", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter ask(@CurrentUserId UUID userId, @RequestBody DecisionQuestionDto body) {
+        if (body == null || body.question() == null || body.question().isBlank()) {
+            throw new IllegalArgumentException("question is required"); // → 400 via GrpcExceptionAdvice
+        }
+        usageLimitGuard.requirePlatformTokensLeft(userId);
+        Map<String, Job> jobs = usersJobs(userId, body.category() == null ? "" : body.category(),
+                body.jobId() == null ? "" : body.jobId());
+        Iterator<AskDecisionsChunk> chunks = aiServiceStub.askDecisions(AskDecisionsRequest.newBuilder()
+                .setUserId(userId.toString()).setQuestion(body.question().strip()).addAllJobIds(jobs.keySet()).build());
+        // As askQuestion: take the first chunk here, so a gRPC error still becomes an ordinary error response.
+        if (!chunks.hasNext()) {
+            throw new IllegalStateException("ai-service closed the AskDecisions stream without any chunk");
+        }
+        AskDecisionsChunk first = chunks.next();
+        SseEmitter emitter = new SseEmitter(0L);
+        Thread.ofVirtual().start(() -> {
+            try {
+                send(emitter, first, jobs);
+                while (chunks.hasNext()) {
+                    send(emitter, chunks.next(), jobs);
+                }
+                emitter.complete();
+            } catch (Exception e) {
+                log.warn("AskDecisions SSE relay failed", e);
+                emitter.completeWithError(e);
+            }
+        });
+        return emitter;
+    }
+
+    // data 一律是單行 JSON（見 AiController.send）；java.time 用 Jackson 3 預設的 ISO 字串。
+    private void send(SseEmitter emitter, AskDecisionsChunk chunk, Map<String, Job> jobs) throws IOException {
+        switch (chunk.getPayloadCase()) {
+            case SOURCES -> emitter.send(SseEmitter.event().name("sources").data(JSON.writeValueAsString(
+                    timelineItems(chunk.getSources().getDecisionsList(), jobs))));
+            case DELTA -> emitter.send(SseEmitter.event().name("delta").data(JSON.writeValueAsString(chunk.getDelta())));
+            case ERROR -> emitter.send(SseEmitter.event().name("error").data(JSON.writeValueAsString(chunk.getError())));
+            case ANSWERED_BY -> emitter.send(SseEmitter.event().name("model").data(JSON.writeValueAsString(
+                    Map.of("provider", chunk.getAnsweredBy().getProvider(), "model", chunk.getAnsweredBy().getModel()))));
+            case PAYLOAD_NOT_SET -> log.warn("AskDecisionsChunk with no payload set, skipping");
+        }
     }
 
     private static DecisionInput toInput(DecisionInputDto body) {
