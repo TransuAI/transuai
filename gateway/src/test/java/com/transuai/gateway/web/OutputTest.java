@@ -37,6 +37,7 @@ import transuai.ai.v1.Ai.ListOutputsResponse;
 import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.OutputStatus;
 import transuai.ai.v1.Ai.RequestOutputRequest;
+import transuai.ai.v1.Ai.UpdateOutputRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
 /** 多格式輸出（見 .scratch/multi-format-outputs/issues/01）：要求、列出、取得，先過 ownership；要求是花錢的功能、帶上 Job 的標題。 */
@@ -116,6 +117,32 @@ class OutputTest {
                 .andExpect(jsonPath("$[0].status").value("COMPLETED"))
                 .andExpect(jsonPath("$[0].content").value("介紹\n"))
                 .andExpect(jsonPath("$[0].editedAt").doesNotExist());
+    }
+
+    @Test
+    void theContentCanBeChanged() throws Exception {
+        when(aiServiceStub.updateOutput(any())).thenReturn(done.toBuilder().setContent("改過的\n")
+                .setEditedAt(com.google.protobuf.Timestamp.newBuilder().setSeconds(1_790_000_000)).build());
+
+        call(MockMvcRequestBuilders.patch("/jobs/" + JOB + "/outputs/o1").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"改過的\\n\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").value("改過的\n"))
+                .andExpect(jsonPath("$.editedAt").exists());
+
+        ArgumentCaptor<UpdateOutputRequest> sent = ArgumentCaptor.forClass(UpdateOutputRequest.class);
+        verify(aiServiceStub).updateOutput(sent.capture());
+        assertThat(sent.getValue().getOutputId()).isEqualTo("o1");
+        assertThat(sent.getValue().getContent()).isEqualTo("改過的\n");
+    }
+
+    @Test
+    void changingAnOutputStillBeingGeneratedIsAConflict() throws Exception {
+        when(aiServiceStub.updateOutput(any())).thenThrow(Status.FAILED_PRECONDITION.asRuntimeException());
+
+        call(MockMvcRequestBuilders.patch("/jobs/" + JOB + "/outputs/o1").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"太早\"}"))
+                .andExpect(status().isConflict());
     }
 
     @Test

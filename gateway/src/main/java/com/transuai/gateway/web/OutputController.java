@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,12 +19,14 @@ import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.GeneratedOutputDto;
 import com.transuai.gateway.web.dto.OutputRequestDto;
+import com.transuai.gateway.web.dto.OutputUpdateDto;
 
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.GeneratedOutput;
 import transuai.ai.v1.Ai.GetOutputRequest;
 import transuai.ai.v1.Ai.ListOutputsRequest;
 import transuai.ai.v1.Ai.RequestOutputRequest;
+import transuai.ai.v1.Ai.UpdateOutputRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
 // 多格式輸出（見 ai-service/CONTEXT.md「多格式輸出」）：在 ai-service 背景產生，前端輪詢列表直到不是 GENERATING。路徑刻意不用 /export
@@ -69,6 +72,18 @@ public class OutputController {
     public GeneratedOutputDto get(@CurrentUserId UUID userId, @PathVariable String jobId, @PathVariable String outputId) {
         jobOwnershipGuard.check(userId, jobId);
         return toDto(aiServiceStub.getOutput(GetOutputRequest.newBuilder().setJobId(jobId).setOutputId(outputId).build()));
+    }
+
+    // 使用者修改內容（只有完成的可以改）：沒帶 content 回 400，空白或太長也是 400，還沒產生完成回 409。
+    @PatchMapping("/jobs/{jobId}/outputs/{outputId}")
+    public GeneratedOutputDto update(@CurrentUserId UUID userId, @PathVariable String jobId, @PathVariable String outputId,
+            @RequestBody OutputUpdateDto request) {
+        jobOwnershipGuard.check(userId, jobId);
+        if (request == null || request.content() == null) {
+            throw new IllegalArgumentException("content is required"); // → 400 via GrpcExceptionAdvice
+        }
+        return toDto(aiServiceStub.updateOutput(UpdateOutputRequest.newBuilder()
+                .setJobId(jobId).setOutputId(outputId).setContent(request.content()).build()));
     }
 
     private static GeneratedOutputDto toDto(GeneratedOutput output) {
