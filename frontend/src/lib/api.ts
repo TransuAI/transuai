@@ -260,6 +260,13 @@ export const outputsApi = {
 // 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.
 // 決策紀錄: extracted in the background (meetings and interviews also once transcribed); extracting again only replaces
 // what the AI found and the user didn't change.
+export interface DecisionQuestionHandlers {
+  onSources: (sources: DecisionTimeline['items']) => void
+  onDelta: (text: string) => void
+  onError: (message: string) => void
+  onModel?: (model: { provider: string; model: string }) => void
+}
+
 export const decisionsApi = {
   list: (jobId: string) => apiFetch<JobDecisions>(`/jobs/${jobId}/decisions`),
   extract: (jobId: string) => apiFetch<DecisionExtraction>(`/jobs/${jobId}/decisions/extract`, { method: 'POST' }),
@@ -270,6 +277,25 @@ export const decisionsApi = {
   update: (jobId: string, decisionId: string, decision: DecisionInput) =>
     apiFetch<Decision>(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'PATCH', body: decision }),
   // An extracted one is only hidden (extracting again doesn't bring it back); one the user added is gone.
+  // 問決策: answered from the user's decisions only (within the page's filters), streamed; sources come first, in the
+  // order the answer numbers them [n].
+  ask: (params: { question: string; category?: JobCategory; jobId?: string }, handlers: DecisionQuestionHandlers) =>
+    requestSse('/decisions/ask', { method: 'POST', body: params }, (event, data) => {
+      switch (event) {
+        case 'sources':
+          handlers.onSources(JSON.parse(data) as DecisionTimeline['items'])
+          break
+        case 'delta':
+          handlers.onDelta(JSON.parse(data) as string)
+          break
+        case 'error':
+          handlers.onError(JSON.parse(data) as string)
+          break
+        case 'model':
+          handlers.onModel?.(JSON.parse(data) as { provider: string; model: string })
+          break
+      }
+    }),
   // The 決策 page: all the user's decisions, or a category's, or one job's; q searches the words and the meaning.
   timeline: (params: { q?: string; category?: JobCategory; jobId?: string }) => {
     const search = new URLSearchParams(params as Record<string, string>).toString()

@@ -6,7 +6,7 @@ import { decisionsApi } from '@/lib/api'
 import type { Decision, DecisionTimeline } from '@/types/api'
 import { DecisionsPage } from './decisions-page'
 
-vi.mock('@/lib/api', () => ({ decisionsApi: { timeline: vi.fn() } }))
+vi.mock('@/lib/api', () => ({ decisionsApi: { timeline: vi.fn(), ask: vi.fn() } }))
 
 const september = { jobId: 'job-a', title: '九月週會', fileName: 'sep.mp3', category: 'meeting' as const, createdAt: '2026-09-01T04:00:00Z' }
 const october = { jobId: 'job-b', title: null, fileName: 'oct.mp3', category: 'interview' as const, createdAt: '2026-10-01T04:00:00Z' }
@@ -145,5 +145,43 @@ describe('DecisionsPage', () => {
     expect(markdown).toContain('# 決策\n\n- 類型：會議\n')
     expect(markdown).toContain('## 2026/10/1 oct.mp3\n\n### 資料庫改用 PostgreSQL（暫定）')
     expect(markdown).toContain('## 2026/9/1 九月週會\n\n### 資料庫用 MySQL\n\n- 理由：團隊熟\n- 沒選：PostgreSQL\n- 時間：[00:08] 「那就用 MySQL」')
+  })
+
+  it('answers a question only from the decisions, showing what the answer is based on', async () => {
+    const user = userEvent.setup()
+    vi.mocked(decisionsApi.ask).mockImplementation(async (_params, handlers) => {
+      handlers.onSources([timeline.items[1]])
+      handlers.onModel?.({ provider: 'platform', model: 'qwen3:14b' })
+      handlers.onDelta('當初選 MySQL ')
+      handlers.onDelta('是因為團隊熟 [1]。')
+    })
+    renderPage('/decisions?category=meeting')
+    await screen.findAllByRole('region')
+
+    await user.type(screen.getByRole('textbox', { name: '問決策' }), '當初為什麼選 MySQL？')
+    await user.click(screen.getByRole('button', { name: '問' }))
+
+    expect(decisionsApi.ask).toHaveBeenCalledWith({ question: '當初為什麼選 MySQL？', category: 'meeting' }, expect.anything())
+    expect(await screen.findByText('當初選 MySQL 是因為團隊熟 [1]。')).toBeInTheDocument()
+    const basis = screen.getByRole('list', { name: '回答依據的決策' })
+    const [first] = within(basis).getAllByRole('listitem')
+    expect(first).toHaveTextContent('[1]')
+    expect(first).toHaveTextContent('資料庫用 MySQL')
+    expect(within(first).getByRole('link', { name: '九月週會' })).toHaveAttribute('href', '/jobs/job-a')
+    expect(screen.getByText('由 qwen3:14b 回答')).toBeInTheDocument()
+  })
+
+  it('says when answering failed', async () => {
+    const user = userEvent.setup()
+    vi.mocked(decisionsApi.ask).mockImplementation(async (_params, handlers) => {
+      handlers.onSources([])
+      handlers.onError('模型暫時無法使用，請稍後再試')
+    })
+    renderPage()
+    await screen.findAllByRole('region')
+
+    await user.type(screen.getByRole('textbox', { name: '問決策' }), '為什麼？{Enter}')
+
+    expect(await screen.findByText('模型暫時無法使用，請稍後再試')).toBeInTheDocument()
   })
 })

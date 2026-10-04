@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Download, Search } from 'lucide-react'
+import { Download, Loader2Icon, MessageCircleQuestion, Search } from 'lucide-react'
 import { decisionsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { downloadTextFile } from '@/lib/download'
@@ -163,6 +163,8 @@ export function DecisionsPage() {
         </Button>
       </div>
 
+      <AskDecisions category={category} jobId={jobId} />
+
       {isLoading && items.length === 0 ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-24 w-full" />
@@ -200,6 +202,96 @@ export function DecisionsPage() {
               </ul>
             </section>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 問決策: a question answered only from the user's decisions (within the page's filters) — the answer streams in, and the
+// decisions it's based on are listed under it, numbered as the answer cites them [n].
+function AskDecisions({ category, jobId }: { category: JobCategory | null; jobId: string | null }) {
+  const [question, setQuestion] = useState('')
+  const [asked, setAsked] = useState<{
+    question: string
+    sources: Item[]
+    answer: string
+    model: string | null
+    error: string | null
+    done: boolean
+  } | null>(null)
+  const asking = asked !== null && !asked.done
+
+  const ask = async (event: FormEvent) => {
+    event.preventDefault()
+    const text = question.trim()
+    if (!text || asking) return
+    setAsked({ question: text, sources: [], answer: '', model: null, error: null, done: false })
+    const update = (change: (prev: NonNullable<typeof asked>) => NonNullable<typeof asked>) =>
+      setAsked((prev) => (prev ? change(prev) : prev))
+    try {
+      await decisionsApi.ask(
+        { question: text, ...(category && { category }), ...(jobId && { jobId }) },
+        {
+          onSources: (sources) => update((prev) => ({ ...prev, sources })),
+          onDelta: (delta) => update((prev) => ({ ...prev, answer: prev.answer + delta })),
+          onError: (message) => update((prev) => ({ ...prev, error: message })),
+          onModel: (model) => update((prev) => ({ ...prev, model: model.model })),
+        },
+      )
+    } catch (err) {
+      update((prev) => ({ ...prev, error: err instanceof ApiError ? err.message : '無法回答，請稍後再試' }))
+    }
+    update((prev) => ({ ...prev, done: true }))
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-4">
+      <form onSubmit={(event) => void ask(event)} className="flex gap-2">
+        <Input
+          aria-label="問決策"
+          placeholder="問決策，例如：當初為什麼選 PostgreSQL？"
+          value={question}
+          disabled={asking}
+          onChange={(event) => setQuestion(event.target.value)}
+        />
+        <Button type="submit" disabled={asking || !question.trim()}>
+          {asking ? <Loader2Icon className="size-4 animate-spin" /> : <MessageCircleQuestion className="size-4" />}
+          問
+        </Button>
+      </form>
+      <p className="text-xs text-muted-foreground">只根據你的決策紀錄回答（跟上面的篩選一樣的範圍）；紀錄裡沒有的會說沒有。</p>
+      {asked && (
+        <div className="flex flex-col gap-2 text-sm">
+          <p className="font-medium">{asked.question}</p>
+          {asked.answer && <p className="leading-relaxed whitespace-pre-wrap">{asked.answer}</p>}
+          {asking && !asked.answer && <p className="text-muted-foreground">找相關的決策…</p>}
+          {asked.error && (
+            <p role="alert" className="text-destructive">
+              {asked.error}
+            </p>
+          )}
+          {asked.sources.length > 0 && (
+            <ol aria-label="回答依據的決策" className="flex flex-col gap-1 text-xs text-muted-foreground">
+              {asked.sources.map(({ job, decision }, i) => (
+                <li key={decision.id} className="flex flex-wrap gap-x-1.5">
+                  <span>{`[${i + 1}]`}</span>
+                  <span className="text-foreground/85">{decision.statement}</span>
+                  <span>·</span>
+                  {job.createdAt && <span>{jobDate(job.createdAt)}</span>}
+                  <Link to={`/jobs/${job.jobId}`} className="hover:underline">
+                    {jobDisplayName(job)}
+                  </Link>
+                  {decision.startTime !== null && (
+                    <Link to={`/jobs/${job.jobId}?t=${decision.startTime}&decision=${decision.id}`} className="font-mono hover:underline">
+                      {formatDuration(decision.startTime)}
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+          {asked.done && asked.model && <p className="text-xs text-muted-foreground/80">由 {asked.model} 回答</p>}
         </div>
       )}
     </div>
