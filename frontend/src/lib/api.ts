@@ -37,6 +37,8 @@ import type {
   User,
   WebSearchResult,
   SpeakerInsights,
+  DecisionExtraction,
+  JobDecisions,
   GeneratedOutput,
   OutputRequest,
   TranslationDetail,
@@ -253,6 +255,13 @@ export const outputsApi = {
 }
 
 // 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.
+// 決策紀錄: extracted in the background (meetings and interviews also once transcribed); extracting again only replaces
+// what the AI found and the user didn't change.
+export const decisionsApi = {
+  list: (jobId: string) => apiFetch<JobDecisions>(`/jobs/${jobId}/decisions`),
+  extract: (jobId: string) => apiFetch<DecisionExtraction>(`/jobs/${jobId}/decisions/extract`, { method: 'POST' }),
+}
+
 export const speakerInsightsApi = {
   get: (jobId: string) => apiFetch<SpeakerInsights>(`/jobs/${jobId}/speaker-insights`),
   request: (jobId: string) => apiFetch<SpeakerInsights>(`/jobs/${jobId}/speaker-insights`, { method: 'POST' }),

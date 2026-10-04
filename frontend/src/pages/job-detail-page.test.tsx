@@ -4,8 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ApiError } from '@/lib/api-client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi, outputsApi, translationsApi } from '@/lib/api'
-import type { GeneratedOutput, SpeakerInsights, TranslationSummary, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
+import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi, speakerInsightsApi, outputsApi, translationsApi, decisionsApi } from '@/lib/api'
+import type { Decision, DecisionExtraction, GeneratedOutput, SpeakerInsights, TranslationSummary, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
   jobsApi: {
@@ -28,7 +28,12 @@ vi.mock('@/lib/api', () => ({
   speakerInsightsApi: { get: vi.fn(), request: vi.fn() },
   outputsApi: { list: vi.fn(), request: vi.fn(), update: vi.fn() },
   translationsApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), delete: vi.fn() },
+  decisionsApi: { list: vi.fn(), extract: vi.fn() },
 }))
+
+// Every test renders the whole page, and this file runs ~250 of them in one jsdom: on a busy machine the later, longer
+// ones take a few seconds (one that takes 1.3 s on its own went past the default 5 s in a full run).
+vi.setConfig({ testTimeout: 15_000 })
 
 vi.mock('@/hooks/use-job-socket', () => ({
   useJobSocket: vi.fn(),
@@ -53,6 +58,7 @@ beforeEach(() => {
   vi.mocked(speakerInsightsApi.get).mockResolvedValue(noInsights)
   vi.mocked(outputsApi.list).mockResolvedValue([])
   vi.mocked(translationsApi.list).mockResolvedValue([])
+  vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: null, decisions: [] })
   vi.mocked(speakerSuggestionsApi.list).mockResolvedValue([])
   vi.mocked(notesApi.list).mockResolvedValue([])
   vi.mocked(postMeetingApi.get).mockResolvedValue({ available: true, unavailableReason: null, hints: [], earlierRuns: [], latestRun: null })
@@ -368,7 +374,7 @@ describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
     await renderCompletedJob()
 
     const tiles = within(await screen.findByRole('list', { name: 'Studio 功能' })).getAllByRole('button')
-    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '筆記還沒', '測驗還沒', '多格式輸', '會後處理', '用量尚無'])
+    expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '筆記還沒', '決策找出', '測驗還沒', '多格式輸', '會後處理', '用量尚無'])
     expect(screen.getByRole('button', { name: '章節' })).toHaveAccessibleDescription('1 個章節')
     expect(screen.queryByRole('button', { name: '0:12開場' })).not.toBeInTheDocument()
   })
@@ -4145,5 +4151,124 @@ describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => 
     await user.click(screen.getByRole('button', { name: '再翻譯一次' }))
 
     expect(translationsApi.request).toHaveBeenCalledWith('job-1', 'ja')
+  })
+})
+
+describe('JobDetailPage decisions (決策, COMPLETED, desktop layout)', () => {
+  // multiSpeakerTranscript: S1 主持人 / S2 講者 2; 大家好 at 0:04 is S2's
+  const extracting: DecisionExtraction = {
+    status: 'GENERATING', failureReason: null, sourceRevision: 0, modelProvider: null, model: null,
+    requestedAt: '2026-10-04T03:00:00Z', completedAt: null,
+  }
+  const extracted = { ...extracting, status: 'COMPLETED' as const, model: 'qwen3:14b', completedAt: '2026-10-04T03:01:00Z' }
+  const decision = (overrides: Partial<Decision>): Decision => ({
+    id: 'd1', jobId: 'job-1', statement: '資料庫用 PostgreSQL', rationale: '需要 pgvector', alternatives: ['MySQL'],
+    proposedBy: 'S2', tentative: false, startTime: 4, evidenceText: '大家好', source: 'ai', edited: false,
+    supersedesId: null, createdAt: '2026-10-04T03:01:00Z', ...overrides,
+  })
+  const decisions = [
+    decision({}),
+    decision({ id: 'd2', statement: '上線日期暫定月底', rationale: '', alternatives: [], proposedBy: null, tentative: true, startTime: 6, evidenceText: '先聊聊近況' }),
+  ]
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('extracts the decisions in the background, then lists what was decided, why, instead of what, by whom', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.extract).mockResolvedValue(extracting)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('決策')
+
+    await user.click(screen.getByRole('button', { name: '抽出決策' }))
+    expect(decisionsApi.extract).toHaveBeenCalledWith('job-1')
+    expect(screen.getByText('抽取中…')).toBeInTheDocument()
+
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    await vi.advanceTimersByTimeAsync(3000)
+
+    const list = await screen.findByRole('list', { name: '這場的決策' })
+    const [postgres, launch] = within(list).getAllByRole('listitem')
+    expect(postgres).toHaveTextContent('資料庫用 PostgreSQL')
+    expect(postgres).toHaveTextContent('理由：需要 pgvector')
+    expect(postgres).toHaveTextContent('沒選：MySQL')
+    expect(postgres).toHaveTextContent('提出：講者 2')
+    expect(postgres).toHaveTextContent('大家好')
+    expect(within(postgres).queryByText('暫定')).toBeNull()
+    expect(within(launch).getByText('暫定')).toBeInTheDocument()
+    expect(launch).not.toHaveTextContent('理由')
+    expect(screen.getByText('由 qwen3:14b 抽取')).toBeInTheDocument()
+  })
+
+  it('plays from where a decision was made', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    await renderCompletedJob(multiSpeakerTranscript)
+    await openStudioTool('決策')
+
+    const list = await screen.findByRole('list', { name: '這場的決策' })
+    fireEvent.click(within(list).getByRole('button', { name: '0:04' }))
+
+    expect(renderedMediaElement().currentTime).toBe(4)
+  })
+
+  it('shows how many decisions there are on the tile, and that they are being extracted', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracting, decisions: [] })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const tile = await screen.findByRole('button', { name: '決策' })
+    expect(tile).toHaveAccessibleDescription('抽取中…')
+
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    await vi.advanceTimersByTimeAsync(3000)
+
+    await waitFor(() => expect(tile).toHaveAccessibleDescription('2 個決策'))
+  })
+
+  it('says when nothing was decided', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions: [] })
+    await renderCompletedJob(multiSpeakerTranscript)
+    await openStudioTool('決策')
+
+    expect(await screen.findByText('這場沒有找到做成的決定')).toBeInTheDocument()
+  })
+
+  it('says the decisions may be out of date once the transcript has changed, and extracts them again', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    vi.mocked(decisionsApi.extract).mockResolvedValue(extracting)
+    await renderCompletedJob({ ...multiSpeakerTranscript, revision: 2 })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('決策')
+
+    expect(await screen.findByText('逐字稿已修改，這些決策可能過時')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重新抽出' }))
+
+    expect(decisionsApi.extract).toHaveBeenCalledWith('job-1')
+    expect(screen.getByText('抽取中…')).toBeInTheDocument()
+    expect(screen.getByText('資料庫用 PostgreSQL')).toBeInTheDocument() // the earlier ones stay meanwhile
+  })
+
+  it('shows why it failed and offers to try again', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({
+      extraction: { ...extracting, status: 'FAILED', failureReason: '模型回傳的格式不正確，請再抽一次' }, decisions: [],
+    })
+    vi.mocked(decisionsApi.extract).mockResolvedValue(extracting)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('決策')
+
+    expect(await screen.findByText('模型回傳的格式不正確，請再抽一次')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '再抽一次' }))
+
+    expect(decisionsApi.extract).toHaveBeenCalledWith('job-1')
   })
 })

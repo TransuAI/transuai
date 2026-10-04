@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { DecisionsActions } from '@/hooks/use-decisions'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import type { OutputsActions } from '@/hooks/use-outputs'
 import type { TranslationsActions } from '@/hooks/use-translations'
@@ -60,6 +61,7 @@ interface CompletedWorkspaceProps {
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
   speakerInsights: SpeakerInsightsActions
+  decisions: DecisionsActions
   outputs: OutputsActions
   translations: TranslationsActions
   postMeeting: PostMeeting | null
@@ -166,6 +168,7 @@ export function CompletedWorkspace({
   isRequestingQuiz,
   onQuizAttempted,
   speakerInsights,
+  decisions,
   outputs,
   translations,
   postMeeting,
@@ -313,6 +316,7 @@ export function CompletedWorkspace({
       isRequestingQuiz={isRequestingQuiz}
       onQuizAttempted={onQuizAttempted}
       speakerInsights={speakerInsights}
+      decisions={decisions}
       outputs={outputs}
       fileName={job.fileName}
       postMeeting={postMeeting}

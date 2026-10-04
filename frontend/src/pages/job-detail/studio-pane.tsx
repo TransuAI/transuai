@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
-import { ArrowLeft, ChartBarBig, FileText, ClipboardList, Gauge, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ChartBarBig, FileText, ClipboardList, Gauge, Gavel, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
 import type { NotesActions } from '@/hooks/use-notes'
+import type { DecisionsActions } from '@/hooks/use-decisions'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import type { OutputsActions } from '@/hooks/use-outputs'
 import { Button } from '@/components/ui/button'
@@ -8,6 +9,7 @@ import { formatDuration } from '@/lib/media'
 import { formatCount, formatMinutes } from '@/lib/usage-format'
 import { Card } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { DecisionsSection } from '@/pages/job-detail/decisions-section'
 import { NotesSection, type NoteToOpen } from '@/pages/job-detail/notes-section'
 import { PostMeetingSection } from '@/pages/job-detail/post-meeting-section'
 import { QuizSection } from '@/pages/job-detail/quiz-section'
@@ -19,7 +21,16 @@ import { cn } from '@/lib/utils'
 import type { Chapter, ConfirmedProposal, JobUsage, PostMeeting, Quiz, Summary, Transcript } from '@/types/api'
 
 /** A Studio tool; the pane shows either the tiles of all tools (none picked) or one tool. */
-export type StudioTool = 'summary' | 'chapters' | 'notes' | 'quiz' | 'outputs' | 'speaker-stats' | 'post-meeting' | 'usage'
+export type StudioTool =
+  | 'summary'
+  | 'chapters'
+  | 'notes'
+  | 'decisions'
+  | 'quiz'
+  | 'outputs'
+  | 'speaker-stats'
+  | 'post-meeting'
+  | 'usage'
 
 interface StudioPaneProps {
   jobId: string
@@ -41,6 +52,7 @@ interface StudioPaneProps {
   isRequestingQuiz: boolean
   onQuizAttempted: () => void
   speakerInsights: SpeakerInsightsActions
+  decisions: DecisionsActions
   outputs: OutputsActions
   /** The uploaded file's name: what downloaded outputs are named after. */
   fileName: string
@@ -80,6 +92,7 @@ export function StudioPane({
   isRequestingQuiz,
   onQuizAttempted,
   speakerInsights,
+  decisions,
   outputs,
   fileName,
   postMeeting,
@@ -200,6 +213,9 @@ export function StudioPane({
                 <ToolTile tool="notes" onOpen={onToolChange}>
                   {notes.notes.length > 0 ? `${notes.notes.length} 則筆記` : '還沒有筆記'}
                 </ToolTile>
+                <ToolTile tool="decisions" onOpen={onToolChange} attention={decisions.decisions?.extraction?.status === 'GENERATING'}>
+                  {decisionsStatus(decisions.decisions)}
+                </ToolTile>
                 <ToolTile tool="quiz" onOpen={onToolChange} attention={quizzes.some((quiz) => quiz.status === 'GENERATING')}>
                   {quizzes.length === 0
                     ? '還沒有測驗'
@@ -276,6 +292,10 @@ export function StudioPane({
             </>
           )}
 
+          {tool === 'decisions' && (
+            <DecisionsSection decisions={decisions} transcript={transcript} onSeek={onSeek} mediaAvailable={mediaAvailable} />
+          )}
+
           {tool === 'quiz' && (
             <QuizSection
               jobId={jobId}
@@ -334,6 +354,7 @@ const TOOLS: Record<StudioTool, { title: string; icon: LucideIcon }> = {
   summary: { title: 'AI 摘要', icon: Sparkles },
   chapters: { title: '章節', icon: List },
   notes: { title: '筆記', icon: NotebookPen },
+  decisions: { title: '決策', icon: Gavel },
   quiz: { title: '測驗', icon: GraduationCap },
   outputs: { title: '多格式輸出', icon: FileText },
   'speaker-stats': { title: '講者數據', icon: ChartBarBig },
@@ -345,6 +366,16 @@ function outputsStatus({ outputs }: OutputsActions): string {
   if (outputs.some((output) => output.status === 'GENERATING')) return '產生中…'
   const done = outputs.filter((output) => output.status === 'COMPLETED').length
   return done > 0 ? `${done} 份` : 'Podcast 介紹等文件'
+}
+
+/** The Studio tile's line: how the extraction stands, or how many decisions there are. */
+function decisionsStatus(decisions: DecisionsActions['decisions']): string {
+  const status = decisions?.extraction?.status
+  if (status === 'GENERATING') return '抽取中…'
+  const count = decisions?.decisions.length ?? 0
+  if (count > 0) return `${count} 個決策`
+  if (status === 'FAILED') return '上次抽取失敗'
+  return status === 'COMPLETED' ? '沒有找到決定' : '找出這場做成的決定'
 }
 
 function usageStatus(usage: JobUsage | null): string {

@@ -453,6 +453,49 @@ export interface SpeakerInsight {
   text: string
 }
 
+/**
+ * 決策紀錄: a job's extraction — GENERATING / COMPLETED / FAILED (failureReason for the user; the decisions found
+ * earlier stay). sourceRevision / model: the last finished one's, 0 / null before that — 過時 when the transcript's
+ * revision has moved on.
+ */
+export interface DecisionExtraction {
+  status: 'GENERATING' | 'COMPLETED' | 'FAILED'
+  failureReason: string | null
+  sourceRevision: number
+  modelProvider: string | null
+  model: string | null
+  requestedAt: string | null
+  completedAt: string | null
+}
+
+/** A decision made in a meeting (決策): what, why, what else was considered, who proposed it, and where it was made. */
+export interface Decision {
+  id: string
+  jobId: string
+  statement: string
+  /** Why, as said in the recording; empty when nobody said. */
+  rationale: string
+  /** Considered but not chosen. */
+  alternatives: string[]
+  /** The speaker's label; null when it isn't clear. */
+  proposedBy: string | null
+  /** 暫定: said to be confirmed later. */
+  tentative: boolean
+  /** Where it was made, and that segment's own words; a decision the user added may have neither. */
+  startTime: number | null
+  evidenceText: string | null
+  source: 'ai' | 'user'
+  edited: boolean
+  supersedesId: string | null
+  createdAt: string | null
+}
+
+/** A job's extraction (null when never extracted) and decisions, by time (those without one last). */
+export interface JobDecisions {
+  extraction: DecisionExtraction | null
+  decisions: Decision[]
+}
+
 /** The kinds of 多格式輸出 (new documents written from a job). */
 export type OutputFormat = 'podcast_description' | 'youtube_description' | 'blog_post' | 'newsletter' | 'social_post'
 
