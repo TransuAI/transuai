@@ -961,7 +961,7 @@ message DecisionInput {
   string statement = 1;
   string rationale = 2;
   repeated string alternatives = 3;
-  // 講者標籤；空字串＝不知道是誰。
+  // 講者標籤，要是這個 Job 的講者（不是的回 INVALID_ARGUMENT「不認得這位講者」）；空字串＝不知道是誰。
   string proposed_by = 4;
   bool tentative = 5;
 }
@@ -1032,6 +1032,8 @@ message Decision {
   repeated DecisionLink superseded_by = 15;
   // 會議的日期（Job 的上傳時間）；舊的決策沒有。
   google.protobuf.Timestamp meeting_at = 16;
+  // 提出者現在的名稱（跨 Job 的頁面用；講者改名時跟著改）；不知道是誰是空字串。
+  string proposed_by_name = 17;
 }
 
 // 另一個決策（通常在別的 Job）：顯示「取代了…」「已被…取代」並連過去用。

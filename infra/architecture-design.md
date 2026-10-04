@@ -220,10 +220,10 @@ GET    /jobs/{jobId}/decisions          這個 Job 的抽取紀錄（沒抽過�
 POST   /jobs/{jobId}/decisions          使用者自己新增一個決策（時間點可以沒有），回 201
 PATCH  /jobs/{jobId}/decisions/{id}     修改決策的內容（時間點與原話不變），之後重新抽也保留
 DELETE /jobs/{jobId}/decisions/{id}     刪除：AI 抽的只是隱藏（重新抽時不再出現），使用者新增的直接刪掉，回 204
-POST   /decisions/ask                   問決策（SSE，跟問答一樣經 Gateway 轉發）：body { question, category?, jobId? }，只根據使用者自己
+POST   /decisions/ask                   問決策（SSE，跟問答一樣經 Gateway 轉發）：body { question, category?, jobIds? }，只根據使用者自己
                                          （篩選範圍內）的決策回答；先送 sources（依據的決策與它們的 Job，順序就是 [n]），再送 model、delta；
                                          找不到相關的決策時不呼叫模型，直接說沒有
-GET    /decisions?q=&category=&jobId=   決策頁：使用者所有 Job 的決策（每個帶 Job 的標題、類型、上傳時間），沒有 q 時依上傳時間由新到舊
+GET    /decisions?q=&category=&jobId=… 決策頁（jobId 可以給好幾個）：使用者所有 Job 的決策（每個帶 Job 的標題、類型、上傳時間），沒有 q 時依上傳時間由新到舊
                                          的時間軸，有 q 時是搜尋（字與意思，依符合程度）；Gateway 先向 upload-service 列出使用者自己的
                                          Job（類型的篩選在那裡），只問 ai-service 這些 Job 的決策，ai-service 再依 user_id 過濾
 POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format", "platform"?（社群貼文必填）, "instruction"? }，回 202
@@ -764,7 +764,8 @@ CREATE TABLE decisions (
     statement TEXT NOT NULL,                -- 決定了什麼
     rationale TEXT NOT NULL DEFAULT '',     -- 為什麼（錄音裡講到的）
     alternatives JSONB NOT NULL DEFAULT '[]',  -- 考慮過但沒選的
-    proposed_by VARCHAR(32),                -- 講者標籤
+    proposed_by VARCHAR(32),                -- 講者標籤（要是這個 Job 的講者）
+    proposed_by_name VARCHAR(100),          -- 那位講者現在的名稱（跨 Job 的頁面用；transcript.edited 時跟著改）
     tentative BOOLEAN NOT NULL DEFAULT false,  -- 暫定
     start_time NUMERIC(10,2),               -- 做成決定的時間點（使用者新增的可以沒有）
     evidence_text TEXT,                     -- 那個片段的原話
@@ -819,7 +820,7 @@ CREATE INDEX ix_generated_outputs_job_id ON generated_outputs (job_id);
 | `speaker_insights.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`）；ai-service 排給自己的背景工作 |
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
 | `post_meeting.requested` | AI Service | AI Service | `{ runId, jobId, userId }`（`userId` 是觸發的使用者）——使用者啟動會後處理（`POST /jobs/{jobId}/post-meeting`）；ai-service 排給自己的背景工作 |
-| `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding，翻好的譯文只重翻文字有變的片段（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
+| `transcript.edited` | Transcription Service | AI Service | `{ jobId }`——使用者編輯逐字稿後發出；ai-service 回頭讀逐字稿、只重算文字有變的片段的 embedding，翻好的譯文只重翻文字有變的片段，決策存的提出者名稱跟著講者改名（見 `docs/adr/0003-transcript-edits-propagate-via-mq-event.md`） |
 | `account.deleted`（**fanout exchange**） | Auth Service（outbox） | Upload Service（`account.deleted.upload`）、AI Service（`account.deleted.ai`）、Transcription Service（`account.deleted.transcription`） | `{ userId }`——使用者刪除了帳號：upload-service 刪掉他所有的 Job（每個再發 `job.deleted`），ai-service 撤銷並刪掉已連結的帳號、自有金鑰與個人設定，兩個服務把用量去識別化（`user_id` 設 NULL） |
 | `job.deleted`（**fanout exchange**） | Upload Service（outbox） | Transcription Service（`job.deleted.transcription`）、AI Service（`job.deleted.ai`） | `{ jobId, userId }`——Job 刪掉了，各服務清掉自己手上這個 Job 的資料（用量不刪）；見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md` |
 
