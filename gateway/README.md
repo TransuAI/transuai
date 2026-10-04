@@ -124,6 +124,8 @@ docker compose up -d
 | `GET` | `/jobs/{jobId}/translations` | 各語言的譯文：`[{ language, status, failureReason, totalSegments, translatedSegments, modelProvider, model, requestedAt, completedAt, segments: null }]`；前端每 3 秒輪詢直到沒有 `GENERATING` |
 | `GET` | `/jobs/{jobId}/translations/{language}` | 一種語言含片段：`segments: [{ segmentId, text, sourceText }]`（翻譯中也有已經翻好的；`sourceText` 是翻的時候的原文，跟片段目前的文字不一樣就是原文改過、還沒重翻）；沒有這種語言回 404 |
 | `DELETE` | `/jobs/{jobId}/translations/{language}` | 刪掉一種語言的譯文（翻譯中也可以），回 `204`；沒有這種語言回 404；轉給 `DeleteTranslation` |
+| `POST` | `/jobs/{jobId}/fact-check` | 事實查核：標出（或重新標出）這個 Job 可以查核的主張（不花搜尋次數），回 `202` 與標出主張的紀錄（`status: GENERATING`）；已經在標就直接回傳；轉給 `RequestFactCheck`，帶上當下使用者。花錢的功能、受每月平台模型上限管 |
+| `GET` | `/jobs/{jobId}/fact-check` | `{ extraction: { status, failureReason, sourceRevision, modelProvider, model, requestedAt, completedAt } \| null, claims: [{ id, jobId, speakerLabel, startTime, text, claim, kind, verdict, explanation, sources: [{ title, url, excerpt }], checkedAt, checkModel, checking, checkError, sourceRevision }] }`（依時間點排序；`verdict` 是 null 表示還沒查）；前端每 3 秒輪詢直到不是 `GENERATING`、沒有查核中的主張 |
 | `POST` | `/jobs/{jobId}/outputs` | 多格式輸出：產生一份，body `{ "format": "podcast_description" \| "youtube_description" \| "blog_post" \| "newsletter" \| "social_post", "platform"?: "threads" \| "facebook" \| "instagram" \| "linkedin" \| "x", "instruction"?: string }`（社群貼文一定要有 `platform`），回 `202` 與「產生中」的那一份；每次都是新的一份。先過 ownership 並取 Job 的標題一起帶給 `RequestOutput`；沒帶 `format` 回 400，格式不認得或要求超過 200 字也是 400。花錢的功能、受每月平台模型上限管 |
 | `GET` | `/jobs/{jobId}/outputs` | 這個 Job 的輸出（新的在前）：`[{ id, jobId, format, platform, instruction, status, failureReason, content, sourceRevision, modelProvider, model, requestedAt, completedAt, editedAt }]`；`content` 是 Markdown（完成前 `null`）；前端每 3 秒輪詢直到沒有 `GENERATING` |
 | `GET` | `/jobs/{jobId}/outputs/{outputId}` | 一份輸出；不屬於這個 Job 回 404 |
@@ -205,6 +207,7 @@ docker compose up -d
 | 分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`） | 每人每小時 10 次 | `RATE_LIMIT_SPEAKER_INSIGHTS` |
 | 抽出決策（`POST /jobs/{jobId}/decisions/extract`） | 每人每小時 10 次 | `RATE_LIMIT_DECISION_EXTRACTION` |
 | 問決策（`POST /decisions/ask`） | 每人每分鐘 20 次 | `RATE_LIMIT_DECISION_QUESTION` |
+| 標出主張（`POST /jobs/{jobId}/fact-check`） | 每人每小時 10 次 | `RATE_LIMIT_FACT_CHECK` |
 | 產生多格式輸出（`POST /jobs/{jobId}/outputs`） | 每人每小時 20 份 | `RATE_LIMIT_OUTPUT` |
 | 翻譯逐字稿（`POST /jobs/{jobId}/translations`） | 每人每小時 10 次 | `RATE_LIMIT_TRANSLATION` |
 | 重新產生摘要（`POST /summary/{jobId}/regenerate`） | 每人每小時 5 次 | |
@@ -230,7 +233,7 @@ docker compose up -d
 | 上限 | 預設 | 到了之後 |
 |---|---|---|
 | 轉錄分鐘數 | 600 分鐘（`USAGE_LIMIT_TRANSCRIPTION_MINUTES`） | `POST /uploads/presign`、`POST /uploads/complete` 回 429；兩者都帶檔案長度 `durationSeconds`（前端量的），整個檔案要放得進剩下的分鐘數——在取得上傳網址時就擋，不讓人傳完 1GB 才被拒 |
-| 平台模型的 token（輸入加輸出） | 2,000,000（`USAGE_LIMIT_PLATFORM_TOKENS`） | 要用平台模型的問答、產生測驗、重新產生摘要、講者數據分析、抽出決策、問決策、多格式輸出、翻譯、開始會後處理回 429（翻譯到一半碰到上限由 ai-service 停下，見 ai-service README「譯文」）；自有金鑰的模型照常可以用（問答這次指定的模型優先，否則看預設模型） |
+| 平台模型的 token（輸入加輸出） | 2,000,000（`USAGE_LIMIT_PLATFORM_TOKENS`） | 要用平台模型的問答、產生測驗、重新產生摘要、講者數據分析、抽出決策、問決策、標出主張、多格式輸出、翻譯、開始會後處理回 429（翻譯到一半碰到上限由 ai-service 停下，見 ai-service README「譯文」）；自有金鑰的模型照常可以用（問答這次指定的模型優先，否則看預設模型） |
 | 網路搜尋次數（只算成功的） | 30 次（`USAGE_LIMIT_WEB_SEARCHES`） | 帶 `webSearch: true` 的問答回 429；不查網路的問答照常。搜尋服務一律平台付費，用自有金鑰的模型提問也算（Tavily 的免費額度是整個平台每月 1,000 次） |
 
 用量是 `/me/usage` 同一份加總（`usage/MonthlyUsage`：LLM 向 ai-service 的 `SumUserLlmUsage`、網路搜尋向 `CountUserWebSearches`、轉錄向
@@ -288,7 +291,7 @@ access token 是 stateless 的，帳號刪掉之後最多還能用到過期（15
 | `FRONTEND_URL` | `http://localhost:5173` | 連結完成（或失敗）後把使用者轉回 `{這個}/settings` |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / 空 | 限流與快取用的 Redis（k8s 裡 `REDIS_PORT` 一定要設，否則會被 k8s 自動注入的 `tcp://…` 蓋掉） |
 | `REDIS_TIMEOUT` / `REDIS_CONNECT_TIMEOUT` | `500ms` | Redis 慢或連不上時多久放棄（放棄時限流放行、快取當作沒記住） |
-| `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`、`RATE_LIMIT_PER_USER`、`RATE_LIMIT_PER_ADDRESS`、`RATE_LIMIT_UPLOAD_URL`、`RATE_LIMIT_UPLOAD`、`RATE_LIMIT_QUESTION`、`RATE_LIMIT_QUIZ`、`RATE_LIMIT_SPEAKER_INSIGHTS`、`RATE_LIMIT_OUTPUT`、`RATE_LIMIT_TRANSLATION`、`RATE_LIMIT_DECISION_EXTRACTION`、`RATE_LIMIT_DECISION_QUESTION`、`RATE_LIMIT_REGENERATE`、`RATE_LIMIT_POST_MEETING`、`RATE_LIMIT_PROVIDER_KEY`、`RATE_LIMIT_TRANSCRIPT_EDIT`、`RATE_LIMIT_LINKED_SERVICE`（與各自的 `_WINDOW`） | 見「限流」的表 | 限流的上限與時間長度 |
+| `RATE_LIMIT_LOGIN_FAILURES`、`RATE_LIMIT_LOGIN`、`RATE_LIMIT_REGISTER`、`RATE_LIMIT_PER_USER`、`RATE_LIMIT_PER_ADDRESS`、`RATE_LIMIT_UPLOAD_URL`、`RATE_LIMIT_UPLOAD`、`RATE_LIMIT_QUESTION`、`RATE_LIMIT_QUIZ`、`RATE_LIMIT_SPEAKER_INSIGHTS`、`RATE_LIMIT_OUTPUT`、`RATE_LIMIT_TRANSLATION`、`RATE_LIMIT_DECISION_EXTRACTION`、`RATE_LIMIT_DECISION_QUESTION`、`RATE_LIMIT_FACT_CHECK`、`RATE_LIMIT_REGENERATE`、`RATE_LIMIT_POST_MEETING`、`RATE_LIMIT_PROVIDER_KEY`、`RATE_LIMIT_TRANSCRIPT_EDIT`、`RATE_LIMIT_LINKED_SERVICE`（與各自的 `_WINDOW`） | 見「限流」的表 | 限流的上限與時間長度 |
 | `CACHE_JOB_OWNER_TTL` | `10m` | Job 擁有者快取的有效時間，見「快取」 |
 | `USAGE_LIMIT_TRANSCRIPTION_MINUTES` / `USAGE_LIMIT_PLATFORM_TOKENS` / `USAGE_LIMIT_WEB_SEARCHES` | `600` / `2000000` / `30` | 每月用量上限，見「每月用量上限」 |
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
