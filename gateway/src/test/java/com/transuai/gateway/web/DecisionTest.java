@@ -38,6 +38,7 @@ import transuai.ai.v1.Ai.CreateDecisionRequest;
 import transuai.ai.v1.Ai.Decision;
 import transuai.ai.v1.Ai.DecisionExtraction;
 import transuai.ai.v1.Ai.DecisionExtractionStatus;
+import transuai.ai.v1.Ai.DecisionLink;
 import transuai.ai.v1.Ai.DeleteDecisionRequest;
 import transuai.ai.v1.Ai.DeleteDecisionResponse;
 import transuai.ai.v1.Ai.JobDecisions;
@@ -122,7 +123,7 @@ class DecisionTest {
                 .andExpect(jsonPath("$.decisions[1].startTime").isEmpty())
                 .andExpect(jsonPath("$.decisions[1].proposedBy").isEmpty())
                 .andExpect(jsonPath("$.decisions[1].tentative").value(true))
-                .andExpect(jsonPath("$.decisions[1].supersedesId").isEmpty());
+                .andExpect(jsonPath("$.decisions[1].supersedes").isEmpty());
     }
 
     @Test
@@ -316,6 +317,43 @@ class DecisionTest {
         call(MockMvcRequestBuilders.get("/decisions")).andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
 
         verify(aiServiceStub, never()).listUserDecisions(any());
+    }
+
+    @Test
+    void extractingTellsWhenTheMeetingWasSoEarlierDecisionsCanBeFound() throws Exception {
+        when(uploadServiceStub.getJob(any())).thenReturn(job(JOB, "十月週會", "2026-10-01T00:00:00Z"));
+        when(aiServiceStub.requestDecisionExtraction(any())).thenReturn(extracting);
+
+        call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/decisions/extract")).andExpect(status().isAccepted());
+
+        ArgumentCaptor<RequestDecisionExtractionRequest> sent = ArgumentCaptor.forClass(RequestDecisionExtractionRequest.class);
+        verify(aiServiceStub).requestDecisionExtraction(sent.capture());
+        assertThat(sent.getValue().getMeetingAt().getSeconds())
+                .isEqualTo(java.time.Instant.parse("2026-10-01T00:00:00Z").getEpochSecond());
+    }
+
+    @Test
+    void aDecisionComesWithWhatItSupersededAndWhatSupersededIt() throws Exception {
+        com.google.protobuf.Timestamp september = com.google.protobuf.Timestamp.newBuilder()
+                .setSeconds(java.time.Instant.parse("2026-09-01T00:00:00Z").getEpochSecond()).build();
+        when(aiServiceStub.getJobDecisions(any())).thenReturn(JobDecisions.newBuilder()
+                .addDecisions(Decision.newBuilder().setId("d1").setJobId(JOB).setStatement("資料庫改用 PostgreSQL")
+                        .setSupersedes(DecisionLink.newBuilder().setId("old").setJobId("job-sep").setStatement("資料庫用 MySQL")
+                                .setMeetingAt(september))
+                        .addSupersededBy(DecisionLink.newBuilder().setId("newer").setJobId("job-nov").setStatement("改回 MySQL")))
+                .addDecisions(Decision.newBuilder().setId("d2").setJobId(JOB).setStatement("週會改到週三"))
+                .build());
+
+        call(MockMvcRequestBuilders.get("/jobs/" + JOB + "/decisions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decisions[0].supersedes.id").value("old"))
+                .andExpect(jsonPath("$.decisions[0].supersedes.jobId").value("job-sep"))
+                .andExpect(jsonPath("$.decisions[0].supersedes.statement").value("資料庫用 MySQL"))
+                .andExpect(jsonPath("$.decisions[0].supersedes.meetingAt").value("2026-09-01T00:00:00Z"))
+                .andExpect(jsonPath("$.decisions[0].supersededBy[0].id").value("newer"))
+                .andExpect(jsonPath("$.decisions[0].supersededBy[0].meetingAt").isEmpty())
+                .andExpect(jsonPath("$.decisions[1].supersedes").isEmpty())
+                .andExpect(jsonPath("$.decisions[1].supersededBy").isEmpty());
     }
 
     @Test

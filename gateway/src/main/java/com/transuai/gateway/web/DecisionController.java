@@ -38,6 +38,7 @@ import transuai.ai.v1.Ai.CreateDecisionRequest;
 import transuai.ai.v1.Ai.Decision;
 import transuai.ai.v1.Ai.DecisionExtraction;
 import transuai.ai.v1.Ai.DecisionInput;
+import transuai.ai.v1.Ai.DecisionLink;
 import transuai.ai.v1.Ai.DeleteDecisionRequest;
 import transuai.ai.v1.Ai.GetJobDecisionsRequest;
 import transuai.ai.v1.Ai.JobDecisions;
@@ -66,10 +67,14 @@ public class DecisionController {
     @PostMapping("/jobs/{jobId}/decisions/extract")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public DecisionsDto.Extraction extract(@CurrentUserId UUID userId, @PathVariable String jobId) {
-        jobOwnershipGuard.check(userId, jobId);
+        Job job = jobOwnershipGuard.fetch(userId, jobId);
         usageLimitGuard.requirePlatformTokensLeft(userId);
-        return toDto(aiServiceStub.requestDecisionExtraction(RequestDecisionExtractionRequest.newBuilder()
-                .setJobId(jobId).setUserId(userId.toString()).build()));
+        RequestDecisionExtractionRequest.Builder request = RequestDecisionExtractionRequest.newBuilder()
+                .setJobId(jobId).setUserId(userId.toString());
+        if (job.hasCreatedAt()) {
+            request.setMeetingAt(job.getCreatedAt()); // the meeting's date: which decisions are from earlier meetings
+        }
+        return toDto(aiServiceStub.requestDecisionExtraction(request.build()));
     }
 
     @GetMapping("/jobs/{jobId}/decisions")
@@ -85,9 +90,12 @@ public class DecisionController {
     @ResponseStatus(HttpStatus.CREATED)
     public DecisionsDto.Item create(@CurrentUserId UUID userId, @PathVariable String jobId,
             @RequestBody DecisionInputDto body) {
-        jobOwnershipGuard.check(userId, jobId);
+        Job job = jobOwnershipGuard.fetch(userId, jobId);
         CreateDecisionRequest.Builder request = CreateDecisionRequest.newBuilder().setJobId(jobId)
                 .setUserId(userId.toString()).setDecision(toInput(body));
+        if (job.hasCreatedAt()) {
+            request.setMeetingAt(job.getCreatedAt());
+        }
         if (body != null && body.startTime() != null) {
             request.setStartTime(body.startTime());
         }
@@ -191,7 +199,14 @@ public class DecisionController {
                 decision.getRationale(), decision.getAlternativesList(), GrpcStrings.emptyToNull(decision.getProposedBy()),
                 decision.getTentative(), decision.hasStartTime() ? decision.getStartTime() : null,
                 GrpcStrings.emptyToNull(decision.getEvidenceText()), decision.getSource(), decision.getEdited(),
-                GrpcStrings.emptyToNull(decision.getSupersedesId()),
+                decision.hasSupersedes() ? toLink(decision.getSupersedes()) : null,
+                decision.getSupersededByList().stream().map(DecisionController::toLink).toList(),
+                decision.hasMeetingAt() ? GrpcTimestamps.toInstant(decision.getMeetingAt()) : null,
                 decision.hasCreatedAt() ? GrpcTimestamps.toInstant(decision.getCreatedAt()) : null);
+    }
+
+    private static DecisionsDto.Link toLink(DecisionLink link) {
+        return new DecisionsDto.Link(link.getId(), link.getJobId(), link.getStatement(),
+                link.hasMeetingAt() ? GrpcTimestamps.toInstant(link.getMeetingAt()) : null);
     }
 }

@@ -13,9 +13,14 @@ public record DecisionsDto(Extraction extraction, List<Item> decisions) {
     }
 
     // proposedBy 是講者標籤；startTime / evidenceText 是做成決定的時間點與那個片段的原話（使用者新增的可以沒有）；source：ai / user；
-    // edited：使用者改過；supersedesId：取代了較早的哪一個決策。不知道的欄位是 null。
+    // edited：使用者改過；supersedes / supersededBy：取代了較早的哪一個決策、被後來的哪些取代（通常在別的 Job）；meetingAt：會議的
+    // 日期（Job 的上傳時間，舊的決策沒有）。不知道的欄位是 null。
     public record Item(String id, String jobId, String statement, String rationale, List<String> alternatives,
             String proposedBy, boolean tentative, Double startTime, String evidenceText, String source, boolean edited,
-            String supersedesId, Instant createdAt) {
+            Link supersedes, List<Link> supersededBy, Instant meetingAt, Instant createdAt) {
+    }
+
+    // 另一個決策：連過去（/jobs/{jobId}?decision={id}）用。
+    public record Link(String id, String jobId, String statement, Instant meetingAt) {
     }
 }
