@@ -119,6 +119,18 @@ class UsageLimitTest {
     }
 
     @Test
+    void thePlatformModelCapAlsoStopsNewOutputsAndSpeakerAnalyses() throws Exception {
+        usedThisMonth(0, 600, 400);
+
+        call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/outputs").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"format\":\"podcast_description\"}"))
+                .andExpect(status().isTooManyRequests());
+        call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/speaker-insights")).andExpect(status().isTooManyRequests());
+        verify(aiServiceStub, never()).requestOutput(any());
+        verify(aiServiceStub, never()).requestSpeakerInsights(any());
+    }
+
+    @Test
     void ownKeyModelsAreNotLimited() throws Exception {
         usedThisMonth(0, 600, 400);
         defaultModel("openai");

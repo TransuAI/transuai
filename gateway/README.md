@@ -168,7 +168,7 @@ docker compose up -d
 
 成功的話 stream 在最後一個 `delta` 後直接結束，沒有額外的「done」event——HTTP 連線關閉本身就是 done。前端不能用瀏覽器原生 `EventSource`（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）：這裡全部端點都是 Bearer JWT 驗證，`EventSource` 沒辦法附加 Authorization header，前端改用 `fetch()` + `ReadableStream` 手動解析（見 [`../frontend/README.md`](../frontend/README.md)）。
 
-`architecture-design.md` §3.4 還規劃了 `POST /export/{jobId}`、`GET /export/{jobId}/{format}`——ai-service 目前還沒有對應的 rpc（見 [`../ai-service/README.md`](../ai-service/README.md) 已知限制），沒有 rpc 可以轉發，這裡先不開，等 ai-service 補上再加。
+多格式輸出（LLM 依摘要與章節寫成新文件）在上面的 `/jobs/{jobId}/outputs`——刻意不用 `/export`：「匯出」是前端把既有內容轉成檔案（見 `frontend/CONTEXT.md`），沒有後端 API。
 
 ### 限流
 
@@ -333,7 +333,6 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 ## 已知限制 / 待辦
 
 - **Transcription / AI 這幾個端點的 ownership 檢查在 Gateway**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 在轉發前先確認 ownership（`JobOwnershipGuard`，別人的 job 回 404）：擁有者記在 Redis（見「快取」），沒記住時才呼叫 `upload-service` 的 `GetJob`
-- 多格式輸出（`POST /export/{jobId}` 系列）架構文件有規劃，但 ai-service 還沒實作對應的 rpc，這裡也還沒開
 - 每月用量上限用的是已記錄的用量加上這次檔案的長度（前端量的，可能不準）：排隊中、還沒轉錄完的檔案還沒算進去，可能超過上限一點（見「每月用量上限」）
 - access token 在 gateway 本地驗章，登出後仍有效到過期（最多 15 分鐘）；要立即失效得每個請求回頭問 auth-service，目前不做
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
