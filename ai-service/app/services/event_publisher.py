@@ -87,6 +87,19 @@ def publish_speaker_insights_requested(channel: BlockingChannel, job_id: str, us
     logger.info("queued speaker_insights.requested for job %s", job_id)
 
 
+def publish_output_requested(channel: BlockingChannel, output_id: str, job_id: str, user_id: str) -> None:
+    """output.requested -> {outputId, jobId, userId}：ai-service 排給自己的背景工作（多格式輸出）；userId 是要求產生的使用者，
+    用他的預設模型、用量記在他名下。"""
+    channel.queue_declare(queue=settings.output_requested_queue, durable=True)
+    channel.basic_publish(
+        exchange="",
+        routing_key=settings.output_requested_queue,
+        body=json.dumps({"outputId": output_id, "jobId": job_id, "userId": user_id}).encode("utf-8"),
+        properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+    )
+    logger.info("queued output.requested for output %s of job %s", output_id, job_id)
+
+
 def publish_post_meeting_requested(channel: BlockingChannel, run_id: str, job_id: str, user_id: str) -> None:
     """post_meeting.requested -> {runId, jobId, userId}：ai-service 排給自己的背景工作（會後處理）；userId 是觸發的使用者，
     用他的預設模型與已連結的帳號、用量記在他名下。"""

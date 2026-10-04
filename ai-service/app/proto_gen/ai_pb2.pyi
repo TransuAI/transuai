@@ -57,6 +57,13 @@ class SpeakerInsightsStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SPEAKER_INSIGHTS_STATUS_GENERATING: _ClassVar[SpeakerInsightsStatus]
     SPEAKER_INSIGHTS_STATUS_COMPLETED: _ClassVar[SpeakerInsightsStatus]
     SPEAKER_INSIGHTS_STATUS_FAILED: _ClassVar[SpeakerInsightsStatus]
+
+class OutputStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    OUTPUT_STATUS_UNSPECIFIED: _ClassVar[OutputStatus]
+    OUTPUT_STATUS_GENERATING: _ClassVar[OutputStatus]
+    OUTPUT_STATUS_COMPLETED: _ClassVar[OutputStatus]
+    OUTPUT_STATUS_FAILED: _ClassVar[OutputStatus]
 REGENERATION_STATUS_IDLE: RegenerationStatus
 REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
@@ -84,6 +91,10 @@ SPEAKER_INSIGHTS_STATUS_UNSPECIFIED: SpeakerInsightsStatus
 SPEAKER_INSIGHTS_STATUS_GENERATING: SpeakerInsightsStatus
 SPEAKER_INSIGHTS_STATUS_COMPLETED: SpeakerInsightsStatus
 SPEAKER_INSIGHTS_STATUS_FAILED: SpeakerInsightsStatus
+OUTPUT_STATUS_UNSPECIFIED: OutputStatus
+OUTPUT_STATUS_GENERATING: OutputStatus
+OUTPUT_STATUS_COMPLETED: OutputStatus
+OUTPUT_STATUS_FAILED: OutputStatus
 
 class RequestQuizRequest(_message.Message):
     __slots__ = ("job_id", "user_id", "question_count")
@@ -844,3 +855,67 @@ class SpeakerInsight(_message.Message):
     start_time: float
     text: str
     def __init__(self, kind: _Optional[str] = ..., speaker_label: _Optional[str] = ..., interrupted_label: _Optional[str] = ..., start_time: _Optional[float] = ..., text: _Optional[str] = ...) -> None: ...
+
+class RequestOutputRequest(_message.Message):
+    __slots__ = ("job_id", "user_id", "format", "title", "instruction")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    FORMAT_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    format: str
+    title: str
+    instruction: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., format: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ...) -> None: ...
+
+class ListOutputsRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class ListOutputsResponse(_message.Message):
+    __slots__ = ("outputs",)
+    OUTPUTS_FIELD_NUMBER: _ClassVar[int]
+    outputs: _containers.RepeatedCompositeFieldContainer[GeneratedOutput]
+    def __init__(self, outputs: _Optional[_Iterable[_Union[GeneratedOutput, _Mapping]]] = ...) -> None: ...
+
+class GetOutputRequest(_message.Message):
+    __slots__ = ("job_id", "output_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    output_id: str
+    def __init__(self, job_id: _Optional[str] = ..., output_id: _Optional[str] = ...) -> None: ...
+
+class GeneratedOutput(_message.Message):
+    __slots__ = ("id", "job_id", "format", "instruction", "status", "failure_reason", "content", "source_revision", "model_provider", "model", "requested_at", "completed_at", "edited_at")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    FORMAT_FIELD_NUMBER: _ClassVar[int]
+    INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    EDITED_AT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    job_id: str
+    format: str
+    instruction: str
+    status: OutputStatus
+    failure_reason: str
+    content: str
+    source_revision: int
+    model_provider: str
+    model: str
+    requested_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    edited_at: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., format: _Optional[str] = ..., instruction: _Optional[str] = ..., status: _Optional[_Union[OutputStatus, str]] = ..., failure_reason: _Optional[str] = ..., content: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., edited_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...

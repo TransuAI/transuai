@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.db import new_session
-from app.models import (ActionProposal, Chapter, Embedding, LlmUsage, PostMeetingRun, QaHistory, Quiz, QuizAttempt,
+from app.models import (ActionProposal, Chapter, Embedding, GeneratedOutput, LlmUsage, PostMeetingRun, QaHistory, Quiz, QuizAttempt,
                         QuizQuestion, SpeakerInsightItem, SpeakerInsightRun, SpeakerSuggestion, Summary, WebSearchUsage)
 from app.services import deletion_consumer, job_deletion
 
@@ -29,6 +29,8 @@ def fill(job_id: uuid.UUID) -> None:
             Embedding(job_id=job_id, chunk_text="大家好", embedding=[0.0] * 1024),
             QaHistory(job_id=job_id, user_id=user, question="?", answer="!", source_timestamps=[]),
             quiz, run, insights,
+            GeneratedOutput(job_id=job_id, user_id=user, format="podcast_description", options={}, status="COMPLETED",
+                            content="介紹"),
             SpeakerSuggestion(job_id=job_id, speaker_label="1", name="王小明", evidence_start_time=0, evidence_text="我是王小明"),
             LlmUsage(job_id=job_id, user_id=user, feature="summary", provider="hf", model="m", key_source="platform", succeeded=True),
             WebSearchUsage(job_id=job_id, user_id=user, provider="tavily", succeeded=True),

@@ -16,14 +16,15 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import new_session
-from app.models import (Chapter, DeletedJob, Embedding, PostMeetingRun, QaHistory, Quiz, SpeakerInsightRun,
+from app.models import (Chapter, DeletedJob, Embedding, GeneratedOutput, PostMeetingRun, QaHistory, Quiz, SpeakerInsightRun,
                         SpeakerSuggestion, Summary)
 
 logger = logging.getLogger(__name__)
 
 _KEEP_MARKERS = timedelta(days=1)
 # 直接帶 job_id 的表；題目、作答、行動提案、講者數據的項目的外鍵是 ON DELETE CASCADE，跟著它們的上一層刪掉。
-JOB_SCOPED = (Summary, Chapter, Embedding, QaHistory, Quiz, SpeakerSuggestion, PostMeetingRun, SpeakerInsightRun)
+JOB_SCOPED = (Summary, Chapter, Embedding, QaHistory, Quiz, SpeakerSuggestion, PostMeetingRun, SpeakerInsightRun,
+              GeneratedOutput)
 _WRITTEN_JOBS = "written_job_ids"
 
 

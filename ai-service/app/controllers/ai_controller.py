@@ -73,6 +73,9 @@ from app.repositories.web_search_usage_repository import count_user_web_searches
 from app.services.web_search import WebSearchResult
 from app.services.web_search import is_available as web_search_available
 from app.services.qa import AnswerStep, NoEmbeddingsError, stream_answer
+from app.services.generated_outputs import (
+    InvalidOutputRequest, OutputNotQueued, find_output, list_outputs, request_output)
+from app.services.generated_outputs import effective_status as output_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
 from app.services.speaker_insight_runs import effective_status as speaker_insights_effective_status
@@ -88,6 +91,8 @@ from app.services.quizzes import (
 )
 from app.models import (
     ConnectionStatus,
+    GeneratedOutput,
+    OutputStatus,
     SpeakerInsightItem,
     SpeakerInsightRun,
     SpeakerInsightsStatus,
@@ -430,6 +435,29 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         finally:
             session.close()
 
+    def RequestOutput(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            output = request_output(job_id, user_id, request.format, title=request.title, instruction=request.instruction)
+        except InvalidOutputRequest:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "格式不支援，或要求超過 200 字")
+        except OutputNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法產生，請稍後再試")
+        return _output_to_proto(output)
+
+    def ListOutputs(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        return ai_pb2.ListOutputsResponse(outputs=[_output_to_proto(output) for output in list_outputs(job_id)])
+
+    def GetOutput(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        output_id = _parse_uuid(request.output_id, "output_id", context)
+        output = find_output(job_id, output_id)
+        if output is None:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "output not found")
+        return _output_to_proto(output)
+
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
@@ -698,6 +726,28 @@ def _quiz_to_proto(quiz: Quiz, questions: Sequence[QuizQuestion] = (), *, best: 
         message.completed_at.FromDatetime(quiz.completed_at)
     if best is not None:
         message.best_correct_count = best
+    return message
+
+
+_OUTPUT_STATUS = {
+    OutputStatus.GENERATING: ai_pb2.OUTPUT_STATUS_GENERATING,
+    OutputStatus.COMPLETED: ai_pb2.OUTPUT_STATUS_COMPLETED,
+    OutputStatus.FAILED: ai_pb2.OUTPUT_STATUS_FAILED,
+}
+
+
+def _output_to_proto(output: GeneratedOutput) -> ai_pb2.GeneratedOutput:
+    status, failure_reason = output_effective_status(output)
+    message = ai_pb2.GeneratedOutput(
+        id=str(output.id), job_id=str(output.job_id), format=output.format,
+        instruction=output.options.get("instruction", ""), status=_OUTPUT_STATUS[status],
+        failure_reason=failure_reason or "", content=output.content or "", source_revision=output.source_revision or 0,
+        model_provider=output.model_provider or "", model=output.model or "")
+    message.requested_at.FromDatetime(output.requested_at)
+    if output.completed_at is not None:
+        message.completed_at.FromDatetime(output.completed_at)
+    if output.edited_at is not None:
+        message.edited_at.FromDatetime(output.edited_at)
     return message
 
 

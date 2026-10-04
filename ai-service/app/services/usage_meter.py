@@ -40,6 +40,7 @@ class LlmFeature(StrEnum):
     JOB_TITLE = "job_title"  # 替 Job 取標題、判斷類型
     SPEAKER_NAMES = "speaker_names"  # 講者名字建議
     SPEAKER_INSIGHTS = "speaker_insights"  # 講者數據：問題與打斷
+    GENERATED_OUTPUT = "generated_output"  # 多格式輸出
 
 
 @dataclass(frozen=True)
