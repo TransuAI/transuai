@@ -502,7 +502,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             _abort(context, grpc.StatusCode.NOT_FOUND, "translation not found")
         progress, segments = found
         message = _translation_to_proto(progress)
-        message.segments.extend(ai_pb2.SegmentTranslation(segment_id=str(s.segment_id), text=s.text) for s in segments)
+        message.segments.extend(ai_pb2.SegmentTranslation(segment_id=str(s.segment_id), text=s.text,
+                                                          source_text=s.source_text) for s in segments)
         return message
 
     def DeleteTranslation(self, request, context):

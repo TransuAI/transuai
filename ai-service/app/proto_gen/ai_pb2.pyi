@@ -1014,9 +1014,11 @@ class Translation(_message.Message):
     def __init__(self, job_id: _Optional[str] = ..., language: _Optional[str] = ..., status: _Optional[_Union[TranslationStatus, str]] = ..., failure_reason: _Optional[str] = ..., total_segments: _Optional[int] = ..., translated_segments: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., segments: _Optional[_Iterable[_Union[SegmentTranslation, _Mapping]]] = ...) -> None: ...
 
 class SegmentTranslation(_message.Message):
-    __slots__ = ("segment_id", "text")
+    __slots__ = ("segment_id", "text", "source_text")
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_TEXT_FIELD_NUMBER: _ClassVar[int]
     segment_id: str
     text: str
-    def __init__(self, segment_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+    source_text: str
+    def __init__(self, segment_id: _Optional[str] = ..., text: _Optional[str] = ..., source_text: _Optional[str] = ...) -> None: ...

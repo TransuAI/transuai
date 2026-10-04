@@ -89,6 +89,7 @@ def test_every_spoken_segment_is_translated_under_its_id_and_cleared_ones_are_sk
     assert done.status == ai_pb2.TRANSLATION_STATUS_COMPLETED
     assert (done.total_segments, done.translated_segments) == (3, 3)
     assert {s.segment_id: s.text for s in done.segments} == {SEG[0]: "嗨。", SEG[2]: "先談預算。", SEG[3]: "好。"}
+    assert {s.segment_id: s.source_text for s in done.segments}[SEG[2]] == "Budget first."  # what it was translated from
     with new_session() as session:
         assert {u.feature for u in session.scalars(select(LlmUsage).where(LlmUsage.job_id == job_id))} == {"translation"}
 
