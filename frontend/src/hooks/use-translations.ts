@@ -41,6 +41,13 @@ export function useTranslations(
   const [shownSegments, setShownSegments] = useState<TranslationDetail['segments']>([])
   const [isRequesting, setIsRequesting] = useState(false)
   const [followingEditUntil, setFollowingEditUntil] = useState<number | null>(null)
+  // Bumped whenever a language is added or deleted here: a list asked for before that is out of date, so its answer is
+  // dropped rather than let it bring a deleted language back or take a new one away (as use-quizzes).
+  const localChanges = useRef(0)
+  const list = useCallback((id: string) => {
+    const asOf = localChanges.current
+    return translationsApi.list(id).then((latest) => (asOf === localChanges.current ? latest : null))
+  }, [])
 
   const revision = transcript?.revision
   const lastRevision = useRef(revision)
@@ -54,25 +61,24 @@ export function useTranslations(
   useEffect(() => {
     if (!jobId || !isCompleted) return
     let cancelled = false
-    translationsApi
-      .list(jobId)
+    list(jobId)
       .then((latest) => {
-        if (!cancelled) setTranslations(latest)
+        if (!cancelled && latest) setTranslations(latest)
       })
       .catch(() => {}) // the bar just offers to translate
     return () => {
       cancelled = true
     }
-  }, [jobId, isCompleted])
+  }, [jobId, isCompleted, list])
 
   const generating = translations.filter((t) => t.status === 'GENERATING').map((t) => t.language).join(',')
   useEffect(() => {
     if (!jobId || (!generating && followingEditUntil === null)) return
     const waitingFor = generating.split(',')
     const timer = setInterval(() => {
-      translationsApi
-        .list(jobId)
+      list(jobId)
         .then((latest) => {
+          if (!latest) return
           setTranslations(latest)
           if (latest.some((t) => waitingFor.includes(t.language) && t.status !== 'GENERATING')) onSettled()
           const changed = latest.some((t) => {
@@ -85,7 +91,7 @@ export function useTranslations(
     }, POLL_INTERVAL_MS)
     return () => clearInterval(timer)
     // Each poll's result restarts the timer (through `translations`), so the next one compares against it.
-  }, [jobId, generating, followingEditUntil, translations, onSettled])
+  }, [jobId, generating, followingEditUntil, translations, onSettled, list])
 
   const shownLanguage = display.mode === 'original' ? null : display.language
   const shown = translations.find((t) => t.language === shownLanguage)
@@ -116,6 +122,7 @@ export function useTranslations(
       translationsApi
         .request(jobId, language)
         .then((translation) => {
+          localChanges.current += 1
           setTranslations((prev) => [...prev.filter((t) => t.language !== language), translation])
           setDisplay({ mode: 'translated', language })
         })
@@ -134,6 +141,7 @@ export function useTranslations(
         toast.error(err instanceof ApiError ? err.message : '無法刪除譯文，請稍後再試')
         return
       }
+      localChanges.current += 1
       setTranslations((prev) => prev.filter((t) => t.language !== language))
       setDisplay((current) => (current.mode !== 'original' && current.language === language ? { mode: 'original' } : current))
     },

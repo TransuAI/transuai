@@ -50,11 +50,11 @@ interface TranscriptViewProps {
 }
 
 // 譯文 in place of the text: search, highlighting and the rest work on what's shown. Not yet translated segments keep the
-// original; the original-text marker (已編輯) is left out — the shown text isn't the transcript's own.
+// original. Nothing is editable then (textEditable), which also leaves out the 已編輯 marker and 還原.
 function translatedSegments(segments: TranscriptSegment[], texts: Map<string, string>): TranscriptSegment[] {
   return segments.map((segment) => {
     const text = texts.get(segment.id)
-    return text === undefined || segment.text === '' ? segment : { ...segment, text, originalText: text }
+    return text === undefined || segment.text === '' ? segment : { ...segment, text }
   })
 }
 

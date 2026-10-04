@@ -4012,6 +4012,45 @@ describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => 
     expect(within(screen.getByRole('combobox', { name: '翻譯成' })).getByRole('option', { name: '日本語' })).toBeInTheDocument()
   })
 
+  it('does not bring a deleted language back from a list asked for before the delete', async () => {
+    stubDesktopLayout()
+    const korean = { ...translating, language: 'ko' as const }
+    vi.mocked(translationsApi.list).mockResolvedValue([done, korean]) // ko still translating: the page polls
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    vi.mocked(translationsApi.delete).mockResolvedValue(undefined)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '譯文（日本語）')
+    await screen.findByText('こんにちは')
+    let answerPoll: (latest: TranslationSummary[]) => void = () => {}
+    vi.mocked(translationsApi.list).mockReturnValue(new Promise((resolve) => (answerPoll = resolve)))
+    await vi.advanceTimersByTimeAsync(3000) // a poll is now on its way
+
+    await user.click(screen.getByRole('button', { name: '刪除日本語譯文' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '刪除' }))
+    await waitFor(() => expect(screen.queryByText('こんにちは')).not.toBeInTheDocument())
+    await act(async () => answerPoll([done, korean]))
+
+    expect(within(screen.getByRole('combobox', { name: '顯示' })).queryByRole('option', { name: '譯文（日本語）' })).toBeNull()
+  })
+
+  it('highlights the playing segment and seeks from its timestamp in 雙語', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '雙語（日本語）')
+    await screen.findByText('こんにちは')
+
+    await user.click(within(row('大家好')).getByRole('button', { name: /0:04$/ }))
+    expect(renderedMediaElement().currentTime).toBe(4)
+
+    playTo(renderedMediaElement(), 5)
+    expect(currentSegmentText()).toContain('大家好')
+    expect(currentSegmentText()).toContain('こんにちは')
+  })
+
   it('keeps the translation when deleting it fails', async () => {
     stubDesktopLayout()
     vi.mocked(translationsApi.list).mockResolvedValue([done])

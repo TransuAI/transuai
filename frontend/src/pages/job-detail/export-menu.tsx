@@ -37,13 +37,14 @@ const TRANSCRIPT_FORMATS: ExportFormat[] = [PLAIN_TEXT_FORMAT, TIMESTAMPED_TEXT_
 
 // 匯出（見 frontend CONTEXT.md）：把工作區已經載入的內容轉成檔案，全部在瀏覽器裡完成。
 // The export content is only assembled when a format is picked, not on every workspace render.
-// 譯文的匯出：每種已經有譯文的語言，譯文取代原文的 TXT／SRT／VTT，與雙語字幕（原文在上、譯文在下）的 SRT／VTT。
+// 譯文的匯出：每種已經有譯文的語言，譯文取代原文的 TXT／SRT／VTT，與雙語（每段原文在上、譯文在下）的 TXT／SRT／VTT。
 const TRANSLATED_FORMATS = [
-  { mode: 'translated', format: PLAIN_TEXT_FORMAT, label: (name: string) => `譯文（${name}，TXT）`, suffix: (l: string) => `-${l}.txt` },
-  { mode: 'translated', format: SRT_FORMAT, label: (name: string) => `譯文字幕（${name}，SRT）`, suffix: (l: string) => `-${l}.srt` },
-  { mode: 'translated', format: VTT_FORMAT, label: (name: string) => `譯文字幕（${name}，VTT）`, suffix: (l: string) => `-${l}.vtt` },
-  { mode: 'bilingual', format: SRT_FORMAT, label: (name: string) => `雙語字幕（${name}，SRT）`, suffix: (l: string) => `-雙語-${l}.srt` },
-  { mode: 'bilingual', format: VTT_FORMAT, label: (name: string) => `雙語字幕（${name}，VTT）`, suffix: (l: string) => `-雙語-${l}.vtt` },
+  { id: 'txt', mode: 'translated', format: PLAIN_TEXT_FORMAT, label: (name: string) => `譯文（${name}，TXT）`, suffix: (l: string) => `-${l}.txt` },
+  { id: 'srt', mode: 'translated', format: SRT_FORMAT, label: (name: string) => `譯文字幕（${name}，SRT）`, suffix: (l: string) => `-${l}.srt` },
+  { id: 'vtt', mode: 'translated', format: VTT_FORMAT, label: (name: string) => `譯文字幕（${name}，VTT）`, suffix: (l: string) => `-${l}.vtt` },
+  { id: 'bilingual-txt', mode: 'bilingual', format: PLAIN_TEXT_FORMAT, label: (name: string) => `雙語（${name}，TXT）`, suffix: (l: string) => `-雙語-${l}.txt` },
+  { id: 'bilingual-srt', mode: 'bilingual', format: SRT_FORMAT, label: (name: string) => `雙語字幕（${name}，SRT）`, suffix: (l: string) => `-雙語-${l}.srt` },
+  { id: 'bilingual-vtt', mode: 'bilingual', format: VTT_FORMAT, label: (name: string) => `雙語字幕（${name}，VTT）`, suffix: (l: string) => `-雙語-${l}.vtt` },
 ] as const
 
 export function ExportMenu({
@@ -138,7 +139,7 @@ export function ExportMenu({
           <div key={t.language}>
             <DropdownMenuSeparator />
             {TRANSLATED_FORMATS.map((choice) => (
-              <DropdownMenuItem key={choice.label('')} onSelect={() => void downloadTranslated(t.language, choice)}>
+              <DropdownMenuItem key={choice.id} onSelect={() => void downloadTranslated(t.language, choice)}>
                 {choice.label(TRANSLATION_LANGUAGES[t.language])}
               </DropdownMenuItem>
             ))}
