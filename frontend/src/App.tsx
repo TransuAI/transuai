@@ -10,6 +10,7 @@ import { UploadPage } from '@/pages/upload-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { JobsPage } from '@/pages/jobs-page'
 import { JobDetailPage } from '@/pages/job-detail-page'
+import { DecisionsPage } from '@/pages/decisions-page'
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
               <Route path="/" element={<Navigate to="/jobs" replace />} />
               <Route path="/jobs" element={<JobsPage />} />
               <Route path="/jobs/:jobId" element={<JobDetailPage />} />
+              <Route path="/decisions" element={<DecisionsPage />} />
               <Route path="/upload" element={<UploadPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>

@@ -1,6 +1,6 @@
 import { useState, type ComponentType } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { AudioLines, Folder, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, Upload } from 'lucide-react'
+import { AudioLines, Folder, Gavel, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, Upload } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/auth-context'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,7 @@ const JOB_DETAIL_ROUTE_PATTERN = /^\/jobs\/[^/]+$/
 
 const NAV_ITEMS: { to: string; label: string; icon: ComponentType<{ className?: string }>; end?: boolean }[] = [
   { to: '/jobs', label: '我的 Job', icon: Folder, end: true },
+  { to: '/decisions', label: '決策', icon: Gavel },
   { to: '/upload', label: '上傳', icon: Upload },
   { to: '/settings', label: '設定', icon: Settings },
 ]

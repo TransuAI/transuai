@@ -8,7 +8,6 @@ import type {
   ConfirmedProposal,
   Connection,
   Job,
-  JobCategory,
   JobListResponse,
   JobUpdate,
   JobUsage,
@@ -40,6 +39,8 @@ import type {
   Decision,
   DecisionExtraction,
   DecisionInput,
+  DecisionTimeline,
+  JobCategory,
   JobDecisions,
   GeneratedOutput,
   OutputRequest,
@@ -269,6 +270,11 @@ export const decisionsApi = {
   update: (jobId: string, decisionId: string, decision: DecisionInput) =>
     apiFetch<Decision>(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'PATCH', body: decision }),
   // An extracted one is only hidden (extracting again doesn't bring it back); one the user added is gone.
+  // The 決策 page: all the user's decisions, or a category's, or one job's; q searches the words and the meaning.
+  timeline: (params: { q?: string; category?: JobCategory; jobId?: string }) => {
+    const search = new URLSearchParams(params as Record<string, string>).toString()
+    return apiFetch<DecisionTimeline>(`/decisions${search ? `?${search}` : ''}`)
+  },
   remove: (jobId: string, decisionId: string) =>
     apiFetchVoid(`/jobs/${jobId}/decisions/${decisionId}`, { method: 'DELETE' }),
 }

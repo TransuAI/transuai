@@ -318,18 +318,36 @@ export function toDecisionsMarkdown(content: Pick<ExportContent, 'fileName' | 't
   if (content.title) blocks.push(`- 檔名：${content.fileName}`)
   const decisions = content.decisions ?? []
   if (decisions.length === 0) blocks.push('尚無決策')
-  decisions.forEach((decision, i) => {
-    blocks.push(`## ${i + 1}. ${decision.statement}${decision.tentative ? '（暫定）' : ''}`)
-    const lines = [
-      decision.rationale && `- 理由：${decision.rationale}`,
-      decision.alternatives.length > 0 && `- 沒選：${decision.alternatives.join('、')}`,
-      decision.proposer && `- 提出：${decision.proposer}`,
-      decision.startTime !== null &&
-        `- 時間：[${formatClock(decision.startTime)}]${decision.evidenceText ? ` 「${decision.evidenceText}」` : ''}`,
-    ].filter(Boolean)
-    if (lines.length > 0) blocks.push(lines.join('\n'))
-  })
+  decisions.forEach((decision, i) => blocks.push(...decisionBlocks(decision, `## ${i + 1}. `)))
   return blocks.join('\n\n') + '\n'
+}
+
+// 決策頁的 Markdown：大標「決策」，有篩選或搜尋時列出來；每場會議一節（日期與名稱），下面每個決策一小節。
+export function toDecisionTimelineMarkdown(content: {
+  filters: string[]
+  meetings: { heading: string; decisions: ExportDecision[] }[]
+}): string {
+  const blocks: string[] = ['# 決策']
+  if (content.filters.length > 0) blocks.push(content.filters.map((filter) => `- ${filter}`).join('\n'))
+  if (content.meetings.length === 0) blocks.push('尚無決策')
+  for (const meeting of content.meetings) {
+    blocks.push(`## ${meeting.heading}`)
+    for (const decision of meeting.decisions) blocks.push(...decisionBlocks(decision, '### '))
+  }
+  return blocks.join('\n\n') + '\n'
+}
+
+// One decision: its heading (暫定 marked), then why, what else was considered, who proposed it and where — those it has.
+function decisionBlocks(decision: ExportDecision, heading: string): string[] {
+  const lines = [
+    decision.rationale && `- 理由：${decision.rationale}`,
+    decision.alternatives.length > 0 && `- 沒選：${decision.alternatives.join('、')}`,
+    decision.proposer && `- 提出：${decision.proposer}`,
+    decision.startTime !== null &&
+      `- 時間：[${formatClock(decision.startTime)}]${decision.evidenceText ? ` 「${decision.evidenceText}」` : ''}`,
+  ].filter(Boolean)
+  const title = `${heading}${decision.statement}${decision.tentative ? '（暫定）' : ''}`
+  return lines.length > 0 ? [title, lines.join('\n')] : [title]
 }
 
 export const DECISIONS_MARKDOWN_FORMAT: ExportFormat = {

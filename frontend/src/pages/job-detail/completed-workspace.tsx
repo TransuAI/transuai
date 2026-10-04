@@ -3,7 +3,7 @@ import type { DecisionsActions } from '@/hooks/use-decisions'
 import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import type { OutputsActions } from '@/hooks/use-outputs'
 import type { TranslationsActions } from '@/hooks/use-translations'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, BookmarkPlus, FileText, PanelLeftOpen, PanelRightOpen, Sparkles, type LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import type { AutoFollow } from '@/hooks/use-auto-follow'
@@ -214,6 +214,26 @@ export function CompletedWorkspace({
     setNoteToOpen({ noteId, edit })
   }
   const onNoteOpened = useCallback(() => setNoteToOpen(null), [])
+
+  // A decision picked in 講者數據, or in the address (the 決策 page links to /jobs/…?decision=…), opens in the Studio's 決策.
+  const [decisionToOpen, setDecisionToOpen] = useState<string | null>(null)
+  const openDecision = (decisionId: string | null) => {
+    setStudioTool('decisions')
+    setStudioCollapsed(false)
+    if (!isDesktop) {
+      setSourceOpen(false)
+      setStudioOpen(true)
+    }
+    setDecisionToOpen(decisionId)
+  }
+  const onDecisionOpened = useCallback(() => setDecisionToOpen(null), [])
+  const [searchParams] = useSearchParams()
+  const decisionInAddress = searchParams.get('decision')
+  const [openedFromAddress, setOpenedFromAddress] = useState<string | null>(null)
+  if (decisionInAddress && decisionInAddress !== openedFromAddress) {
+    setOpenedFromAddress(decisionInAddress)
+    openDecision(decisionInAddress)
+  }
   // A bookmark first (saved even if nothing gets typed), then opened for writing.
   const addNoteAt = async (seconds: number) => {
     try {
@@ -299,6 +319,9 @@ export function CompletedWorkspace({
       currentTime={currentTime}
       noteToOpen={noteToOpen}
       onNoteOpened={onNoteOpened}
+      onOpenDecision={openDecision}
+      decisionToOpen={decisionToOpen}
+      onDecisionOpened={onDecisionOpened}
       onCollapse={desktop?.onCollapse}
       className={desktop?.className}
       summary={summary}

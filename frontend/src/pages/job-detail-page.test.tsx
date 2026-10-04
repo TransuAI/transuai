@@ -68,9 +68,9 @@ beforeAll(async () => {
   ;({ JobDetailPage } = await import('./job-detail-page'))
 })
 
-function renderJobDetail(jobId = 'job-1') {
+function renderJobDetail(jobId = 'job-1', search = '') {
   return render(
-    <MemoryRouter initialEntries={[`/jobs/${jobId}`]}>
+    <MemoryRouter initialEntries={[`/jobs/${jobId}${search}`]}>
       <Routes>
         <Route path="/jobs/:jobId" element={<JobDetailPage />} />
       </Routes>
@@ -4361,6 +4361,23 @@ describe('JobDetailPage decisions (決策, COMPLETED, desktop layout)', () => {
     expect(decisionsApi.extract).toHaveBeenCalledWith('job-1')
     expect(screen.getByText('抽取中…')).toBeInTheDocument()
     expect(screen.getByText('資料庫用 PostgreSQL')).toBeInTheDocument() // the earlier ones stay meanwhile
+  })
+
+  it('opens at the time and the decision the address points to (from the 決策 page)', async () => {
+    stubDesktopLayout()
+    vi.mocked(decisionsApi.list).mockResolvedValue({ extraction: extracted, decisions })
+    vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
+    vi.mocked(transcriptApi.get).mockResolvedValue(multiSpeakerTranscript)
+    vi.mocked(summaryApi.get).mockResolvedValue(mockSummary)
+    vi.mocked(chapterApi.list).mockResolvedValue(mockChapters)
+    vi.mocked(qaApi.history).mockResolvedValue([])
+
+    renderJobDetail('job-1', '?t=6&decision=d2')
+
+    const list = await screen.findByRole('list', { name: '這場的決策' })
+    expect(within(list).getAllByRole('listitem')[1]).toHaveAttribute('data-highlighted')
+    await waitFor(() => expect(renderedMediaElement().currentTime).toBe(6))
+    expect(currentSegmentText()).toContain('先聊聊近況')
   })
 
   it('shows why it failed and offers to try again', async () => {

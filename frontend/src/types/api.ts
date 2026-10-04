@@ -501,6 +501,24 @@ export interface DecisionInput {
   startTime?: number | null
 }
 
+/** The job a decision on the 決策 page belongs to. */
+export interface DecisionJob {
+  jobId: string
+  /** Null: no title, the file name is shown. */
+  title: string | null
+  fileName: string
+  category: JobCategory | null
+  createdAt: string | null
+}
+
+/**
+ * The 決策 page: decisions across the user's jobs, each with its job — without a search, newest job first and by time
+ * within one; with a search, best match first.
+ */
+export interface DecisionTimeline {
+  items: { job: DecisionJob; decision: Decision }[]
+}
+
 /** A job's extraction (null when never extracted) and decisions, by time (those without one last). */
 export interface JobDecisions {
   extraction: DecisionExtraction | null

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
 import { ArrowLeft, ChartBarBig, FileText, ClipboardList, Gauge, Gavel, GraduationCap, History, List, Loader2Icon, NotebookPen, PanelRightClose, RefreshCw, Sparkles, type LucideIcon } from 'lucide-react'
 import type { NotesActions } from '@/hooks/use-notes'
 import type { DecisionsActions } from '@/hooks/use-decisions'
@@ -67,6 +67,11 @@ interface StudioPaneProps {
   currentTime: () => number | null
   noteToOpen: NoteToOpen | null
   onNoteOpened: () => void
+  /** Opens 決策 at that decision (null: just opens it); 講者數據 links there. */
+  onOpenDecision: (decisionId: string | null) => void
+  /** The decision 決策 should scroll to and highlight (from 講者數據 or the 決策 page). */
+  decisionToOpen: string | null
+  onDecisionOpened: () => void
   /** The tool on show; null shows the tiles. Kept by the workspace so it survives the Sheet closing. */
   tool: StudioTool | null
   onToolChange: (tool: StudioTool | null) => void
@@ -105,6 +110,9 @@ export function StudioPane({
   currentTime,
   noteToOpen,
   onNoteOpened,
+  onOpenDecision,
+  decisionToOpen,
+  onDecisionOpened,
   tool,
   onToolChange,
   onCollapse,
@@ -161,14 +169,6 @@ export function StudioPane({
   useEffect(() => {
     if (tool === 'speaker-stats' && !speakerStats) onToolChange(null)
   }, [tool, speakerStats, onToolChange])
-
-  // 講者數據 links to a decision: 決策 opens at it.
-  const [decisionToOpen, setDecisionToOpen] = useState<string | null>(null)
-  const openDecision = (decisionId: string | null) => {
-    setDecisionToOpen(decisionId)
-    onToolChange('decisions')
-  }
-  const onDecisionOpened = useCallback(() => setDecisionToOpen(null), [])
 
   const shown = tool ? TOOLS[tool] : null
   const pendingProposals =
@@ -333,7 +333,7 @@ export function StudioPane({
               transcript={transcript}
               insights={speakerInsights}
               decisions={decisions.decisions}
-              onOpenDecision={openDecision}
+              onOpenDecision={onOpenDecision}
               onSeek={onSeek}
               mediaAvailable={mediaAvailable}
             />

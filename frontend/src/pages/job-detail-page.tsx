@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft } from 'lucide-react'
 import { chapterApi, jobsApi, modelsApi, qaApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
@@ -229,6 +229,18 @@ export function JobDetailPage() {
     // playback position", so it resumes auto-follow too.
     resumeFollow()
   }
+
+  // The 決策 page links to where a decision was made (/jobs/…?t=…): go there once the player and transcript are ready,
+  // without starting playback (the browser wouldn't let it start on its own anyway).
+  const [searchParams] = useSearchParams()
+  const timeInAddress = Number.parseFloat(searchParams.get('t') ?? '')
+  const wentToTimeInAddress = useRef(false)
+  useEffect(() => {
+    if (wentToTimeInAddress.current || !Number.isFinite(timeInAddress) || !mediaElement || !transcript) return
+    wentToTimeInAddress.current = true
+    mediaElement.currentTime = timeInAddress
+    setCurrentSegmentIndex(findCurrentSegmentIndex(transcript.segments, timeInAddress))
+  }, [timeInAddress, mediaElement, transcript])
 
   // 編輯（見 transcription-service CONTEXT.md）：存檔後用回應的片段跟版本號更新逐字稿。失敗時
   // 讓錯誤往外拋，編輯器會保留使用者打的字並提示。

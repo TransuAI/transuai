@@ -5,6 +5,11 @@ export function jobDisplayName(job: Pick<Job, 'title' | 'fileName'>): string {
   return job.title || job.fileName
 }
 
+/** The day a job was made (uploaded), as the 決策 page dates a meeting by. */
+export function jobDate(createdAt: string): string {
+  return new Date(createdAt).toLocaleDateString('zh-TW')
+}
+
 export const CATEGORY_LABELS: Record<JobCategory, string> = {
   meeting: '會議',
   lecture: '課程',
