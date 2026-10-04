@@ -39,7 +39,7 @@ Notification Service 消費訊息
 ```
 
 > **實作現況**：摘要、自動章節分段、embedding/pgvector、RAG 問答都已實作（`ai_db` 有
-> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`/`post_meeting_settings`、網路搜尋用量的 `web_search_usage`、講者名字建議的 `speaker_name_suggestions`、講者數據的 `speaker_insights`/`speaker_insight_items`、刪掉的 Job 的 `deleted_jobs`）。只剩多格式輸出還沒做。見
+> `summaries`/`chapters`/`embeddings`/`qa_history`，加上記錄每次 LLM 呼叫的 `llm_usage`、加密存放使用者自有金鑰的 `provider_keys`、使用者預設模型的 `default_models`、測驗的 `quizzes`/`quiz_questions`/`quiz_attempts`、已連結帳號的 `oauth_connections`/`oauth_pending_authorizations`/`oauth_clients`、會後處理的 `post_meeting_runs`/`action_proposals`/`post_meeting_settings`、網路搜尋用量的 `web_search_usage`、講者名字建議的 `speaker_name_suggestions`、講者數據的 `speaker_insights`/`speaker_insight_items`、刪掉的 Job 的 `deleted_jobs`、多格式輸出的 `generated_outputs`）。還沒做的見
 > [8.5 未來規劃（尚未實作）](#85-未來規劃尚未實作)。
 >
 > **會後處理**（使用者手動啟動，不在上面的 pipeline 裡）：`POST /jobs/{jobId}/post-meeting` → ai-service 建立一筆執行中的紀錄、
@@ -79,7 +79,7 @@ Notification Service 消費訊息
 - `auth_db`：使用者帳號與簽出去的 refresh token（`users`、`refresh_tokens`：只存雜湊，用來輪替與作廢）
 - `upload_db`：檔案 metadata、Job 狀態機
 - `transcription_db`：逐字稿內容、片段 timestamp、講者、轉錄用量
-- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理、網路搜尋用量、講者名字建議、講者數據、刪掉的 Job（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` / `web_search_usage` / `speaker_name_suggestions` / `speaker_insights` / `speaker_insight_items` / `deleted_jobs` 二十一張表；多格式輸出的 `export_outputs` 還沒建，見 8.5）
+- `ai_db`：摘要、章節分段、embedding、問答歷史、LLM 用量、自有金鑰、預設模型、測驗、已連結的帳號、會後處理、網路搜尋用量、講者名字建議、講者數據、刪掉的 Job（`summaries` / `chapters` / `embeddings` / `qa_history` / `llm_usage` / `provider_keys` / `default_models` / `quizzes` / `quiz_questions` / `quiz_attempts` / `oauth_connections` / `oauth_pending_authorizations` / `oauth_clients` / `post_meeting_runs` / `action_proposals` / `post_meeting_settings` / `web_search_usage` / `speaker_name_suggestions` / `speaker_insights` / `speaker_insight_items` / `deleted_jobs` / `generated_outputs` 二十二張表）
 
 跨服務資料需求（例如前端要同時顯示 Job 狀態 + 逐字稿 + 摘要）完全由 **Gateway 做 API Composition**：
 Gateway 收到 REST 請求後呼叫對應下游服務的 gRPC API，把結果轉成 JSON 回傳，下游服務之間除了
@@ -205,6 +205,10 @@ POST   /jobs/{jobId}/quizzes            產生一份測驗，body { "questionCou
                                          輪詢列表直到不是 GENERATING）
 GET    /jobs/{jobId}/quizzes            這個 Job 的測驗（新的在前，不含題目）：狀態、失敗原因、依據的 revision、產生的模型、最佳成績
 GET    /jobs/{jobId}/quizzes/{quizId}   一份測驗含題目、選項、正確答案、解說、依據的時間戳
+POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format": "podcast_description", "instruction"? }，回 202
+                                         （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
+GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）
+GET    /jobs/{jobId}/outputs/{outputId} 一份輸出
 POST   /jobs/{jobId}/speaker-insights   講者數據的 AI 判斷（每位講者提出的問題、可能的打斷），回 202（背景分析，前端每 3 秒輪詢）；
                                          一個 Job 一份，再分析完成才取代
 GET    /jobs/{jobId}/speaker-insights   目前這一份：狀態、依據的 revision、模型、項目（類型、講者、被打斷的講者、時間、原話）
@@ -261,8 +265,7 @@ GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省�
 [`docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](./docs/adr/0001-sse-via-gateway-for-streaming-qa.md)。
 「對話」的範圍是整個 job，沒有獨立的 conversation/thread 概念，見
 [`ai-service/docs/adr/0002-single-conversation-per-job.md`](../ai-service/docs/adr/0002-single-conversation-per-job.md)。
-多格式輸出（LLM 生成會議紀錄等新文件，見下方 8.5）還沒實作，ai-service 沒有對應的 rpc，API 路徑也還沒定——
-刻意**不用** `/export`：「匯出」這個詞已經指前端把既有內容（逐字稿、摘要、章節、問答、測驗、原始檔）轉成檔案下載，
+多格式輸出（LLM 依摘要與章節寫成要發出去的新文件）的路徑是 `/jobs/{jobId}/outputs`（見下）——刻意**不用** `/export`：「匯出」這個詞已經指前端把既有內容（逐字稿、摘要、章節、問答、測驗、原始檔）轉成檔案下載，
 兩者不同（見 `frontend/CONTEXT.md`、`ai-service/CONTEXT.md`）。文字格式的匯出（TXT/SRT/VTT/Markdown、複製）
 在前端產生、沒有後端 API；唯一跟後端有關的是「下載原始檔」用的 media-url `download` 參數（見 3.2）。
 
@@ -421,7 +424,7 @@ CREATE TABLE deleted_jobs (
 
 ### 4.4 ai_db
 
-**現況（已建立，二十一張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
+**現況（已建立，二十二張表都在用）**：`pgvector` extension 有裝在 Postgres 上，`embeddings` 用
 `BAAI/bge-m3`（1024 維，見 `ai-service/README.md`）：
 
 ```sql
@@ -480,7 +483,7 @@ CREATE TABLE llm_usage (
     id UUID PRIMARY KEY,
     user_id UUID,                           -- Job 擁有者 / 提問者；升級前排入的舊訊息沒有
     job_id UUID NOT NULL,
-    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting / job_title / speaker_names / speaker_insights
+    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting / job_title / speaker_names / speaker_insights / generated_output
     provider VARCHAR(32) NOT NULL,          -- platform 或廠商名稱
     model VARCHAR(200) NOT NULL,
     key_source VARCHAR(16) NOT NULL,        -- platform / own_key
@@ -690,17 +693,26 @@ CREATE TABLE deleted_jobs (
 );
 ```
 
-**規劃中（尚未建立）**：多格式輸出還沒實作，`export_outputs` 目前不存在：
+多格式輸出（原本規劃叫 `export_outputs`，改名避免跟「匯出」混淆；同一種格式可以有很多份，沒有 UNIQUE）：
 
 ```sql
-CREATE TABLE export_outputs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE generated_outputs (
+    id UUID PRIMARY KEY,
     job_id UUID NOT NULL,
-    format VARCHAR(50) NOT NULL,            -- meeting_minutes / podcast_desc / youtube_desc / social_post
-    content TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    UNIQUE(job_id, format)
+    user_id UUID NOT NULL,                  -- 要求產生的使用者（他的預設模型、用量記在他名下）
+    format VARCHAR(32) NOT NULL,            -- podcast_description（之後：youtube_description / blog_post / newsletter / social_post）
+    options JSONB NOT NULL DEFAULT '{}',    -- Job 的標題、使用者的一句要求、社群貼文的平台
+    status VARCHAR(10) NOT NULL,            -- GENERATING / COMPLETED / FAILED
+    failure_reason TEXT,
+    content TEXT,                           -- Markdown；章節時間由程式附上，模型寫的時間會被刪掉
+    source_revision INTEGER,
+    model_provider VARCHAR(32),
+    model VARCHAR(200),
+    requested_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    edited_at TIMESTAMPTZ                   -- 使用者改過內容的時間
 );
+CREATE INDEX ix_generated_outputs_job_id ON generated_outputs (job_id);
 ```
 
 ---
@@ -714,6 +726,7 @@ CREATE TABLE export_outputs (
 | `ai.completed` | AI Service | Notification Service | `{ jobId, status }` |
 | `job.failed` | 任一服務 | Notification Service | `{ jobId, stage, errorReason }` |
 | `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
+| `output.requested` | AI Service | AI Service | `{ outputId, jobId, userId }`——使用者要求產生一份多格式輸出（`POST /jobs/{jobId}/outputs`）；ai-service 排給自己的背景工作 |
 | `speaker_insights.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`）；ai-service 排給自己的背景工作 |
 | `quiz.requested` | AI Service | AI Service | `{ quizId, jobId, userId }`（`userId` 是要求產生的使用者）——使用者要求產生測驗（`POST /jobs/{jobId}/quizzes`）；ai-service 排給自己的背景工作 |
 | `post_meeting.requested` | AI Service | AI Service | `{ runId, jobId, userId }`（`userId` 是觸發的使用者）——使用者啟動會後處理（`POST /jobs/{jobId}/post-meeting`）；ai-service 排給自己的背景工作 |
@@ -799,7 +812,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
    consumer（ai-service/transcription-service/notification-service）連線斷線時有指數退避自動
    重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
 3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
-4. **多格式輸出**：目前**一種格式都還沒做**（摘要/章節分段/RAG 問答都已實作），原規劃的「先做 1-2 種格式」還沒開始。
+4. **多格式輸出**：Studio「多格式輸出」產生 Podcast 介紹（其他格式見 `.scratch/multi-format-outputs`），依摘要、章節與使用者取過名字的講者寫成 Markdown，可以複製、下載。「會議紀錄」不另外做——會後處理寫進 Notion 的會議紀錄就是它。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、測驗）、複製、下載原始檔）混為一談
 5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
@@ -820,7 +833,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 - [x] 章節自動分段的演算法/prompt 設計——**已解決**：純 LLM 判斷（把逐字稿片段連同時間戳丟給
       HF Inference Providers 的聊天模型，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見
       `ai-service/app/services/chapter_generator.py`
-- [ ] 多格式輸出的模板內容（每種格式要問 LLM 什麼樣的 prompt）——尚未實作
+- [x] 多格式輸出的模板內容——**已解決**：每種格式一份 prompt（`ai-service/app/services/output_generator.py`），只根據摘要與章節、不編造、不寫時間（章節時間由程式附上）
 - [ ] Google 的權限審查——連結 Google 帳號已實作，但 `gmail.compose`（建立草稿）是 Google 的受限權限，通過 Google 的
       應用程式審查之前只有同意畫面登記的測試使用者能連結，還沒申請；Notion 已經用真的帳號走過一次（2026-09-28），但回應的
       格式沒有正式文件（標題、建立好的網址是寬鬆地從回應裡找出來的）
@@ -833,7 +846,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 - [x] 使用者刪除 Job 時是否連帶清除物件儲存檔案——**部分解決**：`UploadService.DeleteJob` 會嘗試刪除
       對應的物件儲存檔案，刪除失敗只記警告不擋 Job 刪除（優先保證使用者的刪除意圖，孤兒物件之後
       靠背景清理排除）。transcription_db／ai_db 的資料由 `job.deleted` 事件清掉（2026-10-03，見 5.）：逐字稿、片段、講者、
-      摘要、章節、embedding、問答、測驗、講者名字建議、講者數據的問題與打斷、會後處理；用量紀錄保留。刪除當下還在跑的寫入晚到也會被丟掉
+      摘要、章節、embedding、問答、測驗、講者名字建議、講者數據的問題與打斷、多格式輸出、會後處理；用量紀錄保留。刪除當下還在跑的寫入晚到也會被丟掉
 - [x] 授權缺口：使用者只能存取自己的 job——**已解決**：Gateway 在轉發 Transcription/AI 的查詢
       前先呼叫 upload-service 的 `GetJob` 做 ownership 檢查（見 2.1），但 transcription-service /
       ai-service 本身仍不驗證 `x-user-id`，這個決定維持不變（見 2.1 授權模型）
@@ -842,6 +855,5 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
-- **多格式輸出**（LLM 生成會議紀錄/Podcast 介紹/YouTube 描述/社群貼文）：完全未實作，API 路徑待定（不使用 `/export`，見 3.4）
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
 - **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做
