@@ -129,6 +129,11 @@ class AiServiceStub:
                 request_serializer=ai__pb2.GetTranslationRequest.SerializeToString,
                 response_deserializer=ai__pb2.Translation.FromString,
                 _registered_method=True)
+        self.DeleteTranslation = channel.unary_unary(
+                '/transuai.ai.v1.AiService/DeleteTranslation',
+                request_serializer=ai__pb2.DeleteTranslationRequest.SerializeToString,
+                response_deserializer=ai__pb2.DeleteTranslationResponse.FromString,
+                _registered_method=True)
         self.RequestSpeakerInsights = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestSpeakerInsights',
                 request_serializer=ai__pb2.RequestSpeakerInsightsRequest.SerializeToString,
@@ -385,6 +390,7 @@ class AiServiceServicer:
         """譯文（見 ai-service CONTEXT.md「譯文」）：把一個 Job 的逐字稿翻成另一種語言，每個片段一句（保留時間與講者）。一個 Job 每種語言一份。
         要求後立刻回傳「翻譯中」，背景用要求者的預設模型一批一批翻、每批存檔；已經翻好的再要求一次是補翻缺的、原文改過的。
         language 是 zh-TW / en / ja / ko，其他回 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒變）。
+        原文片段被編輯後（transcript.edited），翻好的語言自動只重翻改過的片段、清空的刪掉（不算使用者的限流）。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -399,6 +405,13 @@ class AiServiceServicer:
 
     def GetTranslation(self, request, context):
         """一種語言的譯文含片段；沒有這種語言回 NOT_FOUND。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteTranslation(self, request, context):
+        """刪掉一種語言的譯文（翻譯中也可以，背景翻好的那批不會再存）；沒有這種語言回 NOT_FOUND。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -679,6 +692,11 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.GetTranslation,
                     request_deserializer=ai__pb2.GetTranslationRequest.FromString,
                     response_serializer=ai__pb2.Translation.SerializeToString,
+            ),
+            'DeleteTranslation': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteTranslation,
+                    request_deserializer=ai__pb2.DeleteTranslationRequest.FromString,
+                    response_serializer=ai__pb2.DeleteTranslationResponse.SerializeToString,
             ),
             'RequestSpeakerInsights': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestSpeakerInsights,
@@ -1281,6 +1299,33 @@ class AiService:
             '/transuai.ai.v1.AiService/GetTranslation',
             ai__pb2.GetTranslationRequest.SerializeToString,
             ai__pb2.Translation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteTranslation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/DeleteTranslation',
+            ai__pb2.DeleteTranslationRequest.SerializeToString,
+            ai__pb2.DeleteTranslationResponse.FromString,
             options,
             channel_credentials,
             insecure,

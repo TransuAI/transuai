@@ -50,7 +50,7 @@ uv run python -m app.main
 啟動時會：
 
 1. 把 `ai_db` 的 schema 升級到最新的 Alembic migration（多個副本同時啟動時用 Postgres advisory lock 排隊）。導入 Alembic 前用 `create_all` 建的資料庫可能只有部分表（例如只有 `summaries`），baseline（`0001`）只補建缺少的表、不動既有的表跟資料，不需要刪庫重建；唯一例外是還停在 768 維的舊 `embeddings` 表，會拒絕啟動並提示整張表 DROP 掉、重跑 pipeline
-2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）、`speaker_insights.requested`（使用者要求分析講者的問題與打斷）、`output.requested`（使用者要求產生多格式輸出）、`translation.requested`（翻譯逐字稿）跟 `post_meeting.requested`（使用者啟動會後處理）
+2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding、重翻譯文裡改過的片段）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）、`speaker_insights.requested`（使用者要求分析講者的問題與打斷）、`output.requested`（使用者要求產生多格式輸出）、`translation.requested`（翻譯逐字稿）跟 `post_meeting.requested`（使用者啟動會後處理）
 3. 起 gRPC server，監聽 `8084`
 
 ## Pipeline
@@ -265,7 +265,11 @@ RequestTranslation(jobId, userId, language)（Gateway POST /jobs/{jobId}/transla
   → 每 40 個一批，附前面 3 句原文當上下文（不翻），模型只看到行號、要回同樣行號的 JSON；對不上（漏了、合併了幾句）就切成兩半各自翻，
     越切越小，只剩一句還對不上（重試一次後）才失敗——本機 qwen3:14b 翻一場 24 分鐘的會議時，40 句一批偶爾會把幾句合併
   → 每批翻完就存（前端看得到進度、看得到已經翻好的）；中文一律繁體；講者名稱不送
-  → 全部翻完：COMPLETED、模型
+  → 全部翻完：COMPLETED、模型；存下一批時發現這種語言已經被刪掉（DeleteTranslation）就停下
+原文被編輯之後（transcript.edited，見下方）
+  → 每種譯文：刪掉被清空、不存在的片段的譯文
+  → 翻好的（COMPLETED）語言有原文變了的片段：用最近一次要求的使用者重新排入 translation.requested，同一個比對只翻那幾段（不算限流）
+  → 翻譯中的不動（這次編輯可能沒跟上，下次編輯或再翻譯一次時補上）；失敗的留給使用者再翻譯一次，不自動花錢
 ```
 
 用要求者（最近一次要求的使用者）的預設模型，用量功能是 `translation`。翻一份長逐字稿要很多批，GENERATING 超過 30 分鐘才當成卡住。
@@ -336,6 +340,7 @@ RequestSpeakerInsights(jobId, userId)（Gateway POST /jobs/{jobId}/speaker-insig
   → 以片段的起訖時間（NUMERIC(10,2)）對應這個 job 現有的 embedding：
       文字變了 → 重算；被清空（空字串）→ 刪掉；從清空還原（沒有對應的列）→ 算一筆新的；都沒變 → 不呼叫 embedder
   → 只寫入 / 刪除有變的那幾列
+在那之前先讓譯文跟上（translations.follow_transcript_edit，見「譯文」）：沒有譯文就連逐字稿都不讀；失敗只記 log、不重試、不擋重算 embedding
 ```
 
 暫時性失敗一樣走訊息層級重試（`transcript.edited.retry.2s`／`.4s`）。預算用盡或永久性失敗只記 log——這不是 Job
@@ -355,7 +360,7 @@ RequestSpeakerInsights(jobId, userId)（Gateway POST /jobs/{jobId}/speaker-insig
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: 穿插其間的 `step`（回答過程正在做的一步：`understand` 理解問題（追問時）、`retrieve` 在內容裡找段落（完成時「找到 N 段」）、`search` 查網路（寫好查詢後顯示「搜尋「…」」，完成時加上「找到 N 個網頁」，失敗是 `failed`）、`answer` 撰寫回答；同一個 id 會送好幾次：running → done／failed；第一個 chunk 可能就是步驟）、`sources` 恰好一次、帶 `web_search` 而且有設定 `TAVILY_API_KEY` 時 `web_sources` 恰好一次（網路來源，順序是回答裡 [n] 的編號；搜尋失敗是空的、`failed` 為 true）、`answered_by` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`，模型呼叫失敗時訊息點出廠商與原因）。可以帶 `model` 臨時換模型（只用在這一次，必須是提問者用得到的：平台模型、有金鑰的廠商整理好的清單，或他目前的預設模型；否則在送出任何 chunk 前回 `INVALID_ARGUMENT`），不帶就用預設模型；問題改寫與回答用同一個模型，`qa_history` 記錄回答的模型、有沒有查網路與網路來源。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk（包括步驟）送出之前——送出第一個步驟前先確認這個 job 有 embedding；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，用來記錄 `qa_history`、決定用誰的預設模型與自有金鑰，不重新驗證 |
 | `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
-| `RequestTranslation` / `ListTranslations` / `GetTranslation` | 譯文（見上方）：要求翻譯（帶 `user_id`、`language`）立刻回傳 GENERATING；列出各語言的狀態與進度（`total_segments`、`translated_segments`）；取得一種語言含片段的譯文（翻譯中也取得到已經翻好的），沒有這種語言回 `NOT_FOUND`。語言不支援回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
+| `RequestTranslation` / `ListTranslations` / `GetTranslation` / `DeleteTranslation` | 譯文（見上方）：要求翻譯（帶 `user_id`、`language`）立刻回傳 GENERATING；列出各語言的狀態與進度（`total_segments`、`translated_segments`）；取得一種語言含片段的譯文（翻譯中也取得到已經翻好的）；刪掉一種語言的譯文（翻譯中也可以）。取得、刪除時沒有這種語言回 `NOT_FOUND`。語言不支援回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
 | `UpdateOutput` | 使用者修改一份完成的輸出：跟原本一樣就不算修改；空白或超過 20000 字回 `INVALID_ARGUMENT`，還在產生或失敗的回 `FAILED_PRECONDITION`，不屬於這個 Job 回 `NOT_FOUND` |
 | `RequestOutput` / `ListOutputs` / `GetOutput` | 多格式輸出（見上方）：要求產生（帶 `user_id`、`format`、Job 的 `title`、可選的 `instruction`、社群貼文必填的 `platform`）立刻回傳 GENERATING，每次都是新的一份；列出（新的在前，含內容）；取得一份（不屬於這個 Job 回 `NOT_FOUND`）。格式不認得、要求超過 200 字、社群貼文沒有（或不認得）平台回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
 | `RequestSpeakerInsights` / `GetSpeakerInsights` | 講者數據的問題與打斷（見上方）：要求分析（帶 `user_id`）立刻回傳 GENERATING；取得目前這一份（還沒分析過是 UNSPECIFIED、沒有項目），`items` 是上一次完成的結果。排入失敗回 `UNAVAILABLE` |
@@ -456,10 +461,10 @@ app/
   controllers/
     ai_controller.py               AiServiceServicer 實作（摘要、章節、問答、重新產生、用量、自有金鑰、預設模型、測驗的 rpc）
   services/
-    reembed.py                       消費 transcript.edited：只重算文字有變的片段的 embedding
+    reembed.py                       消費 transcript.edited：只重算文字有變的片段的 embedding（譯文跟上見 translations.py）
     regeneration.py                  RequestRegeneration（排入自己的 queue）與消費 summary.regeneration.requested：重新產生摘要與章節
     translator.py                    翻譯一批片段：行號、上下文、對不上就是格式錯誤、中文轉繁體
-    translations.py                  RequestTranslation（排入自己的 queue）與消費 translation.requested：分批、每批存檔、只翻缺的與原文變了的
+    translations.py                  RequestTranslation（排入自己的 queue）與消費 translation.requested：分批、每批存檔、只翻缺的與原文變了的；編輯後跟上、刪除語言
     output_generator.py              多格式輸出的產生：每種格式一份 prompt、刪掉模型寫的時間、附上章節
     generated_outputs.py             RequestOutput（排入自己的 queue）與消費 output.requested；卡住的判斷
     speaker_insights.py              講者數據的 AI 判斷：編號的逐字稿、打斷的候選、只收行號並對回片段

@@ -11,7 +11,7 @@ from app.services.pipeline import process_message
 from app.services.post_meeting import process_post_meeting_requested
 from app.services.generated_outputs import process_output_requested
 from app.services.quizzes import process_quiz_requested
-from app.services.translations import process_translation_requested
+from app.services.translations import follow_transcript_edit, process_translation_requested
 from app.services.speaker_insight_runs import process_speaker_insights_requested
 from app.services.reembed import process_transcript_edited
 from app.services.regeneration import process_regeneration_requested
@@ -38,6 +38,8 @@ def _handle_transcription_completed(body: bytes, ch: BlockingChannel, retry_coun
 
 
 def _handle_transcript_edited(body: bytes, _ch: BlockingChannel, retry_count: int) -> None:
+    # Translations first: it never raises, so a retried re-embed doesn't hold it back (and re-running it is a no-op).
+    follow_transcript_edit(body)
     process_transcript_edited(body, retry_count=retry_count)
 
 

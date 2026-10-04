@@ -78,7 +78,8 @@ from app.services.generated_outputs import (
     request_output, update_content)
 from app.services.generated_outputs import effective_status as output_effective_status
 from app.services.translations import (
-    TranslationNotQueued, TranslationProgress, UnknownLanguage, find_translation, list_translations, request_translation)
+    TranslationNotQueued, TranslationProgress, UnknownLanguage, delete_translation, find_translation, list_translations,
+    request_translation)
 from app.services.translations import effective_status as translation_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
@@ -503,6 +504,12 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         message = _translation_to_proto(progress)
         message.segments.extend(ai_pb2.SegmentTranslation(segment_id=str(s.segment_id), text=s.text) for s in segments)
         return message
+
+    def DeleteTranslation(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        if not delete_translation(job_id, request.language):
+            _abort(context, grpc.StatusCode.NOT_FOUND, "translation not found")
+        return ai_pb2.DeleteTranslationResponse()
 
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)

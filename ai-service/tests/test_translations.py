@@ -201,3 +201,95 @@ def test_deleting_the_job_deletes_its_translations(ai_stub, db_session, rabbitmq
     job_deletion.delete_job_data(job_id)
 
     assert list(ai_stub.ListTranslations(ai_pb2.ListTranslationsRequest(job_id=str(job_id))).translations) == []
+
+
+def edited(job_id, the_transcript):
+    with patch.object(translations, "transcript_client") as client:
+        client.get_transcript.return_value = the_transcript
+        translations.follow_transcript_edit(json.dumps({"jobId": str(job_id)}).encode())
+
+
+def test_an_edit_re_translates_only_the_changed_segments_and_drops_cleared_ones(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+    rabbitmq.reset_mock()
+    after_edit = transcript([segment(0, "Hello."), segment(2, ""), segment(3, "Okay.")])
+
+    edited(job_id, after_edit)
+
+    assert published(rabbitmq) == [("translation.requested", {"jobId": str(job_id), "language": "zh-TW"})]
+    assert get(ai_stub, job_id).status == ai_pb2.TRANSLATION_STATUS_GENERATING
+    assert SEG[2] not in {s.segment_id for s in get(ai_stub, job_id).segments}
+    answer(fake_llm, "哈囉。")
+    process(job_id, after_edit)
+    assert '{"n": 1, "text": "Hello."}' in fake_llm.bodies()[1]["messages"][0]["content"]
+    done = get(ai_stub, job_id)
+    assert (done.status, done.total_segments) == (ai_pb2.TRANSLATION_STATUS_COMPLETED, 2)
+    assert {s.segment_id: s.text for s in done.segments} == {SEG[0]: "哈囉。", SEG[3]: "好。"}
+
+
+def test_an_edit_that_changes_no_text_re_translates_nothing(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+    rabbitmq.reset_mock()
+
+    edited(job_id, TRANSCRIPT)  # e.g. a speaker was renamed
+
+    assert published(rabbitmq) == []
+    assert get(ai_stub, job_id).status == ai_pb2.TRANSLATION_STATUS_COMPLETED
+
+
+def test_an_edit_leaves_a_failed_translation_for_the_user_to_retry(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    fake_llm.fail(400, {"error": {"message": "bad request"}})
+    process(job_id)
+    rabbitmq.reset_mock()
+
+    edited(job_id, transcript([segment(0, "Hello.")]))
+
+    assert published(rabbitmq) == []
+    assert get(ai_stub, job_id).status == ai_pb2.TRANSLATION_STATUS_FAILED
+
+
+def test_a_job_without_translations_does_not_even_read_the_transcript(db_session, rabbitmq):
+    with patch.object(translations, "transcript_client") as client:
+        translations.follow_transcript_edit(json.dumps({"jobId": str(uuid.uuid4())}).encode())
+
+    client.get_transcript.assert_not_called()
+
+
+def test_a_deleted_language_is_gone(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+
+    ai_stub.DeleteTranslation(ai_pb2.DeleteTranslationRequest(job_id=str(job_id), language="zh-TW"))
+
+    assert list(ai_stub.ListTranslations(ai_pb2.ListTranslationsRequest(job_id=str(job_id))).translations) == []
+    with pytest.raises(grpc.RpcError) as error:
+        ai_stub.DeleteTranslation(ai_pb2.DeleteTranslationRequest(job_id=str(job_id), language="zh-TW"))
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_a_translation_deleted_while_it_was_being_made_stays_deleted(ai_stub, db_session, rabbitmq, fake_llm, monkeypatch):
+    monkeypatch.setattr(translations, "BATCH_SIZE", 2)
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。")
+
+    def delete_after_first_batch(*args, **kwargs):
+        ai_stub.DeleteTranslation(ai_pb2.DeleteTranslationRequest(job_id=str(job_id), language="zh-TW"))
+        return {SEG[3]: "好。"}
+    real = translations.translate_batch
+    monkeypatch.setattr(translations, "translate_batch",
+                        lambda pairs, *a, **k: real(pairs, *a, **k) if pairs[0][0] == SEG[0] else delete_after_first_batch())
+
+    process(job_id)
+
+    assert list(ai_stub.ListTranslations(ai_pb2.ListTranslationsRequest(job_id=str(job_id))).translations) == []

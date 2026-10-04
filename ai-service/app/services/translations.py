@@ -2,7 +2,7 @@
 translation.requested queue；背景依片段一批一批翻，**每批翻完就存**（前端輪詢看得到進度、看得到前面已經翻好的）。
 
 每個片段的譯文記著翻的時候的原文：還沒翻的、原文跟記著的不一樣的才要翻——所以重試或中斷之後再跑，只翻剩下的；之後逐字稿被編輯，
-同一個比對就知道哪幾段要重翻。被清空或不存在的片段，譯文刪掉。"""
+同一個比對就知道哪幾段要重翻（follow_transcript_edit）。被清空或不存在的片段，譯文刪掉。"""
 
 import json
 import logging
@@ -40,6 +40,10 @@ class UnknownLanguage(Exception):
 
 class TranslationNotQueued(Exception):
     """The request couldn't be put on the queue; nothing changed."""
+
+
+class TranslationGone(Exception):
+    """The translation was deleted while it was being made."""
 
 
 @dataclass(frozen=True)
@@ -105,6 +109,38 @@ def find_translation(job_id: uuid.UUID, language: str) -> tuple[TranslationProgr
         return TranslationProgress(translation, len(segments)), segments
 
 
+def delete_translation(job_id: uuid.UUID, language: str) -> bool:
+    """刪掉一種語言的譯文（片段的跟著 cascade）；沒有這種語言回 False。正在翻的那次存下一批時發現不見了就停下。"""
+    with new_session() as session:
+        deleted = session.execute(delete(Translation).where(Translation.job_id == job_id, Translation.language == language))
+        session.commit()
+        return deleted.rowcount > 0
+
+
+def follow_transcript_edit(body: bytes) -> None:
+    """transcript.edited { jobId } 之後（consumer 跟重算 embedding 一起呼叫）：這個 Job 的每種譯文刪掉被清空、不存在的片段的譯文；
+    翻好的語言裡原文變了（或從清空還原）的片段，用最近一次要求翻譯的使用者重新排入翻譯——只翻那幾段（見 _segments_to_translate）。
+    翻譯中的不動（這次編輯它可能沒跟上，下次編輯或再翻譯一次時補上）；失敗的留給使用者再翻譯一次，不自動花錢。
+    沒有譯文就連逐字稿都不讀。失敗只記 log，不重試、不影響重算 embedding。"""
+    job_id = uuid.UUID(json.loads(body)["jobId"])
+    try:
+        with new_session() as session:
+            existing = list(session.scalars(select(Translation).where(
+                Translation.job_id == job_id, Translation.status != TranslationStatus.GENERATING)))
+        if not existing:
+            return
+        transcript = transcript_client.get_transcript(str(job_id))
+        spoken = [s for s in spoken_segments(transcript) if s.id]
+        for translation in existing:
+            changed = _segments_to_translate(translation.id, spoken)
+            if changed and translation.status == TranslationStatus.COMPLETED:
+                request_translation(job_id, translation.requested_by, translation.language)
+                logger.info("transcript.edited for job %s: re-translating %d segments into %s",
+                            job_id, len(changed), translation.language)
+    except Exception:
+        logger.exception("transcript.edited for job %s: could not bring its translations up to date", job_id)
+
+
 def queue_translation(job_id: str, language: str) -> None:
     # Runs inside the user's request (or the edit handler): short timeouts, one attempt, publisher confirms (as quizzes.py).
     connection = BlockingConnection(connection_params(
@@ -142,6 +178,9 @@ def process_translation_requested(body: bytes, retry_count: int = 0) -> None:
             translated = _translate(pairs, language, context, model, meter)
             _save_batch(translation.id, batch, translated)
         _complete(translation.id, model)
+    except TranslationGone:
+        logger.info("translation of job %s into %s was deleted while being made, stopping", job_id, language)
+        return
     except TranslationFormatError as exc:
         logger.warning("translation of job %s into %s: the model's reply didn't match the batch twice: %s", job_id, language, exc)
         _fail(job_id, language, FORMAT_REASON)
@@ -178,6 +217,9 @@ def _still_generating(job_id: uuid.UUID, language: str) -> Translation | None:
 def _segments_to_translate(translation_id: uuid.UUID, spoken: list) -> list:
     """記下這次要翻的片段數；刪掉已經不存在或被清空的片段的譯文；回傳還沒翻的、原文變了的片段（依順序）。"""
     with new_session() as session:
+        translation = session.get(Translation, translation_id, with_for_update=True)
+        if translation is None:
+            raise TranslationGone()
         existing = {str(row.segment_id): row.source_text for row in session.scalars(
             select(SegmentTranslation).where(SegmentTranslation.translation_id == translation_id))}
         current = {s.id for s in spoken}
@@ -185,13 +227,16 @@ def _segments_to_translate(translation_id: uuid.UUID, spoken: list) -> list:
         if gone:
             session.execute(delete(SegmentTranslation).where(SegmentTranslation.translation_id == translation_id,
                                                               SegmentTranslation.segment_id.in_(gone)))
-        session.get(Translation, translation_id).total_segments = len(spoken)
+        translation.total_segments = len(spoken)
         session.commit()
     return [s for s in spoken if existing.get(s.id) != s.text]
 
 
 def _save_batch(translation_id: uuid.UUID, batch: list, translated: dict[str, str]) -> None:
     with new_session() as session:
+        # Locked so a delete in between waits for this batch (and then cascades it away) instead of the insert failing.
+        if session.get(Translation, translation_id, with_for_update=True) is None:
+            raise TranslationGone()
         ids = [uuid.UUID(s.id) for s in batch]
         session.execute(delete(SegmentTranslation).where(SegmentTranslation.translation_id == translation_id,
                                                           SegmentTranslation.segment_id.in_(ids)))

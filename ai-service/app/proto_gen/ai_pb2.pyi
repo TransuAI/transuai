@@ -975,6 +975,18 @@ class GetTranslationRequest(_message.Message):
     language: str
     def __init__(self, job_id: _Optional[str] = ..., language: _Optional[str] = ...) -> None: ...
 
+class DeleteTranslationRequest(_message.Message):
+    __slots__ = ("job_id", "language")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    LANGUAGE_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    language: str
+    def __init__(self, job_id: _Optional[str] = ..., language: _Optional[str] = ...) -> None: ...
+
+class DeleteTranslationResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
 class Translation(_message.Message):
     __slots__ = ("job_id", "language", "status", "failure_reason", "total_segments", "translated_segments", "model_provider", "model", "requested_at", "completed_at", "segments")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
