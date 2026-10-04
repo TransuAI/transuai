@@ -109,6 +109,11 @@ class AiServiceStub:
                 request_serializer=ai__pb2.GetOutputRequest.SerializeToString,
                 response_deserializer=ai__pb2.GeneratedOutput.FromString,
                 _registered_method=True)
+        self.UpdateOutput = channel.unary_unary(
+                '/transuai.ai.v1.AiService/UpdateOutput',
+                request_serializer=ai__pb2.UpdateOutputRequest.SerializeToString,
+                response_deserializer=ai__pb2.GeneratedOutput.FromString,
+                _registered_method=True)
         self.RequestSpeakerInsights = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestSpeakerInsights',
                 request_serializer=ai__pb2.RequestSpeakerInsightsRequest.SerializeToString,
@@ -348,6 +353,14 @@ class AiServiceServicer:
 
     def GetOutput(self, request, context):
         """一份輸出；不屬於這個 Job 回 NOT_FOUND。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateOutput(self, request, context):
+        """使用者修改內容（只有完成的可以改）：跟原本一樣就不算修改；空白或超過 20000 字回 INVALID_ARGUMENT；還在產生或失敗的回
+        FAILED_PRECONDITION；不屬於這個 Job 回 NOT_FOUND。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -607,6 +620,11 @@ def add_AiServiceServicer_to_server(servicer, server):
             'GetOutput': grpc.unary_unary_rpc_method_handler(
                     servicer.GetOutput,
                     request_deserializer=ai__pb2.GetOutputRequest.FromString,
+                    response_serializer=ai__pb2.GeneratedOutput.SerializeToString,
+            ),
+            'UpdateOutput': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateOutput,
+                    request_deserializer=ai__pb2.UpdateOutputRequest.FromString,
                     response_serializer=ai__pb2.GeneratedOutput.SerializeToString,
             ),
             'RequestSpeakerInsights': grpc.unary_unary_rpc_method_handler(
@@ -1101,6 +1119,33 @@ class AiService:
             target,
             '/transuai.ai.v1.AiService/GetOutput',
             ai__pb2.GetOutputRequest.SerializeToString,
+            ai__pb2.GeneratedOutput.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateOutput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/UpdateOutput',
+            ai__pb2.UpdateOutputRequest.SerializeToString,
             ai__pb2.GeneratedOutput.FromString,
             options,
             channel_credentials,

@@ -204,3 +204,60 @@ def test_deleting_the_job_deletes_its_outputs(ai_stub, db_session, rabbitmq):
     job_deletion.delete_job_data(uuid.UUID(output.job_id))
 
     assert list(ai_stub.ListOutputs(ai_pb2.ListOutputsRequest(job_id=output.job_id)).outputs) == []
+
+
+# --- 03：使用者修改內容 ---
+
+
+def completed(ai_stub, fake_llm):
+    job_id = summarized_job()
+    output = request(ai_stub, job_id)
+    fake_llm.reply("原本的介紹")
+    process(output)
+    return job_id, output
+
+
+def change_content(stub, job_id, output_id, content):
+    return stub.UpdateOutput(ai_pb2.UpdateOutputRequest(job_id=str(job_id), output_id=output_id, content=content))
+
+
+def test_the_user_can_change_a_finished_output_and_it_is_marked_edited(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id, output = completed(ai_stub, fake_llm)
+
+    updated = change_content(ai_stub, job_id, output.id, "我改過的介紹\n")
+
+    assert updated.content == "我改過的介紹\n"
+    assert updated.HasField("edited_at")
+    assert ai_stub.GetOutput(ai_pb2.GetOutputRequest(job_id=str(job_id), output_id=output.id)).content == "我改過的介紹\n"
+
+
+def test_saving_the_same_content_does_not_mark_it_edited(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id, output = completed(ai_stub, fake_llm)
+    original = ai_stub.GetOutput(ai_pb2.GetOutputRequest(job_id=str(job_id), output_id=output.id)).content
+
+    assert not change_content(ai_stub, job_id, output.id, original).HasField("edited_at")
+
+
+@pytest.mark.parametrize("content", ["", "   \n", "很" * 20001])
+def test_empty_or_too_long_content_is_invalid(ai_stub, db_session, rabbitmq, fake_llm, content):
+    job_id, output = completed(ai_stub, fake_llm)
+
+    with pytest.raises(grpc.RpcError) as error:
+        change_content(ai_stub, job_id, output.id, content)
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_an_output_still_being_generated_cannot_be_changed(ai_stub, db_session, rabbitmq):
+    output = request(ai_stub, uuid.uuid4())
+
+    with pytest.raises(grpc.RpcError) as error:
+        change_content(ai_stub, output.job_id, output.id, "太早了")
+    assert error.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_changing_another_jobs_output_is_not_found(ai_stub, db_session, rabbitmq, fake_llm):
+    _, output = completed(ai_stub, fake_llm)
+
+    with pytest.raises(grpc.RpcError) as error:
+        change_content(ai_stub, uuid.uuid4(), output.id, "偷改")
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND

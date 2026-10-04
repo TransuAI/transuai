@@ -277,6 +277,9 @@ RequestOutput(jobId, userId, format, title, instruction, platform)（Gateway POS
 | `newsletter` | 電子報：標題、開頭、三到五個粗體重點、行動呼籲，300–600 字 | 沒有 |
 | `social_post` | 社群貼文：依平台（`platform` 必填：threads / facebook / instagram / linkedin / x，`SOCIAL_PLATFORMS`）的語氣與字數上限寫 | 沒有 |
 
+使用者可以修改完成的輸出（`UpdateOutput`：內容跟原本一樣就不算修改；改了記 `edited_at`，前端標「已修改」）；逐字稿之後被編輯，
+依據的 revision 比較舊的標「過時」（照常顯示，要新的就再產生一份）。
+
 使用者的一句要求（`instruction`，最多 200 字）放在寫作規則之後，不能推翻規則（不編造、不寫時間）。社群貼文的字數上限寫在 prompt；超過時不截斷，前端顯示字數與提醒。模型回空的是永久性失敗；
 暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘回報成失敗。用量功能是 `generated_output`。本機 `qwen3:14b` 對一場 24 分鐘的會議
 約 1 分鐘寫完。
@@ -332,6 +335,7 @@ RequestSpeakerInsights(jobId, userId)（Gateway POST /jobs/{jobId}/speaker-insig
 | `ListChapters` | 依 `job_id` 取得章節列表（依 `sequence_no` 排序），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有章節時回空列表，不算錯誤 |
 | `AskQuestion` | 針對 `job_id` 的逐字稿內容做 RAG 問答（含最近 5 輪對話記憶），**server-streaming**：回傳 `stream AskQuestionChunk`（`oneof`: 穿插其間的 `step`（回答過程正在做的一步：`understand` 理解問題（追問時）、`retrieve` 在內容裡找段落（完成時「找到 N 段」）、`search` 查網路（寫好查詢後顯示「搜尋「…」」，完成時加上「找到 N 個網頁」，失敗是 `failed`）、`answer` 撰寫回答；同一個 id 會送好幾次：running → done／failed；第一個 chunk 可能就是步驟）、`sources` 恰好一次、帶 `web_search` 而且有設定 `TAVILY_API_KEY` 時 `web_sources` 恰好一次（網路來源，順序是回答裡 [n] 的編號；搜尋失敗是空的、`failed` 為 true）、`answered_by` 恰好一次、任意數量 `delta`、失敗時恰好一次 `error`，模型呼叫失敗時訊息點出廠商與原因）。可以帶 `model` 臨時換模型（只用在這一次，必須是提問者用得到的：平台模型、有金鑰的廠商整理好的清單，或他目前的預設模型；否則在送出任何 chunk 前回 `INVALID_ARGUMENT`），不帶就用預設模型；問題改寫與回答用同一個模型，`qa_history` 記錄回答的模型、有沒有查網路與網路來源。`job_id`/`user_id` 不合法回 `INVALID_ARGUMENT`；還沒有 embedding（pipeline 沒跑完或該 job 沒有逐字稿分段）回 `NOT_FOUND`，這種情況一定發生在任何 chunk（包括步驟）送出之前——送出第一個步驟前先確認這個 job 有 embedding；改寫/生成中途失敗改用 `error` chunk（stream 正常結束，不寫 `qa_history`），不是 gRPC 層級的錯誤。`user_id` 是 Gateway 驗證過 ownership 之後轉過來的，用來記錄 `qa_history`、決定用誰的預設模型與自有金鑰，不重新驗證 |
 | `ListJobLlmUsage` | 依 `job_id` 列出這個 Job 的 LLM 用量（依時間升冪）：功能、廠商、模型、金鑰來源、輸入 / 輸出 token（廠商沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
+| `UpdateOutput` | 使用者修改一份完成的輸出：跟原本一樣就不算修改；空白或超過 20000 字回 `INVALID_ARGUMENT`，還在產生或失敗的回 `FAILED_PRECONDITION`，不屬於這個 Job 回 `NOT_FOUND` |
 | `RequestOutput` / `ListOutputs` / `GetOutput` | 多格式輸出（見上方）：要求產生（帶 `user_id`、`format`、Job 的 `title`、可選的 `instruction`）立刻回傳 GENERATING，每次都是新的一份；列出（新的在前，含內容）；取得一份（不屬於這個 Job 回 `NOT_FOUND`）。格式不認得或要求超過 200 字回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
 | `RequestSpeakerInsights` / `GetSpeakerInsights` | 講者數據的問題與打斷（見上方）：要求分析（帶 `user_id`）立刻回傳 GENERATING；取得目前這一份（還沒分析過是 UNSPECIFIED、沒有項目），`items` 是上一次完成的結果。排入失敗回 `UNAVAILABLE` |
 | `RequestQuiz` | 要求產生一份測驗（帶 `user_id`：要求的使用者，用他的預設模型、用量記在他名下）：新增 GENERATING 的測驗、排入 `quiz.requested` 後立即回傳（不含題目）；每次都是新的一份。題數不是 5、10、20 或 ID 不合法回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE`（什麼都沒建立） |
@@ -551,7 +555,6 @@ uvx pip-audit --no-deps --disable-pip -r /tmp/requirements.txt
   沒有任何後續動作（不會有 `job.failed` 事件），但會記錄一則高嚴重度、帶 `AI_SERVICE_TERMINAL_FAILURE_REPORT_LOST`
   marker 的 log，方便跟一般 log 區分、手動搜尋處理——沒有額外的 dead-letter queue 或事件記錄這類遺失的回報，
   這是目前接受的已知限制，之後若證明是實際的維運痛點再處理
-- 多格式輸出還不能在網站上修改產生的內容，也不會標示過時（見 `.scratch/multi-format-outputs/issues/03`）
 - `embeddings` 沒有建 ivfflat 向量索引：MVP 資料量小、查詢一定先用 `job_id` 過濾縮小範圍，先不做這層優化；資料量大了之後要補
 - 章節分段的 prompt 沒有做輸出格式驗證，模型回傳非預期 JSON（缺欄位、型別不對）時整個 job 會直接標成 `FAILED`，不會重試或降級成「沒有章節」
 - 對話記憶只取最近 5 輪（`app/services/qa.py` 的 `_MEMORY_TURNS`），沒有依 token 數動態調整；長對話裡更早的內容不會被 LLM 看到

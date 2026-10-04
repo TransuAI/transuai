@@ -74,7 +74,8 @@ from app.services.web_search import WebSearchResult
 from app.services.web_search import is_available as web_search_available
 from app.services.qa import AnswerStep, NoEmbeddingsError, stream_answer
 from app.services.generated_outputs import (
-    InvalidOutputRequest, OutputNotQueued, find_output, list_outputs, request_output)
+    InvalidContent, InvalidOutputRequest, OutputNotEditable, OutputNotFound, OutputNotQueued, find_output, list_outputs,
+    request_output, update_content)
 from app.services.generated_outputs import effective_status as output_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
@@ -457,6 +458,19 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         output = find_output(job_id, output_id)
         if output is None:
             _abort(context, grpc.StatusCode.NOT_FOUND, "output not found")
+        return _output_to_proto(output)
+
+    def UpdateOutput(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        output_id = _parse_uuid(request.output_id, "output_id", context)
+        try:
+            output = update_content(job_id, output_id, request.content)
+        except InvalidContent:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "內容不能是空的，也不能超過 20000 字")
+        except OutputNotFound:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "output not found")
+        except OutputNotEditable:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "還沒產生完成，不能修改")
         return _output_to_proto(output)
 
     def RequestSpeakerInsights(self, request, context):

@@ -892,6 +892,16 @@ class GetOutputRequest(_message.Message):
     output_id: str
     def __init__(self, job_id: _Optional[str] = ..., output_id: _Optional[str] = ...) -> None: ...
 
+class UpdateOutputRequest(_message.Message):
+    __slots__ = ("job_id", "output_id", "content")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_ID_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    output_id: str
+    content: str
+    def __init__(self, job_id: _Optional[str] = ..., output_id: _Optional[str] = ..., content: _Optional[str] = ...) -> None: ...
+
 class GeneratedOutput(_message.Message):
     __slots__ = ("id", "job_id", "format", "instruction", "status", "failure_reason", "content", "source_revision", "model_provider", "model", "requested_at", "completed_at", "edited_at", "platform")
     ID_FIELD_NUMBER: _ClassVar[int]

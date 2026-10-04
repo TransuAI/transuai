@@ -27,10 +27,23 @@ logger = logging.getLogger(__name__)
 
 STUCK_REASON = "產生逾時，請再產生一次"
 MAX_INSTRUCTION_CHARS = 200
+MAX_CONTENT_CHARS = 20000
 
 
 class InvalidOutputRequest(Exception):
     """Unknown format, an instruction that's too long, or a social post without a known platform."""
+
+
+class InvalidContent(Exception):
+    """Empty, or longer than MAX_CONTENT_CHARS."""
+
+
+class OutputNotFound(Exception):
+    pass
+
+
+class OutputNotEditable(Exception):
+    """Still being generated, or failed: there's nothing to change yet."""
 
 
 class OutputNotQueued(Exception):
@@ -82,6 +95,23 @@ def find_output(job_id: uuid.UUID, output_id: uuid.UUID) -> GeneratedOutput | No
     with new_session() as session:
         return session.scalar(select(GeneratedOutput).where(GeneratedOutput.job_id == job_id,
                                                             GeneratedOutput.id == output_id))
+
+
+def update_content(job_id: uuid.UUID, output_id: uuid.UUID, content: str) -> GeneratedOutput:
+    """使用者修改一份完成的輸出。內容跟原本一樣就不算修改（edited_at 不變）。"""
+    if not content.strip() or len(content) > MAX_CONTENT_CHARS:
+        raise InvalidContent()
+    with new_session() as session:
+        output = session.scalar(select(GeneratedOutput).where(GeneratedOutput.job_id == job_id,
+                                                              GeneratedOutput.id == output_id).with_for_update())
+        if output is None:
+            raise OutputNotFound()
+        if effective_status(output)[0] != OutputStatus.COMPLETED:
+            raise OutputNotEditable()
+        if content != output.content:
+            output.content, output.edited_at = content, datetime.now(timezone.utc)
+            session.commit()
+        return output
 
 
 def _queue(output_id: str, job_id: str, user_id: str) -> None:
