@@ -77,6 +77,15 @@ service AiService {
   // FAILED_PRECONDITION；不屬於這個 Job 回 NOT_FOUND。
   rpc UpdateOutput(UpdateOutputRequest) returns (GeneratedOutput);
 
+  // 譯文（見 ai-service CONTEXT.md「譯文」）：把一個 Job 的逐字稿翻成另一種語言，每個片段一句（保留時間與講者）。一個 Job 每種語言一份。
+  // 要求後立刻回傳「翻譯中」，背景用要求者的預設模型一批一批翻、每批存檔；已經翻好的再要求一次是補翻缺的、原文改過的。
+  // language 是 zh-TW / en / ja / ko，其他回 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒變）。
+  rpc RequestTranslation(RequestTranslationRequest) returns (Translation);
+  // 這個 Job 各種語言的譯文（狀態與進度，不含片段）。
+  rpc ListTranslations(ListTranslationsRequest) returns (ListTranslationsResponse);
+  // 一種語言的譯文含片段；沒有這種語言回 NOT_FOUND。
+  rpc GetTranslation(GetTranslationRequest) returns (Translation);
+
   // 講者數據的 AI 判斷（每位講者提出的問題、可能的打斷）：一個 Job 一份，再分析就取代。要求後立刻回傳「分析中」，背景用要求者的
   // 預設模型分析（見 ai-service README「講者數據」）。少於兩位講者時分析會失敗並附原因。
   rpc RequestSpeakerInsights(RequestSpeakerInsightsRequest) returns (SpeakerInsights);
@@ -826,4 +835,53 @@ message GeneratedOutput {
   google.protobuf.Timestamp edited_at = 13;
   // 社群貼文的平台；其他格式是空字串。
   string platform = 14;
+}
+
+enum TranslationStatus {
+  TRANSLATION_STATUS_UNSPECIFIED = 0;
+  TRANSLATION_STATUS_GENERATING = 1;
+  TRANSLATION_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；已經翻好的片段保留，再要求一次只翻剩下的。
+  TRANSLATION_STATUS_FAILED = 3;
+}
+
+message RequestTranslationRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string language = 3;
+}
+
+message ListTranslationsRequest {
+  string job_id = 1;
+}
+
+message ListTranslationsResponse {
+  repeated Translation translations = 1;
+}
+
+message GetTranslationRequest {
+  string job_id = 1;
+  string language = 2;
+}
+
+message Translation {
+  string job_id = 1;
+  string language = 2;
+  TranslationStatus status = 3;
+  string failure_reason = 4;
+  // 進度：這次要翻的片段數（有內容的片段）與已經有譯文的片段數。
+  int32 total_segments = 5;
+  int32 translated_segments = 6;
+  string model_provider = 7;
+  string model = 8;
+  google.protobuf.Timestamp requested_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  // 只有 GetTranslation 帶。
+  repeated SegmentTranslation segments = 11;
+}
+
+message SegmentTranslation {
+  // transcription-service 的片段 id
+  string segment_id = 1;
+  string text = 2;
 }
