@@ -260,20 +260,25 @@ RequestTranslation(jobId, userId, language)（Gateway POST /jobs/{jobId}/transla
   → 一個 Job 一種語言一份（translations 的 (job_id, language) 唯一）：已經在翻（還沒卡住）就直接回傳；否則改成 GENERATING 並排入
     translation.requested { jobId, language }（排入失敗就恢復原狀）
 消費 translation.requested
-  → GetTranscript：有內容的片段；刪掉已經不存在或被清空的片段的譯文；記下要翻的片段數
-  → 要翻的：還沒有譯文的、原文跟譯文記著的 source_text 不一樣的（所以中斷或失敗之後再要求，只翻剩下的）
-  → 每 40 個一批，附前面 3 句原文當上下文（不翻），模型只看到行號、要回同樣行號的 JSON；對不上（漏了、合併了幾句）就切成兩半各自翻，
+  → GetTranscript：有內容的片段；刪掉已經不存在、被清空、原文跟譯文記著的 source_text 不一樣的片段的譯文（進度只算還對得上的）；
+    記下要翻的片段數
+  → 要翻的：還沒有譯文的（所以中斷或失敗之後再要求，只翻剩下的）
+  → 每 40 個一批，附前後各 3 句原文當上下文（不翻），模型只看到行號、要回同樣行號的 JSON；對不上（漏了、合併了幾句）就切成兩半各自翻，
     越切越小，只剩一句還對不上（重試一次後）才失敗——本機 qwen3:14b 翻一場 24 分鐘的會議時，40 句一批偶爾會把幾句合併
-  → 每批翻完就存（前端看得到進度、看得到已經翻好的）；中文一律繁體；講者名稱不送
+  → 用平台模型時每批之前檢查每月上限（app/services/platform_quota.py），到了就停在那裡、FAILED 附原因（已經翻好的保留）
+  → 每批翻完就存（前端看得到進度、看得到已經翻好的），記下 progressed_at；中文一律繁體；講者名稱不送
+  → 翻完再讀一次逐字稿，翻的時候被編輯的片段也補翻（最多 3 輪）
   → 全部翻完：COMPLETED、模型；存下一批時發現這種語言已經被刪掉（DeleteTranslation）就停下
 原文被編輯之後（transcript.edited，見下方）
-  → 每種譯文：刪掉被清空、不存在的片段的譯文
-  → 翻好的（COMPLETED）語言有原文變了的片段：用最近一次要求的使用者重新排入 translation.requested，同一個比對只翻那幾段（不算限流）
-  → 翻譯中的不動（這次編輯可能沒跟上，下次編輯或再翻譯一次時補上）；失敗的留給使用者再翻譯一次，不自動花錢
+  → 每種譯文：刪掉被清空、不存在、原文變了的片段的譯文
+  → 翻好的（COMPLETED）語言有原文變了的片段：用最近一次要求的使用者重新排入 translation.requested，同一個比對只翻那幾段（不算限流，
+    但一樣受每月上限管）
+  → 翻譯中的不動（翻完的那一輪會再讀逐字稿補上）；失敗的留給使用者再翻譯一次，不自動花錢
 ```
 
-用要求者（最近一次要求的使用者）的預設模型，用量功能是 `translation`。翻一份長逐字稿要很多批，GENERATING 超過 30 分鐘才當成卡住。
-每月平台模型上限只在要求時由 gateway 檢查——翻到一半到了上限不會停（已知限制）。
+用要求者（最近一次要求的使用者）的預設模型，用量功能是 `translation`。GENERATING 超過 30 分鐘沒有進展（從要求或上一批存檔起算）才當成卡住。
+一批的格式一直對不上時，切到一句一句最壞約 80 次呼叫（都記用量）。每月平台模型上限跟 gateway 用同一個環境變數 `USAGE_LIMIT_PLATFORM_TOKENS`
+（預設 2,000,000，兩邊要一致；算法一樣：台北時間這個月、平台金鑰的輸入＋輸出 token）。
 
 ### 多格式輸出（`output.requested`）
 
@@ -463,7 +468,8 @@ app/
   services/
     reembed.py                       消費 transcript.edited：只重算文字有變的片段的 embedding（譯文跟上見 translations.py）
     regeneration.py                  RequestRegeneration（排入自己的 queue）與消費 summary.regeneration.requested：重新產生摘要與章節
-    translator.py                    翻譯一批片段：行號、上下文、對不上就是格式錯誤、中文轉繁體
+    translator.py                    翻譯一批片段：行號、前後文、對不上就是格式錯誤、中文轉繁體
+    platform_quota.py                每月平台模型上限的 ai-service 這一側（背景工作、不經過 gateway 的自己檢查）
     translations.py                  RequestTranslation（排入自己的 queue）與消費 translation.requested：分批、每批存檔、只翻缺的與原文變了的；編輯後跟上、刪除語言
     output_generator.py              多格式輸出的產生：每種格式一份 prompt、刪掉模型寫的時間、附上章節
     generated_outputs.py             RequestOutput（排入自己的 queue）與消費 output.requested；卡住的判斷

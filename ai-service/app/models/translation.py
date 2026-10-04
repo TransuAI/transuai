@@ -36,6 +36,8 @@ class Translation(Base):
     requested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 上一批存檔的時間：翻得久的還在進展就不算卡住（見 translations.effective_status）。
+    progressed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SegmentTranslation(Base):

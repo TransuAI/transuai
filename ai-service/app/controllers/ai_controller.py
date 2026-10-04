@@ -488,6 +488,8 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         except TranslationNotQueued:
             _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法翻譯，請稍後再試")
         found = find_translation(job_id, request.language)
+        if found is None:  # deleted right after it was asked for
+            _abort(context, grpc.StatusCode.NOT_FOUND, "translation not found")
         return _translation_to_proto(found[0])
 
     def ListTranslations(self, request, context):

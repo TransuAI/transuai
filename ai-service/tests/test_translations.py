@@ -3,6 +3,7 @@
 
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +14,7 @@ from sqlalchemy import select
 from app.db import new_session
 from app.models import LlmUsage
 from app.proto_gen import ai_pb2
+from app.models import Translation, TranslationStatus
 from app.services import job_deletion, translations
 from app.services.retry import RetryableMessageError
 
@@ -221,8 +223,10 @@ def test_an_edit_re_translates_only_the_changed_segments_and_drops_cleared_ones(
     edited(job_id, after_edit)
 
     assert published(rabbitmq) == [("translation.requested", {"jobId": str(job_id), "language": "zh-TW"})]
-    assert get(ai_stub, job_id).status == ai_pb2.TRANSLATION_STATUS_GENERATING
-    assert SEG[2] not in {s.segment_id for s in get(ai_stub, job_id).segments}
+    following = get(ai_stub, job_id)
+    assert following.status == ai_pb2.TRANSLATION_STATUS_GENERATING
+    assert {s.segment_id for s in following.segments} == {SEG[3]}  # the edited one's old translation is gone too
+    assert (following.total_segments, following.translated_segments) == (2, 1)
     answer(fake_llm, "哈囉。")
     process(job_id, after_edit)
     assert '{"n": 1, "text": "Hello."}' in fake_llm.bodies()[1]["messages"][0]["content"]
@@ -294,3 +298,65 @@ def test_a_translation_deleted_while_it_was_being_made_stays_deleted(ai_stub, db
     process(job_id)
 
     assert list(ai_stub.ListTranslations(ai_pb2.ListTranslationsRequest(job_id=str(job_id))).translations) == []
+
+
+def test_each_batch_gets_the_lines_around_it_as_context(ai_stub, db_session, rabbitmq, fake_llm, monkeypatch):
+    monkeypatch.setattr(translations, "BATCH_SIZE", 2)
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。")
+    answer(fake_llm, "好。")
+
+    process(job_id)
+
+    first_prompt = fake_llm.bodies()[0]["messages"][0]["content"]
+    after = first_prompt.split("後面的句子")[1]
+    assert "Okay." in after and '"Okay."' not in first_prompt  # the next line, as context only
+
+
+def test_reaching_the_monthly_platform_limit_stops_it_keeping_what_is_done(ai_stub, db_session, rabbitmq, fake_llm,
+                                                                         monkeypatch):
+    monkeypatch.setattr(translations, "BATCH_SIZE", 2)
+    left = iter([True, False])
+    monkeypatch.setattr(translations, "platform_tokens_left", lambda user_id, model: next(left))
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。")
+
+    process(job_id)
+
+    stopped = get(ai_stub, job_id)
+    assert (stopped.status, stopped.failure_reason) == (ai_pb2.TRANSLATION_STATUS_FAILED, translations.LIMIT_REASON)
+    assert stopped.translated_segments == 2
+    assert len(fake_llm.bodies()) == 1
+
+
+def test_an_edit_made_while_it_was_translating_is_caught_up_before_it_completes(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    answer(fake_llm, "先談時程。")
+    edited_meanwhile = transcript([segment(0, "Hi."), segment(2, "Schedule first."), segment(3, "Okay.")])
+    reads = iter([TRANSCRIPT, edited_meanwhile, edited_meanwhile])
+
+    with patch.object(translations, "transcript_client") as client:
+        client.get_transcript.side_effect = lambda _job_id: next(reads)
+        translations.process_translation_requested(json.dumps({"jobId": str(job_id), "language": "zh-TW"}).encode())
+
+    done = get(ai_stub, job_id)
+    assert done.status == ai_pb2.TRANSLATION_STATUS_COMPLETED
+    assert {s.segment_id: s.text for s in done.segments}[SEG[2]] == "先談時程。"
+
+
+def test_a_long_translation_still_saving_batches_is_not_taken_for_stuck():
+    now = datetime.now(timezone.utc)
+    translation = Translation(status=TranslationStatus.GENERATING, requested_at=now - timedelta(minutes=40),
+                              progressed_at=now - timedelta(minutes=1))
+    assert translations.effective_status(translation, now)[0] == TranslationStatus.GENERATING
+
+    translation.progressed_at = now - translations.STUCK_AFTER
+    assert translations.effective_status(translation, now)[0] == TranslationStatus.FAILED
+
+
+def test_a_malformed_edit_message_is_only_logged(db_session):
+    translations.follow_transcript_edit(b"not json")

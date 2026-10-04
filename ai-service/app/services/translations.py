@@ -18,6 +18,7 @@ from app.models import SegmentTranslation, Translation, TranslationStatus
 from app.services.default_models import resolve_chat_model
 from app.services.event_publisher import connection_params, publish_translation_requested
 from app.services.llm_client import LlmError
+from app.services.platform_quota import LIMIT_REASON as PLATFORM_LIMIT_REASON, platform_tokens_left
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
 from app.services.speaker_context import spoken_segments
 from app.services.transcript_client import transcript_client
@@ -32,6 +33,9 @@ CONTEXT_LINES = 3
 STUCK_AFTER = timedelta(minutes=30)
 STUCK_REASON = "翻譯逾時，請再翻譯一次（已經翻好的不會重翻）"
 FORMAT_REASON = "模型回傳的翻譯格式不正確，請再翻譯一次（已經翻好的不會重翻）"
+LIMIT_REASON = f"{PLATFORM_LIMIT_REASON}（已經翻好的保留）"
+# 翻完再讀一次逐字稿，翻的時候被編輯的片段也補翻（編輯後自動重翻不動翻譯中的，見 follow_transcript_edit）；最多這幾輪。
+MAX_PASSES = 3
 
 
 class UnknownLanguage(Exception):
@@ -46,6 +50,10 @@ class TranslationGone(Exception):
     """The translation was deleted while it was being made."""
 
 
+class _PlatformLimitReached(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class TranslationProgress:
     translation: Translation
@@ -53,8 +61,10 @@ class TranslationProgress:
 
 
 def effective_status(translation: Translation, now: datetime | None = None) -> tuple[TranslationStatus, str | None]:
+    """「翻譯中」超過 STUCK_AFTER 沒有進展（從要求或上一批存檔起算）的當成失敗，使用者才能再翻譯一次。"""
     now = now or datetime.now(timezone.utc)
-    if translation.status == TranslationStatus.GENERATING and now - translation.requested_at >= STUCK_AFTER:
+    last_progress = max(translation.requested_at, translation.progressed_at or translation.requested_at)
+    if translation.status == TranslationStatus.GENERATING and now - last_progress >= STUCK_AFTER:
         return TranslationStatus.FAILED, STUCK_REASON
     return TranslationStatus(translation.status), translation.failure_reason
 
@@ -65,7 +75,7 @@ def request_translation(job_id: uuid.UUID, user_id: uuid.UUID, language: str) ->
     if language not in LANGUAGES:
         raise UnknownLanguage()
     with new_session() as session:
-        translation = session.scalar(select(Translation).where(Translation.job_id == job_id, Translation.language == language)
+        translation = session.scalar(_one(job_id, language)
                                      .with_for_update())
         if translation is not None and effective_status(translation)[0] == TranslationStatus.GENERATING:
             return translation
@@ -102,7 +112,7 @@ def list_translations(job_id: uuid.UUID) -> list[TranslationProgress]:
 
 def find_translation(job_id: uuid.UUID, language: str) -> tuple[TranslationProgress, list[SegmentTranslation]] | None:
     with new_session() as session:
-        translation = session.scalar(select(Translation).where(Translation.job_id == job_id, Translation.language == language))
+        translation = session.scalar(_one(job_id, language))
         if translation is None:
             return None
         segments = list(session.scalars(select(SegmentTranslation).where(SegmentTranslation.translation_id == translation.id)))
@@ -122,15 +132,16 @@ def follow_transcript_edit(body: bytes) -> None:
     翻好的語言裡原文變了（或從清空還原）的片段，用最近一次要求翻譯的使用者重新排入翻譯——只翻那幾段（見 _segments_to_translate）。
     翻譯中的不動（這次編輯它可能沒跟上，下次編輯或再翻譯一次時補上）；失敗的留給使用者再翻譯一次，不自動花錢。
     沒有譯文就連逐字稿都不讀。失敗只記 log，不重試、不影響重算 embedding。"""
-    job_id = uuid.UUID(json.loads(body)["jobId"])
+    job_id = None
     try:
+        job_id = uuid.UUID(json.loads(body)["jobId"])
         with new_session() as session:
             existing = list(session.scalars(select(Translation).where(
                 Translation.job_id == job_id, Translation.status != TranslationStatus.GENERATING)))
         if not existing:
             return
         transcript = transcript_client.get_transcript(str(job_id))
-        spoken = [s for s in spoken_segments(transcript) if s.id]
+        spoken = _spoken(transcript)
         for translation in existing:
             changed = _segments_to_translate(translation.id, spoken)
             if changed and translation.status == TranslationStatus.COMPLETED:
@@ -154,8 +165,9 @@ def queue_translation(job_id: str, language: str) -> None:
 
 
 def process_translation_requested(body: bytes, retry_count: int = 0) -> None:
-    """處理一則 translation.requested { jobId, language }：讀目前的逐字稿，刪掉已經不存在或被清空的片段的譯文，把還沒翻的、原文變了的
-    一批一批翻、每批存檔。一批的格式不對就切成兩半各自翻（見 _translate），一句都翻不出來才失敗（已經翻好的保留）；暫時性失敗且還有重試預算時
+    """處理一則 translation.requested { jobId, language }：讀目前的逐字稿，刪掉已經不存在、被清空、原文變了的片段的譯文，把還沒翻的
+    一批一批翻、每批存檔；翻完再讀一次逐字稿，翻的時候被編輯的也補翻（最多 MAX_PASSES 輪）。一批的格式不對就切成兩半各自翻（見
+    _translate），一句都翻不出來才失敗；用平台模型時每批之前檢查每月上限，到了就停（都保留已經翻好的）；暫時性失敗且還有重試預算時
     raise RetryableMessageError（再跑時從沒翻的地方接著翻）。"""
     payload = json.loads(body)
     job_id, language = uuid.UUID(payload["jobId"]), payload["language"]
@@ -164,20 +176,19 @@ def process_translation_requested(body: bytes, retry_count: int = 0) -> None:
         if translation is None:
             logger.info("translation of job %s into %s is no longer being made, dropping the request", job_id, language)
             return
-        transcript = transcript_client.get_transcript(str(job_id))
-        spoken = [s for s in spoken_segments(transcript) if s.id]
-        todo = _segments_to_translate(translation.id, spoken)
         model = resolve_chat_model(translation.requested_by)
         meter = UsageMeter(translation.requested_by, job_id, LlmFeature.TRANSLATION)
-        position = {s.id: i for i, s in enumerate(spoken)}
-        for start in range(0, len(todo), BATCH_SIZE):
-            batch = todo[start:start + BATCH_SIZE]
-            first = position[batch[0].id]
-            context = [s.text for s in spoken[max(0, first - CONTEXT_LINES):first]]
-            pairs = [(s.id, s.text) for s in batch]
-            translated = _translate(pairs, language, context, model, meter)
-            _save_batch(translation.id, batch, translated)
+        for _ in range(MAX_PASSES):
+            spoken = _spoken(transcript_client.get_transcript(str(job_id)))
+            todo = _segments_to_translate(translation.id, spoken)
+            if not todo:
+                break
+            _translate_in_batches(translation, spoken, todo, language, model, meter)
         _complete(translation.id, model)
+    except _PlatformLimitReached:
+        logger.info("translation of job %s into %s stopped: the monthly platform limit is reached", job_id, language)
+        _fail(job_id, language, LIMIT_REASON)
+        return
     except TranslationGone:
         logger.info("translation of job %s into %s was deleted while being made, stopping", job_id, language)
         return
@@ -194,39 +205,61 @@ def process_translation_requested(body: bytes, retry_count: int = 0) -> None:
     logger.info("translated job %s into %s", job_id, language)
 
 
-def _translate(pairs: list[tuple[str, str]], language: str, context: list[str], model, meter) -> dict[str, str]:
+def _translate_in_batches(translation: Translation, spoken: list, todo: list, language: str, model, meter) -> None:
+    position = {s.id: i for i, s in enumerate(spoken)}
+    for start in range(0, len(todo), BATCH_SIZE):
+        if not platform_tokens_left(translation.requested_by, model):
+            raise _PlatformLimitReached()
+        batch = todo[start:start + BATCH_SIZE]
+        first, last = position[batch[0].id], position[batch[-1].id]
+        before = [s.text for s in spoken[max(0, first - CONTEXT_LINES):first]]
+        after = [s.text for s in spoken[last + 1:last + 1 + CONTEXT_LINES]]
+        translated = _translate([(s.id, s.text) for s in batch], language, before, after, model, meter)
+        _save_batch(translation.id, batch, translated)
+
+
+def _translate(pairs: list[tuple[str, str]], language: str, before: list[str], after: list[str], model,
+               meter) -> dict[str, str]:
     """翻一批；模型回的對不上（漏了、合併了幾句）就把這批切成兩半各自翻，越切越小——到只剩一句時重試一次，還是不對才 raise
-    TranslationFormatError。後半的上下文是前半的最後幾句。"""
+    TranslationFormatError。前半的後文是後半的開頭幾句，後半的前文是前半的最後幾句。最壞情況一批 40 句約 80 次呼叫（都記用量）。"""
     try:
-        return translate_batch(pairs, language, context=context, model=model, meter=meter)
+        return translate_batch(pairs, language, before=before, after=after, model=model, meter=meter)
     except TranslationFormatError:
         if len(pairs) == 1:
-            return translate_batch(pairs, language, context=context, model=model, meter=meter)
+            return translate_batch(pairs, language, before=before, after=after, model=model, meter=meter)
     middle = len(pairs) // 2
-    first, second = pairs[:middle], pairs[middle:]
-    translated = _translate(first, language, context, model, meter)
-    return translated | _translate(second, language, [text for _, text in first][-CONTEXT_LINES:], model, meter)
+    texts = [text for _, text in pairs]
+    translated = _translate(pairs[:middle], language, before, texts[middle:middle + CONTEXT_LINES], model, meter)
+    return translated | _translate(pairs[middle:], language, texts[:middle][-CONTEXT_LINES:], after, model, meter)
+
+
+def _one(job_id: uuid.UUID, language: str):
+    return select(Translation).where(Translation.job_id == job_id, Translation.language == language)
+
+
+def _spoken(transcript) -> list:
+    return [s for s in spoken_segments(transcript) if s.id]
 
 
 def _still_generating(job_id: uuid.UUID, language: str) -> Translation | None:
     with new_session() as session:
-        translation = session.scalar(select(Translation).where(Translation.job_id == job_id, Translation.language == language))
+        translation = session.scalar(_one(job_id, language))
         return translation if translation and translation.status == TranslationStatus.GENERATING else None
 
 
 def _segments_to_translate(translation_id: uuid.UUID, spoken: list) -> list:
-    """記下這次要翻的片段數；刪掉已經不存在或被清空的片段的譯文；回傳還沒翻的、原文變了的片段（依順序）。"""
+    """記下這次要翻的片段數；刪掉已經不存在、被清空、原文變了的片段的譯文（進度只算現在還對得上的）；回傳要翻的片段（依順序）。"""
     with new_session() as session:
         translation = session.get(Translation, translation_id, with_for_update=True)
         if translation is None:
             raise TranslationGone()
         existing = {str(row.segment_id): row.source_text for row in session.scalars(
             select(SegmentTranslation).where(SegmentTranslation.translation_id == translation_id))}
-        current = {s.id for s in spoken}
-        gone = [uuid.UUID(segment_id) for segment_id in existing if segment_id not in current]
-        if gone:
+        current = {s.id: s.text for s in spoken}
+        outdated = [uuid.UUID(segment_id) for segment_id, source in existing.items() if current.get(segment_id) != source]
+        if outdated:
             session.execute(delete(SegmentTranslation).where(SegmentTranslation.translation_id == translation_id,
-                                                              SegmentTranslation.segment_id.in_(gone)))
+                                                              SegmentTranslation.segment_id.in_(outdated)))
         translation.total_segments = len(spoken)
         session.commit()
     return [s for s in spoken if existing.get(s.id) != s.text]
@@ -235,8 +268,10 @@ def _segments_to_translate(translation_id: uuid.UUID, spoken: list) -> list:
 def _save_batch(translation_id: uuid.UUID, batch: list, translated: dict[str, str]) -> None:
     with new_session() as session:
         # Locked so a delete in between waits for this batch (and then cascades it away) instead of the insert failing.
-        if session.get(Translation, translation_id, with_for_update=True) is None:
+        translation = session.get(Translation, translation_id, with_for_update=True)
+        if translation is None:
             raise TranslationGone()
+        translation.progressed_at = datetime.now(timezone.utc)
         ids = [uuid.UUID(s.id) for s in batch]
         session.execute(delete(SegmentTranslation).where(SegmentTranslation.translation_id == translation_id,
                                                           SegmentTranslation.segment_id.in_(ids)))
@@ -259,7 +294,7 @@ def _complete(translation_id: uuid.UUID, model) -> None:
 def _fail(job_id: uuid.UUID, language: str, reason: str) -> None:
     try:
         with new_session() as session:
-            translation = session.scalar(select(Translation).where(Translation.job_id == job_id, Translation.language == language))
+            translation = session.scalar(_one(job_id, language))
             if translation is not None:
                 translation.status, translation.failure_reason = TranslationStatus.FAILED, reason
                 session.commit()

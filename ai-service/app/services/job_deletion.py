@@ -16,8 +16,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import new_session
-from app.models import (Chapter, DeletedJob, Embedding, GeneratedOutput, PostMeetingRun, Translation, QaHistory, Quiz, SpeakerInsightRun,
-                        SpeakerSuggestion, Summary)
+from app.models import (Chapter, DeletedJob, Embedding, GeneratedOutput, PostMeetingRun, QaHistory, Quiz, SpeakerInsightRun,
+                        SpeakerSuggestion, Summary, Translation)
 
 logger = logging.getLogger(__name__)
 
