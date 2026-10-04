@@ -1,13 +1,25 @@
-import { Languages, Loader2Icon } from 'lucide-react'
+import { useState } from 'react'
+import { Languages, Loader2Icon, Trash2 } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import type { TranscriptDisplay, TranslationsActions } from '@/hooks/use-translations'
 import { TRANSLATION_LANGUAGES } from '@/lib/translation-languages'
 import type { TranslationLanguage } from '@/types/api'
 
 // 譯文: above the transcript — what it shows (原文, a language's 譯文 in its place, or 雙語 under each segment), starting a
-// translation into another language, and how each one is coming along.
+// translation into another language, how each one is coming along, and deleting the shown one (after confirming).
 export function TranslationBar({ translations: actions }: { translations: TranslationsActions }) {
-  const { translations, display, setDisplay, isRequesting, request } = actions
+  const { translations, display, setDisplay, isRequesting, request, remove } = actions
+  const [deleting, setDeleting] = useState<TranslationLanguage | null>(null)
   const notYet = (Object.keys(TRANSLATION_LANGUAGES) as TranslationLanguage[]).filter(
     (language) => !translations.some((t) => t.language === language),
   )
@@ -32,6 +44,17 @@ export function TranslationBar({ translations: actions }: { translations: Transl
               </optgroup>
             ))}
           </select>
+        )}
+        {display.mode !== 'original' && (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={`刪除${TRANSLATION_LANGUAGES[display.language]}譯文`}
+            title="刪除這種語言的譯文"
+            onClick={() => setDeleting(display.language)}
+          >
+            <Trash2 />
+          </Button>
         )}
         {notYet.length > 0 && (
           <select
@@ -63,6 +86,18 @@ export function TranslationBar({ translations: actions }: { translations: Transl
           </div>
         ) : null,
       )}
+      <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>刪除{deleting && TRANSLATION_LANGUAGES[deleting]}譯文？</AlertDialogTitle>
+            <AlertDialogDescription>這種語言已經翻好的片段都會刪掉，之後要再看得重新翻譯。逐字稿原文不受影響。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => deleting && void remove(deleting)}>刪除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

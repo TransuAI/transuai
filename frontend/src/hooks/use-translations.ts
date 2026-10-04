@@ -17,6 +17,8 @@ export interface TranslationsActions {
   texts: Map<string, string>
   isRequesting: boolean
   request: (language: TranslationLanguage) => void
+  /** Deletes a language's translation; the transcript goes back to the original if it was showing it. */
+  remove: (language: TranslationLanguage) => Promise<void>
 }
 
 // 譯文: the job's translations and what the transcript shows. While any is GENERATING the list is asked for again every
@@ -93,5 +95,20 @@ export function useTranslations(jobId: string | undefined, isCompleted: boolean,
     [jobId, isRequesting],
   )
 
-  return { translations, display, setDisplay, texts, isRequesting, request }
+  const remove = useCallback(
+    async (language: TranslationLanguage) => {
+      if (!jobId) return
+      try {
+        await translationsApi.delete(jobId, language)
+      } catch (err) {
+        toast.error(err instanceof ApiError ? err.message : '無法刪除譯文，請稍後再試')
+        return
+      }
+      setTranslations((prev) => prev.filter((t) => t.language !== language))
+      setDisplay((current) => (current.mode !== 'original' && current.language === language ? { mode: 'original' } : current))
+    },
+    [jobId],
+  )
+
+  return { translations, display, setDisplay, texts, isRequesting, request, remove }
 }

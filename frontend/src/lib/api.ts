@@ -237,6 +237,8 @@ export const translationsApi = {
     apiFetch<TranslationSummary>(`/jobs/${jobId}/translations`, { method: 'POST', body: { language } }),
   get: (jobId: string, language: TranslationLanguage) =>
     apiFetch<TranslationDetail>(`/jobs/${jobId}/translations/${language}`),
+  delete: (jobId: string, language: TranslationLanguage) =>
+    apiFetch<void>(`/jobs/${jobId}/translations/${language}`, { method: 'DELETE' }),
 }
 
 // 多格式輸出: every request makes another one (newest first in the list). Not 匯出 — these are new documents.

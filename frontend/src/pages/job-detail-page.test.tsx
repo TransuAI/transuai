@@ -27,7 +27,7 @@ vi.mock('@/lib/api', () => ({
   postMeetingApi: { get: vi.fn(), start: vi.fn(), execute: vi.fn(), retry: vi.fn() },
   speakerInsightsApi: { get: vi.fn(), request: vi.fn() },
   outputsApi: { list: vi.fn(), request: vi.fn(), update: vi.fn() },
-  translationsApi: { list: vi.fn(), request: vi.fn(), get: vi.fn() },
+  translationsApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), delete: vi.fn() },
 }))
 
 vi.mock('@/hooks/use-job-socket', () => ({
@@ -3990,6 +3990,43 @@ describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => 
 
     await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '原文')
     expect(screen.queryByText('こんにちは')).not.toBeInTheDocument()
+  })
+
+  it('deletes the shown language after confirming, going back to the original', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    vi.mocked(translationsApi.delete).mockResolvedValue(undefined)
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '譯文（日本語）')
+    await screen.findByText('こんにちは')
+
+    await user.click(screen.getByRole('button', { name: '刪除日本語譯文' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '刪除' }))
+
+    expect(translationsApi.delete).toHaveBeenCalledWith('job-1', 'ja')
+    await waitFor(() => expect(screen.queryByText('こんにちは')).not.toBeInTheDocument())
+    expect(screen.getByText('大家好')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '顯示' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('combobox', { name: '翻譯成' })).getByRole('option', { name: '日本語' })).toBeInTheDocument()
+  })
+
+  it('keeps the translation when deleting it fails', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    vi.mocked(translationsApi.delete).mockRejectedValue(new Error('down'))
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '譯文（日本語）')
+    await screen.findByText('こんにちは')
+
+    await user.click(screen.getByRole('button', { name: '刪除日本語譯文' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '刪除' }))
+
+    expect(await screen.findByText('無法刪除譯文，請稍後再試')).toBeInTheDocument()
+    expect(screen.getByText('こんにちは')).toBeInTheDocument()
   })
 
   it('searches the translation too in 雙語, highlighting it under the original', async () => {
