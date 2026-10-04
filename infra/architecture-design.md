@@ -220,6 +220,9 @@ GET    /jobs/{jobId}/decisions          這個 Job 的抽取紀錄（沒抽過�
 POST   /jobs/{jobId}/decisions          使用者自己新增一個決策（時間點可以沒有），回 201
 PATCH  /jobs/{jobId}/decisions/{id}     修改決策的內容（時間點與原話不變），之後重新抽也保留
 DELETE /jobs/{jobId}/decisions/{id}     刪除：AI 抽的只是隱藏（重新抽時不再出現），使用者新增的直接刪掉，回 204
+POST   /decisions/ask                   問決策（SSE，跟問答一樣經 Gateway 轉發）：body { question, category?, jobId? }，只根據使用者自己
+                                         （篩選範圍內）的決策回答；先送 sources（依據的決策與它們的 Job，順序就是 [n]），再送 model、delta；
+                                         找不到相關的決策時不呼叫模型，直接說沒有
 GET    /decisions?q=&category=&jobId=   決策頁：使用者所有 Job 的決策（每個帶 Job 的標題、類型、上傳時間），沒有 q 時依上傳時間由新到舊
                                          的時間軸，有 q 時是搜尋（字與意思，依符合程度）；Gateway 先向 upload-service 列出使用者自己的
                                          Job（類型的篩選在那裡），只問 ai-service 這些 Job 的決策，ai-service 再依 user_id 過濾
@@ -501,8 +504,8 @@ CREATE INDEX ix_qa_history_job_id ON qa_history(job_id);
 CREATE TABLE llm_usage (
     id UUID PRIMARY KEY,
     user_id UUID,                           -- Job 擁有者 / 提問者；升級前排入的舊訊息沒有
-    job_id UUID NOT NULL,
-    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting / job_title / speaker_names / speaker_insights / generated_output / translation / decision_extraction
+    job_id UUID,                            -- 不屬於任何一個 Job 的呼叫（問決策跨 Job）是空的：算進使用者的月用量，不列在任何 Job 的用量裡
+    feature VARCHAR(32) NOT NULL,           -- summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting / job_title / speaker_names / speaker_insights / generated_output / translation / decision_extraction / decision_qa
     provider VARCHAR(32) NOT NULL,          -- platform 或廠商名稱
     model VARCHAR(200) NOT NULL,
     key_source VARCHAR(16) NOT NULL,        -- platform / own_key

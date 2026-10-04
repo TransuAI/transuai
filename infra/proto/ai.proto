@@ -111,6 +111,10 @@ service AiService {
   rpc ListUserDecisions(ListUserDecisionsRequest) returns (UserDecisions);
   // 搜尋決策：決定、理由、沒選的選項、原話裡有這些字的在前，接著是意思相近的（embedding）；embedding 算不出來就只比字。範圍同上。
   rpc SearchDecisions(SearchDecisionsRequest) returns (UserDecisions);
+  // 問決策（決策頁的問答框）：用自然語言問，只根據這位使用者在這些 Job 的決策回答（跟 SearchDecisions 一樣找相關的決策）。先送恰好一個
+  // sources（依據的決策，順序就是回答裡 [n] 的編號），接著 answered_by 與任意數量的 delta；找不到相關的決策時不呼叫模型，sources 是空的、
+  // 只有一個說「沒有」的 delta。中途失敗送恰好一個 error 並結束。不存紀錄。question 是空的回 INVALID_ARGUMENT。
+  rpc AskDecisions(AskDecisionsRequest) returns (stream AskDecisionsChunk);
 
   // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -1036,4 +1040,19 @@ message DecisionLink {
   string job_id = 2;
   string statement = 3;
   google.protobuf.Timestamp meeting_at = 4;
+}
+
+message AskDecisionsRequest {
+  string user_id = 1;
+  string question = 2;
+  repeated string job_ids = 3;
+}
+
+message AskDecisionsChunk {
+  oneof payload {
+    UserDecisions sources = 1;
+    string delta = 2;
+    string error = 3;
+    ModelChoice answered_by = 4;
+  }
 }
