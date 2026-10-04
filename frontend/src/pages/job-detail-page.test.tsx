@@ -3992,6 +3992,38 @@ describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => 
     expect(screen.queryByText('こんにちは')).not.toBeInTheDocument()
   })
 
+  it('searches the translation too in 雙語, highlighting it under the original', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.selectOptions(screen.getByRole('combobox', { name: '顯示' }), '雙語（日本語）')
+    await screen.findByText('こんにちは')
+
+    await user.type(screen.getByRole('searchbox', { name: '搜尋逐字稿' }), 'こんにちは')
+
+    expect(await screen.findByText('1 / 1')).toBeInTheDocument()
+    expect(within(row('大家好')).getByText('こんにちは', { selector: 'mark' })).toBeInTheDocument()
+  })
+
+  it('downloads bilingual subtitles for a translated language', async () => {
+    stubDesktopLayout()
+    const downloads = captureDownloads()
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    vi.mocked(translationsApi.get).mockResolvedValue({ ...done, segments })
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+    await user.click(await screen.findByRole('menuitem', { name: '雙語字幕（日本語，SRT）' }))
+
+    await waitFor(() => expect(downloads).toHaveLength(1))
+    expect(downloads[0].fileName).toBe('interview-雙語-ja.srt')
+    const srt = await downloads[0].blob!.text()
+    expect(srt).toContain('講者 2：大家好\nこんにちは')
+  })
+
   it('shows why a translation failed and asks again', async () => {
     stubDesktopLayout()
     vi.mocked(translationsApi.list).mockResolvedValue([{ ...translating, status: 'FAILED', translatedSegments: 2, failureReason: '翻譯失敗，請再試一次（已經翻好的不會重翻）' }])

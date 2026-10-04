@@ -79,7 +79,11 @@ export function TranscriptView({
     [showsTranslationInstead, transcriptSegments, translation],
   )
   const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const search = useTranscriptSearch(segments, pause)
+  const bilingualTexts = useMemo(
+    () => (translation?.mode === 'bilingual' ? segments.map((segment) => translation.texts.get(segment.id) ?? null) : undefined),
+    [translation, segments],
+  )
+  const search = useTranscriptSearch(segments, pause, bilingualTexts)
   const { activeMatch, matchesBySegment } = search
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null)
   const turnSpeakers = useMemo(() => speakersAtTurns(segments, speakers), [segments, speakers])
@@ -159,7 +163,8 @@ export function TranscriptView({
               index={i}
               isCurrent={i === currentSegmentIndex}
               matches={matchesBySegment.get(i) ?? []}
-              activeMatchStart={activeMatch?.segmentIndex === i ? activeMatch.start : null}
+              activeMatchStart={activeMatch?.segmentIndex === i && !activeMatch.inTranslation ? activeMatch.start : null}
+              activeTranslationMatchStart={activeMatch?.segmentIndex === i && activeMatch.inTranslation ? activeMatch.start : null}
               mediaAvailable={mediaAvailable}
               onSeek={onSeek}
               isEditing={editingSegmentId === segment.id}
@@ -177,7 +182,7 @@ export function TranscriptView({
               notes={segmentNotes.get(i) ?? NO_NOTES}
               onAddNote={() => onAddNoteAt(segment.startTime)}
               onOpenNote={onOpenNote}
-              translation={translation?.mode === 'bilingual' ? (translation.texts.get(segment.id) ?? null) : null}
+              translation={bilingualTexts?.[i] ?? null}
               textEditable={!showsTranslationInstead}
             />
           ))}

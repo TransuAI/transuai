@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
-import { jobsApi, quizApi } from '@/lib/api'
+import { jobsApi, quizApi, translationsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { downloadTextFile, openDownloadUrl, fileNameWithSuffix } from '@/lib/download'
 import {
@@ -14,6 +14,7 @@ import {
   TIMESTAMPED_TEXT_FORMAT,
   toQuizMarkdown,
   VTT_FORMAT,
+  withTranslation,
   type ExportFormat,
   type ExportSource,
 } from '@/lib/export-formats'
@@ -28,13 +29,31 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { Quiz } from '@/types/api'
+import { TRANSLATION_LANGUAGES } from '@/lib/translation-languages'
+import type { Quiz, TranslationLanguage, TranslationSummary } from '@/types/api'
 
 const TRANSCRIPT_FORMATS: ExportFormat[] = [PLAIN_TEXT_FORMAT, TIMESTAMPED_TEXT_FORMAT, SRT_FORMAT, VTT_FORMAT]
 
 // 匯出（見 frontend CONTEXT.md）：把工作區已經載入的內容轉成檔案，全部在瀏覽器裡完成。
 // The export content is only assembled when a format is picked, not on every workspace render.
-export function ExportMenu({ source, quizzes }: { source: ExportSource; quizzes: Quiz[] }) {
+// 譯文的匯出：每種已經有譯文的語言，譯文取代原文的 TXT／SRT／VTT，與雙語字幕（原文在上、譯文在下）的 SRT／VTT。
+const TRANSLATED_FORMATS = [
+  { mode: 'translated', format: PLAIN_TEXT_FORMAT, label: (name: string) => `譯文（${name}，TXT）`, suffix: (l: string) => `-${l}.txt` },
+  { mode: 'translated', format: SRT_FORMAT, label: (name: string) => `譯文字幕（${name}，SRT）`, suffix: (l: string) => `-${l}.srt` },
+  { mode: 'translated', format: VTT_FORMAT, label: (name: string) => `譯文字幕（${name}，VTT）`, suffix: (l: string) => `-${l}.vtt` },
+  { mode: 'bilingual', format: SRT_FORMAT, label: (name: string) => `雙語字幕（${name}，SRT）`, suffix: (l: string) => `-雙語-${l}.srt` },
+  { mode: 'bilingual', format: VTT_FORMAT, label: (name: string) => `雙語字幕（${name}，VTT）`, suffix: (l: string) => `-雙語-${l}.vtt` },
+] as const
+
+export function ExportMenu({
+  source,
+  quizzes,
+  translations = [],
+}: {
+  source: ExportSource
+  quizzes: Quiz[]
+  translations?: TranslationSummary[]
+}) {
   const hasTranscript = source.transcript !== null
   const [reportIncludesQa, setReportIncludesQa] = useState(false)
   const [reportIncludesNotes, setReportIncludesNotes] = useState(false)
@@ -69,6 +88,26 @@ export function ExportMenu({ source, quizzes }: { source: ExportSource; quizzes:
       },
       (err) => toast.error(err instanceof ApiError ? err.message : '無法下載測驗'),
     )
+  // 譯文：選了才載入那種語言的片段譯文。
+  const translated = translations.filter((t) => t.translatedSegments > 0)
+  const downloadTranslated = (language: TranslationLanguage, choice: (typeof TRANSLATED_FORMATS)[number]) =>
+    translationsApi.get(source.job.jobId, language).then(
+      (detail) => {
+        const texts = new Map(detail.segments.map((s) => [s.segmentId, s.text]))
+        const byPosition = new Map<number, string>()
+        source.transcript?.segments.forEach((segment, i) => {
+          const text = texts.get(segment.id)
+          if (text !== undefined) byPosition.set(i, text)
+        })
+        const content = buildExportContent(source)
+        downloadTextFile({
+          fileName: fileNameWithSuffix(content.fileName, choice.suffix(language)),
+          content: choice.format.render({ ...content, segments: withTranslation(content.segments, byPosition, choice.mode) }),
+          mimeType: choice.format.mimeType,
+        })
+      },
+      (err) => toast.error(err instanceof ApiError ? err.message : '無法下載譯文'),
+    )
   const downloadOriginal = () =>
     jobsApi.getMediaUrl(source.job.jobId, { download: true }).then(
       (response) => openDownloadUrl(response.downloadUrl),
@@ -93,6 +132,16 @@ export function ExportMenu({ source, quizzes }: { source: ExportSource; quizzes:
           <DropdownMenuItem key={format.fileSuffix} disabled={!hasTranscript} onSelect={() => download(format)}>
             {format.label}
           </DropdownMenuItem>
+        ))}
+        {translated.map((t) => (
+          <div key={t.language}>
+            <DropdownMenuSeparator />
+            {TRANSLATED_FORMATS.map((choice) => (
+              <DropdownMenuItem key={choice.label('')} onSelect={() => void downloadTranslated(t.language, choice)}>
+                {choice.label(TRANSLATION_LANGUAGES[t.language])}
+              </DropdownMenuItem>
+            ))}
+          </div>
         ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => download(reportFormat)}>{reportFormat.label}</DropdownMenuItem>

@@ -15,10 +15,16 @@ export interface TranscriptSearch {
 // Searching is reading, not following: typing a query or stepping between matches pauses
 // auto-follow. Clearing the query deliberately does not resume it — only 回到播放位置 or a
 // jump does (see frontend CONTEXT.md 自動跟隨).
-export function useTranscriptSearch(segments: TranscriptSegment[], pauseFollow: () => void): TranscriptSearch {
+// translations: 雙語 shows each segment's translation under it, and search looks there too (by segment order; null when a
+// segment has none).
+export function useTranscriptSearch(
+  segments: TranscriptSegment[],
+  pauseFollow: () => void,
+  translations?: (string | null)[],
+): TranscriptSearch {
   const [query, setQuery] = useState('')
   const [activeMatchIndex, setActiveMatchIndex] = useState(0)
-  const matches = useMemo(() => findTranscriptMatches(segments, query), [segments, query])
+  const matches = useMemo(() => findTranscriptMatches(segments, query, translations), [segments, query, translations])
   const matchesBySegment = useMemo(() => groupMatchesBySegment(matches), [matches])
   // Editing a segment can remove matches; keep the selection within the ones that remain.
   const selectedIndex = matches.length === 0 ? 0 : Math.min(activeMatchIndex, matches.length - 1)

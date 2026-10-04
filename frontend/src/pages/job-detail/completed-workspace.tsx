@@ -361,6 +361,7 @@ export function CompletedWorkspace({
           <ExportMenu
             source={{ job, transcript, summary, chapters, qaHistory, notes: notes.notes, speakerInsights: speakerInsights.insights }}
             quizzes={quizzes}
+            translations={translations.translations}
           />
           <div className="flex items-center gap-2 lg:hidden">
             <Button variant="outline" size="sm" onClick={() => setSourceOpen(true)}>

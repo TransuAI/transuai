@@ -59,6 +59,8 @@ interface SegmentRowProps {
   onOpenNote: (noteId: string) => void
   /** 雙語: the segment's translation, shown under its text. */
   translation?: string | null
+  /** Where the selected search match starts, when it's in the translation. */
+  activeTranslationMatchStart?: number | null
   /** False while a translation is shown in place of the text (譯文): editing it would edit the original unseen. */
   textEditable?: boolean
 }
@@ -86,8 +88,11 @@ export function SegmentRow({
   onAddNote,
   onOpenNote,
   translation = null,
+  activeTranslationMatchStart = null,
   textEditable = true,
 }: SegmentRowProps) {
+  const textMatches = matches.filter((match) => !match.inTranslation)
+  const translationMatches = matches.filter((match) => match.inTranslation)
   // When the editor closes, give keyboard focus back to this segment's edit button rather than
   // letting it fall to <body>.
   const editButtonRef = useRef<HTMLButtonElement>(null)
@@ -230,7 +235,7 @@ export function SegmentRow({
       ) : (
         <>
           <p className="col-start-2 row-start-2 leading-relaxed break-words">
-            <HighlightedText text={segment.text} matches={matches} activeStart={activeMatchStart} />
+            <HighlightedText text={segment.text} matches={textMatches} activeStart={activeMatchStart} />
             {isEdited && textEditable && (
               // inline-block: an inline box holding the sr-only parentheses can break into a stray
               // empty fragment on the next line.
@@ -241,7 +246,9 @@ export function SegmentRow({
             )}
           </p>
           {translation && (
-            <p className="col-start-2 row-start-3 leading-relaxed break-words text-muted-foreground">{translation}</p>
+            <p className="col-start-2 row-start-3 leading-relaxed break-words text-muted-foreground">
+              <HighlightedText text={translation} matches={translationMatches} activeStart={activeTranslationMatchStart} />
+            </p>
           )}
           <div
             className={cn(

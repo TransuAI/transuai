@@ -5,6 +5,7 @@ import {
   buildExportContent,
   markdownReportFormat,
   toMarkdownReport,
+  withTranslation,
   toNotesMarkdown,
   toQuizMarkdown,
   toPlainText,
@@ -533,5 +534,29 @@ describe('toQuizMarkdown', () => {
     const multiLine = { ...quiz, questions: [{ ...quiz.questions[1], prompt: '第一行\n第二行' }] }
 
     expect(toQuizMarkdown(multiLine)).toContain('### 1. 第一行 第二行\n')
+  })
+})
+
+describe('translated and bilingual subtitles (譯文、雙語)', () => {
+  const segments = [segment(0, 2, '大家好', '主持人'), segment(2, 4, '', '主持人'), segment(4, 6, '開始吧', '小明')]
+  const texts = new Map([[0, 'Hello everyone'], [2, "Let's start"]])
+
+  it('puts the translation in place of the text, keeping times and speakers', () => {
+    expect(toSrt(withTranslation(segments, texts, 'translated'))).toBe(
+      '﻿1\n00:00:00,000 --> 00:00:02,000\n主持人：Hello everyone\n\n2\n00:00:04,000 --> 00:00:06,000\n小明：Let\'s start\n\n',
+    )
+  })
+
+  it('puts the translation on a second line of each cue for bilingual subtitles', () => {
+    expect(toVtt(withTranslation(segments, texts, 'bilingual'))).toBe(
+      'WEBVTT\n\n00:00:00.000 --> 00:00:02.000\n<v 主持人>大家好\nHello everyone\n\n00:00:04.000 --> 00:00:06.000\n<v 小明>開始吧\nLet\'s start\n\n',
+    )
+  })
+
+  it('keeps the original where a segment isn’t translated yet', () => {
+    const partly = new Map([[0, 'Hello everyone']])
+
+    expect(toPlainText(withTranslation(segments, partly, 'translated'))).toBe('主持人：Hello everyone\n小明：開始吧\n')
+    expect(toSrt(withTranslation(segments, partly, 'bilingual'))).toContain('小明：開始吧\n\n')
   })
 })

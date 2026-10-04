@@ -190,6 +190,20 @@ export function toSrt(segments: ExportSegment[]): string {
   return '﻿' + cues.join('')
 }
 
+// 譯文的匯出：translations 依片段在清單裡的位置（跟 buildExportContent 的 segments 一樣的順序）。translated 用譯文取代文字，bilingual
+// 把譯文放在下一行（字幕一條兩行：原文在上、譯文在下）；還沒翻到的片段維持原文。已清空片段照樣不匯出。
+export function withTranslation(
+  segments: ExportSegment[],
+  translations: Map<number, string>,
+  mode: 'translated' | 'bilingual',
+): ExportSegment[] {
+  return segments.map((segment, i) => {
+    const translation = translations.get(i)
+    if (!translation || segment.text === '') return segment
+    return { ...segment, text: mode === 'translated' ? translation : `${segment.text}\n${translation}` }
+  })
+}
+
 // WebVTT 的字幕文字是 markup：& < > 要跳脫，否則會變成壞掉的標籤。
 function escapeVtt(text: string) {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
