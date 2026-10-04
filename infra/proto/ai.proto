@@ -100,6 +100,12 @@ service AiService {
   rpc RequestDecisionExtraction(RequestDecisionExtractionRequest) returns (DecisionExtraction);
   // 這個 Job 的抽取紀錄（沒抽過就沒有）與決策（依時間點排序，沒有時間點的在後）。
   rpc GetJobDecisions(GetJobDecisionsRequest) returns (JobDecisions);
+  // 使用者自己新增一個決策（source = user；時間點可以沒有）。決定是空的、太長，或欄位超過上限回 INVALID_ARGUMENT（附給使用者看的原因）。
+  rpc CreateDecision(CreateDecisionRequest) returns (Decision);
+  // 修改決策的內容（時間點與原話不變）；改過的標記 edited，重新抽時保留。不是這個 Job 的回 NOT_FOUND；欄位不合規則同上。
+  rpc UpdateDecision(UpdateDecisionRequest) returns (Decision);
+  // 刪掉一個決策：AI 抽的只是隱藏（重新抽時不會再出現），使用者新增的直接刪掉。不是這個 Job 的回 NOT_FOUND。
+  rpc DeleteDecision(DeleteDecisionRequest) returns (DeleteDecisionResponse);
 
   // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -938,6 +944,37 @@ message JobDecisions {
   optional DecisionExtraction extraction = 1;
   repeated Decision decisions = 2;
 }
+
+// 決策可以改的內容。
+message DecisionInput {
+  string statement = 1;
+  string rationale = 2;
+  repeated string alternatives = 3;
+  // 講者標籤；空字串＝不知道是誰。
+  string proposed_by = 4;
+  bool tentative = 5;
+}
+
+message CreateDecisionRequest {
+  string job_id = 1;
+  // Job 擁有者（時間軸、搜尋都只查自己的）。
+  string user_id = 2;
+  DecisionInput decision = 3;
+  optional double start_time = 4;
+}
+
+message UpdateDecisionRequest {
+  string job_id = 1;
+  string decision_id = 2;
+  DecisionInput decision = 3;
+}
+
+message DeleteDecisionRequest {
+  string job_id = 1;
+  string decision_id = 2;
+}
+
+message DeleteDecisionResponse {}
 
 message Decision {
   string id = 1;

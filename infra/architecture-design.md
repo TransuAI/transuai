@@ -213,6 +213,9 @@ DELETE /jobs/{jobId}/translations/{language}  刪掉一種語言的譯文（翻�
 POST   /jobs/{jobId}/decisions/extract  決策紀錄：抽出（或重新抽出）這場的決策，回 202（背景抽，前端每 3 秒輪詢）；會議、訪談
                                          轉錄完也會自動抽；重新抽只換掉 AI 抽的、使用者沒改過的
 GET    /jobs/{jobId}/decisions          這個 Job 的抽取紀錄（沒抽過是 null）與決策（決定、理由、沒選的選項、提出者、暫定、時間點與原話）
+POST   /jobs/{jobId}/decisions          使用者自己新增一個決策（時間點可以沒有），回 201
+PATCH  /jobs/{jobId}/decisions/{id}     修改決策的內容（時間點與原話不變），之後重新抽也保留
+DELETE /jobs/{jobId}/decisions/{id}     刪除：AI 抽的只是隱藏（重新抽時不再出現），使用者新增的直接刪掉，回 204
 POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format", "platform"?（社群貼文必填）, "instruction"? }，回 202
                                          （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
 GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）
@@ -757,6 +760,7 @@ CREATE TABLE decisions (
     evidence_text TEXT,                     -- 那個片段的原話
     source VARCHAR(8) NOT NULL DEFAULT 'ai',   -- ai / user
     edited BOOLEAN NOT NULL DEFAULT false,  -- 使用者改過：重新抽時保留
+    dismissed BOOLEAN NOT NULL DEFAULT false,  -- AI 抽的被使用者刪掉：不顯示，重新抽時同一個片段的不再收
     supersedes_id UUID REFERENCES decisions(id) ON DELETE SET NULL,  -- 取代了較早的哪一個
     embedding vector(1024),                 -- statement＋rationale
     source_revision INTEGER,
