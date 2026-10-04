@@ -11,11 +11,12 @@ import json
 import logging
 import uuid
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from pika import BlockingConnection
-from sqlalchemy import Text, cast, delete, or_, select
+from sqlalchemy import Text, cast, delete, or_, select, update
 
 from app.db import new_session
 from app.models import Decision, DecisionExtraction, DecisionExtractionStatus, DecisionSource
@@ -26,12 +27,11 @@ from app.services.decision_supersedes import Candidate, NewDecision, judge_super
 from app.services.default_models import resolve_chat_model
 from app.services.embedder import embed_documents, embed_query
 from app.services.event_publisher import connection_params, publish_decisions_requested
-from collections.abc import Iterator
-
 from app.services.llm_client import ChatModel, LlmError, stream_chat
 from app.services.platform_quota import LIMIT_REASON, platform_tokens_left
 from app.services.regeneration import STUCK_AFTER
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
+from app.services.speaker_context import speaker_names
 from app.services.traditional_chinese import TraditionalStream
 from app.services.transcript_client import transcript_client
 from app.services.usage_meter import LlmFeature, UsageMeter
@@ -48,11 +48,9 @@ MAX_STATEMENT_CHARS = 300
 MAX_RATIONALE_CHARS = 1000
 MAX_ALTERNATIVES = 10
 MAX_ALTERNATIVE_CHARS = 200
-_MAX_SPEAKER_LABEL_CHARS = 32
 SEARCH_LIMIT = 30
 # 只靠意思（沒有這些字）的要相近到這個程度才算找到（cosine similarity，bge-m3）。
 SEMANTIC_MIN_SIMILARITY = 0.5
-# 取代的候選：每個新的決策最多這幾個、至少這麼相近的較早決策。
 # 問決策：最多拿幾個相關的決策給模型；找不到相關的就不問模型，直接這樣回答。
 ANSWER_SOURCES = 8
 _ANSWER_MAX_TOKENS = 1500
@@ -64,6 +62,7 @@ _ANSWER_PROMPT = (
     "就直接說決策紀錄裡沒有，不要用常識或推測補上。決策之間有取代關係時，以較新的為準，並說明是怎麼改的。\n\n"
     "## 決策\n{decisions}\n\n## 問題\n{question}"
 )
+# 取代的候選：每個新的決策最多這幾個、至少這麼相近的較早決策。
 SUPERSEDE_CANDIDATES = 3
 SUPERSEDE_MIN_SIMILARITY = 0.5
 
@@ -236,12 +235,15 @@ def decision_links(decisions: list[Decision]) -> dict[uuid.UUID, DecisionLinks]:
     """這些決策各自的取代連結。"""
     ids = [d.id for d in decisions]
     targets = {d.supersedes_id for d in decisions if d.supersedes_id}
+    # Links only ever join one user's decisions; checked here too, so this can't show anyone else's on its own.
+    users = Decision.user_id.in_({d.user_id for d in decisions})
     with new_session() as session:
         superseded = {d.id: d for d in session.scalars(select(Decision).where(
-            Decision.id.in_(targets), Decision.dismissed.is_(False)))} if targets else {}
+            Decision.id.in_(targets), Decision.dismissed.is_(False), users))} if targets else {}
         later: dict[uuid.UUID, list[Decision]] = defaultdict(list)
         if ids:
-            for d in session.scalars(select(Decision).where(Decision.supersedes_id.in_(ids), Decision.dismissed.is_(False))
+            for d in session.scalars(select(Decision).where(Decision.supersedes_id.in_(ids), Decision.dismissed.is_(False),
+                                                            users)
                                      .order_by(Decision.meeting_at.asc().nulls_last(), Decision.created_at)):
                 later[d.supersedes_id].append(d)
     return {d.id: DecisionLinks(superseded.get(d.supersedes_id), later[d.id]) for d in decisions}
@@ -253,9 +255,11 @@ def create_decision(job_id: uuid.UUID, user_id: uuid.UUID, fields: DecisionField
     fields = _validated(fields)
     if start_time is not None and start_time < 0:
         raise InvalidDecision("時間點不能是負的")
+    proposer_name = _proposer_name(job_id, fields.proposed_by)
     with new_session() as session:
         decision = Decision(job_id=job_id, user_id=user_id, statement=fields.statement, rationale=fields.rationale,
-                            alternatives=fields.alternatives, proposed_by=fields.proposed_by, tentative=fields.tentative,
+                            alternatives=fields.alternatives, proposed_by=fields.proposed_by,
+                            proposed_by_name=proposer_name, tentative=fields.tentative,
                             start_time=start_time, source=DecisionSource.USER, embedding=_embedding_or_none(fields),
                             meeting_at=meeting_at)
         session.add(decision)
@@ -266,13 +270,15 @@ def create_decision(job_id: uuid.UUID, user_id: uuid.UUID, fields: DecisionField
 def update_decision(job_id: uuid.UUID, decision_id: uuid.UUID, fields: DecisionFields) -> Decision:
     """改決策的內容（時間點與原話不變），標記 edited。不是這個 Job 的（或刪掉了）raise DecisionNotFound。"""
     fields = _validated(fields)
+    proposer_name = _proposer_name(job_id, fields.proposed_by)
     with new_session() as session:
         decision = _one(session, job_id, decision_id)
         if (decision.statement, decision.rationale) != (fields.statement, fields.rationale):
             decision.embedding = _embedding_or_none(fields)
         decision.statement, decision.rationale, decision.alternatives = (
             fields.statement, fields.rationale, fields.alternatives)
-        decision.proposed_by, decision.tentative = fields.proposed_by, fields.tentative
+        decision.proposed_by, decision.proposed_by_name, decision.tentative = (
+            fields.proposed_by, proposer_name, fields.tentative)
         decision.edited, decision.updated_at = True, datetime.now(timezone.utc)
         session.commit()
         return decision
@@ -308,9 +314,36 @@ def _validated(fields: DecisionFields) -> DecisionFields:
         raise InvalidDecision(f"理由最多 {MAX_RATIONALE_CHARS} 字")
     if len(alternatives) > MAX_ALTERNATIVES or any(len(a) > MAX_ALTERNATIVE_CHARS for a in alternatives):
         raise InvalidDecision(f"沒選的選項最多 {MAX_ALTERNATIVES} 個、每個 {MAX_ALTERNATIVE_CHARS} 字")
-    if fields.proposed_by and len(fields.proposed_by) > _MAX_SPEAKER_LABEL_CHARS:
-        raise InvalidDecision("不認得這位講者")
     return DecisionFields(statement, rationale, alternatives, fields.proposed_by or None, fields.tentative)
+
+
+def _proposer_name(job_id: uuid.UUID, label: str | None) -> str | None:
+    """提出者的講者標籤要是這個 Job 的講者；回傳現在的名稱（跨 Job 的頁面沒有逐字稿，顯示存下來的名稱）。"""
+    if not label:
+        return None
+    names = {speaker.label: speaker.display_name for speaker in transcript_client.get_transcript(str(job_id)).speakers}
+    if label not in names:
+        raise InvalidDecision("不認得這位講者")
+    return names[label]
+
+
+def follow_transcript_edit(body: bytes) -> None:
+    """transcript.edited { jobId } 之後（講者改名也會發）：這個 Job 的決策存下來的提出者名稱跟著改。沒有提出者就連逐字稿都不讀；
+    失敗只記 log，不重試（名稱只是跨 Job 的頁面顯示用，下次編輯再跟上）。"""
+    job_id = None
+    try:
+        job_id = uuid.UUID(json.loads(body)["jobId"])
+        proposed = Decision.job_id == job_id, Decision.proposed_by.is_not(None)
+        with new_session() as session:
+            if session.scalar(select(Decision.id).where(*proposed).limit(1)) is None:
+                return
+        names = {s.label: s.display_name for s in transcript_client.get_transcript(str(job_id)).speakers}
+        with new_session() as session:
+            for decision in session.scalars(select(Decision).where(*proposed)):
+                decision.proposed_by_name = names.get(decision.proposed_by, decision.proposed_by_name)
+            session.commit()
+    except Exception:
+        logger.exception("transcript.edited for job %s: could not bring its decisions' proposer names up to date", job_id)
 
 
 def _embedding_or_none(fields: DecisionFields) -> list[float] | None:
@@ -372,7 +405,8 @@ def process_decisions_requested(body: bytes, retry_count: int = 0) -> None:
                                   meter=UsageMeter(user_id, job_id, LlmFeature.DECISION_EXTRACTION))
         vectors = _embeddings(found, retry_count)
         supersedes = _supersedes(job_id, user_id, meeting_at, found, vectors, model)
-        _save(job_id, user_id, found, vectors, supersedes, meeting_at, transcript.revision, model)
+        _save(job_id, user_id, found, vectors, supersedes, meeting_at, speaker_names(transcript) or {},
+              transcript.revision, model)
     except DecisionFormatError as exc:
         logger.warning("decisions of job %s: the model's reply was not valid: %s", job_id, exc)
         _fail(job_id, FORMAT_REASON)
@@ -439,24 +473,38 @@ def _still_generating(job_id: uuid.UUID) -> bool:
 
 
 def _save(job_id: uuid.UUID, user_id: uuid.UUID, found: list[ExtractedDecision], vectors: list[list[float] | None],
-          supersedes: list[uuid.UUID | None], meeting_at: datetime | None, source_revision: int, model: ChatModel) -> None:
+          supersedes: list[uuid.UUID | None], meeting_at: datetime | None, names: dict[str, str], source_revision: int,
+          model: ChatModel) -> None:
     with new_session() as session:
         extraction = session.scalar(
             select(DecisionExtraction).where(DecisionExtraction.job_id == job_id).with_for_update())
         if extraction is None:
             return
-        session.execute(delete(Decision).where(
+        replaced = list(session.scalars(select(Decision).where(
             Decision.job_id == job_id, Decision.source == DecisionSource.AI, Decision.edited.is_(False),
-            Decision.dismissed.is_(False)))
+            Decision.dismissed.is_(False))))
+        # Later meetings' decisions superseding one of these: relinked to the new decision made in the same segment
+        # (deleting would only SET NULL them, and nothing looks forward to link them again).
+        replaced_at = {d.id: float(d.start_time) for d in replaced if d.start_time is not None}
+        relink = session.execute(select(Decision.id, Decision.supersedes_id).where(
+            Decision.supersedes_id.in_(replaced_at))).all() if replaced_at else []
+        session.execute(delete(Decision).where(Decision.id.in_([d.id for d in replaced])))
         # What stays (edited, added, dismissed) holds its segment: a new one made there is the same decision again.
         held = {float(t) for t in session.scalars(select(Decision.start_time).where(
             Decision.job_id == job_id, Decision.start_time.is_not(None)))}
-        session.add_all([
+        added = [
             Decision(job_id=job_id, user_id=user_id, statement=d.statement, rationale=d.rationale,
-                     alternatives=d.alternatives, proposed_by=d.proposed_by, tentative=d.tentative,
-                     start_time=d.start_time, evidence_text=d.evidence_text, source=DecisionSource.AI,
-                     embedding=vector, source_revision=source_revision, meeting_at=meeting_at, supersedes_id=superseded)
-            for d, vector, superseded in zip(found, vectors, supersedes) if d.start_time not in held])
+                     alternatives=d.alternatives, proposed_by=d.proposed_by, proposed_by_name=names.get(d.proposed_by),
+                     tentative=d.tentative, start_time=d.start_time, evidence_text=d.evidence_text,
+                     source=DecisionSource.AI, embedding=vector, source_revision=source_revision, meeting_at=meeting_at,
+                     supersedes_id=superseded)
+            for d, vector, superseded in zip(found, vectors, supersedes) if d.start_time not in held]
+        session.add_all(added)
+        session.flush()
+        made_at = {float(d.start_time): d.id for d in added}
+        for later_id, old_id in relink:
+            if (new_id := made_at.get(replaced_at[old_id])) is not None:
+                session.execute(update(Decision).where(Decision.id == later_id).values(supersedes_id=new_id))
         extraction.status, extraction.failure_reason = DecisionExtractionStatus.COMPLETED, None
         extraction.source_revision, extraction.model_provider, extraction.model = (
             source_revision, model.provider, model.model)

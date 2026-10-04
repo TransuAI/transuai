@@ -153,10 +153,14 @@ def test_decisions_are_extracted_by_the_category_the_job_ends_up_with(fake_llm, 
     assert meeting_at == datetime(2026, 10, 1, tzinfo=timezone.utc)  # what earlier meetings are earlier than
 
 
-def test_without_a_title_the_category_is_unknown_and_nothing_is_extracted(fake_llm, db_session):
+
+
+def test_without_a_title_the_jobs_own_category_still_decides_on_extracting_decisions(fake_llm, db_session):
+    owner = uuid.uuid4()
     answers(fake_llm, "不是 JSON")
 
-    with patch.object(pipeline, "extract_after_transcription") as extract, running_the_pipeline(uuid.uuid4()):
-        pass
+    with patch.object(pipeline, "extract_after_transcription") as extract, running_the_pipeline(owner) as job_status_client:
+        job_status_client.set_suggested_details.return_value = upload_pb2.Job(category="meeting")  # set by the user
 
-    assert extract.call_args.args[2] is None
+    job_status_client.set_suggested_details.assert_called_once_with(JOB_ID, "", "")  # reads the job, changing nothing
+    assert extract.call_args.args[2] == "meeting"

@@ -53,6 +53,8 @@ class Decision(Base):
     rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
     alternatives: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     proposed_by: Mapped[str | None] = mapped_column(String(32))  # 講者標籤
+    # 提出者現在的名稱：跨 Job 的頁面沒有逐字稿可以查名字；講者改名時跟著改（decisions.follow_transcript_edit）。
+    proposed_by_name: Mapped[str | None] = mapped_column(String(100))
     tentative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     start_time: Mapped[float | None] = mapped_column(Numeric(10, 2))
     evidence_text: Mapped[str | None] = mapped_column(Text)

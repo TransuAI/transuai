@@ -921,7 +921,8 @@ def _decision_link(decision: Decision) -> ai_pb2.DecisionLink:
 def _decision_to_proto(decision: Decision, links: DecisionLinks) -> ai_pb2.Decision:
     message = ai_pb2.Decision(
         id=str(decision.id), job_id=str(decision.job_id), statement=decision.statement, rationale=decision.rationale,
-        alternatives=decision.alternatives, proposed_by=decision.proposed_by or "", tentative=decision.tentative,
+        alternatives=decision.alternatives, proposed_by=decision.proposed_by or "",
+        proposed_by_name=decision.proposed_by_name or "", tentative=decision.tentative,
         evidence_text=decision.evidence_text or "", source=decision.source, edited=decision.edited,
         supersedes_id=str(decision.supersedes_id) if decision.supersedes_id else "")
     if decision.start_time is not None:

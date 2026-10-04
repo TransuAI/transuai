@@ -345,6 +345,7 @@ RequestSpeakerInsights(jobId, userId)（Gateway POST /jobs/{jobId}/speaker-insig
 RequestDecisionExtraction(jobId, userId, meetingAt)（Gateway POST /jobs/{jobId}/decisions/extract，meetingAt 是 Job 的上傳時間）
 轉錄完的 pipeline：取完標題與類型之後，Job 最後的類型（使用者設定過就是他的）是 meeting / interview 才自動要求，用 Job 擁有者
                    （meetingAt 是 SetSuggestedDetails 回來的 Job 的上傳時間）；
+                   沒取到標題（模型失敗）時用空的 SetSuggestedDetails 讀 Job（什麼都不改），使用者設定的類型照樣算；
                    不知道擁有者、平台模型這個月已經到上限就跳過（之後可以手動抽）；失敗只記 log，Job 照樣完成
   → 一個 Job 一份抽取紀錄（decision_extractions.job_id 唯一）：已經在抽（還沒卡住）就直接回傳；否則改成 GENERATING 並排入
     decision.requested { jobId, userId, meetingAt }（publisher confirms、短 timeout；排入失敗就恢復原狀）
@@ -360,9 +361,12 @@ RequestDecisionExtraction(jobId, userId, meetingAt)（Gateway POST /jobs/{jobId}
     模型只能指向給它看的其中一個，其他的不收；判斷失敗只記 log（決策照樣存，沒有連結）
   → 刪掉 AI 抽的、使用者沒改過、沒刪掉的（source = ai、edited = false、dismissed = false）；留下來的（改過的、自己新增的、刪掉的）
     佔著它們的片段——新抽到的在同一個時間點就是同一個決策，不收（改過的不會多一份原本的、刪掉的不會再出現）；
-    其他的存起來（user_id = userId、meeting_at、supersedes_id）；COMPLETED、source_revision = R、模型
+    其他的存起來（user_id = userId、meeting_at、supersedes_id、提出者現在的名稱 proposed_by_name）；後來的會議取代了被換掉的
+    決策時，連結改指向同一個片段新抽到的那個（不然 ON DELETE SET NULL 就斷了）；COMPLETED、source_revision = R、模型
 CreateDecision / UpdateDecision / DeleteDecision（Gateway POST / PATCH / DELETE /jobs/{jobId}/decisions…）
   → 新增：source = user，時間點可以沒有；修改：只改內容（時間點與原話不變），edited = true；都當場算 embedding（算不出來先存沒有的）
+  → 提出者要是這個 Job 的講者（讀一次逐字稿），不是的 INVALID_ARGUMENT「不認得這位講者」；存下名稱
+  → transcript.edited（講者改名也會發）時，這個 Job 的決策存的提出者名稱跟著改（decisions.follow_transcript_edit，失敗只記 log）
   → 刪除：AI 抽的只標 dismissed（不顯示、重新抽時佔著那個片段），使用者新增的直接刪掉
   → 決定是空的或超過 300 字、理由超過 1000 字、沒選的選項超過 10 個或每個超過 200 字：INVALID_ARGUMENT（附給使用者看的原因）
 ListUserDecisions / SearchDecisions（Gateway GET /decisions，決策頁：第一個跨 Job 的功能）
@@ -380,7 +384,8 @@ AskDecisions（Gateway POST /decisions/ask，SSE）
 
 格式不對是永久性失敗（「模型回傳的格式不正確，請再抽一次」，之前的決策保留）；暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘
 回報成失敗。用量功能是 `decision_extraction`。每個決策回傳時帶取代的連結（取代了的、被取代的，刪掉的都不算）。
-已知限制：只有新抽的決策往前找取代——先抽了較晚的會議、之後才抽較早的會議，兩者之間不會連起來；決策紀錄做好之前的決策沒有
+已知限制：重新抽時，新抽到的決策跟留下來的（改過、自己新增、刪掉的）在同一個片段就不收——同一個片段做成的另一個決定也會漏掉；
+只有新抽的決策往前找取代——先抽了較晚的會議、之後才抽較早的會議，兩者之間不會連起來；決策紀錄做好之前的決策沒有
 meeting_at，不會被當成候選（重新抽那一場就有）。
 
 ### 逐字稿被編輯之後（`transcript.edited`）

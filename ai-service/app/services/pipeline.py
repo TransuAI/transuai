@@ -90,6 +90,8 @@ def process_message(
         _suggest_speaker_names(job_uuid, transcript, model=model,
                                meter=UsageMeter(user_id, job_uuid, LlmFeature.SPEAKER_NAMES))
         # Queued for later (its own background work): the job doesn't wait for its decisions.
+        if job is None and user_id is not None:
+            job = _read_job(job_id)  # no AI title: the category the user may have set still decides on decisions
         uploaded_at = job.created_at.ToDatetime(tzinfo=timezone.utc) if job and job.HasField("created_at") else None
         extract_after_transcription(job_uuid, user_id, job.category if job else None, model, uploaded_at)
         job_status_client.update_status(job_id, "COMPLETED")
@@ -128,6 +130,15 @@ def _suggest_title_and_category(job_id: str, summary: str, chapters: list[tuple[
     except Exception:
         logger.exception("job %s: could not give it a title, it keeps its file name", job_id)
     return None
+
+
+def _read_job(job_id: str) -> upload_pb2.Job | None:
+    """SetSuggestedDetails 帶空的標題與類型什麼都不改（見 upload.proto），只回傳 Job。失敗只記 log。"""
+    try:
+        return job_status_client.set_suggested_details(job_id, "", "")
+    except Exception:
+        logger.exception("job %s: could not read its category", job_id)
+        return None
 
 
 def _suggest_speaker_names(job_uuid: uuid.UUID, transcript, *, model: ChatModel, meter: UsageMeter) -> None:

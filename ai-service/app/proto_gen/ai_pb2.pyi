@@ -1153,7 +1153,7 @@ class UserDecisions(_message.Message):
     def __init__(self, decisions: _Optional[_Iterable[_Union[Decision, _Mapping]]] = ...) -> None: ...
 
 class Decision(_message.Message):
-    __slots__ = ("id", "job_id", "statement", "rationale", "alternatives", "proposed_by", "tentative", "start_time", "evidence_text", "source", "edited", "supersedes_id", "created_at", "supersedes", "superseded_by", "meeting_at")
+    __slots__ = ("id", "job_id", "statement", "rationale", "alternatives", "proposed_by", "tentative", "start_time", "evidence_text", "source", "edited", "supersedes_id", "created_at", "supersedes", "superseded_by", "meeting_at", "proposed_by_name")
     ID_FIELD_NUMBER: _ClassVar[int]
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     STATEMENT_FIELD_NUMBER: _ClassVar[int]
@@ -1170,6 +1170,7 @@ class Decision(_message.Message):
     SUPERSEDES_FIELD_NUMBER: _ClassVar[int]
     SUPERSEDED_BY_FIELD_NUMBER: _ClassVar[int]
     MEETING_AT_FIELD_NUMBER: _ClassVar[int]
+    PROPOSED_BY_NAME_FIELD_NUMBER: _ClassVar[int]
     id: str
     job_id: str
     statement: str
@@ -1186,7 +1187,8 @@ class Decision(_message.Message):
     supersedes: DecisionLink
     superseded_by: _containers.RepeatedCompositeFieldContainer[DecisionLink]
     meeting_at: _timestamp_pb2.Timestamp
-    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., statement: _Optional[str] = ..., rationale: _Optional[str] = ..., alternatives: _Optional[_Iterable[str]] = ..., proposed_by: _Optional[str] = ..., tentative: _Optional[bool] = ..., start_time: _Optional[float] = ..., evidence_text: _Optional[str] = ..., source: _Optional[str] = ..., edited: _Optional[bool] = ..., supersedes_id: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., supersedes: _Optional[_Union[DecisionLink, _Mapping]] = ..., superseded_by: _Optional[_Iterable[_Union[DecisionLink, _Mapping]]] = ..., meeting_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    proposed_by_name: str
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., statement: _Optional[str] = ..., rationale: _Optional[str] = ..., alternatives: _Optional[_Iterable[str]] = ..., proposed_by: _Optional[str] = ..., tentative: _Optional[bool] = ..., start_time: _Optional[float] = ..., evidence_text: _Optional[str] = ..., source: _Optional[str] = ..., edited: _Optional[bool] = ..., supersedes_id: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., supersedes: _Optional[_Union[DecisionLink, _Mapping]] = ..., superseded_by: _Optional[_Iterable[_Union[DecisionLink, _Mapping]]] = ..., meeting_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., proposed_by_name: _Optional[str] = ...) -> None: ...
 
 class DecisionLink(_message.Message):
     __slots__ = ("id", "job_id", "statement", "meeting_at")

@@ -41,6 +41,14 @@ LAUNCH = {"statement": "上線日期暫定月底", "rationale": "", "alternative
           "tentative": True, "line": 4, "quote": "上線日期先訂月底"}
 
 
+@pytest.fixture(autouse=True)
+def transcripts():
+    """What create/update check the proposer against (the job's speakers); process() swaps in its own."""
+    with patch.object(decisions, "transcript_client") as client:
+        client.get_transcript.return_value = TRANSCRIPT
+        yield client
+
+
 @pytest.fixture
 def rabbitmq():
     with patch("app.services.decisions.BlockingConnection") as connection_class:
@@ -566,3 +574,56 @@ def test_an_empty_question_is_invalid(ai_stub, db_session):
         ask(ai_stub, "  ", [uuid.uuid4()])
 
     assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_who_proposed_it_is_kept_by_name_for_pages_across_jobs(ai_stub, db_session, rabbitmq, fake_llm, embedder):
+    job_id = extracted_job(ai_stub, fake_llm, POSTGRES)  # proposed by 主持人 (S1)
+
+    [listed_decision] = ai_stub.ListUserDecisions(
+        ai_pb2.ListUserDecisionsRequest(user_id=str(USER), job_ids=[str(job_id)])).decisions
+
+    assert (listed_decision.proposed_by, listed_decision.proposed_by_name) == ("S1", "主持人")
+
+
+def test_a_decision_proposed_by_someone_not_in_the_recording_is_invalid(ai_stub, db_session, rabbitmq, embedder):
+    assert create(ai_stub, uuid.uuid4(), proposed_by="S2").proposed_by_name == "講者 2"
+
+    with pytest.raises(grpc.RpcError) as error:
+        create(ai_stub, uuid.uuid4(), proposed_by="S9")
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+    assert error.value.details() == "不認得這位講者"
+
+
+def test_renaming_a_speaker_renames_them_on_their_decisions(ai_stub, db_session, rabbitmq, fake_llm, embedder):
+    job_id = extracted_job(ai_stub, fake_llm, POSTGRES)
+    renamed = SimpleNamespace(**{**vars(TRANSCRIPT), "speakers": [
+        SimpleNamespace(label="S1", display_name="王經理", display_order=1), TRANSCRIPT.speakers[1]]})
+
+    with patch.object(decisions, "transcript_client") as client:
+        client.get_transcript.return_value = renamed
+        decisions.follow_transcript_edit(json.dumps({"jobId": str(job_id)}).encode())
+
+    assert get(ai_stub, job_id).decisions[0].proposed_by_name == "王經理"
+
+
+def test_extracting_an_earlier_meeting_again_keeps_the_later_decisions_superseding_it(
+        ai_stub, db_session, rabbitmq, fake_llm, embedder):
+    embedder.side_effect = lambda texts: [axis(0) for _ in texts]
+    september_job = uuid.uuid4()
+    request(ai_stub, september_job)
+    answer(fake_llm, POSTGRES | {"statement": "資料庫用 MySQL"})
+    process_meeting(september_job, SEPTEMBER)
+    [mysql] = get(ai_stub, september_job).decisions
+    october_job = uuid.uuid4()
+    request(ai_stub, october_job)
+    answer(fake_llm, POSTGRES)
+    fake_llm.reply('[{"decision": 1, "supersedes": "A"}]')
+    process_meeting(october_job, OCTOBER)
+    assert get(ai_stub, october_job).decisions[0].supersedes.id == mysql.id
+
+    request(ai_stub, september_job)
+    answer(fake_llm, POSTGRES | {"statement": "資料庫先用 MySQL"})  # the same decision, worded anew
+    process_meeting(september_job, SEPTEMBER)
+
+    [mysql_again] = get(ai_stub, september_job).decisions
+    assert get(ai_stub, october_job).decisions[0].supersedes.id == mysql_again.id

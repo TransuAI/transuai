@@ -19,7 +19,7 @@ class LlmUsage(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
     # 不屬於任何一個 Job 的呼叫（問決策跨 Job）是空的：算進這位使用者的月用量，不列在任何 Job 的用量裡。
     job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
-    # summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters
+    # 見 services/usage_meter.LlmFeature（summary、chapters、qa_answer…、decision_extraction、decision_qa）
     feature: Mapped[str] = mapped_column(String(32), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str] = mapped_column(String(200), nullable=False)
