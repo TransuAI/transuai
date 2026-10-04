@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -31,15 +32,19 @@ import com.transuai.upload.grpc.v1.Job;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.grpc.Status;
+import transuai.ai.v1.Ai.CreateDecisionRequest;
 import transuai.ai.v1.Ai.Decision;
 import transuai.ai.v1.Ai.DecisionExtraction;
 import transuai.ai.v1.Ai.DecisionExtractionStatus;
+import transuai.ai.v1.Ai.DeleteDecisionRequest;
+import transuai.ai.v1.Ai.DeleteDecisionResponse;
 import transuai.ai.v1.Ai.JobDecisions;
 import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.RequestDecisionExtractionRequest;
+import transuai.ai.v1.Ai.UpdateDecisionRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
-/** 決策紀錄（見 .scratch/decision-log/issues/01）：抽取與列出一個 Job 的決策，先過 ownership；抽取是花錢的功能。 */
+/** 決策紀錄（見 .scratch/decision-log/issues/01、02）：抽取、列出、新增、修改、刪除一個 Job 的決策，先過 ownership；抽取是花錢的功能。 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(RedisContainerConfig.class)
@@ -126,6 +131,81 @@ class DecisionTest {
     }
 
     @Test
+    void addingADecisionPassesTheUserAndWhatTheyWroteOn() throws Exception {
+        when(aiServiceStub.createDecision(any())).thenReturn(Decision.newBuilder().setId("d3").setJobId(JOB)
+                .setStatement("週會改到週三").setSource("user").setStartTime(12.0).build());
+
+        call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/decisions").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"statement\":\"週會改到週三\",\"rationale\":\"週一很忙\",\"alternatives\":[\"週五\"],"
+                        + "\"proposedBy\":\"S1\",\"tentative\":true,\"startTime\":12.0}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value("d3"))
+                .andExpect(jsonPath("$.source").value("user"));
+
+        ArgumentCaptor<CreateDecisionRequest> sent = ArgumentCaptor.forClass(CreateDecisionRequest.class);
+        verify(aiServiceStub).createDecision(sent.capture());
+        assertThat(sent.getValue().getUserId()).isEqualTo(user.toString());
+        assertThat(sent.getValue().getDecision().getAlternativesList()).containsExactly("週五");
+        assertThat(sent.getValue().getDecision().getTentative()).isTrue();
+        assertThat(sent.getValue().getStartTime()).isEqualTo(12.0);
+    }
+
+    @Test
+    void aDecisionWithoutATimeIsAddedWithoutOne() throws Exception {
+        when(aiServiceStub.createDecision(any())).thenReturn(Decision.newBuilder().setId("d4").build());
+
+        call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/decisions").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"statement\":\"週會改到週三\"}"))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<CreateDecisionRequest> sent = ArgumentCaptor.forClass(CreateDecisionRequest.class);
+        verify(aiServiceStub).createDecision(sent.capture());
+        assertThat(sent.getValue().hasStartTime()).isFalse();
+        assertThat(sent.getValue().getDecision().getProposedBy()).isEmpty();
+    }
+
+    @Test
+    void whatTheUserWroteBreakingARuleComesBackAsTheReason() throws Exception {
+        when(aiServiceStub.createDecision(any()))
+                .thenThrow(Status.INVALID_ARGUMENT.withDescription("決定不能是空的").asRuntimeException());
+
+        call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/decisions").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"statement\":\" \"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void editingADecisionPassesItsNewContentOn() throws Exception {
+        when(aiServiceStub.updateDecision(any())).thenReturn(Decision.newBuilder().setId("d1").setEdited(true).build());
+
+        call(MockMvcRequestBuilders.patch("/jobs/" + JOB + "/decisions/d1").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"statement\":\"資料庫確定用 PostgreSQL 16\",\"alternatives\":[]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.edited").value(true));
+
+        ArgumentCaptor<UpdateDecisionRequest> sent = ArgumentCaptor.forClass(UpdateDecisionRequest.class);
+        verify(aiServiceStub).updateDecision(sent.capture());
+        assertThat(sent.getValue().getDecisionId()).isEqualTo("d1");
+        assertThat(sent.getValue().getDecision().getStatement()).isEqualTo("資料庫確定用 PostgreSQL 16");
+    }
+
+    @Test
+    void deletingADecisionPassesItOn() throws Exception {
+        when(aiServiceStub.deleteDecision(any())).thenReturn(DeleteDecisionResponse.getDefaultInstance());
+
+        call(MockMvcRequestBuilders.delete("/jobs/" + JOB + "/decisions/d1")).andExpect(status().isNoContent());
+
+        verify(aiServiceStub).deleteDecision(DeleteDecisionRequest.newBuilder().setJobId(JOB).setDecisionId("d1").build());
+    }
+
+    @Test
+    void aDecisionOfAnotherJobIsNotFound() throws Exception {
+        when(aiServiceStub.deleteDecision(any())).thenThrow(Status.NOT_FOUND.asRuntimeException());
+
+        call(MockMvcRequestBuilders.delete("/jobs/" + JOB + "/decisions/d9")).andExpect(status().isNotFound());
+    }
+
+    @Test
     void someoneElsesJobIsNotFound() throws Exception {
         when(uploadServiceStub.getJob(any())).thenThrow(Status.NOT_FOUND.asRuntimeException());
 
@@ -133,6 +213,8 @@ class DecisionTest {
         call(MockMvcRequestBuilders.get("/jobs/" + JOB + "/decisions")).andExpect(status().isNotFound());
         verify(aiServiceStub, never()).requestDecisionExtraction(any());
         verify(aiServiceStub, never()).getJobDecisions(any());
+        call(MockMvcRequestBuilders.delete("/jobs/" + JOB + "/decisions/d1")).andExpect(status().isNotFound());
+        verify(aiServiceStub, never()).deleteDecision(any());
     }
 
     private ResultActions call(MockHttpServletRequestBuilder request) throws Exception {
