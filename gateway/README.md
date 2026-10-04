@@ -221,7 +221,7 @@ docker compose up -d
 | 上限 | 預設 | 到了之後 |
 |---|---|---|
 | 轉錄分鐘數 | 600 分鐘（`USAGE_LIMIT_TRANSCRIPTION_MINUTES`） | `POST /uploads/presign`、`POST /uploads/complete` 回 429；兩者都帶檔案長度 `durationSeconds`（前端量的），整個檔案要放得進剩下的分鐘數——在取得上傳網址時就擋，不讓人傳完 1GB 才被拒 |
-| 平台模型的 token（輸入加輸出） | 2,000,000（`USAGE_LIMIT_PLATFORM_TOKENS`） | 要用平台模型的問答、產生測驗、重新產生摘要、開始會後處理回 429；自有金鑰的模型照常可以用（問答這次指定的模型優先，否則看預設模型） |
+| 平台模型的 token（輸入加輸出） | 2,000,000（`USAGE_LIMIT_PLATFORM_TOKENS`） | 要用平台模型的問答、產生測驗、重新產生摘要、講者數據分析、多格式輸出、翻譯、開始會後處理回 429（翻譯到一半碰到上限由 ai-service 停下，見 ai-service README「譯文」）；自有金鑰的模型照常可以用（問答這次指定的模型優先，否則看預設模型） |
 | 網路搜尋次數（只算成功的） | 30 次（`USAGE_LIMIT_WEB_SEARCHES`） | 帶 `webSearch: true` 的問答回 429；不查網路的問答照常。搜尋服務一律平台付費，用自有金鑰的模型提問也算（Tavily 的免費額度是整個平台每月 1,000 次） |
 
 用量是 `/me/usage` 同一份加總（`usage/MonthlyUsage`：LLM 向 ai-service 的 `SumUserLlmUsage`、網路搜尋向 `CountUserWebSearches`、轉錄向
