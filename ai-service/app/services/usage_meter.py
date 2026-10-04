@@ -44,6 +44,7 @@ class LlmFeature(StrEnum):
     TRANSLATION = "translation"  # 譯文
     DECISION_EXTRACTION = "decision_extraction"  # 決策紀錄：抽出一場的決策
     DECISION_QA = "decision_qa"  # 問決策
+    FACT_CHECK = "fact_check"  # 事實查核：標出主張、判斷查核的結論
 
 
 @dataclass(frozen=True)

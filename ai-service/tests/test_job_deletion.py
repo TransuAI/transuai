@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.db import new_session
-from app.models import (ActionProposal, Chapter, Decision, DecisionExtraction, Embedding, GeneratedOutput, LlmUsage, PostMeetingRun, QaHistory, Quiz, QuizAttempt,
+from app.models import (ActionProposal, Chapter, Claim, Decision, DecisionExtraction, Embedding, FactCheck, GeneratedOutput, LlmUsage, PostMeetingRun, QaHistory, Quiz, QuizAttempt,
                         QuizQuestion, SegmentTranslation, SpeakerInsightItem, SpeakerInsightRun, SpeakerSuggestion, Summary,
                         Translation, WebSearchUsage)
 from app.services import deletion_consumer, job_deletion
@@ -38,6 +38,8 @@ def fill(job_id: uuid.UUID) -> None:
             WebSearchUsage(job_id=job_id, user_id=user, provider="tavily", succeeded=True),
             DecisionExtraction(job_id=job_id, requested_by=user, status="COMPLETED"),
             Decision(job_id=job_id, user_id=user, statement="資料庫用 PostgreSQL"),
+            FactCheck(job_id=job_id, requested_by=user, status="COMPLETED"),
+            Claim(job_id=job_id, start_time=0, text="三成的人", claim="三成的人每天聽 Podcast", kind="number"),
         ])
         session.flush()
         session.add_all([

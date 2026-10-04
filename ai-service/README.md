@@ -4,7 +4,7 @@
 
 ## MVP 範圍
 
-對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。多格式輸出存在 `generated_outputs`，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts`、`oauth_connections`、`oauth_pending_authorizations`、`oauth_clients`、`post_meeting_runs`、`action_proposals`、`post_meeting_settings`、`web_search_usage`、`speaker_name_suggestions`、`speaker_insights`、`speaker_insight_items`、`deleted_jobs`、`generated_outputs`、`translations`、`segment_translations`、`decisions`、`decision_extractions` 二十六張表。
+對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。多格式輸出存在 `generated_outputs`，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts`、`oauth_connections`、`oauth_pending_authorizations`、`oauth_clients`、`post_meeting_runs`、`action_proposals`、`post_meeting_settings`、`web_search_usage`、`speaker_name_suggestions`、`speaker_insights`、`speaker_insight_items`、`deleted_jobs`、`generated_outputs`、`translations`、`segment_translations`、`decisions`、`decision_extractions`、`fact_checks`、`claims` 二十八張表。
 
 原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)；embedding 仍用 `hf_client.py`。
 
@@ -50,7 +50,7 @@ uv run python -m app.main
 啟動時會：
 
 1. 把 `ai_db` 的 schema 升級到最新的 Alembic migration（多個副本同時啟動時用 Postgres advisory lock 排隊）。導入 Alembic 前用 `create_all` 建的資料庫可能只有部分表（例如只有 `summaries`），baseline（`0001`）只補建缺少的表、不動既有的表跟資料，不需要刪庫重建；唯一例外是還停在 768 維的舊 `embeddings` 表，會拒絕啟動並提示整張表 DROP 掉、重跑 pipeline
-2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding、重翻譯文裡改過的片段）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）、`speaker_insights.requested`（使用者要求分析講者的問題與打斷）、`output.requested`（使用者要求產生多格式輸出）、`translation.requested`（翻譯逐字稿）、`decision.requested`（抽出一場的決策）跟 `post_meeting.requested`（使用者啟動會後處理）
+2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding、重翻譯文裡改過的片段）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）、`speaker_insights.requested`（使用者要求分析講者的問題與打斷）、`output.requested`（使用者要求產生多格式輸出）、`translation.requested`（翻譯逐字稿）、`decision.requested`（抽出一場的決策）、`fact_check.requested`（事實查核：標出主張）跟 `post_meeting.requested`（使用者啟動會後處理）
 3. 起 gRPC server，監聽 `8084`
 
 ## Pipeline
@@ -388,6 +388,27 @@ AskDecisions（Gateway POST /decisions/ask，SSE）
 只有新抽的決策往前找取代——先抽了較晚的會議、之後才抽較早的會議，兩者之間不會連起來；決策紀錄做好之前的決策沒有
 meeting_at，不會被當成候選（重新抽那一場就有）。
 
+### 事實查核：標出主張（`fact_check.requested`）
+
+從逐字稿標出可以查核的主張（見 CONTEXT.md「主張」「查核」；`app/services/claim_extractor.py`、`fact_checks.py`）。這一步不花搜尋次數。
+
+```
+RequestFactCheck(jobId, userId)（Gateway POST /jobs/{jobId}/fact-check）
+  → 一個 Job 一筆標出主張的紀錄（fact_checks.job_id 唯一）：已經在標（還沒卡住）就直接回傳；否則改成 GENERATING 並排入
+    fact_check.requested { jobId, userId }（publisher confirms、短 timeout；排入失敗就恢復原狀）
+消費 fact_check.requested
+  → 用 userId 的預設模型；平台模型這個月已經到上限：FAILED（附原因），不呼叫模型
+  → GetTranscript（revision R）；每行編號「[n] [分:秒] 講者：文字」（排除已清空片段；兩位以上講者才帶名字）
+  → 模型回 JSON 陣列：每條主張的 claim（整理成一句完整、可以搜尋的陳述）、kind（number / fact）、checkable、line、quote
+  → 驗證：line 要存在、quote（正規化後）要出現在那一行或前後一行，kind 要是 number / fact，對不上整筆丟掉；陳述轉繁體；存下的原話、
+    時間點與講者取那個片段本身；checkable = false 的結論直接是 not_checkable（不給勾選）
+  → 刪掉沒查核過的主張（查核過的保留——花了搜尋次數），新標出的在同一個片段（同一個時間點）就不收；存起來（source_revision = R）；
+    COMPLETED、source_revision = R、模型
+```
+
+格式不對是永久性失敗（「模型回傳的格式不正確，請再標出一次」，之前的主張保留）；暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘回報成
+失敗。用量功能是 `fact_check`。
+
 ### 逐字稿被編輯之後（`transcript.edited`）
 
 ```
@@ -420,6 +441,7 @@ meeting_at，不會被當成候選（重新抽那一場就有）。
 | `UpdateOutput` | 使用者修改一份完成的輸出：跟原本一樣就不算修改；空白或超過 20000 字回 `INVALID_ARGUMENT`，還在產生或失敗的回 `FAILED_PRECONDITION`，不屬於這個 Job 回 `NOT_FOUND` |
 | `RequestOutput` / `ListOutputs` / `GetOutput` | 多格式輸出（見上方）：要求產生（帶 `user_id`、`format`、Job 的 `title`、可選的 `instruction`、社群貼文必填的 `platform`）立刻回傳 GENERATING，每次都是新的一份；列出（新的在前，含內容）；取得一份（不屬於這個 Job 回 `NOT_FOUND`）。格式不認得、要求超過 200 字、社群貼文沒有（或不認得）平台回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
 | `AskDecisions` | 問決策（見上方，server-streaming）：只根據這位使用者在這些 Job 的決策回答；先 `sources`，再 `answered_by` 與 `delta`，失敗一個 `error`；找不到有關的決策時只有一個說「沒有」的 `delta`。`question` 是空的回 `INVALID_ARGUMENT` |
+| `RequestFactCheck` / `GetFactCheck` | 事實查核（見上方）：要求標出主張（帶 `user_id`）立刻回傳 GENERATING 的紀錄；取得這個 Job 標出主張的紀錄（沒標過就沒有 `extraction`）與主張（依時間點排序；`verdict` 空的是還沒查）。排入失敗回 `UNAVAILABLE` |
 | `ListUserDecisions` / `SearchDecisions` | 決策頁（見上方）：這位使用者在這些 Job 的決策（依時間點）／搜尋（字與意思）。`user_id` 由 gateway 從 token 帶入，`job_ids` 是使用者自己的 Job；空的 `job_ids` 回空的結果 |
 | `RequestDecisionExtraction` / `GetJobDecisions` / `CreateDecision` / `UpdateDecision` / `DeleteDecision` | 決策紀錄（見上方）：要求抽取（帶 `user_id`）立刻回傳 GENERATING 的抽取紀錄；取得這個 Job 的抽取紀錄（沒抽過就沒有 `extraction`）與決策（依時間點排序，沒有時間點的在後；刪掉的不列）；新增（帶 `user_id`，時間點可以沒有）、修改內容、刪除。排入失敗回 `UNAVAILABLE`；內容不合規則回 `INVALID_ARGUMENT`（附原因）；不是這個 Job 的決策回 `NOT_FOUND` |
 | `RequestSpeakerInsights` / `GetSpeakerInsights` | 講者數據的問題與打斷（見上方）：要求分析（帶 `user_id`）立刻回傳 GENERATING；取得目前這一份（還沒分析過是 UNSPECIFIED、沒有項目），`items` 是上一次完成的結果。排入失敗回 `UNAVAILABLE` |
@@ -528,6 +550,8 @@ app/
     output_generator.py              多格式輸出的產生：每種格式一份 prompt、刪掉模型寫的時間、附上章節
     generated_outputs.py             RequestOutput（排入自己的 queue）與消費 output.requested；卡住的判斷
     decision_extractor.py            抽出決策：有行號的逐字稿、照抄的原話要對得上那一行或前後一行
+    claim_extractor.py               標出主張：有行號的逐字稿、照抄的原話要對得上那一行或前後一行、能不能查核
+    fact_checks.py                   RequestFactCheck（排入自己的 queue）與消費 fact_check.requested：查核過的保留
     decision_supersedes.py           取代：新的決策取代了哪一個較早的候選（只收給模型看的候選之一）
     decisions.py                     RequestDecisionExtraction（排入自己的 queue）、轉錄完自動抽、消費 decision.requested；新增、修改、刪除
     speaker_insights.py              講者數據的 AI 判斷：編號的逐字稿、打斷的候選、只收行號並對回片段
@@ -591,7 +615,7 @@ scripts/generate_grpc.sh                    重新產生 gRPC stub
 
 upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanout exchange `job.deleted`；這個服務綁 `job.deleted.ai`
 （`app/services/deletion_consumer.py`，另一條 thread、另一條連線，不排在摘要、出題、會後處理後面），清掉這個 Job 的摘要、章節、embedding、
-問答、測驗（題目、作答跟著 cascade）、講者名字建議、講者數據的問題與打斷（項目跟著 cascade）、決策（別的 Job 的決策取代它的連結變成空的）、多格式輸出、譯文（片段的譯文跟著 cascade）、會後處理（行動提案跟著 cascade）。**用量（`llm_usage`、`web_search_usage`）不刪**。
+問答、測驗（題目、作答跟著 cascade）、講者名字建議、講者數據的問題與打斷（項目跟著 cascade）、決策（別的 Job 的決策取代它的連結變成空的）、事實查核的主張、多格式輸出、譯文（片段的譯文跟著 cascade）、會後處理（行動提案跟著 cascade）。**用量（`llm_usage`、`web_search_usage`）不刪**。
 可以重複處理；處理失敗 nack 到 `job.deleted.ai.retry`，30 秒後回來，不限次數；訊息本身不合法才丟掉。見 `docs/adr/0005-deletion-events-fan-out-through-an-outbox.md`。
 
 刪除當下還在跑的寫入（pipeline、重算 embedding、重新產生摘要、出題、講者名字建議、講者數據分析、多格式輸出、翻譯、會後處理、問答存紀錄）可能比刪除晚：收到事件時先記下

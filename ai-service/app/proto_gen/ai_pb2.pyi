@@ -78,6 +78,13 @@ class DecisionExtractionStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper
     DECISION_EXTRACTION_STATUS_GENERATING: _ClassVar[DecisionExtractionStatus]
     DECISION_EXTRACTION_STATUS_COMPLETED: _ClassVar[DecisionExtractionStatus]
     DECISION_EXTRACTION_STATUS_FAILED: _ClassVar[DecisionExtractionStatus]
+
+class FactCheckStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    FACT_CHECK_STATUS_UNSPECIFIED: _ClassVar[FactCheckStatus]
+    FACT_CHECK_STATUS_GENERATING: _ClassVar[FactCheckStatus]
+    FACT_CHECK_STATUS_COMPLETED: _ClassVar[FactCheckStatus]
+    FACT_CHECK_STATUS_FAILED: _ClassVar[FactCheckStatus]
 REGENERATION_STATUS_IDLE: RegenerationStatus
 REGENERATION_STATUS_RUNNING: RegenerationStatus
 REGENERATION_STATUS_FAILED: RegenerationStatus
@@ -117,6 +124,10 @@ DECISION_EXTRACTION_STATUS_UNSPECIFIED: DecisionExtractionStatus
 DECISION_EXTRACTION_STATUS_GENERATING: DecisionExtractionStatus
 DECISION_EXTRACTION_STATUS_COMPLETED: DecisionExtractionStatus
 DECISION_EXTRACTION_STATUS_FAILED: DecisionExtractionStatus
+FACT_CHECK_STATUS_UNSPECIFIED: FactCheckStatus
+FACT_CHECK_STATUS_GENERATING: FactCheckStatus
+FACT_CHECK_STATUS_COMPLETED: FactCheckStatus
+FACT_CHECK_STATUS_FAILED: FactCheckStatus
 
 class RequestQuizRequest(_message.Message):
     __slots__ = ("job_id", "user_id", "question_count")
@@ -1223,3 +1234,89 @@ class AskDecisionsChunk(_message.Message):
     error: str
     answered_by: ModelChoice
     def __init__(self, sources: _Optional[_Union[UserDecisions, _Mapping]] = ..., delta: _Optional[str] = ..., error: _Optional[str] = ..., answered_by: _Optional[_Union[ModelChoice, _Mapping]] = ...) -> None: ...
+
+class RequestFactCheckRequest(_message.Message):
+    __slots__ = ("job_id", "user_id")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
+
+class GetFactCheckRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    def __init__(self, job_id: _Optional[str] = ...) -> None: ...
+
+class FactCheck(_message.Message):
+    __slots__ = ("job_id", "status", "failure_reason", "source_revision", "model_provider", "model", "requested_at", "completed_at")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    status: FactCheckStatus
+    failure_reason: str
+    source_revision: int
+    model_provider: str
+    model: str
+    requested_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    def __init__(self, job_id: _Optional[str] = ..., status: _Optional[_Union[FactCheckStatus, str]] = ..., failure_reason: _Optional[str] = ..., source_revision: _Optional[int] = ..., model_provider: _Optional[str] = ..., model: _Optional[str] = ..., requested_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class JobFactCheck(_message.Message):
+    __slots__ = ("extraction", "claims")
+    EXTRACTION_FIELD_NUMBER: _ClassVar[int]
+    CLAIMS_FIELD_NUMBER: _ClassVar[int]
+    extraction: FactCheck
+    claims: _containers.RepeatedCompositeFieldContainer[Claim]
+    def __init__(self, extraction: _Optional[_Union[FactCheck, _Mapping]] = ..., claims: _Optional[_Iterable[_Union[Claim, _Mapping]]] = ...) -> None: ...
+
+class Claim(_message.Message):
+    __slots__ = ("id", "job_id", "speaker_label", "start_time", "text", "claim", "kind", "verdict", "explanation", "sources", "checked_at", "check_model", "checking", "check_error", "source_revision")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    SPEAKER_LABEL_FIELD_NUMBER: _ClassVar[int]
+    START_TIME_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    CLAIM_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    VERDICT_FIELD_NUMBER: _ClassVar[int]
+    EXPLANATION_FIELD_NUMBER: _ClassVar[int]
+    SOURCES_FIELD_NUMBER: _ClassVar[int]
+    CHECKED_AT_FIELD_NUMBER: _ClassVar[int]
+    CHECK_MODEL_FIELD_NUMBER: _ClassVar[int]
+    CHECKING_FIELD_NUMBER: _ClassVar[int]
+    CHECK_ERROR_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    job_id: str
+    speaker_label: str
+    start_time: float
+    text: str
+    claim: str
+    kind: str
+    verdict: str
+    explanation: str
+    sources: _containers.RepeatedCompositeFieldContainer[ClaimSource]
+    checked_at: _timestamp_pb2.Timestamp
+    check_model: str
+    checking: bool
+    check_error: str
+    source_revision: int
+    def __init__(self, id: _Optional[str] = ..., job_id: _Optional[str] = ..., speaker_label: _Optional[str] = ..., start_time: _Optional[float] = ..., text: _Optional[str] = ..., claim: _Optional[str] = ..., kind: _Optional[str] = ..., verdict: _Optional[str] = ..., explanation: _Optional[str] = ..., sources: _Optional[_Iterable[_Union[ClaimSource, _Mapping]]] = ..., checked_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., check_model: _Optional[str] = ..., checking: _Optional[bool] = ..., check_error: _Optional[str] = ..., source_revision: _Optional[int] = ...) -> None: ...
+
+class ClaimSource(_message.Message):
+    __slots__ = ("title", "url", "excerpt")
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    URL_FIELD_NUMBER: _ClassVar[int]
+    EXCERPT_FIELD_NUMBER: _ClassVar[int]
+    title: str
+    url: str
+    excerpt: str
+    def __init__(self, title: _Optional[str] = ..., url: _Optional[str] = ..., excerpt: _Optional[str] = ...) -> None: ...

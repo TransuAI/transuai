@@ -13,6 +13,7 @@ from app.services.generated_outputs import process_output_requested
 from app.services.quizzes import process_quiz_requested
 from app.services.translations import follow_transcript_edit, process_translation_requested
 from app.services.decisions import follow_transcript_edit as follow_edit_in_decisions, process_decisions_requested
+from app.services.fact_checks import process_fact_check_requested
 from app.services.speaker_insight_runs import process_speaker_insights_requested
 from app.services.reembed import process_transcript_edited
 from app.services.regeneration import process_regeneration_requested
@@ -69,6 +70,10 @@ def _handle_decisions_requested(body: bytes, _ch: BlockingChannel, retry_count: 
     process_decisions_requested(body, retry_count=retry_count)
 
 
+def _handle_fact_check_requested(body: bytes, _ch: BlockingChannel, retry_count: int) -> None:
+    process_fact_check_requested(body, retry_count=retry_count)
+
+
 def _handle_post_meeting_requested(body: bytes, _ch: BlockingChannel, retry_count: int) -> None:
     process_post_meeting_requested(body, retry_count=retry_count)
 
@@ -85,6 +90,7 @@ def _handlers() -> dict[str, MessageHandler]:
         settings.output_requested_queue: _handle_output_requested,
         settings.translation_requested_queue: _handle_translation_requested,
         settings.decision_requested_queue: _handle_decisions_requested,
+        settings.fact_check_requested_queue: _handle_fact_check_requested,
         settings.post_meeting_requested_queue: _handle_post_meeting_requested,
     }
 

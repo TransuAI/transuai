@@ -102,6 +102,19 @@ def publish_decisions_requested(channel: BlockingChannel, job_id: str, user_id: 
     logger.info("queued decision.requested for job %s", job_id)
 
 
+def publish_fact_check_requested(channel: BlockingChannel, job_id: str, user_id: str) -> None:
+    """fact_check.requested -> {jobId, userId}：ai-service 排給自己的背景工作（事實查核：標出主張）；userId 是要求的使用者，用他的
+    預設模型、用量記在他名下。"""
+    channel.queue_declare(queue=settings.fact_check_requested_queue, durable=True)
+    channel.basic_publish(
+        exchange="",
+        routing_key=settings.fact_check_requested_queue,
+        body=json.dumps({"jobId": job_id, "userId": user_id}).encode("utf-8"),
+        properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+    )
+    logger.info("queued fact_check.requested for job %s", job_id)
+
+
 def publish_output_requested(channel: BlockingChannel, output_id: str, job_id: str, user_id: str) -> None:
     """output.requested -> {outputId, jobId, userId}：ai-service 排給自己的背景工作（多格式輸出）；userId 是要求產生的使用者，
     用他的預設模型、用量記在他名下。"""

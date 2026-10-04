@@ -184,6 +184,16 @@ class AiServiceStub:
                 request_serializer=ai__pb2.AskDecisionsRequest.SerializeToString,
                 response_deserializer=ai__pb2.AskDecisionsChunk.FromString,
                 _registered_method=True)
+        self.RequestFactCheck = channel.unary_unary(
+                '/transuai.ai.v1.AiService/RequestFactCheck',
+                request_serializer=ai__pb2.RequestFactCheckRequest.SerializeToString,
+                response_deserializer=ai__pb2.FactCheck.FromString,
+                _registered_method=True)
+        self.GetFactCheck = channel.unary_unary(
+                '/transuai.ai.v1.AiService/GetFactCheck',
+                request_serializer=ai__pb2.GetFactCheckRequest.SerializeToString,
+                response_deserializer=ai__pb2.JobFactCheck.FromString,
+                _registered_method=True)
         self.RequestQuiz = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestQuiz',
                 request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
@@ -532,6 +542,21 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RequestFactCheck(self, request, context):
+        """事實查核（見 ai-service CONTEXT.md「主張」「查核」）：先標出一個 Job 可以查核的主張（不花搜尋次數），使用者再勾選要查的。一個 Job
+        一筆標出主張的紀錄；要求後立刻回傳「標出中」，背景用要求者的預設模型標。重新標出時查核過的主張保留，其他的換掉。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetFactCheck(self, request, context):
+        """這個 Job 標出主張的紀錄（沒標過就沒有）與主張（依時間點排序）。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RequestQuiz(self, request, context):
         """測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
         quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -847,6 +872,16 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.AskDecisions,
                     request_deserializer=ai__pb2.AskDecisionsRequest.FromString,
                     response_serializer=ai__pb2.AskDecisionsChunk.SerializeToString,
+            ),
+            'RequestFactCheck': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestFactCheck,
+                    request_deserializer=ai__pb2.RequestFactCheckRequest.FromString,
+                    response_serializer=ai__pb2.FactCheck.SerializeToString,
+            ),
+            'GetFactCheck': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetFactCheck,
+                    request_deserializer=ai__pb2.GetFactCheckRequest.FromString,
+                    response_serializer=ai__pb2.JobFactCheck.SerializeToString,
             ),
             'RequestQuiz': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestQuiz,
@@ -1736,6 +1771,60 @@ class AiService:
             '/transuai.ai.v1.AiService/AskDecisions',
             ai__pb2.AskDecisionsRequest.SerializeToString,
             ai__pb2.AskDecisionsChunk.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RequestFactCheck(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/RequestFactCheck',
+            ai__pb2.RequestFactCheckRequest.SerializeToString,
+            ai__pb2.FactCheck.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetFactCheck(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/GetFactCheck',
+            ai__pb2.GetFactCheckRequest.SerializeToString,
+            ai__pb2.JobFactCheck.FromString,
             options,
             channel_credentials,
             insecure,

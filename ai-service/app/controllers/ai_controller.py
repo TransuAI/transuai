@@ -86,6 +86,8 @@ from app.services.decisions import (
     create_decision, decision_links, delete_decision, find_job_decisions, list_user_decisions, request_decision_extraction,
     search_decisions, update_decision)
 from app.services.decisions import effective_status as decision_effective_status
+from app.services.fact_checks import FactCheckNotQueued, find_fact_check, request_fact_check
+from app.services.fact_checks import effective_status as fact_check_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
 from app.services.speaker_insight_runs import effective_status as speaker_insights_effective_status
@@ -100,7 +102,10 @@ from app.services.quizzes import (
     submit_attempt,
 )
 from app.models import (
+    Claim,
     ConnectionStatus,
+    FactCheck,
+    FactCheckStatus,
     Decision,
     DecisionExtraction,
     DecisionExtractionStatus,
@@ -599,6 +604,24 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
             logger.exception("answering a question about the decisions of user %s failed", user_id)
             yield ai_pb2.AskDecisionsChunk(error=_stream_error_message(exc))
 
+    def RequestFactCheck(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        user_id = _parse_user_id(request.user_id, context)
+        try:
+            request_fact_check(job_id, user_id)
+        except FactCheckNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法標出主張，請稍後再試")
+        fact_check, _ = find_fact_check(job_id)
+        return _fact_check_to_proto(fact_check)
+
+    def GetFactCheck(self, request, context):
+        job_id = _parse_uuid(request.job_id, "job_id", context)
+        fact_check, claims = find_fact_check(job_id)
+        message = ai_pb2.JobFactCheck(claims=[_claim_to_proto(c) for c in claims])
+        if fact_check is not None:
+            message.extraction.CopyFrom(_fact_check_to_proto(fact_check))
+        return message
+
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
         user_id = _parse_user_id(request.user_id, context)
@@ -875,6 +898,39 @@ _TRANSLATION_STATUS = {
     TranslationStatus.COMPLETED: ai_pb2.TRANSLATION_STATUS_COMPLETED,
     TranslationStatus.FAILED: ai_pb2.TRANSLATION_STATUS_FAILED,
 }
+
+
+_FACT_CHECK_STATUS = {
+    FactCheckStatus.GENERATING: ai_pb2.FACT_CHECK_STATUS_GENERATING,
+    FactCheckStatus.COMPLETED: ai_pb2.FACT_CHECK_STATUS_COMPLETED,
+    FactCheckStatus.FAILED: ai_pb2.FACT_CHECK_STATUS_FAILED,
+}
+
+
+def _fact_check_to_proto(fact_check: FactCheck) -> ai_pb2.FactCheck:
+    status, failure_reason = fact_check_effective_status(fact_check)
+    message = ai_pb2.FactCheck(
+        job_id=str(fact_check.job_id), status=_FACT_CHECK_STATUS[status], failure_reason=failure_reason or "",
+        source_revision=fact_check.source_revision or 0, model_provider=fact_check.model_provider or "",
+        model=fact_check.model or "")
+    message.requested_at.FromDatetime(fact_check.requested_at)
+    if fact_check.completed_at is not None:
+        message.completed_at.FromDatetime(fact_check.completed_at)
+    return message
+
+
+def _claim_to_proto(claim: Claim) -> ai_pb2.Claim:
+    message = ai_pb2.Claim(
+        id=str(claim.id), job_id=str(claim.job_id), speaker_label=claim.speaker_label or "",
+        start_time=float(claim.start_time), text=claim.text, claim=claim.claim, kind=claim.kind,
+        verdict=claim.verdict or "", explanation=claim.explanation or "", check_model=claim.check_model or "",
+        checking=claim.checking_since is not None, check_error=claim.check_error or "",
+        source_revision=claim.source_revision or 0,
+        sources=[ai_pb2.ClaimSource(title=s.get("title", ""), url=s.get("url", ""), excerpt=s.get("excerpt", ""))
+                 for s in claim.sources])
+    if claim.checked_at is not None:
+        message.checked_at.FromDatetime(claim.checked_at)
+    return message
 
 
 _DECISION_EXTRACTION_STATUS = {
