@@ -228,7 +228,11 @@ GET    /decisions?q=&category=&jobId=… 決策頁（jobId 可以給好幾個）
                                          Job（類型的篩選在那裡），只問 ai-service 這些 Job 的決策，ai-service 再依 user_id 過濾
 POST   /jobs/{jobId}/fact-check         事實查核：標出這個 Job 可以查核的主張（不花搜尋次數），回 202（背景標，前端每 3 秒輪詢）；
                                          重新標出時查核過的保留
-GET    /jobs/{jobId}/fact-check         標出主張的紀錄（沒標過是 null）與主張（講者、時間點、原話、整理過的陳述、種類、查核的結論）
+GET    /jobs/{jobId}/fact-check         標出主張的紀錄（沒標過是 null）與主張（講者、時間點、原話、整理過的陳述、種類、查核的結論、
+                                         說明、來源、查核中、上次查核失敗的原因）
+POST   /jobs/{jobId}/fact-check/verify  查核勾選的主張 { claimIds }：每條查一次網路（只送整理過的那一句）、AI 依搜到的網頁給結論，回 202
+                                         與這個 Job 的主張（勾選的標成查核中，前端每 3 秒輪詢）；這個月剩下的搜尋次數（跟問答共用，
+                                         先扣掉這個 Job 還在查核中的）不夠查完全部就整批不查（429，說還剩幾次）
 POST   /jobs/{jobId}/outputs            多格式輸出：產生一份，body { "format", "platform"?（社群貼文必填）, "instruction"? }，回 202
                                          （背景產生，前端每 3 秒輪詢列表）；每次都是新的一份；Job 的標題由 Gateway 一起帶給 ai-service
 GET    /jobs/{jobId}/outputs            這個 Job 的輸出（新的在前，含 Markdown 內容、狀態、依據的 revision、模型）
@@ -280,7 +284,7 @@ DELETE /me/connections/{service}        中斷連結：向對方撤銷授權並�
 GET    /me/usage?month=YYYY-MM          登入者某個月（台灣時間，省略就是這個月）的用量：LLM 依模型與金鑰來源、轉錄依模型加總；
                                          Gateway 把月份換成時間範圍，向兩個服務分別查詢；網路搜尋成功 / 失敗各幾次；附上每月的
                                          用量上限（轉錄分鐘數、平台模型 token、網路搜尋次數）。到了上限時，上傳、要用平台模型的
-                                         AI 功能、查網路的問答回 429，見 gateway README
+                                         AI 功能、查網路的問答、查核主張回 429，見 gateway README
 ```
 
 都已實作，對應 ai-service 的 gRPC `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory`/`RequestRegeneration`/`RequestQuiz`/`ListQuizzes`/`GetQuiz`/`SubmitQuizAttempt`/`ListConnections`/`StartConnection`/`CompleteConnection`/`DeleteConnection`/`GetPostMeeting`/`RequestPostMeeting`/`ExecuteProposals`/`RetryProposal`/`GetPostMeetingSettings`/`UpdatePostMeetingSettings`/`ListJobLlmUsage`/`SumUserLlmUsage`/`SaveProviderKey`/`DeleteProviderKey`/`ListProviderKeys`/`ListAvailableModels`/`GetDefaultModel`/`SetDefaultModel`（用量另外也呼叫 transcription-service 的 `ListJobTranscriptionUsage`/`SumUserTranscriptionUsage`），
@@ -534,12 +538,14 @@ CREATE TABLE speaker_name_suggestions (
 );
 CREATE INDEX ix_speaker_name_suggestions_job_id ON speaker_name_suggestions(job_id);
 
--- 網路搜尋的用量：問答每查一次網路一筆（量是次數，不是 token，所以不放在 llm_usage）；每月上限只算成功的
+-- 網路搜尋的用量：問答每查一次網路、事實查核每查一條主張各一筆（量是次數，不是 token，所以不放在 llm_usage）；
+-- 每月上限兩者共用，只算成功的
 CREATE TABLE web_search_usage (
     id UUID PRIMARY KEY,
-    user_id UUID,                           -- 提問者
+    user_id UUID,                           -- 提問 / 查核的使用者
     job_id UUID NOT NULL,
     provider VARCHAR(32) NOT NULL,          -- 搜尋服務，例如 tavily
+    feature VARCHAR(16) NOT NULL DEFAULT 'qa', -- qa / fact_check（加這個欄位之前的都是問答）
     succeeded BOOLEAN NOT NULL,
     created_at TIMESTAMPTZ NOT NULL
 );
@@ -855,6 +861,7 @@ CREATE INDEX ix_generated_outputs_job_id ON generated_outputs (job_id);
 | `summary.regeneration.requested` | AI Service | AI Service | `{ jobId, userId }`（`userId` 是要求重新產生的使用者）——使用者要求重新產生摘要與章節（`POST /summary/{jobId}/regenerate`）；ai-service 排給自己的背景工作，不動 Job 狀態 |
 | `translation.requested` | AI Service | AI Service | `{ jobId, language }`——使用者要求翻譯逐字稿（`POST /jobs/{jobId}/translations`）；ai-service 排給自己的背景工作，一批一批翻、每批存檔 |
 | `fact_check.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求標出可以查核的主張（`POST /jobs/{jobId}/fact-check`）；ai-service 排給自己的背景工作 |
+| `claim_check.requested` | AI Service | AI Service | `{ jobId, userId, claimIds }`——使用者要求查核勾選的主張（`POST /jobs/{jobId}/fact-check/verify`）；ai-service 排給自己的背景工作，每條各自查一次網路、判斷結論，一條失敗不影響其他條、不整則重試（重試會再花搜尋次數） |
 | `decision.requested` | AI Service | AI Service | `{ jobId, userId, meetingAt }`（`meetingAt` 是 Job 的上傳時間，找較早的會議裡被取代的決策用）——使用者要求抽出決策（`POST /jobs/{jobId}/decisions/extract`），或會議、訪談轉錄完由 pipeline 自動要求（`userId` 是 Job 擁有者）；ai-service 排給自己的背景工作 |
 | `output.requested` | AI Service | AI Service | `{ outputId, jobId, userId }`——使用者要求產生一份多格式輸出（`POST /jobs/{jobId}/outputs`）；ai-service 排給自己的背景工作 |
 | `speaker_insights.requested` | AI Service | AI Service | `{ jobId, userId }`——使用者要求分析講者的問題與打斷（`POST /jobs/{jobId}/speaker-insights`）；ai-service 排給自己的背景工作 |
@@ -892,7 +899,7 @@ Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登
 | ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體；ai-service 也用它把整段寫成簡體的問答回答與測驗轉成繁體（本機小模型偶爾會） |
 | LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型（問答可以臨時換成別的模型）：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型預設是 HF Inference Providers 的 OpenAI 相容路由（`PLATFORM_LLM_BASE_URL` 可以改指向任何 OpenAI 相容的伺服器：本機開發用 Docker 跑的 Ollama，一般生成與會後處理都用 `qwen3:14b`（見 `ai-service/docs/adr/0011-local-post-meeting-model-qwen3-14b.md`），上雲可以用自架 vLLM 或其他託管 API，見 `infra/README.md`）（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
 | Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
-| 網路搜尋（問答「查網路」） | Tavily 官方遠端 MCP（`tavily_search`，平台付費的 `TAVILY_API_KEY`；由系統在回答前查一次，不給模型工具；只送出一句搜尋查詢，見 `ai-service/docs/adr/0014-qa-web-search-by-the-system.md`） |
+| 網路搜尋（問答「查網路」、事實查核） | Tavily 官方遠端 MCP（`tavily_search`，平台付費的 `TAVILY_API_KEY`；由系統查，不給模型工具；問答在回答前查一次，只送出一句搜尋查詢，見 `ai-service/docs/adr/0014-qa-web-search-by-the-system.md`；事實查核每條主張查一次，只送整理過的那一句主張） |
 | 已連結的帳號（會後處理用） | Google OAuth（平台自己的 OAuth client，只要 Calendar 活動、Gmail 建立草稿、Tasks 的權限）與 Notion 官方遠端 MCP 的 OAuth（PKCE + 動態註冊 client）；權杖用自有金鑰那套 AES-GCM 加密存在 ai-service，state 綁定開始連結的瀏覽器（見 `ai-service/README.md`「已連結的帳號」） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
@@ -915,7 +922,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
 | **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
 | **LLM（摘要/章節分段/問答，ai-service）** | **HF Inference Providers** | 依 provider 而定，沒有像 Groq 那樣公開逐模型的固定數字 | 免費額度會隨政策調整而變動，需定期查閱官方文件確認當下額度；特定模型是否有 provider 承載也會隨時間變動，換模型前建議先查（見 `ai-service/README.md` 已知限制） |
-| **網路搜尋（ai-service，問答「查網路」）** | **Tavily** | 整個平台每月 1,000 credits（一般搜尋 1 credit／次），不用綁卡；之後 US$0.008／credit | 額度是整個平台共用，不是每位使用者；每人每月的搜尋次數有用量上限（預設 30 次，只算成功的，見 gateway README「每月用量上限」） |
+| **網路搜尋（ai-service，問答「查網路」、事實查核）** | **Tavily** | 整個平台每月 1,000 credits（一般搜尋 1 credit／次），不用綁卡；之後 US$0.008／credit | 額度是整個平台共用，不是每位使用者；每人每月的搜尋次數有用量上限（預設 30 次，問答與事實查核共用，只算成功的，見 gateway README「每月用量上限」） |
 | **Embedding（ai-service）** | **HF Inference Providers** | 依 provider 而定，一般有免費額度，無需信用卡即可申請 | 特定模型是否有 provider 承載會隨時間變動，需留意 |
 
 **額度風險提醒**

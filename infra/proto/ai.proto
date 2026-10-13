@@ -121,6 +121,10 @@ service AiService {
   rpc RequestFactCheck(RequestFactCheckRequest) returns (FactCheck);
   // 這個 Job 標出主張的紀錄（沒標過就沒有）與主張（依時間點排序）。
   rpc GetFactCheck(GetFactCheckRequest) returns (JobFactCheck);
+  // 查核勾選的主張：每條查一次網路（整理過的那一句，逐字稿不送）、依搜到的網頁判斷結論。標成「查核中」並排入 claim_check.requested，回傳
+  // 這個 Job 的主張。剩餘的搜尋次數由 gateway 先檢查。不是這個 Job 的主張回 NOT_FOUND；無法查核的回 INVALID_ARGUMENT；這個部署沒有
+  // 設定網路搜尋回 FAILED_PRECONDITION；排不進 queue 回 UNAVAILABLE。
+  rpc CheckClaims(CheckClaimsRequest) returns (JobFactCheck);
 
   // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
   // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -1080,6 +1084,12 @@ message RequestFactCheckRequest {
 
 message GetFactCheckRequest {
   string job_id = 1;
+}
+
+message CheckClaimsRequest {
+  string job_id = 1;
+  string user_id = 2;
+  repeated string claim_ids = 3;
 }
 
 message FactCheck {
