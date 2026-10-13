@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -33,14 +34,16 @@ import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 import io.grpc.Status;
 import transuai.ai.v1.Ai.Claim;
 import transuai.ai.v1.Ai.ClaimSource;
+import transuai.ai.v1.Ai.CountUserWebSearchesResponse;
 import transuai.ai.v1.Ai.FactCheck;
 import transuai.ai.v1.Ai.FactCheckStatus;
 import transuai.ai.v1.Ai.JobFactCheck;
 import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.RequestFactCheckRequest;
+import transuai.ai.v1.Ai.CheckClaimsRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
-/** 事實查核（見 .scratch/fact-check/issues/01）：標出主張與取得，先過 ownership；標出主張是花錢的功能。 */
+/** 事實查核（見 .scratch/fact-check/issues/01、02）：標出主張、查核勾選的主張與取得，先過 ownership；標出與查核是花錢的功能。 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(RedisContainerConfig.class)
@@ -74,6 +77,8 @@ class FactCheckTest {
         when(uploadServiceStub.withInterceptors(any())).thenReturn(uploadServiceStub);
         when(uploadServiceStub.getJob(any())).thenReturn(Job.getDefaultInstance());
         when(aiServiceStub.getDefaultModel(any())).thenReturn(ModelChoice.newBuilder().setProvider("openai").build());
+        when(aiServiceStub.countUserWebSearches(any())).thenReturn(CountUserWebSearchesResponse.getDefaultInstance());
+        when(aiServiceStub.getFactCheck(any())).thenReturn(JobFactCheck.getDefaultInstance());
     }
 
     @Test
@@ -124,13 +129,47 @@ class FactCheckTest {
     }
 
     @Test
+    void checkingClaimsPassesTheUserAndTheClaimsOnAndComesBackWithThemBeingChecked() throws Exception {
+        when(aiServiceStub.checkClaims(any())).thenReturn(JobFactCheck.newBuilder()
+                .setExtraction(finding.toBuilder().setStatus(FactCheckStatus.FACT_CHECK_STATUS_COMPLETED))
+                .addClaims(Claim.newBuilder().setId("c1").setJobId(JOB).setChecking(true))
+                .addClaims(Claim.newBuilder().setId("c2").setJobId(JOB).setChecking(true))
+                .build());
+
+        checkClaims("{\"claimIds\":[\"c1\",\"c2\"]}")
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.claims[0].checking").value(true))
+                .andExpect(jsonPath("$.claims[1].id").value("c2"));
+
+        ArgumentCaptor<CheckClaimsRequest> sent = ArgumentCaptor.forClass(CheckClaimsRequest.class);
+        verify(aiServiceStub).checkClaims(sent.capture());
+        assertThat(sent.getValue().getJobId()).isEqualTo(JOB);
+        assertThat(sent.getValue().getUserId()).isEqualTo(user.toString());
+        assertThat(sent.getValue().getClaimIdsList()).containsExactly("c1", "c2");
+    }
+
+    @Test
+    void checkingNothingIsABadRequest() throws Exception {
+        checkClaims("{\"claimIds\":[]}").andExpect(status().isBadRequest());
+        checkClaims("{}").andExpect(status().isBadRequest());
+        verify(aiServiceStub, never()).checkClaims(any());
+    }
+
+    @Test
     void someoneElsesJobIsNotFound() throws Exception {
         when(uploadServiceStub.getJob(any())).thenThrow(Status.NOT_FOUND.asRuntimeException());
 
         call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/fact-check")).andExpect(status().isNotFound());
         call(MockMvcRequestBuilders.get("/jobs/" + JOB + "/fact-check")).andExpect(status().isNotFound());
+        checkClaims("{\"claimIds\":[\"c1\"]}").andExpect(status().isNotFound());
         verify(aiServiceStub, never()).requestFactCheck(any());
         verify(aiServiceStub, never()).getFactCheck(any());
+        verify(aiServiceStub, never()).checkClaims(any());
+    }
+
+    private ResultActions checkClaims(String body) throws Exception {
+        return call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/fact-check/verify")
+                .contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
     private ResultActions call(MockHttpServletRequestBuilder request) throws Exception {

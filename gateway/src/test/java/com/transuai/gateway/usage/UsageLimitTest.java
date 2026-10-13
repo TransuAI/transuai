@@ -37,7 +37,9 @@ import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
 import io.grpc.Status;
 import transuai.ai.v1.Ai.AskQuestionChunk;
+import transuai.ai.v1.Ai.Claim;
 import transuai.ai.v1.Ai.CountUserWebSearchesResponse;
+import transuai.ai.v1.Ai.JobFactCheck;
 import transuai.ai.v1.Ai.LlmUsageSum;
 import transuai.ai.v1.Ai.ModelChoice;
 import transuai.ai.v1.Ai.Quiz;
@@ -85,6 +87,8 @@ class UsageLimitTest {
         when(uploadServiceStub.getJob(any())).thenReturn(Job.getDefaultInstance());
         when(uploadServiceStub.getPresignedUploadUrl(any())).thenReturn(GetPresignedUploadUrlResponse.getDefaultInstance());
         when(aiServiceStub.requestQuiz(any())).thenReturn(Quiz.getDefaultInstance());
+        when(aiServiceStub.checkClaims(any())).thenReturn(JobFactCheck.getDefaultInstance());
+        when(aiServiceStub.getFactCheck(any())).thenReturn(JobFactCheck.getDefaultInstance());
         when(aiServiceStub.askQuestion(any())).thenAnswer(call -> List.of(AskQuestionChunk.getDefaultInstance()).iterator());
         usedThisMonth(0, 0, 0);
         searchedThisMonth(0, 0);
@@ -236,6 +240,52 @@ class UsageLimitTest {
     }
 
     @Test
+    void checkingMoreClaimsThanSearchesLeftIsRefusedAllTogetherSayingHowManyAreLeft() throws Exception {
+        searchedThisMonth(2, 0);
+
+        checkClaims("c1", "c2").andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("USAGE_LIMIT_REACHED"))
+                .andExpect(jsonPath("$.message").value(containsString("還剩 1 次")))
+                .andExpect(header().exists("Retry-After"));
+        verify(aiServiceStub, never()).checkClaims(any());
+    }
+
+    @Test
+    void checkingAsManyClaimsAsSearchesLeftGoesAhead() throws Exception {
+        searchedThisMonth(1, 4);
+
+        checkClaims("c1", "c2").andExpect(status().is(not(429)));
+        verify(aiServiceStub).checkClaims(any());
+    }
+
+    @Test
+    void claimsStillBeingCheckedCountAgainstTheSearchesLeft() throws Exception {
+        searchedThisMonth(1, 0);
+        beingChecked("c1");
+
+        checkClaims("c2", "c3").andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value(containsString("還剩 1 次")));
+        verify(aiServiceStub, never()).checkClaims(any());
+    }
+
+    @Test
+    void aClaimTickedTwiceOrAlreadyBeingCheckedNeedsNoMoreSearches() throws Exception {
+        searchedThisMonth(1, 0);  // 2 left: one for c1, still being checked, one for c2
+        beingChecked("c1");
+
+        checkClaims("c1", "c2", "c2").andExpect(status().is(not(429)));
+        verify(aiServiceStub).checkClaims(any());
+    }
+
+    @Test
+    void checkingClaimsOnThePlatformModelStopsAtItsLimitToo() throws Exception {
+        usedThisMonth(0, 1000, 0);
+
+        checkClaims("c1").andExpect(status().isTooManyRequests());
+        verify(aiServiceStub, never()).checkClaims(any());
+    }
+
+    @Test
     void searchesThatFailedDoNotCountTowardTheLimit() throws Exception {
         searchedThisMonth(2, 5);
 
@@ -263,6 +313,14 @@ class UsageLimitTest {
                 CountUserWebSearchesResponse.newBuilder().setSucceeded(succeeded).setFailed(failed).build());
     }
 
+    private void beingChecked(String... claimIds) {
+        JobFactCheck.Builder found = JobFactCheck.newBuilder();
+        for (String id : claimIds) {
+            found.addClaims(Claim.newBuilder().setId(id).setChecking(true));
+        }
+        when(aiServiceStub.getFactCheck(any())).thenReturn(found.build());
+    }
+
     private void defaultModel(String provider) {
         when(aiServiceStub.getDefaultModel(any())).thenReturn(ModelChoice.newBuilder().setProvider(provider).build());
     }
@@ -280,6 +338,12 @@ class UsageLimitTest {
     private ResultActions requestQuiz() throws Exception {
         return call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/quizzes").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"questionCount\":5}"));
+    }
+
+    private ResultActions checkClaims(String... claimIds) throws Exception {
+        String ids = String.join("\",\"", claimIds);
+        return call(MockMvcRequestBuilders.post("/jobs/" + JOB + "/fact-check/verify").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"claimIds\":[\"" + ids + "\"]}"));
     }
 
     private ResultActions ask(String body) throws Exception {

@@ -47,7 +47,7 @@ import transuai.ai.v1.AiServiceGrpc;
         "app.rate-limit.costly.question.limit=1", "app.rate-limit.costly.quiz.limit=1",
         "app.rate-limit.costly.regenerate.limit=1", "app.rate-limit.costly.post-meeting.limit=1",
         "app.rate-limit.costly.provider-key.limit=1", "app.rate-limit.costly.transcript-edit.limit=1",
-        "app.rate-limit.costly.linked-service.limit=1",
+        "app.rate-limit.costly.linked-service.limit=1", "app.rate-limit.costly.claim-check.limit=1",
 })
 @AutoConfigureMockMvc
 @Import(RedisContainerConfig.class)
@@ -132,6 +132,7 @@ class ApiRateLimitTest {
             "POST, /summary/" + JOB + "/regenerate",
             "POST, /jobs/" + JOB + "/post-meeting",
             "PUT, /me/provider-keys/openai",
+            "POST, /jobs/" + JOB + "/fact-check/verify",
     })
     void everyCostlyFeatureIsLimited(HttpMethod method, String path) throws Exception {
         attempt(alice, method, path);

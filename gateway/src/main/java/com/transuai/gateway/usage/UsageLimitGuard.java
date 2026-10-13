@@ -67,11 +67,41 @@ public class UsageLimitGuard {
 
     /** 問答要查網路之前：這個月成功查網路的次數還沒到上限。沒開查網路的問答不用檢查。 */
     public void requireWebSearchesLeft(UUID userId) {
-        Long used = unlessUnavailable(() -> usage.webSearchesThisMonth(userId));
-        if (used != null && used >= limits.webSearches()) {
-            throw new UsageLimitReachedException("這個月的網路搜尋已經到用量上限（%s 次），下個月 1 日恢復；不查網路的問答照常可以用"
-                    .formatted(number(limits.webSearches())), UsageMonth.secondsUntilNextMonth());
+        Long left = webSearchesLeft(userId);
+        if (left != null && left == 0) {
+            throw webSearchesUsedUp("不查網路的問答照常可以用");
         }
+    }
+
+    /**
+     * 事實查核之前：每條主張查一次網路，這個月剩下的搜尋次數要夠查完勾選的全部（跟問答的查網路共用上限）；不夠就整批不查，說還剩
+     * 幾次。beingChecked 是這個 Job 還在查核中的主張：它們的搜尋可能還沒記進用量，先從剩下的扣掉，才不會連送兩批超過上限。
+     */
+    public void requireWebSearchesLeftToCheck(UUID userId, int claims, int beingChecked) {
+        Long recorded = webSearchesLeft(userId);
+        if (recorded == null) {
+            return;
+        }
+        long left = Math.max(0, recorded - beingChecked);
+        if (left >= claims) {
+            return;
+        }
+        if (left == 0) {
+            throw webSearchesUsedUp("找出主張照常可以用");
+        }
+        throw new UsageLimitReachedException("查核 %d 條主張要用 %d 次網路搜尋，這個月還剩 %d 次（用量上限 %s 次），下個月 1 日恢復；可以少勾幾條再查"
+                .formatted(claims, claims, left, number(limits.webSearches())), UsageMonth.secondsUntilNextMonth());
+    }
+
+    /** 這個月還能成功查網路幾次；查不到用量是 null（放行）。 */
+    private Long webSearchesLeft(UUID userId) {
+        Long used = unlessUnavailable(() -> usage.webSearchesThisMonth(userId));
+        return used == null ? null : Math.max(0, limits.webSearches() - used);
+    }
+
+    private UsageLimitReachedException webSearchesUsedUp(String stillWorks) {
+        return new UsageLimitReachedException("這個月的網路搜尋已經到用量上限（%s 次），下個月 1 日恢復；%s"
+                .formatted(number(limits.webSearches()), stillWorks), UsageMonth.secondsUntilNextMonth());
     }
 
     public void requirePlatformTokensLeft(UUID userId) {

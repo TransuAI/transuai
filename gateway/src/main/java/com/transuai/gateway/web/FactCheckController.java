@@ -1,11 +1,15 @@
 package com.transuai.gateway.web;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -15,6 +19,7 @@ import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.ratelimit.CostlyFeature;
 import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.FactCheckDto;
+import com.transuai.gateway.web.dto.CheckClaimsRequestDto;
 
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.Claim;
@@ -22,9 +27,11 @@ import transuai.ai.v1.Ai.FactCheck;
 import transuai.ai.v1.Ai.GetFactCheckRequest;
 import transuai.ai.v1.Ai.JobFactCheck;
 import transuai.ai.v1.Ai.RequestFactCheckRequest;
+import transuai.ai.v1.Ai.CheckClaimsRequest;
 import transuai.ai.v1.AiServiceGrpc;
 
-// 事實查核（見 ai-service/CONTEXT.md「主張」「查核」）：標出主張在 ai-service 背景跑（不花搜尋次數），前端輪詢直到不是 GENERATING。
+// 事實查核（見 ai-service/CONTEXT.md「主張」「查核」）：標出主張在 ai-service 背景跑（不花搜尋次數），前端輪詢直到不是 GENERATING；
+// 查核勾選的主張也在背景跑（每條查一次網路），前端輪詢直到沒有主張在查核中。
 @RestController
 @RequiredArgsConstructor
 public class FactCheckController {
@@ -47,7 +54,30 @@ public class FactCheckController {
     @GetMapping("/jobs/{jobId}/fact-check")
     public FactCheckDto get(@CurrentUserId UUID userId, @PathVariable String jobId) {
         jobOwnershipGuard.check(userId, jobId);
-        JobFactCheck found = aiServiceStub.getFactCheck(GetFactCheckRequest.newBuilder().setJobId(jobId).build());
+        return toDto(aiServiceStub.getFactCheck(GetFactCheckRequest.newBuilder().setJobId(jobId).build()));
+    }
+
+    // 查核勾選的主張：剩下的搜尋次數不夠查完全部就整批不查（429，說還剩幾次）；回傳這個 Job 的主張（勾選的標成查核中）。
+    @CostlyFeature("claim-check")
+    @PostMapping("/jobs/{jobId}/fact-check/verify")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public FactCheckDto check(@CurrentUserId UUID userId, @PathVariable String jobId,
+            @RequestBody CheckClaimsRequestDto request) {
+        jobOwnershipGuard.check(userId, jobId);
+        if (request == null || request.claimIds() == null || request.claimIds().isEmpty()) {
+            throw new IllegalArgumentException("claimIds are required"); // → 400 via GrpcExceptionAdvice
+        }
+        usageLimitGuard.requirePlatformTokensLeft(userId);
+        Set<String> beingChecked = aiServiceStub.getFactCheck(GetFactCheckRequest.newBuilder().setJobId(jobId).build())
+                .getClaimsList().stream().filter(Claim::getChecking).map(Claim::getId).collect(Collectors.toSet());
+        Set<String> toSearch = new HashSet<>(request.claimIds());  // ai-service doesn't queue what's already being checked
+        toSearch.removeAll(beingChecked);
+        usageLimitGuard.requireWebSearchesLeftToCheck(userId, toSearch.size(), beingChecked.size());
+        return toDto(aiServiceStub.checkClaims(CheckClaimsRequest.newBuilder()
+                .setJobId(jobId).setUserId(userId.toString()).addAllClaimIds(request.claimIds()).build()));
+    }
+
+    private static FactCheckDto toDto(JobFactCheck found) {
         return new FactCheckDto(found.hasExtraction() ? toDto(found.getExtraction()) : null,
                 found.getClaimsList().stream().map(FactCheckController::toDto).toList());
     }
