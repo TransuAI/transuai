@@ -1249,6 +1249,16 @@ class GetFactCheckRequest(_message.Message):
     job_id: str
     def __init__(self, job_id: _Optional[str] = ...) -> None: ...
 
+class CheckClaimsRequest(_message.Message):
+    __slots__ = ("job_id", "user_id", "claim_ids")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    CLAIM_IDS_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    user_id: str
+    claim_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., claim_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class FactCheck(_message.Message):
     __slots__ = ("job_id", "status", "failure_reason", "source_revision", "model_provider", "model", "requested_at", "completed_at")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]

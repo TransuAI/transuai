@@ -5,14 +5,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import new_session
-from app.models import WebSearchUsage
+from app.models import WebSearchFeature, WebSearchUsage
 
 
-def save_web_search(user_id: uuid.UUID | None, job_id: uuid.UUID, provider: str, succeeded: bool) -> None:
-    """用自己的 session 立即寫入：這一題後面失敗（例如回答串流中斷），查過的這一次照樣算。"""
+def save_web_search(user_id: uuid.UUID | None, job_id: uuid.UUID, provider: str, feature: WebSearchFeature,
+                    succeeded: bool) -> None:
+    """用自己的 session 立即寫入：之後的步驟失敗（例如回答串流中斷），查過的這一次照樣算。"""
     session = new_session()
     try:
-        session.add(WebSearchUsage(user_id=user_id, job_id=job_id, provider=provider, succeeded=succeeded))
+        session.add(WebSearchUsage(user_id=user_id, job_id=job_id, provider=provider, succeeded=succeeded,
+                                   feature=feature))
         session.commit()
     finally:
         session.close()

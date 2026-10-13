@@ -1,7 +1,8 @@
-"""網路搜尋（見 CONTEXT.md「網路搜尋」）：問答開了「查網路」時，用 Tavily 的官方遠端 MCP 查一次，ai-service 是 MCP client。
+"""網路搜尋（見 CONTEXT.md「網路搜尋」）：問答開了「查網路」時、事實查核每查一條主張時，用 Tavily 的官方遠端 MCP 查一次，
+ai-service 是 MCP client。
 金鑰是平台的（`TAVILY_API_KEY`，放在 Authorization header，不放進網址）；沒設定就是這個功能關閉。
 
-每次搜尋開一次連線（一題只查一次，不值得維持長連線）。測試把 `server_override` 換成程式內的假 MCP server（MCP SDK 會直接在
+每次搜尋開一次連線（一題、一條主張只查一次，不值得維持長連線）。測試把 `server_override` 換成程式內的假 MCP server（MCP SDK 會直接在
 程式裡接上它），其他都照正式的路徑走。"""
 
 import asyncio
@@ -39,7 +40,7 @@ class WebSource:
 
 @dataclass(frozen=True)
 class WebPage:
-    """一筆搜尋結果：網頁與它的內容摘錄（摘錄只給模型看，不保存）。"""
+    """一筆搜尋結果：網頁與它的內容摘錄（問答的摘錄只給模型看，不保存；查核把引用的摘錄跟著來源存起來，給使用者對照）。"""
 
     source: WebSource
     content: str

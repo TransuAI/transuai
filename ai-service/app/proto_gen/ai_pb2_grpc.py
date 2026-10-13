@@ -194,6 +194,11 @@ class AiServiceStub:
                 request_serializer=ai__pb2.GetFactCheckRequest.SerializeToString,
                 response_deserializer=ai__pb2.JobFactCheck.FromString,
                 _registered_method=True)
+        self.CheckClaims = channel.unary_unary(
+                '/transuai.ai.v1.AiService/CheckClaims',
+                request_serializer=ai__pb2.CheckClaimsRequest.SerializeToString,
+                response_deserializer=ai__pb2.JobFactCheck.FromString,
+                _registered_method=True)
         self.RequestQuiz = channel.unary_unary(
                 '/transuai.ai.v1.AiService/RequestQuiz',
                 request_serializer=ai__pb2.RequestQuizRequest.SerializeToString,
@@ -557,6 +562,15 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CheckClaims(self, request, context):
+        """查核勾選的主張：每條查一次網路（整理過的那一句，逐字稿不送）、依搜到的網頁判斷結論。標成「查核中」並排入 claim_check.requested，回傳
+        這個 Job 的主張。剩餘的搜尋次數由 gateway 先檢查。不是這個 Job 的主張回 NOT_FOUND；無法查核的回 INVALID_ARGUMENT；這個部署沒有
+        設定網路搜尋回 FAILED_PRECONDITION；排不進 queue 回 UNAVAILABLE。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RequestQuiz(self, request, context):
         """測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
         quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
@@ -881,6 +895,11 @@ def add_AiServiceServicer_to_server(servicer, server):
             'GetFactCheck': grpc.unary_unary_rpc_method_handler(
                     servicer.GetFactCheck,
                     request_deserializer=ai__pb2.GetFactCheckRequest.FromString,
+                    response_serializer=ai__pb2.JobFactCheck.SerializeToString,
+            ),
+            'CheckClaims': grpc.unary_unary_rpc_method_handler(
+                    servicer.CheckClaims,
+                    request_deserializer=ai__pb2.CheckClaimsRequest.FromString,
                     response_serializer=ai__pb2.JobFactCheck.SerializeToString,
             ),
             'RequestQuiz': grpc.unary_unary_rpc_method_handler(
@@ -1824,6 +1843,33 @@ class AiService:
             target,
             '/transuai.ai.v1.AiService/GetFactCheck',
             ai__pb2.GetFactCheckRequest.SerializeToString,
+            ai__pb2.JobFactCheck.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CheckClaims(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/CheckClaims',
+            ai__pb2.CheckClaimsRequest.SerializeToString,
             ai__pb2.JobFactCheck.FromString,
             options,
             channel_credentials,

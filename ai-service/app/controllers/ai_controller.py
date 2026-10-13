@@ -86,7 +86,9 @@ from app.services.decisions import (
     create_decision, decision_links, delete_decision, find_job_decisions, list_user_decisions, request_decision_extraction,
     search_decisions, update_decision)
 from app.services.decisions import effective_status as decision_effective_status
-from app.services.fact_checks import FactCheckNotQueued, find_fact_check, request_fact_check
+from app.services.fact_checks import (
+    ClaimNotCheckable, ClaimNotFound, FactCheckNotQueued, WebSearchUnavailable, claim_check_state, find_fact_check,
+    request_fact_check, check_claims)
 from app.services.fact_checks import effective_status as fact_check_effective_status
 from app.services.speaker_insight_runs import (
     SpeakerInsightsNotQueued, find_speaker_insights, request_speaker_insights)
@@ -615,12 +617,25 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         return _fact_check_to_proto(fact_check)
 
     def GetFactCheck(self, request, context):
+        return _job_fact_check_to_proto(*find_fact_check(_parse_uuid(request.job_id, "job_id", context)))
+
+    def CheckClaims(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
-        fact_check, claims = find_fact_check(job_id)
-        message = ai_pb2.JobFactCheck(claims=[_claim_to_proto(c) for c in claims])
-        if fact_check is not None:
-            message.extraction.CopyFrom(_fact_check_to_proto(fact_check))
-        return message
+        user_id = _parse_user_id(request.user_id, context)
+        claim_ids = [_parse_uuid(claim_id, "claim_ids", context) for claim_id in request.claim_ids]
+        if not claim_ids:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "請勾選要查核的主張")
+        try:
+            check_claims(job_id, user_id, claim_ids)
+        except ClaimNotFound:
+            _abort(context, grpc.StatusCode.NOT_FOUND, "claim not found")
+        except ClaimNotCheckable:
+            _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "這條主張無法查核")
+        except WebSearchUnavailable:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "這個部署沒有設定網路搜尋，無法查核")
+        except FactCheckNotQueued:
+            _abort(context, grpc.StatusCode.UNAVAILABLE, "暫時無法查核，請稍後再試")
+        return _job_fact_check_to_proto(*find_fact_check(job_id))
 
     def RequestSpeakerInsights(self, request, context):
         job_id = _parse_uuid(request.job_id, "job_id", context)
@@ -919,12 +934,20 @@ def _fact_check_to_proto(fact_check: FactCheck) -> ai_pb2.FactCheck:
     return message
 
 
+def _job_fact_check_to_proto(fact_check: FactCheck | None, claims: list[Claim]) -> ai_pb2.JobFactCheck:
+    message = ai_pb2.JobFactCheck(claims=[_claim_to_proto(c) for c in claims])
+    if fact_check is not None:
+        message.extraction.CopyFrom(_fact_check_to_proto(fact_check))
+    return message
+
+
 def _claim_to_proto(claim: Claim) -> ai_pb2.Claim:
+    checking, check_error = claim_check_state(claim)
     message = ai_pb2.Claim(
         id=str(claim.id), job_id=str(claim.job_id), speaker_label=claim.speaker_label or "",
         start_time=float(claim.start_time), text=claim.text, claim=claim.claim, kind=claim.kind,
         verdict=claim.verdict or "", explanation=claim.explanation or "", check_model=claim.check_model or "",
-        checking=claim.checking_since is not None, check_error=claim.check_error or "",
+        checking=checking, check_error=check_error or "",
         source_revision=claim.source_revision or 0,
         sources=[ai_pb2.ClaimSource(title=s.get("title", ""), url=s.get("url", ""), excerpt=s.get("excerpt", ""))
                  for s in claim.sources])

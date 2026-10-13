@@ -35,7 +35,7 @@ def fill(job_id: uuid.UUID) -> None:
                             content="介紹"),
             SpeakerSuggestion(job_id=job_id, speaker_label="1", name="王小明", evidence_start_time=0, evidence_text="我是王小明"),
             LlmUsage(job_id=job_id, user_id=user, feature="summary", provider="hf", model="m", key_source="platform", succeeded=True),
-            WebSearchUsage(job_id=job_id, user_id=user, provider="tavily", succeeded=True),
+            WebSearchUsage(job_id=job_id, user_id=user, provider="tavily", feature="qa", succeeded=True),
             DecisionExtraction(job_id=job_id, requested_by=user, status="COMPLETED"),
             Decision(job_id=job_id, user_id=user, statement="資料庫用 PostgreSQL"),
             FactCheck(job_id=job_id, requested_by=user, status="COMPLETED"),

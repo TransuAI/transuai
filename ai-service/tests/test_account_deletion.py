@@ -27,7 +27,7 @@ def fill(user_id: uuid.UUID) -> None:
                                       client_id="c", browser_binding_hash="h", created_at=datetime.now(timezone.utc)),
             LlmUsage(user_id=user_id, job_id=JOB, feature="qa", provider="groq", model="m", key_source="own",
                      input_tokens=10, output_tokens=5, succeeded=True),
-            WebSearchUsage(user_id=user_id, job_id=JOB, provider="tavily", succeeded=True),
+            WebSearchUsage(user_id=user_id, job_id=JOB, provider="tavily", feature="qa", succeeded=True),
         ])
         session.commit()
 

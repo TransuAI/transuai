@@ -8,7 +8,7 @@ from typing import Generator
 import grpc
 from sqlalchemy.orm import Session
 
-from app.models import QaHistory
+from app.models import QaHistory, WebSearchFeature
 from app.repositories.chapter_repository import find_by_job_id as find_chapters
 from app.repositories.embedding_repository import find_similar, has_embeddings
 from app.repositories.qa_repository import find_by_job_id
@@ -208,7 +208,7 @@ def _search_query(
 def _record_web_search(user_id: uuid.UUID | None, job_id: uuid.UUID, *, succeeded: bool) -> None:
     """用量（見 CONTEXT.md）：成功或失敗都記。記不到不能讓這一題跟著失敗——少一筆紀錄比沒有回答好。"""
     try:
-        save_web_search(user_id, job_id, web.PROVIDER, succeeded)
+        save_web_search(user_id, job_id, web.PROVIDER, WebSearchFeature.QA, succeeded)
     except Exception:
         logger.exception("could not record a web search for job %s", job_id)
 

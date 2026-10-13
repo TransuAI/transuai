@@ -50,7 +50,7 @@ uv run python -m app.main
 啟動時會：
 
 1. 把 `ai_db` 的 schema 升級到最新的 Alembic migration（多個副本同時啟動時用 Postgres advisory lock 排隊）。導入 Alembic 前用 `create_all` 建的資料庫可能只有部分表（例如只有 `summaries`），baseline（`0001`）只補建缺少的表、不動既有的表跟資料，不需要刪庫重建；唯一例外是還停在 768 維的舊 `embeddings` 表，會拒絕啟動並提示整張表 DROP 掉、重跑 pipeline
-2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding、重翻譯文裡改過的片段）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）、`speaker_insights.requested`（使用者要求分析講者的問題與打斷）、`output.requested`（使用者要求產生多格式輸出）、`translation.requested`（翻譯逐字稿）、`decision.requested`（抽出一場的決策）、`fact_check.requested`（事實查核：標出主張）跟 `post_meeting.requested`（使用者啟動會後處理）
+2. 開一條背景 thread 消費 RabbitMQ 的 `transcription.completed`（主要業務入口，MQ 驅動）、`transcript.edited`（使用者編輯逐字稿後，更新問答用的 embedding、重翻譯文裡改過的片段）、`summary.regeneration.requested`（使用者要求重新產生摘要與章節）、`quiz.requested`（使用者要求產生測驗）、`speaker_insights.requested`（使用者要求分析講者的問題與打斷）、`output.requested`（使用者要求產生多格式輸出）、`translation.requested`（翻譯逐字稿）、`decision.requested`（抽出一場的決策）、`fact_check.requested`（事實查核：標出主張）、`claim_check.requested`（事實查核：查核勾選的主張）跟 `post_meeting.requested`（使用者啟動會後處理）
 3. 起 gRPC server，監聽 `8084`
 
 ## Pipeline
@@ -207,8 +207,9 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
 功能、廠商、模型、金鑰來源、輸入 / 輸出 token（取廠商回報的數字，沒回報就是未知，不估算）、成功或失敗。失敗的呼叫也記
 （通常沒有數字）；串流回答被中途放棄也算失敗。用量用自己的 session 立即寫入，跟摘要存檔無關；寫不進去只記 log，不讓
 Job 失敗。embedding 不記。`ListJobLlmUsage`（一個 Job 逐筆）與 `SumUserLlmUsage`（一位使用者一段時間依模型加總）提供查詢，
-Gateway 跟 transcription-service 的轉錄用量合併後給前端。問答每查一次網路，另外記一筆到 `web_search_usage`（使用者、Job、
-搜尋服務、成功或失敗；量是次數，所以不放在 `llm_usage`），由 `ListJobWebSearches`（一個 Job 逐筆）與 `CountUserWebSearches`
+Gateway 跟 transcription-service 的轉錄用量合併後給前端。問答每查一次網路、事實查核每查一條主張，另外記一筆到 `web_search_usage`
+（使用者、Job、搜尋服務、`feature`（`qa` / `fact_check`；加這個欄位之前的都是問答）、成功或失敗；量是次數，所以不放在 `llm_usage`；
+每月上限兩者共用），由 `ListJobWebSearches`（一個 Job 逐筆）與 `CountUserWebSearches`
 （一位使用者一段時間成功 / 失敗各幾次，Gateway 的每月上限只算成功的）查詢。
 
 ### 重新產生摘要與章節（`summary.regeneration.requested`）
@@ -409,6 +410,31 @@ RequestFactCheck(jobId, userId)（Gateway POST /jobs/{jobId}/fact-check）
 格式不對是永久性失敗（「模型回傳的格式不正確，請再標出一次」，之前的主張保留）；暫時性失敗走訊息層級重試；GENERATING 超過 5 分鐘回報成
 失敗。用量功能是 `fact_check`。
 
+### 事實查核：查核勾選的主張（`claim_check.requested`）
+
+使用者勾選的主張，每條查一次網路、依搜到的網頁判斷結論（`app/services/claim_checker.py`、`fact_checks.py`）。剩下的搜尋次數夠不夠由
+Gateway 先檢查（扣掉這個 Job 還在查核中的主張，不夠就整批不查）。
+
+```
+CheckClaims(jobId, userId, claimIds)（Gateway POST /jobs/{jobId}/fact-check/verify）
+  → 沒設定網路搜尋：FAILED_PRECONDITION；有不是這個 Job 的主張：NOT_FOUND；有無法查核的：INVALID_ARGUMENT
+  → 勾選的標成查核中（checking_since = now、清掉上次失敗的原因；已經在查、還沒卡住的不重複排），排入
+    claim_check.requested { jobId, userId, claimIds }（publisher confirms、短 timeout；排入失敗就恢復原狀，回 UNAVAILABLE）；回傳這個 Job 的主張
+消費 claim_check.requested：一條一條查，各自成功或失敗
+  → 已經不在查核中（例如被重新標出刪掉）就跳過
+  → 用 userId 的預設模型；平台模型這個月已經到上限：保持還沒查、記下原因，不搜尋（搜了也沒辦法判斷，白花搜尋次數）
+  → web_search.search(整理過的那一句主張)——逐字稿不送；記一筆 web_search_usage（feature = fact_check，成功或失敗都記）
+    → 搜尋失敗：這條保持還沒查，記下原因「網路搜尋失敗，請再查一次」
+    → 沒有結果：no_reliable_source，不呼叫模型
+  → 模型只能根據編號的網頁摘錄判斷，回 JSON { verdict（supported / disputed / no_reliable_source）, explanation, sources（引用的編號）}
+  → 程式把關：引用的編號要是給它看的網頁；說有依據或有出入卻沒有引用任何一個，改成 no_reliable_source；只保存引用的網頁，說明裡的
+    [n] 改成它在保存的來源裡的位置（依說明裡第一次出現的順序），指到沒引用的網頁的 [n] 拿掉；說明轉繁體
+  → 存結論、說明、來源（標題、網址、摘錄）、查核的模型與時間；清掉查核中
+```
+
+一條的失敗（格式不對、模型呼叫失敗）不影響其他條，也不整則重試——重試會再花搜尋次數；失敗的那條保持還沒查、記下原因，使用者可以再查。
+查核中超過 10 分鐘（例如服務中途重啟）讀出來就是失敗（「查核逾時，請再查一次」），可以再查。用量功能是 `fact_check`。
+
 ### 逐字稿被編輯之後（`transcript.edited`）
 
 ```
@@ -441,7 +467,7 @@ RequestFactCheck(jobId, userId)（Gateway POST /jobs/{jobId}/fact-check）
 | `UpdateOutput` | 使用者修改一份完成的輸出：跟原本一樣就不算修改；空白或超過 20000 字回 `INVALID_ARGUMENT`，還在產生或失敗的回 `FAILED_PRECONDITION`，不屬於這個 Job 回 `NOT_FOUND` |
 | `RequestOutput` / `ListOutputs` / `GetOutput` | 多格式輸出（見上方）：要求產生（帶 `user_id`、`format`、Job 的 `title`、可選的 `instruction`、社群貼文必填的 `platform`）立刻回傳 GENERATING，每次都是新的一份；列出（新的在前，含內容）；取得一份（不屬於這個 Job 回 `NOT_FOUND`）。格式不認得、要求超過 200 字、社群貼文沒有（或不認得）平台回 `INVALID_ARGUMENT`，排入失敗回 `UNAVAILABLE` |
 | `AskDecisions` | 問決策（見上方，server-streaming）：只根據這位使用者在這些 Job 的決策回答；先 `sources`，再 `answered_by` 與 `delta`，失敗一個 `error`；找不到有關的決策時只有一個說「沒有」的 `delta`。`question` 是空的回 `INVALID_ARGUMENT` |
-| `RequestFactCheck` / `GetFactCheck` | 事實查核（見上方）：要求標出主張（帶 `user_id`）立刻回傳 GENERATING 的紀錄；取得這個 Job 標出主張的紀錄（沒標過就沒有 `extraction`）與主張（依時間點排序；`verdict` 空的是還沒查）。排入失敗回 `UNAVAILABLE` |
+| `RequestFactCheck` / `GetFactCheck` / `CheckClaims` | 事實查核（見上方）：要求標出主張（帶 `user_id`）立刻回傳 GENERATING 的紀錄；取得這個 Job 標出主張的紀錄（沒標過就沒有 `extraction`）與主張（依時間點排序；`verdict` 空的是還沒查，`checking` 是查核中，`check_error` 是上次查核失敗的原因）；查核勾選的主張（帶 `user_id`、`claim_ids`）把它們標成查核中並回傳這個 Job 的主張——沒設定網路搜尋 `FAILED_PRECONDITION`、不是這個 Job 的主張 `NOT_FOUND`、無法查核或沒勾 `INVALID_ARGUMENT`。排入失敗回 `UNAVAILABLE` |
 | `ListUserDecisions` / `SearchDecisions` | 決策頁（見上方）：這位使用者在這些 Job 的決策（依時間點）／搜尋（字與意思）。`user_id` 由 gateway 從 token 帶入，`job_ids` 是使用者自己的 Job；空的 `job_ids` 回空的結果 |
 | `RequestDecisionExtraction` / `GetJobDecisions` / `CreateDecision` / `UpdateDecision` / `DeleteDecision` | 決策紀錄（見上方）：要求抽取（帶 `user_id`）立刻回傳 GENERATING 的抽取紀錄；取得這個 Job 的抽取紀錄（沒抽過就沒有 `extraction`）與決策（依時間點排序，沒有時間點的在後；刪掉的不列）；新增（帶 `user_id`，時間點可以沒有）、修改內容、刪除。排入失敗回 `UNAVAILABLE`；內容不合規則回 `INVALID_ARGUMENT`（附原因）；不是這個 Job 的決策回 `NOT_FOUND` |
 | `RequestSpeakerInsights` / `GetSpeakerInsights` | 講者數據的問題與打斷（見上方）：要求分析（帶 `user_id`）立刻回傳 GENERATING；取得目前這一份（還沒分析過是 UNSPECIFIED、沒有項目），`items` 是上一次完成的結果。排入失敗回 `UNAVAILABLE` |
@@ -551,7 +577,8 @@ app/
     generated_outputs.py             RequestOutput（排入自己的 queue）與消費 output.requested；卡住的判斷
     decision_extractor.py            抽出決策：有行號的逐字稿、照抄的原話要對得上那一行或前後一行
     claim_extractor.py               標出主張：有行號的逐字稿、照抄的原話要對得上那一行或前後一行、能不能查核
-    fact_checks.py                   RequestFactCheck（排入自己的 queue）與消費 fact_check.requested：查核過的保留
+    claim_checker.py                 查核一條主張的結論：只根據編號的網頁摘錄、引用要對得上、沒引用就是查不到可靠來源、[n] 依保存的來源重新編號
+    fact_checks.py                   RequestFactCheck / CheckClaims（排入自己的 queue）與消費 fact_check.requested、claim_check.requested：查核過的保留、每條各自成功或失敗
     decision_supersedes.py           取代：新的決策取代了哪一個較早的候選（只收給模型看的候選之一）
     decisions.py                     RequestDecisionExtraction（排入自己的 queue）、轉錄完自動抽、消費 decision.requested；新增、修改、刪除
     speaker_insights.py              講者數據的 AI 判斷：編號的逐字稿、打斷的候選、只收行號並對回片段
