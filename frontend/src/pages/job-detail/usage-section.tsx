@@ -16,6 +16,7 @@ const FEATURE_LABELS: Record<string, string> = {
   post_meeting: '會後處理',
   transcription: '轉錄',
   web_search: '網路搜尋',
+  fact_check: '事實查核',
   job_title: '標題',
   speaker_names: '講者名字建議',
   speaker_insights: '講者數據分析',

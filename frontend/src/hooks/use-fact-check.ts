@@ -11,10 +11,15 @@ export interface FactCheckActions {
   factCheck: JobFactCheck | null
   isRequesting: boolean
   find: () => void
+  /** Sending the ticked claims off to be checked. */
+  isSendingCheck: boolean
+  /** Checks these claims (one web search each); resolves true once they're being checked. */
+  check: (claimIds: string[]) => Promise<boolean>
 }
 
-// 事實查核: claims found in the background; while that's GENERATING (or a claim is being checked) it's asked for again every
-// 3 seconds, and once it settles onSettled is told (the model was used). Lives in the page, not the Studio card, so polling
+// 事實查核: claims found, and ticked claims checked, in the background; while that's GENERATING (or a claim is being
+// checked) it's asked for again every 3 seconds, and once it settles onSettled is told (the model, and maybe web
+// searches, were used). Lives in the page, not the Studio card, so polling
 // carries on while the phone's Studio sheet is closed, and the transcript can mark the claims (as quizzes, decisions).
 export function useFactCheck(jobId: string | undefined, isCompleted: boolean, onSettled: () => void): FactCheckActions {
   const [factCheck, setFactCheck] = useState<JobFactCheck | null>(null)
@@ -68,5 +73,26 @@ export function useFactCheck(jobId: string | undefined, isCompleted: boolean, on
       .finally(() => setIsRequesting(false))
   }, [jobId, isRequesting])
 
-  return { factCheck, isRequesting, find }
+  const [isSendingCheck, setIsSendingCheck] = useState(false)
+  const check = useCallback(
+    (claimIds: string[]) => {
+      if (!jobId || isSendingCheck || claimIds.length === 0) return Promise.resolve(false)
+      setIsSendingCheck(true)
+      return factCheckApi
+        .check(jobId, claimIds)
+        .then((latest) => {
+          localChanges.current += 1
+          setFactCheck(latest)
+          return true
+        })
+        .catch((err) => {
+          toast.error(err instanceof ApiError ? err.message : '無法開始查核，請稍後再試')
+          return false
+        })
+        .finally(() => setIsSendingCheck(false))
+    },
+    [jobId, isSendingCheck],
+  )
+
+  return { factCheck, isRequesting, find, isSendingCheck, check }
 }

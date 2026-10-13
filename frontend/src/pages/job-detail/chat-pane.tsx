@@ -3,6 +3,7 @@ import { AlertCircle, BookmarkPlus, Check, ChevronRight, CircleAlert, Globe, Loa
 import { toast } from 'sonner'
 import { modelLabel } from '@/lib/providers'
 import { cn } from '@/lib/utils'
+import { siteOf, WEB_LINK } from '@/lib/web-sources'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
@@ -100,15 +101,6 @@ interface ChatPaneProps {
 
 const USED_UP = '這個月的網路搜尋已用完，下個月 1 日恢復'
 
-const WEB_LINK = { target: '_blank', rel: 'noopener noreferrer' } as const
-
-function siteOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '')
-  } catch {
-    return url
-  }
-}
 
 // The answer, with each [n] that points at one of its web sources turned into a small link to that page. Any other
 // bracketed number is left as text.

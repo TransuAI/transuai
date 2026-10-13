@@ -210,7 +210,12 @@ export function JobDetailPage() {
   const quizzes = useQuizzes(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const speakerInsights = useSpeakerInsights(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const decisions = useDecisions(jobId, jobStatus === 'COMPLETED', reloadUsage)
-  const factCheck = useFactCheck(jobId, jobStatus === 'COMPLETED', reloadUsage)
+  // Checking claims searches the web: once it settles, this month's searches left go down too.
+  const reloadAfterFactCheck = useCallback(() => {
+    reloadUsage()
+    reloadWebSearchesLeft()
+  }, [reloadUsage, reloadWebSearchesLeft])
+  const factCheck = useFactCheck(jobId, jobStatus === 'COMPLETED', reloadAfterFactCheck)
   const outputs = useOutputs(jobId, jobStatus === 'COMPLETED', reloadUsage)
   const translations = useTranslations(jobId, jobStatus === 'COMPLETED', reloadUsage, transcript)
   const postMeeting = usePostMeeting(jobId, jobStatus === 'COMPLETED', reloadUsage)

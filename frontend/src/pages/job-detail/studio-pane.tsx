@@ -57,6 +57,9 @@ interface StudioPaneProps {
   speakerInsights: SpeakerInsightsActions
   decisions: DecisionsActions
   factCheck: FactCheckActions
+  /** Whether this deployment can search the web, and how many searches are left this month (null: unknown). */
+  webSearchAvailable: boolean
+  webSearchesLeft: number | null
   /** The claim 事實查核 should scroll to and highlight (picked on the transcript). */
   claimToOpen: string | null
   onClaimOpened: () => void
@@ -106,6 +109,8 @@ export function StudioPane({
   speakerInsights,
   decisions,
   factCheck,
+  webSearchAvailable,
+  webSearchesLeft,
   claimToOpen,
   onClaimOpened,
   outputs,
@@ -328,6 +333,8 @@ export function StudioPane({
           {tool === 'fact-check' && (
             <FactCheckSection
               factCheck={factCheck}
+              webSearchAvailable={webSearchAvailable}
+              webSearchesLeft={webSearchesLeft}
               transcript={transcript}
               onSeek={onSeek}
               mediaAvailable={mediaAvailable}

@@ -29,7 +29,7 @@ vi.mock('@/lib/api', () => ({
   outputsApi: { list: vi.fn(), request: vi.fn(), update: vi.fn() },
   translationsApi: { list: vi.fn(), request: vi.fn(), get: vi.fn(), delete: vi.fn() },
   decisionsApi: { list: vi.fn(), extract: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
-  factCheckApi: { get: vi.fn(), find: vi.fn(), verify: vi.fn() },
+  factCheckApi: { get: vi.fn(), find: vi.fn(), check: vi.fn() },
 }))
 
 // Every test renders the whole page, and this file runs ~250 of them in one jsdom: on a busy machine the later, longer
@@ -4591,5 +4591,135 @@ describe('JobDetailPage fact check (事實查核, COMPLETED, desktop layout)', (
     await user.click(screen.getByRole('button', { name: '再找一次' }))
 
     expect(factCheckApi.find).toHaveBeenCalledWith('job-1')
+  })
+
+  describe('checking the ticked claims (查核)', () => {
+    const law = claim({ id: 'c3', speakerLabel: 'S1', startTime: 6, text: '先聊聊近況', claim: '某法規在去年修改', kind: 'fact' })
+    const searchedThisMonth = (succeeded: number) => ({
+      month: '2026-10', llm: [], transcription: [], webSearches: { succeeded, failed: 0 },
+      limits: { transcriptionMinutes: 600, platformTokens: 2000000, webSearches: 30 },
+    })
+
+    beforeEach(() => {
+      vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false, webSearch: true })
+      vi.mocked(usageApi.getMonthly).mockResolvedValue(searchedThisMonth(27))
+      vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: found, claims: [...claims, law] })
+    })
+
+    async function openFactCheck() {
+      stubDesktopLayout()
+      await renderCompletedJob(multiSpeakerTranscript)
+      await openStudioTool('事實查核')
+      return screen.findByRole('list', { name: '這場的主張' })
+    }
+
+    it('says how many searches the ticked claims will use and how many are left, then checks them', async () => {
+      const list = await openFactCheck()
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      expect(within(list).queryByRole('checkbox', { name: '查核：主持人最近很忙' })).toBeNull() // 無法查核
+
+      await user.click(within(list).getByRole('checkbox', { name: '查核：台灣約有 30% 的人每天收聽 Podcast' }))
+      await user.click(within(list).getByRole('checkbox', { name: '查核：某法規在去年修改' }))
+      expect(await screen.findByText('會用掉 2 次網路搜尋，本月還剩 3 次')).toBeInTheDocument()
+
+      vi.mocked(factCheckApi.check).mockResolvedValue({
+        extraction: found, claims: [claim({ checking: true }), claims[1], { ...law, checking: true }],
+      })
+      await user.click(screen.getByRole('button', { name: '查核 2 條' }))
+
+      expect(factCheckApi.check).toHaveBeenCalledWith('job-1', ['c1', 'c3'])
+      expect(within(list).getAllByText('查核中…')).toHaveLength(2)
+      expect(screen.getByRole('button', { name: '查核' })).toBeDisabled() // nothing ticked any more
+    })
+
+    it('shows each verdict with its explanation and sources once checked, why a check failed, and the searches now left', async () => {
+      vi.mocked(factCheckApi.get).mockResolvedValue({
+        extraction: found, claims: [claim({ checking: true }), claims[1], { ...law, checking: true }],
+      })
+      const list = await openFactCheck()
+      expect(screen.queryByText('AI 依網路搜尋整理，請自行確認來源')).toBeNull()
+
+      vi.mocked(factCheckApi.get).mockResolvedValue({
+        extraction: found,
+        claims: [
+          claim({
+            verdict: 'disputed', explanation: '調查顯示約 22%，不是三成 [1]。', checkModel: 'qwen3:14b', checkedAt: '2026-10-04T03:05:00Z',
+            sources: [{ title: '2025 Podcast 收聽調查', url: 'https://www.example.org/survey', excerpt: '每天收聽的人約 22%' }],
+          }),
+          claims[1],
+          { ...law, checkError: '網路搜尋失敗，請再查一次' },
+        ],
+      })
+      vi.mocked(usageApi.getMonthly).mockResolvedValue(searchedThisMonth(29))
+      await vi.advanceTimersByTimeAsync(3000)
+
+      const [podcast, , lawItem] = within(list).getAllByRole('listitem').filter((item) => item.dataset.claimId)
+      await waitFor(() => expect(within(podcast).getByText('有出入')).toBeInTheDocument())
+      expect(podcast).toHaveTextContent('調查顯示約 22%，不是三成 [1]。')
+      const source = within(within(podcast).getByRole('list', { name: '查核來源' })).getByRole('link', { name: /2025 Podcast 收聽調查/ })
+      expect(source).toHaveAttribute('href', 'https://www.example.org/survey')
+      expect(source).toHaveAttribute('target', '_blank')
+      expect(podcast).toHaveTextContent('example.org')
+      expect(podcast).toHaveTextContent('由 qwen3:14b 查核')
+      expect(lawItem).toHaveTextContent('查核失敗：網路搜尋失敗，請再查一次')
+      expect(within(lawItem).getByRole('checkbox', { name: '查核：某法規在去年修改' })).toBeEnabled() // can be checked again
+      expect(screen.getByText('AI 依網路搜尋整理，請自行確認來源')).toBeInTheDocument()
+      expect(await screen.findByText('勾選要查核的主張，每條會用掉 1 次網路搜尋，本月還剩 1 次')).toBeInTheDocument()
+    })
+
+    it('says why the check was refused, keeping the claims ticked', async () => {
+      const list = await openFactCheck()
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      vi.mocked(factCheckApi.check).mockRejectedValue(new ApiError(429, {
+        error: 'USAGE_LIMIT_REACHED', message: '查核 1 條主張要用 1 次網路搜尋，這個月還剩 0 次（用量上限 30 次），下個月 1 日恢復',
+      }))
+
+      await user.click(within(list).getByRole('checkbox', { name: '查核：某法規在去年修改' }))
+      await user.click(screen.getByRole('button', { name: '查核 1 條' }))
+
+      expect(await screen.findByText(/這個月還剩 0 次/)).toBeInTheDocument()
+      expect(within(list).getByRole('checkbox', { name: '查核：某法規在去年修改' })).toBeChecked()
+    })
+
+    it('counts the claims still being checked against the searches left', async () => {
+      vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: found, claims: [claim({ checking: true }), claims[1], law] })
+      const list = await openFactCheck()
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+      await user.click(within(list).getByRole('checkbox', { name: '查核：某法規在去年修改' }))
+
+      expect(await screen.findByText('會用掉 1 次網路搜尋，本月還剩 2 次')).toBeInTheDocument()
+    })
+
+    it("won't check more claims than there are searches left, and still lists the claims once they're used up", async () => {
+      vi.mocked(usageApi.getMonthly).mockResolvedValue(searchedThisMonth(29))
+      const list = await openFactCheck()
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+      await user.click(within(list).getByRole('checkbox', { name: '查核：台灣約有 30% 的人每天收聽 Podcast' }))
+      await user.click(within(list).getByRole('checkbox', { name: '查核：某法規在去年修改' }))
+
+      expect(screen.getByText('勾了 2 條，本月只剩 1 次網路搜尋，請少勾幾條')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '查核 2 條' })).toBeDisabled()
+    })
+
+    it("says when this month's searches are used up, with nothing left to tick", async () => {
+      vi.mocked(usageApi.getMonthly).mockResolvedValue(searchedThisMonth(30))
+      const list = await openFactCheck()
+
+      expect(await screen.findByText('這個月的網路搜尋已用完，下個月 1 日恢復；找出主張照常可以用')).toBeInTheDocument()
+      const boxes = within(list).getAllByRole('checkbox')
+      expect(boxes).toHaveLength(2)
+      for (const box of boxes) expect(box).toBeDisabled()
+      expect(screen.getByRole('button', { name: '重新找出' })).toBeEnabled()
+    })
+
+    it("can't check anything where the deployment has no web search", async () => {
+      vi.mocked(modelsApi.available).mockResolvedValue({ models: [platformModel, gpt5], openrouterCustom: false, webSearch: false })
+      const list = await openFactCheck()
+
+      expect(await screen.findByText('這個部署沒有設定網路搜尋，無法查核')).toBeInTheDocument()
+      expect(within(list).queryAllByRole('checkbox')).toHaveLength(0)
+    })
   })
 })

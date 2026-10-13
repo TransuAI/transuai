@@ -320,6 +320,10 @@ export const decisionsApi = {
 export const factCheckApi = {
   get: (jobId: string) => apiFetch<JobFactCheck>(`/jobs/${jobId}/fact-check`),
   find: (jobId: string) => apiFetch<FactCheckExtraction>(`/jobs/${jobId}/fact-check`, { method: 'POST' }),
+  // 每條查一次網路，在背景跑：回傳這個 Job 的主張（勾選的標成查核中），輪詢 get 直到沒有在查核中的。剩下的搜尋次數不夠查完全部時
+  // 整批不查（429，說還剩幾次）。
+  check: (jobId: string, claimIds: string[]) =>
+    apiFetch<JobFactCheck>(`/jobs/${jobId}/fact-check/verify`, { method: 'POST', body: { claimIds } }),
 }
 
 // 講者數據的 AI 判斷: one analysis per job, re-analysing replaces it once done.

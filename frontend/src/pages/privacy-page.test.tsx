@@ -19,12 +19,13 @@ describe('PrivacyPage', () => {
     expect(screen.getByText(/Hugging Face Inference Providers/)).toBeInTheDocument()
   })
 
-  it('says only a rewritten search query goes to Tavily, and only when 查網路 is on', () => {
+  it('says only a rewritten search query or a ticked claim goes to Tavily, and only when 查網路 is on or a claim is checked', () => {
     render(<MemoryRouter><PrivacyPage /></MemoryRouter>)
 
     const tavily = screen.getByText('Tavily').parentElement!
     expect(within(tavily).getByText(/逐字稿與摘要本身不送/)).toBeInTheDocument()
-    expect(within(tavily).getByText(/只有你在問答時打開「查網路」的那一題/)).toBeInTheDocument()
+    expect(within(tavily).getByText(/事實查核時，你勾選的每條主張整理成的一句話/)).toBeInTheDocument()
+    expect(within(tavily).getByText(/只有你在問答時打開「查網路」的那一題，以及你在事實查核按下查核的主張（每條一次）/)).toBeInTheDocument()
   })
 
   it('marks what still has to be filled in instead of making it up', () => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BookmarkPlus, Pencil, SearchCheck, StickyNote, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { VERDICT_LABELS } from '@/lib/claims'
 import { handleEditorKeys } from '@/lib/editor-keys'
 import { formatDuration } from '@/lib/media'
 import type { TranscriptMatch } from '@/lib/transcript-search'
@@ -181,7 +182,7 @@ export function SegmentRow({
                 key={claim.id}
                 type="button"
                 aria-label={`主張：${claim.claim}`}
-                title={claim.claim}
+                title={claim.verdict ? `${claim.claim}（${VERDICT_LABELS[claim.verdict]}）` : claim.claim}
                 onClick={() => onOpenClaim(claim.id)}
                 className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               >

@@ -360,6 +360,8 @@ export function CompletedWorkspace({
       speakerInsights={speakerInsights}
       decisions={decisions}
       factCheck={factCheck}
+      webSearchAvailable={webSearchAvailable}
+      webSearchesLeft={webSearchesLeft}
       claimToOpen={claimToOpen}
       onClaimOpened={onClaimOpened}
       outputs={outputs}
