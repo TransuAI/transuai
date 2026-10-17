@@ -279,6 +279,16 @@ access token 是 stateless 的，帳號刪掉之後最多還能用到過期（15
 
 對應表：`INVALID_ARGUMENT`→400、`UNAUTHENTICATED`→401、`PERMISSION_DENIED`→403、`NOT_FOUND`→404、`ALREADY_EXISTS`/`FAILED_PRECONDITION`→409、`UNAVAILABLE`（下游服務沒開/連不上）→503，其餘→500。JWT 驗證失敗（缺 header、簽章錯、過期）直接在 filter 層回 401，不會走到這裡。超過限流是 429（見上方「限流」）。
 
+500 不把下游的描述給使用者（Python 服務沒接住的例外，描述裡是例外訊息）：回 `{ "error": "INTERNAL", "message": "伺服器發生錯誤，請稍後再試（錯誤代碼 1a2b3c4d）" }`，
+log 裡同一個代碼那一行有完整的 status（ASVS 7.4.1）。503 的描述照樣傳——那是各服務寫給使用者看的「暫時無法…，請稍後再試」。
+
+### 安全標頭
+
+每個回應（含被 JWT filter 擋下的 401／429）都有（`security/SecurityHeadersFilter`，ASVS 8.2.1、14.4）：`X-Content-Type-Options: nosniff`、
+`Cache-Control: no-store`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`、
+`Content-Disposition: attachment; filename="api.json"`（開發環境的 Swagger 兩條路徑不加後兩個）。HSTS 由終結 TLS 的反向代理加，前端頁面的 CSP 由
+提供前端檔案的伺服器加（見 `infra/docs/deployment-checklist.md`）。
+
 ## 環境變數
 
 | 變數 | 預設值 | 說明 |
@@ -306,7 +316,7 @@ access token 是 stateless 的，帳號刪掉之後最多還能用到過期（15
 ```
 src/main/java/com/transuai/gateway/
   config/            GrpcClientConfig（4 個 ManagedChannel + blocking stub bean）、GrpcProperties、WebConfig
-  security/           JwtProperties、JwtService（只驗證 access token）、JwtAuthenticationFilter、InvalidTokenException、RefreshTokenCookie、DeletedUsers（剛刪除帳號的使用者）
+  security/           JwtProperties、JwtService（只驗證 access token）、JwtAuthenticationFilter、InvalidTokenException、RefreshTokenCookie、DeletedUsers（剛刪除帳號的使用者）、SecurityHeadersFilter
   web/                CurrentUserId annotation + CurrentUserIdArgumentResolver、AuthController、UploadController、
                        TranscriptionController、AiController、QuizController、UsageController、ModelController、
                        ProviderKeyController、ConnectionController、PostMeetingController

@@ -1,5 +1,7 @@
 package com.transuai.gateway.web.advice;
 
+import java.util.UUID;
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -35,7 +37,14 @@ public class GrpcExceptionAdvice {
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
         if (httpStatus.is5xxServerError()) {
-            log.error("downstream gRPC call failed: {}", status, e);
+            // 伺服器端的錯誤不把細節給使用者（Python 服務沒接住的例外，描述裡是例外訊息）：一般的訊息加上一個代碼，
+            // log 裡用同一個代碼找得到細節（ASVS 7.4.1）。UNAVAILABLE 的描述是各服務寫給使用者看的「暫時無法…」，照樣傳。
+            String errorId = UUID.randomUUID().toString().substring(0, 8);
+            log.error("downstream gRPC call failed [{}]: {}", errorId, status, e);
+            if (status.getCode() != Status.Code.UNAVAILABLE) {
+                return ResponseEntity.status(httpStatus).body(new ErrorResponse("INTERNAL",
+                        "伺服器發生錯誤，請稍後再試（錯誤代碼 " + errorId + "）"));
+            }
         }
         return ResponseEntity.status(httpStatus)
                 .body(new ErrorResponse(status.getCode().name(), status.getDescription()));

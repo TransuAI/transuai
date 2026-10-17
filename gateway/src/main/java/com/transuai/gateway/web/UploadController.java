@@ -59,7 +59,7 @@ public class UploadController {
                 GetPresignedUploadUrlResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                                                 .setFileName(request.fileName())
-                                                .setFileType(FileType.valueOf(request.fileType()))
+                                                .setFileType(fileType(request.fileType()))
                                                 .setFileSizeBytes(request.fileSizeBytes())
                                                 .build());
                 return new PresignResponseDto(response.getUploadUrl(), response.getStoragePath(),
@@ -74,7 +74,7 @@ public class UploadController {
                                 .completeUpload(CompleteUploadRequest.newBuilder()
                                                 .setStoragePath(request.storagePath())
                                                 .setFileName(request.fileName())
-                                                .setFileType(FileType.valueOf(request.fileType()))
+                                                .setFileType(fileType(request.fileType()))
                                                 .setFileSizeBytes(request.fileSizeBytes())
                                                 .setDurationSeconds(request.durationSeconds())
                                                 .setTranscriptionLanguage(
@@ -136,5 +136,13 @@ public class UploadController {
                 GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .deleteJob(DeleteJobRequest.newBuilder().setJobId(jobId).build());
                 jobOwnershipGuard.forget(jobId);
+        }
+
+        // 只有這兩種；其他字串不要把 enum 的類別名稱帶進錯誤訊息（FileType.valueOf 的訊息）。
+        private static FileType fileType(String value) {
+                if ("AUDIO".equals(value) || "VIDEO".equals(value)) {
+                        return FileType.valueOf(value);
+                }
+                throw new IllegalArgumentException("fileType must be AUDIO or VIDEO"); // → 400 via GrpcExceptionAdvice
         }
 }
