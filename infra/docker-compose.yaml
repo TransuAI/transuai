@@ -69,7 +69,8 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # MinIO 官方的 image 已經從 Docker Hub 下架：用 Pigsty 維護的同一套程式（含 mc），跟 infra/deploy 一樣。
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -90,7 +91,7 @@ services:
       retries: 10
 
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: minio-init
     depends_on:
       minio:

@@ -33,7 +33,8 @@ spec:
     spec:
       containers:
         - name: minio
-          image: minio/minio:latest
+          # MinIO 官方的 image 已經從 Docker Hub 下架：用 Pigsty 維護的同一套程式（含 mc），跟 infra/deploy 一樣。
+          image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
           args: ["server", "/data", "--console-address", ":9001"]
           ports:
             - containerPort: 9000
@@ -80,7 +81,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: minio-init
-          image: minio/mc:latest
+          image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
           envFrom:
             - configMapRef:
                 name: app-config
