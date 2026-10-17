@@ -7,6 +7,8 @@ import {
   toMarkdownReport,
   withTranslation,
   toDecisionsMarkdown,
+  toFactCheckMarkdown,
+  buildFactCheckExport,
   toNotesMarkdown,
   toQuizMarkdown,
   toPlainText,
@@ -596,5 +598,97 @@ describe('toDecisionsMarkdown', () => {
 
   it('says so when there are none', () => {
     expect(toDecisionsMarkdown({ fileName: 'meeting.mp3', decisions: [] })).toBe('# meeting.mp3：決策\n\n尚無決策\n')
+  })
+})
+
+describe('toFactCheckMarkdown', () => {
+  const disputed = {
+    claim: '台灣約有 30% 的人每天收聽 Podcast', kind: 'number' as const, verdict: 'disputed' as const,
+    explanation: '調查顯示約 22%，不是三成 [1]。',
+    sources: [{ title: '2025 Podcast [收聽] 調查', url: 'https://www.example.org/survey' }, { title: '', url: 'https://news.example.com/a' }],
+    speaker: '主持人', startTime: 75, text: '台灣\n有三成的人每天聽', isStale: false,
+  }
+  const unchecked = {
+    claim: '某法規在去年修改', kind: 'fact' as const, verdict: null, explanation: null, sources: [],
+    speaker: null, startTime: 12, text: '那個法規去年改了', isStale: true,
+  }
+  const notCheckable = { ...unchecked, claim: '主持人最近很忙', verdict: 'not_checkable' as const, startTime: 200, isStale: false }
+
+  it('writes each verdict with why and its sources, and lists the claims not checked yet last', () => {
+    const markdown = toFactCheckMarkdown({
+      fileName: '節目.m4a', title: '第 12 集', isStale: false, claims: [unchecked, disputed, notCheckable],
+    })
+
+    expect(markdown).toBe(
+      [
+        '# 第 12 集：事實查核',
+        '',
+        '- 檔名：節目.m4a',
+        '',
+        '> AI 依網路搜尋整理，請自行確認來源',
+        '',
+        '## 結論',
+        '',
+        '### 1. 台灣約有 30% 的人每天收聽 Podcast',
+        '',
+        '- 結論：有出入\n- 類型：數字\n- 時間：[01:15] 主持人：「台灣 有三成的人每天聽」',
+        '',
+        '調查顯示約 22%，不是三成 [1]。',
+        '',
+        '來源：',
+        '',
+        '1. [2025 Podcast \\[收聽\\] 調查](https://www.example.org/survey)\n2. [news.example.com](https://news.example.com/a)',
+        '',
+        '### 2. 主持人最近很忙',
+        '',
+        '- 結論：無法查核\n- 類型：事實\n- 時間：[03:20] 「那個法規去年改了」',
+        '',
+        '## 還沒查核',
+        '',
+        '### 3. 某法規在去年修改',
+        '',
+        '- 類型：事實\n- 時間：[00:12] 「那個法規去年改了」\n- 依據舊版逐字稿',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('says the claims may be out of date once the transcript has changed', () => {
+    const markdown = toFactCheckMarkdown({ fileName: '節目.m4a', isStale: true, claims: [disputed] })
+
+    expect(markdown).toContain('# 節目.m4a：事實查核\n\n> AI 依網路搜尋整理，請自行確認來源\n>\n> 逐字稿在找出主張後有修改，這些主張可能過時\n\n')
+  })
+
+  it('says there are no claims yet', () => {
+    expect(toFactCheckMarkdown({ fileName: '節目.m4a', isStale: false, claims: [] })).toBe('# 節目.m4a：事實查核\n\n尚無主張\n')
+  })
+})
+
+describe('buildFactCheckExport', () => {
+  it("names the speakers and leaves out a 無法查核 claim's explanation", () => {
+    const base = {
+      jobId: 'job-1', startTime: 4, text: '大家好', kind: 'fact' as const, sources: [], checkedAt: null, checkModel: null,
+      checking: false, checkError: null, sourceRevision: 1,
+    }
+    const content = buildFactCheckExport(
+      { fileName: 'a.mp3', title: '週會' },
+      {
+        extraction: {
+          status: 'COMPLETED', failureReason: null, sourceRevision: 1, modelProvider: null, model: 'm',
+          requestedAt: '2026-10-04T03:00:00Z', completedAt: '2026-10-04T03:01:00Z',
+        },
+        claims: [
+          { ...base, id: 'c1', speakerLabel: 'S1', claim: 'A', verdict: 'not_checkable', explanation: '只有說話者知道' },
+          { ...base, id: 'c2', speakerLabel: null, claim: 'B', verdict: null, explanation: null },
+        ],
+      },
+      { jobId: 'job-1', language: 'zh-TW', fullText: '', revision: 2, segments: [], speakers: [{ label: 'S1', displayName: '主持人', displayOrder: 1 }] },
+    )
+
+    expect(content.isStale).toBe(true)
+    expect(content.claims.map(({ claim, speaker, explanation, isStale }) => ({ claim, speaker, explanation, isStale }))).toEqual([
+      { claim: 'A', speaker: '主持人', explanation: null, isStale: true },
+      { claim: 'B', speaker: null, explanation: null, isStale: true },
+    ])
   })
 })

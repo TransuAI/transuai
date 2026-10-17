@@ -4548,6 +4548,42 @@ describe('JobDetailPage fact check (事實查核, COMPLETED, desktop layout)', (
     await waitFor(() => expect(screen.getByRole('button', { name: '事實查核' })).toHaveAccessibleDescription('2 條主張'))
   })
 
+  it('downloads the claims and their verdicts as Markdown, headed by the title', async () => {
+    stubDesktopLayout()
+    const downloads = captureDownloads()
+    vi.mocked(factCheckApi.get).mockResolvedValue({
+      extraction: found,
+      claims: [
+        claim({ verdict: 'supported', explanation: '調查顯示約 30% [1]。', sources: [{ title: '收聽調查', url: 'https://example.org/s', excerpt: null }] }),
+        { ...claims[1], verdict: null },
+      ],
+    })
+    await renderCompletedJob(multiSpeakerTranscript, [], { title: '第 12 集' })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await openStudioTool('事實查核')
+    await screen.findByRole('list', { name: '這場的主張' })
+
+    await user.click(screen.getByRole('button', { name: '下載 Markdown' }))
+
+    expect(downloads[0].fileName).toBe('interview-事實查核.md')
+    const markdown = await downloads[0].blob?.text()
+    expect(markdown).toContain('# 第 12 集：事實查核')
+    expect(markdown).toContain(
+      '## 結論\n\n### 1. 台灣約有 30% 的人每天收聽 Podcast\n\n- 結論：有依據\n- 類型：數字\n- 時間：[00:04] 講者 2：「大家好」\n\n調查顯示約 30% [1]。\n\n來源：\n\n1. [收聽調查](https://example.org/s)',
+    )
+    expect(markdown).toContain('## 還沒查核\n\n### 2. 主持人最近很忙\n\n- 類型：事實\n- 時間：[00:06] 主持人：「先聊聊近況」')
+  })
+
+  it('offers no download before any claims are found', async () => {
+    stubDesktopLayout()
+    vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: null, claims: [] })
+    await renderCompletedJob(multiSpeakerTranscript)
+    await openStudioTool('事實查核')
+
+    expect(await screen.findByRole('button', { name: '找出主張' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下載 Markdown' })).toBeNull()
+  })
+
   it('marks where a claim was said in the transcript, opening it in 事實查核', async () => {
     stubDesktopLayout()
     vi.mocked(factCheckApi.get).mockResolvedValue({ extraction: found, claims })

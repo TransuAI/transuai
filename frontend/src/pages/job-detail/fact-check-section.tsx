@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   CircleCheck,
   CircleSlash,
+  Download,
   ExternalLink,
   History,
   Loader2Icon,
@@ -15,6 +16,8 @@ import type { FactCheckActions } from '@/hooks/use-fact-check'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { KIND_LABELS, VERDICT_LABELS } from '@/lib/claims'
+import { downloadTextFile, fileNameWithSuffix } from '@/lib/download'
+import { buildFactCheckExport, FACT_CHECK_MARKDOWN, toFactCheckMarkdown } from '@/lib/export-formats'
 import { speakerNameOrLabel } from '@/lib/speakers'
 import { siteOf, WEB_LINK } from '@/lib/web-sources'
 import { isClaimStale, isFactCheckStale } from '@/lib/staleness'
@@ -44,6 +47,8 @@ export function FactCheckSection({
   mediaAvailable,
   claimToOpen = null,
   onClaimOpened = () => {},
+  fileName,
+  jobTitle = null,
 }: {
   factCheck: FactCheckActions
   /** Whether this deployment can search the web, and how many searches are left this month (null: unknown). */
@@ -55,6 +60,9 @@ export function FactCheckSection({
   /** A claim picked in the transcript: scrolled to and briefly highlighted. */
   claimToOpen?: string | null
   onClaimOpened?: () => void
+  /** What the exported Markdown is named after and headed by. */
+  fileName: string
+  jobTitle?: string | null
 }) {
   // As notes: the claim just opened from elsewhere, briefly highlighted so the eye finds it in the list.
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
@@ -97,6 +105,14 @@ export function FactCheckSection({
       else next.delete(claimId)
       return next
     })
+  const download = () => {
+    if (!factCheck) return
+    downloadTextFile({
+      fileName: fileNameWithSuffix(fileName, FACT_CHECK_MARKDOWN.fileSuffix),
+      content: toFactCheckMarkdown(buildFactCheckExport({ fileName, title: jobTitle }, factCheck, transcript)),
+      mimeType: FACT_CHECK_MARKDOWN.mimeType,
+    })
+  }
   const checkTicked = () => {
     void check(ticked.map((claim) => claim.id)).then((started) => {
       if (started) setSelected(new Set())
@@ -187,6 +203,12 @@ export function FactCheckSection({
           </div>
         ))}
       {anyChecked && <p className="text-xs text-muted-foreground">AI 依網路搜尋整理，請自行確認來源</p>}
+      {claims.length > 0 && (
+        <Button size="sm" variant="outline" className="w-fit" onClick={download}>
+          <Download className="size-4" />
+          下載 Markdown
+        </Button>
+      )}
 
       {status === 'COMPLETED' && !stale && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground/80">

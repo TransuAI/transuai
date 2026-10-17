@@ -66,6 +66,8 @@ interface StudioPaneProps {
   outputs: OutputsActions
   /** The uploaded file's name: what downloaded outputs are named after. */
   fileName: string
+  /** The job's title (標題), when it has one: what an exported 事實查核 is headed by. */
+  jobTitle: string | null
   postMeeting: PostMeeting | null
   onStartPostMeeting: () => void
   isStartingPostMeeting: boolean
@@ -115,6 +117,7 @@ export function StudioPane({
   onClaimOpened,
   outputs,
   fileName,
+  jobTitle,
   postMeeting,
   onStartPostMeeting,
   isStartingPostMeeting,
@@ -340,6 +343,8 @@ export function StudioPane({
               mediaAvailable={mediaAvailable}
               claimToOpen={claimToOpen}
               onClaimOpened={onClaimOpened}
+              fileName={fileName}
+              jobTitle={jobTitle}
             />
           )}
 

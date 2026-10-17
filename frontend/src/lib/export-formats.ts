@@ -1,8 +1,21 @@
+import { KIND_LABELS, VERDICT_LABELS } from '@/lib/claims'
 import { speakerNameLookup, speakerNameOrLabel } from '@/lib/speakers'
 import { computeSpeakerStats, insightsByKind } from '@/lib/speaker-stats'
 import { sortNotes } from '@/lib/notes'
-import { hasSpeakerInsightResults, isSpeakerInsightsStale, isSummaryStale } from '@/lib/staleness'
-import type { Chapter, Decision, Job, Note, QuizQuestion, SpeakerInsights, Summary, Transcript, WebSource } from '@/types/api'
+import { hasSpeakerInsightResults, isClaimStale, isFactCheckStale, isSpeakerInsightsStale, isSummaryStale } from '@/lib/staleness'
+import { siteOf } from '@/lib/web-sources'
+import type {
+  Chapter,
+  Decision,
+  Job,
+  JobFactCheck,
+  Note,
+  QuizQuestion,
+  SpeakerInsights,
+  Summary,
+  Transcript,
+  WebSource,
+} from '@/types/api'
 
 // 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
 // 這裡只負責「內容長什麼樣」，下載 / 複製由呼叫端處理。
@@ -355,6 +368,107 @@ export const DECISIONS_MARKDOWN_FORMAT: ExportFormat = {
   fileSuffix: '-決策.md',
   mimeType: 'text/markdown',
   render: toDecisionsMarkdown,
+}
+
+/** A 主張 in an export: who said it by name, and — once checked — the verdict, why, and the pages it rests on. */
+export interface ExportClaim {
+  claim: string
+  kind: keyof typeof KIND_LABELS
+  verdict: keyof typeof VERDICT_LABELS | null
+  explanation: string | null
+  /** In the order the explanation's [n] cites them. */
+  sources: { title: string; url: string }[]
+  /** The speaker's display name; null when the claim has no speaker. */
+  speaker: string | null
+  startTime: number
+  text: string
+  /** Found in an older transcript than the one there is now. */
+  isStale: boolean
+}
+
+export interface FactCheckExport {
+  fileName: string
+  title?: string | null
+  /** The claims were found before the transcript was last edited. */
+  isStale: boolean
+  /** By time, as listed in the Studio. */
+  claims: ExportClaim[]
+}
+
+export const FACT_CHECK_MARKDOWN = { fileSuffix: '-事實查核.md', mimeType: 'text/markdown' } as const
+
+export function buildFactCheckExport(
+  job: { fileName: string; title?: string | null },
+  factCheck: JobFactCheck,
+  transcript: Transcript | null,
+): FactCheckExport {
+  const nameOf = speakerNameOrLabel(transcript?.speakers ?? [])
+  return {
+    fileName: job.fileName,
+    title: job.title ?? null,
+    isStale: isFactCheckStale(factCheck.extraction, transcript),
+    claims: factCheck.claims.map((claim) => ({
+      claim: claim.claim,
+      kind: claim.kind,
+      verdict: claim.verdict,
+      // As in the Studio: what makes a claim 無法查核 isn't something checked, so it has no explanation to give.
+      explanation: claim.verdict === 'not_checkable' ? null : claim.explanation,
+      sources: claim.sources.map(({ title, url }) => ({ title, url })),
+      speaker: claim.speakerLabel ? nameOf(claim.speakerLabel) : null,
+      startTime: claim.startTime,
+      text: claim.text,
+      isStale: isClaimStale(claim, transcript),
+    })),
+  }
+}
+
+// 事實查核的 Markdown：大標「標題：事實查核」，有標題時多一行檔名，然後是「AI 依網路搜尋整理」的提示（與過時提示）。
+// 有結論的主張（含無法查核）依時間在前，還沒查的列在最後；編號整份連續。每條主張一節：結論、類型、時間點與講者的原話、
+// 說明，最後是來源（編號跟說明裡的 [n] 一樣）。
+export function toFactCheckMarkdown(content: FactCheckExport): string {
+  const blocks: string[] = [`# ${content.title || content.fileName}：事實查核`]
+  if (content.title) blocks.push(`- 檔名：${content.fileName}`)
+  if (content.claims.length === 0) {
+    blocks.push('尚無主張')
+    return blocks.join('\n\n') + '\n'
+  }
+  blocks.push(
+    [
+      '> AI 依網路搜尋整理，請自行確認來源',
+      ...(content.isStale ? ['>', '> 逐字稿在找出主張後有修改，這些主張可能過時'] : []),
+    ].join('\n'),
+  )
+
+  const withVerdict = content.claims.filter((claim) => claim.verdict !== null)
+  const unchecked = content.claims.filter((claim) => claim.verdict === null)
+  let number = 0
+  if (withVerdict.length > 0) {
+    blocks.push('## 結論')
+    for (const claim of withVerdict) blocks.push(...claimBlocks(claim, ++number))
+  }
+  if (unchecked.length > 0) {
+    blocks.push('## 還沒查核')
+    for (const claim of unchecked) blocks.push(...claimBlocks(claim, ++number))
+  }
+  return blocks.join('\n\n') + '\n'
+}
+
+function claimBlocks(claim: ExportClaim, number: number): string[] {
+  const facts = [
+    claim.verdict && `- 結論：${VERDICT_LABELS[claim.verdict]}`,
+    `- 類型：${KIND_LABELS[claim.kind]}`,
+    `- 時間：[${formatClock(claim.startTime)}] ${claim.speaker ? `${claim.speaker}：` : ''}「${oneLine(claim.text)}」`,
+    claim.isStale && '- 依據舊版逐字稿',
+  ].filter(Boolean)
+  const blocks = [`### ${number}. ${oneLine(claim.claim)}`, facts.join('\n')]
+  if (claim.explanation) blocks.push(claim.explanation)
+  if (claim.sources.length > 0) {
+    blocks.push(
+      '來源：',
+      claim.sources.map((source, i) => `${i + 1}. [${markdownLinkText(source.title || siteOf(source.url))}](${source.url})`).join('\n'),
+    )
+  }
+  return blocks
 }
 
 // Markdown 報告：標題、長度與建立時間、摘要、章節、（有的話）筆記、逐字稿，最後是（有的話）問答紀錄。每一節都是一

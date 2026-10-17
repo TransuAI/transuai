@@ -366,6 +366,7 @@ export function CompletedWorkspace({
       onClaimOpened={onClaimOpened}
       outputs={outputs}
       fileName={job.fileName}
+      jobTitle={job.title ?? null}
       postMeeting={postMeeting}
       onStartPostMeeting={onStartPostMeeting}
       isStartingPostMeeting={isStartingPostMeeting}
