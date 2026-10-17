@@ -47,6 +47,19 @@ service AuthService {
   // 用重設連結裡的 token 設新密碼（不需要 x-user-id）：token 無效、過期、用過了回 FAILED_PRECONDITION；新密碼照註冊的規則
   // （INVALID_ARGUMENT）。成功就作廢這位使用者所有的登入、寄一封通知信。
   rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+
+  // 確認 email（不需要 x-user-id）：註冊時寄的確認連結裡的 token。無效、過期、用過了回 FAILED_PRECONDITION。
+  rpc VerifyEmail(VerifyEmailRequest) returns (VerifyEmailResponse);
+
+  // 重寄確認信（需要 x-user-id）：已經確認過就什麼都不做；這個部署沒有設定寄信時 UNAVAILABLE。
+  rpc ResendEmailVerification(ResendEmailVerificationRequest) returns (ResendEmailVerificationResponse);
+
+  // 產生復原碼（需要 x-user-id）：要目前的密碼（錯了 PERMISSION_DENIED）。舊的作廢，回傳新的 10 組（只有這一次看得到），寄通知信。
+  rpc GenerateRecoveryCodes(GenerateRecoveryCodesRequest) returns (GenerateRecoveryCodesResponse);
+
+  // 忘記密碼的另一條路（不需要 x-user-id）：email＋一組還沒用的復原碼，設新密碼。email 或復原碼不對都回 FAILED_PRECONDITION（不分是哪個）；
+  // 新密碼照註冊的規則（INVALID_ARGUMENT，不合時復原碼不用掉）。成功就用掉那組、作廢所有登入、寄通知信。
+  rpc ResetPasswordWithRecoveryCode(ResetPasswordWithRecoveryCodeRequest) returns (ResetPasswordResponse);
 }
 
 message RegisterRequest {
@@ -78,6 +91,10 @@ message User {
   string email = 2;
   string display_name = 3;
   google.protobuf.Timestamp created_at = 4;
+  // email 確認過了沒（忘記密碼的信只寄給確認過的 email）。
+  bool email_verified = 5;
+  // 還沒用的復原碼有幾組（0：沒產生過或用完了）。
+  int32 recovery_codes_left = 6;
 }
 
 message LogoutRequest {
@@ -123,6 +140,33 @@ message ResetPasswordResponse {
   string user_id = 1;
   // 作廢的、access token 可能還沒過期的那幾串（同 LogoutResponse.ended_session_ids）。
   repeated string ended_session_ids = 2;
+}
+
+message VerifyEmailRequest {
+  string token = 1;
+}
+
+message VerifyEmailResponse {
+}
+
+message ResendEmailVerificationRequest {
+}
+
+message ResendEmailVerificationResponse {
+}
+
+message GenerateRecoveryCodesRequest {
+  string current_password = 1;
+}
+
+message GenerateRecoveryCodesResponse {
+  repeated string codes = 1;
+}
+
+message ResetPasswordWithRecoveryCodeRequest {
+  string email = 1;
+  string code = 2;
+  string new_password = 3;
 }
 
 message ChangePasswordResponse {

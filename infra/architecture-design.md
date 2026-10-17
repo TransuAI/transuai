@@ -120,6 +120,10 @@ POST   /auth/account/delete    刪除帳號：body { password }（密碼錯 403�
 POST   /auth/password          改密碼：body { currentPassword, newPassword }（目前的密碼錯 403、猜太多次 429）；其他裝置的登入全部作廢，這次拿到新的 token 與 cookie
 POST   /auth/password-reset    忘記密碼：body { email }，不用登入；一律 202（不透露有沒有註冊），有註冊就寄重設連結（auth-service 用部署單位的 SMTP）
 POST   /auth/password-reset/confirm  用重設連結設新密碼：body { token, newPassword }；連結一次性、30 分鐘；成功後所有登入作廢、寄通知信
+POST   /auth/password-reset/recovery-code  用 email＋一組復原碼設新密碼（收不到信時）；成功後所有登入作廢、寄通知信
+POST   /auth/verify-email      確認 email（註冊時寄的連結）；忘記密碼的信只寄給確認過的 email
+POST   /auth/verify-email/resend  重寄確認信（要登入）
+POST   /auth/recovery-codes    產生 10 組復原碼（要登入、要目前的密碼，只回傳這一次）
 GET    /auth/me                取得目前使用者資訊（需帶 access token）
 ```
 
@@ -954,7 +958,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
 4. **多格式輸出**：Studio「多格式輸出」產生 Podcast 介紹、YouTube 描述、部落格文章、電子報、社群貼文（依平台），依摘要、章節與使用者取過名字的講者寫成 Markdown，可以複製、下載。「會議紀錄」不另外做——會後處理寫進 Notion 的會議紀錄就是它。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、筆記、決策、測驗、事實查核），含譯文與雙語字幕、複製、下載原始檔）混為一談
-5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天，一次登入最多 30 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow；密碼 12 到 128 字元，PBKDF2 雜湊（舊的 bcrypt 登入時換掉）；可以改密碼、忘記密碼（email 重設連結），改了或重設了會寄通知信
+5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天，一次登入最多 30 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow；密碼 12 到 128 字元，PBKDF2 雜湊（舊的 bcrypt 登入時換掉）；可以改密碼、忘記密碼（寄到確認過的 email 的重設連結，或復原碼），改了、重設了、產生復原碼都會寄通知信
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
 7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。用量已記錄（每一次 LLM 呼叫與轉錄都記在使用者與 Job 名下，Job 工作區逐筆列出、設定頁看得到每月依模型加總）；每位使用者每月有用量上限（轉錄分鐘數、平台模型 token，見 `gateway/README.md`「每月用量上限」），用量告警仍是缺口
 8. **正式環境的設定**：每個服務讀 `APP_ENV`（預設 `development`）；`production` 時啟動前檢查自己的密鑰（沒設、還是開發用預設值、或太短就不啟動，並說出是哪幾個環境變數），並關掉開發用的東西（gRPC reflection、gateway 與 notification-service 的 API 文件）。要換掉哪些值見 `infra/k8s/02-secret.yaml`，Redis 在正式環境要設密碼（`REDIS_PASSWORD`）。

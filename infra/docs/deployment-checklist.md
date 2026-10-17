@@ -90,4 +90,5 @@ TransuAI 附了前端的 image（`transuai/frontend`，`frontend/Dockerfile`，k
 - [ ] 確認要開的外部服務（Deepgram、HF、Tavily、Google、Notion）符合單位的規定；不用的功能就不設金鑰，對應的項目在 `/privacy` 也要跟著拿掉。
 - [ ] 上傳的檔案**沒有掃毒**（使用者決定，`.scratch/pre-launch-hardening/issues/19`）：檔案只會送去轉錄、給上傳者本人播放與下載。單位規定要掃的話，
       在物件儲存那一層接（例如 bucket 的事件觸發 ClamAV）。
-- [ ] 忘記密碼靠 email：設好 SMTP（第 1 節）。註冊時不驗證 email，重設信寄到註冊時填的地址。
+- [ ] 忘記密碼：重設信只寄給確認過的 email（註冊時寄確認信），要設好 SMTP（第 1 節）；收不到信時可以用復原碼。在設定 SMTP 之前就註冊的帳號
+      要到設定頁「重寄確認信」；請使用者在設定頁產生復原碼、存好。
