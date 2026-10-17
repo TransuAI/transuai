@@ -60,6 +60,7 @@ src/
     layout/          AppShell、Sidebar(導覽:我的 Job、決策、上傳、設定;使用者選單;Job Detail 頁自動收成 icon rail)、深色模式切換
     decision-supersession.tsx 決策的取代:「取代了:日期「…」」「已被取代:日期「…」」,連到那個決策所在的 Job(`?decision=`);工作區的「決策」與決策頁共用
     job-status-badge.tsx
+    password-input.tsx     密碼欄:`PasswordInput`(可以切換「顯示密碼」,登入、註冊、改密碼、刪除帳號都用)、`PasswordStrengthHint`(新密碼下方:規則與輸入時的強度,只是提示,規則由伺服器決定)
     protected-route.tsx
   context/
     auth-context.tsx  登入狀態;開啟或重新整理頁面時用 refresh token 的 cookie 換 access token 恢復登入(順便清掉舊版存在 localStorage 的 token);登出時通知伺服器作廢 refresh token、清 cookie(不等回應,連不上也照樣登出這裡),登出所有裝置(`logoutEverywhere`),刪除帳號(`deleteAccount`,成功後忘掉 access token、回登入頁)
@@ -98,6 +99,7 @@ src/
     usage-format.ts    用量數字的格式:token 數加千分位、轉錄秒數換成分鐘(Job 用量與本月用量共用)
     translation-languages.ts 譯文可以翻成的語言(跟後端一樣的清單)
     current-translations.ts  片段 id → 譯文,去掉原文已經改過(`sourceText` 跟片段現在的文字不一樣)還沒重翻的;逐字稿顯示與匯出共用
+    password-strength.ts 密碼強度(不依賴畫面):少於 12 字元「太短」,長度為主、字元種類多(3 種以上)加分、只有一種字元或同一段重複扣分 →「弱／普通／強」
     output-formats.ts  多格式輸出:每種格式的名稱、社群平台與字數上限、貼文字數的算法(X 的中日韓字算兩個,跟 X 一樣)
     speaker-stats.ts   講者數據(不呼叫 AI,直接從逐字稿算):每位講者的發言時間、佔比、發言次數(同一位講者連續的片段算一次)、最長一次、平均,「發言很少」(少於平均每人的四分之一),整場換人次數與無人說話(片段之間超過 1 秒的空隙);已清空片段不算也不打斷;少於兩位講者時是 null
     speakers.ts        講者:依標籤查顯示名稱(名稱由後端決定,逐字稿與匯出共用)、是否只有一位講者(未清空片段中出現的講者 < 2 時所有講者顯示都隱藏)、要列出的講者(還有未清空片段的)、逐字稿只在換人的第一個片段顯示講者(已清空片段不顯示也不算換人)、依顯示順序從固定配色(index.css 的 --speaker-1…8)取顏色
@@ -105,7 +107,7 @@ src/
     transcript-search.ts 逐字稿搜尋比對:比對顯示中的文字(顯示譯文時就是譯文;雙語時原文之後也比對譯文,結果標記在譯文裡)、英文不分大小寫、不跨片段;依片段分組
     web-sources.ts     網頁連結(問答的網路來源、事實查核的來源):開新分頁的連結屬性、網址顯示成網站名稱(去掉 www.)
   pages/
-    login-page.tsx / register-page.tsx(註冊按鈕下方連到隱私權說明)
+    login-page.tsx / register-page.tsx(註冊按鈕下方連到隱私權說明;註冊的密碼欄有強度提示)
     privacy-page.tsx        隱私權說明 `/privacy`(不用登入;存了哪些資料、每個第三方送什麼與什麼時候送、怎麼刪除與匯出)。系統由客戶部署在自己內部,所以不寫營運方的聯絡方式與伺服器地區,其他請求請洽部署的單位;新增會把資料送出去的服務時要一起更新這頁
     upload-page.tsx        presign → PUT 上傳(含進度條)→ complete;檔案長度限制 60 分鐘(前端檢查),音訊 120MB、影片 1GB 以內(後端檢查);錄音的語言:中文(預設)/ 英文 / 自動偵測(中文或英文,選它時提示判斷成中文的錯字較多)
     jobs-page.tsx           Job 列表(標題與類型徽章,有標題時檔名小字留在下面)、搜尋框(標題或檔名,輸入停 300ms 才查)與類型篩選;搜尋、類型、頁數都放在網址(`?q=&category=&page=`,打字用 replace 不堆歷史),重新整理與上一頁都保留,換條件從第 1 頁開始;沒有符合的顯示「找不到符合的 Job」與「清除搜尋與篩選」;分頁(頁數從 1 開始,跟後端一樣)、刪除

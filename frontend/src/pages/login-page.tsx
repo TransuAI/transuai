@@ -4,6 +4,7 @@ import { useAuth } from '@/context/auth-context'
 import { ApiError } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/password-input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -57,9 +58,8 @@ export function LoginPage() {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">密碼</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 required
                 autoComplete="current-password"
                 value={password}

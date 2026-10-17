@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { useAuth } from '@/context/auth-context'
 import { ApiError } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { PasswordInput, PasswordStrengthHint } from '@/components/password-input'
 import { Label } from '@/components/ui/label'
 import {
   AlertDialog,
@@ -89,9 +89,8 @@ function ChangePassword() {
       <h3 id="change-password-heading" className="text-sm font-medium">改密碼</h3>
       <div className="flex flex-col gap-2">
         <Label htmlFor="current-password">目前的密碼</Label>
-        <Input
+        <PasswordInput
           id="current-password"
-          type="password"
           autoComplete="current-password"
           value={currentPassword}
           onChange={(event) => setCurrentPassword(event.target.value)}
@@ -99,18 +98,16 @@ function ChangePassword() {
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="new-password">新密碼</Label>
-        <Input
+        <PasswordInput
           id="new-password"
-          type="password"
           autoComplete="new-password"
           minLength={12}
           aria-describedby="new-password-hint"
           value={newPassword}
           onChange={(event) => setNewPassword(event.target.value)}
         />
-        <p id="new-password-hint" className="text-xs text-muted-foreground">
-          至少 12 個字元，最多 128 個。改好之後，其他裝置要重新登入。
-        </p>
+        <PasswordStrengthHint id="new-password-hint" password={newPassword} />
+        <p className="text-xs text-muted-foreground">改好之後，其他裝置要重新登入。</p>
       </div>
       {error && (
         <p role="alert" className="text-sm text-destructive">
@@ -189,9 +186,8 @@ function DeleteAccount() {
             </AlertDialogHeader>
             <div className="flex flex-col gap-2">
               <Label htmlFor="delete-account-password">輸入密碼確認</Label>
-              <Input
+              <PasswordInput
                 id="delete-account-password"
-                type="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}

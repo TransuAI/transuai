@@ -4,6 +4,7 @@ import { useAuth } from '@/context/auth-context'
 import { ApiError } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput, PasswordStrengthHint } from '@/components/password-input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -72,9 +73,8 @@ export function RegisterPage() {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">密碼</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 required
                 minLength={12}
                 autoComplete="new-password"
@@ -82,9 +82,7 @@ export function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
-              <p id="password-hint" className="text-xs text-muted-foreground">
-                至少 12 個字元，最多 128 個；可以用空格、中文或任何字元，長一點的句子最好記也最安全
-              </p>
+              <PasswordStrengthHint id="password-hint" password={password} />
             </div>
             <Button type="submit" disabled={isSubmitting} className="mt-2 w-full">
               {isSubmitting ? '註冊中...' : '註冊'}
