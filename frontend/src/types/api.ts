@@ -15,6 +15,10 @@ export interface User {
   email: string
   displayName: string | null
   createdAt: string
+  /** Confirmed by the link mailed at sign-up; 忘記密碼 mails only confirmed addresses. */
+  emailVerified: boolean
+  /** 復原碼 not used yet (0: never made, or all used). */
+  recoveryCodesLeft: number
 }
 
 /** 登入、註冊、換發的回應。refresh token 不在這裡：gateway 把它放在 httpOnly cookie。 */

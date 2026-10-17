@@ -7,8 +7,11 @@ import { ApiError } from '@/lib/api-client'
 import { ForgotPasswordPage } from './forgot-password-page'
 import { LoginPage } from './login-page'
 import { ResetPasswordPage } from './reset-password-page'
+import { VerifyEmailPage } from './verify-email-page'
 
-vi.mock('@/lib/api', () => ({ authApi: { requestPasswordReset: vi.fn(), resetPassword: vi.fn() } }))
+vi.mock('@/lib/api', () => ({
+  authApi: { requestPasswordReset: vi.fn(), resetPassword: vi.fn(), verifyEmail: vi.fn(), resetPasswordWithRecoveryCode: vi.fn() },
+}))
 vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ login: vi.fn() }) }))
 
 afterEach(() => {
@@ -35,7 +38,7 @@ describe('ForgotPasswordPage', () => {
     await user.click(screen.getByRole('button', { name: '寄重設密碼的信' }))
 
     expect(authApi.requestPasswordReset).toHaveBeenCalledWith('a@example.com')
-    expect(await screen.findByRole('status')).toHaveTextContent('如果 a@example.com 有註冊，幾分鐘內會收到重設密碼的信')
+    expect(await screen.findByRole('status')).toHaveTextContent('如果 a@example.com 有註冊、而且確認過，幾分鐘內會收到重設密碼的信')
   })
 
   it("says why it can't, such as no mail set up on this installation", async () => {
@@ -91,5 +94,69 @@ describe('ResetPasswordPage', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('這個連結不完整')
     expect(screen.queryByLabelText('新密碼')).toBeNull()
+  })
+})
+
+describe('ForgotPasswordPage with a recovery code (用復原碼重設)', () => {
+  it('resets the password with the email and one code', async () => {
+    vi.mocked(authApi.resetPasswordWithRecoveryCode).mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<MemoryRouter><ForgotPasswordPage /></MemoryRouter>)
+
+    await user.click(screen.getByRole('button', { name: '收不到信？用復原碼重設' }))
+    await user.type(screen.getByLabelText('Email'), 'a@example.com')
+    await user.type(screen.getByLabelText('復原碼'), 'aaaaa-bbbbb-ccccc-ddddd')
+    await user.type(screen.getByLabelText('新密碼'), 'a brand new password')
+    await user.click(screen.getByRole('button', { name: '重設密碼' }))
+
+    expect(authApi.resetPasswordWithRecoveryCode).toHaveBeenCalledWith({
+      email: 'a@example.com', code: 'aaaaa-bbbbb-ccccc-ddddd', newPassword: 'a brand new password',
+    })
+    expect(await screen.findByRole('status')).toHaveTextContent('密碼已重設，請用新密碼登入')
+  })
+
+  it("says the server's answer when the email or code is wrong", async () => {
+    vi.mocked(authApi.resetPasswordWithRecoveryCode).mockRejectedValue(new ApiError(409, {
+      error: 'FAILED_PRECONDITION', message: 'email 或復原碼不對，或這組復原碼已經用過了',
+    }))
+    const user = userEvent.setup()
+    render(<MemoryRouter><ForgotPasswordPage /></MemoryRouter>)
+
+    await user.click(screen.getByRole('button', { name: '收不到信？用復原碼重設' }))
+    await user.type(screen.getByLabelText('Email'), 'a@example.com')
+    await user.type(screen.getByLabelText('復原碼'), 'wrong')
+    await user.type(screen.getByLabelText('新密碼'), 'a brand new password')
+    await user.click(screen.getByRole('button', { name: '重設密碼' }))
+
+    expect(await screen.findByText('email 或復原碼不對，或這組復原碼已經用過了')).toBeInTheDocument()
+  })
+})
+
+describe('VerifyEmailPage', () => {
+  it('confirms with the token from the link only when asked, taking it out of the address bar', async () => {
+    vi.mocked(authApi.verifyEmail).mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    window.history.replaceState(null, '', '/verify-email#token=t123')
+    render(<MemoryRouter><VerifyEmailPage /></MemoryRouter>)
+    expect(window.location.hash).toBe('')
+    expect(authApi.verifyEmail).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: '確認這個 email 是我的' }))
+
+    expect(authApi.verifyEmail).toHaveBeenCalledWith('t123')
+    expect(await screen.findByRole('status')).toHaveTextContent('email 已確認')
+  })
+
+  it('says why when the link is used up', async () => {
+    vi.mocked(authApi.verifyEmail).mockRejectedValue(new ApiError(409, {
+      error: 'FAILED_PRECONDITION', message: '這個確認連結無效或已過期，請到設定頁重寄確認信',
+    }))
+    const user = userEvent.setup()
+    window.history.replaceState(null, '', '/verify-email#token=old')
+    render(<MemoryRouter><VerifyEmailPage /></MemoryRouter>)
+
+    await user.click(screen.getByRole('button', { name: '確認這個 email 是我的' }))
+
+    expect(await screen.findByText(/這個確認連結無效或已過期/)).toBeInTheDocument()
   })
 })

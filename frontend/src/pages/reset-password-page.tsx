@@ -2,19 +2,12 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { authApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
+import { takeTokenFromAddress } from '@/lib/link-token'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { PasswordInput, PasswordStrengthHint } from '@/components/password-input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-
-// The token comes after # in the link (never sent to a server, not in logs or Referer). It is read once and taken out of
-// the address bar, so it doesn't stay in the history either.
-function takeTokenFromAddress(): string | null {
-  const token = new URLSearchParams(window.location.hash.slice(1)).get('token')
-  if (token) window.history.replaceState(null, '', window.location.pathname + window.location.search)
-  return token
-}
 
 // 重設密碼: the page the mail's link opens. Sets a new password with the one-use token; every device is signed out,
 // so it then asks to sign in with the new password.

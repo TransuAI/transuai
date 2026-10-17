@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/sonner'
-import { connectionsApi, modelsApi, postMeetingSettingsApi, providerKeysApi, usageApi } from '@/lib/api'
+import { authApi, connectionsApi, modelsApi, postMeetingSettingsApi, providerKeysApi, usageApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { leaveTo } from '@/lib/navigation'
 import { SettingsPage } from './settings-page'
 
 vi.mock('@/lib/api', () => ({
+  authApi: { me: vi.fn(), resendEmailVerification: vi.fn(), generateRecoveryCodes: vi.fn() },
   providerKeysApi: { list: vi.fn(), save: vi.fn(), remove: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
   usageApi: { getMonthly: vi.fn() },
@@ -31,6 +32,10 @@ const platform = { provider: 'platform', model: 'Qwen/Qwen3.5-9B', supportsTools
 const gpt5mini = { provider: 'openai', model: 'gpt-5-mini', supportsTools: true }
 
 beforeEach(() => {
+  vi.mocked(authApi.me).mockResolvedValue({
+    id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z', emailVerified: true,
+    recoveryCodesLeft: 0,
+  })
   vi.mocked(providerKeysApi.list).mockResolvedValue([
     { provider: 'openai', last4: 'a3F9', createdAt: '2026-09-26T02:00:00Z' },
   ])
@@ -601,5 +606,69 @@ describe('SettingsPage changing the password (改密碼)', () => {
     await clicker.click(within(section).getByRole('button', { name: '更新密碼' }))
 
     expect(await within(section).findByRole('alert')).toHaveTextContent('密碼至少要 12 個字元')
+  })
+})
+
+describe('SettingsPage email and recovery codes (確認 email、復原碼)', () => {
+  const me = { id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z' }
+
+  it('says when the email is not confirmed yet and sends the link again', async () => {
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: false, recoveryCodesLeft: 0 })
+    vi.mocked(authApi.resendEmailVerification).mockResolvedValue(undefined)
+    const clicker = userEvent.setup()
+    await renderSettings()
+    const email = await screen.findByRole('group', { name: 'Email' })
+
+    expect(email).toHaveTextContent('還沒確認：忘記密碼時收不到重設的信')
+    await clicker.click(within(email).getByRole('button', { name: '重寄確認信' }))
+
+    expect(authApi.resendEmailVerification).toHaveBeenCalled()
+    expect(await screen.findByText('已寄確認信到 a@example.com')).toBeInTheDocument()
+  })
+
+  it('shows a confirmed email without offering to send anything', async () => {
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 4 })
+    await renderSettings()
+
+    const email = await screen.findByRole('group', { name: 'Email' })
+    expect(email).toHaveTextContent('（已確認）')
+    expect(within(email).queryByRole('button')).toBeNull()
+    expect(screen.getByRole('group', { name: '復原碼' })).toHaveTextContent('還有 4 組沒用過')
+  })
+
+  it('makes recovery codes with the current password and shows them once', async () => {
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 0 })
+    vi.mocked(authApi.generateRecoveryCodes).mockResolvedValue({ codes: ['AAAAA-BBBBB-CCCCC-DDDDD', 'EEEEE-FFFFF-GGGGG-HHHHH'] })
+    const clicker = userEvent.setup()
+    await renderSettings()
+    const section = await screen.findByRole('group', { name: '復原碼' })
+    expect(section).toHaveTextContent('還沒有復原碼')
+
+    await clicker.click(within(section).getByRole('button', { name: '產生復原碼…' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '產生復原碼' })
+    await clicker.type(within(dialog).getByLabelText('目前的密碼'), 'the password')
+    await clicker.click(within(dialog).getByRole('button', { name: '產生' }))
+
+    expect(authApi.generateRecoveryCodes).toHaveBeenCalledWith('the password')
+    const shown = await screen.findByRole('alertdialog', { name: '你的復原碼' })
+    expect(within(shown).getByRole('list', { name: '復原碼' })).toHaveTextContent('AAAAA-BBBBB-CCCCC-DDDDD')
+    expect(shown).toHaveTextContent('只會顯示這一次')
+    await clicker.click(within(shown).getByRole('button', { name: '我存好了' }))
+    expect(screen.queryByText('AAAAA-BBBBB-CCCCC-DDDDD')).toBeNull()
+    expect(section).toHaveTextContent('還有 2 組沒用過')
+  })
+
+  it('says when the password is wrong', async () => {
+    vi.mocked(authApi.generateRecoveryCodes).mockRejectedValue(new ApiError(403, { error: 'PERMISSION_DENIED', message: 'wrong password' }))
+    const clicker = userEvent.setup()
+    await renderSettings()
+    const section = await screen.findByRole('group', { name: '復原碼' })
+
+    await clicker.click(within(section).getByRole('button', { name: '產生復原碼…' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '產生復原碼' })
+    await clicker.type(within(dialog).getByLabelText('目前的密碼'), 'not it')
+    await clicker.click(within(dialog).getByRole('button', { name: '產生' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('密碼不正確')
   })
 })

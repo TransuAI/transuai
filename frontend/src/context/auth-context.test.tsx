@@ -9,7 +9,9 @@ vi.mock('@/lib/api', () => ({
   authApi: { me: vi.fn(), login: vi.fn(), register: vi.fn(), logout: vi.fn(), logoutAll: vi.fn(), deleteAccount: vi.fn() },
 }))
 
-const user = { id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z' }
+const user = {
+  id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z', emailVerified: true, recoveryCodesLeft: 0,
+}
 
 function Buttons() {
   const { user: signedIn, isLoading, login, logout, logoutEverywhere, deleteAccount } = useAuth()

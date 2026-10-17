@@ -80,6 +80,16 @@ export const authApi = {
   // The token from the link in the mail; 409 when the link is used up or expired. Signs every device out.
   resetPassword: (params: { token: string; newPassword: string }) =>
     apiFetchVoid('/auth/password-reset/confirm', { method: 'POST', body: params, auth: false }),
+  // 確認 email: the token from the link mailed at sign-up; no sign-in. 409 when used up or expired.
+  verifyEmail: (token: string) => apiFetchVoid('/auth/verify-email', { method: 'POST', body: { token }, auth: false }),
+  // Mails the confirmation link again (nothing when already confirmed); 503 without mail set up.
+  resendEmailVerification: () => apiFetchVoid('/auth/verify-email/resend', { method: 'POST' }),
+  // 復原碼: the current password (403 when wrong); the old codes stop working. The codes come back only this once.
+  generateRecoveryCodes: (currentPassword: string) =>
+    apiFetch<{ codes: string[] }>('/auth/recovery-codes', { method: 'POST', body: { currentPassword } }),
+  // 忘記密碼 without the mailbox: the email and one unused 復原碼; no sign-in. 409 when either is wrong. Signs every device out.
+  resetPasswordWithRecoveryCode: (params: { email: string; code: string; newPassword: string }) =>
+    apiFetchVoid('/auth/password-reset/recovery-code', { method: 'POST', body: params, auth: false }),
 }
 
 export const uploadApi = {

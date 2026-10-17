@@ -91,6 +91,7 @@ src/
   lib/
     api-client.ts     fetch wrapper(auth header、401 refresh-and-retry、錯誤格式)+ refreshSession(用 cookie 換 access token,同時多個請求只換一次)+ requestSse(手動解析 SSE frame,問答 streaming 用)
     api.ts            對應 Gateway 每支 REST API 的函式
+    link-token.ts      信裡連結的一次性 token(重設密碼、確認 email):從 `#` 後面讀出來後就從網址拿掉
     access-token.ts    access token 只放在記憶體(不放 localStorage);refresh token 在 httpOnly cookie,前端碰不到
     current-segment.ts 依播放時間找出「目前片段」(定義見 CONTEXT.md),二分搜尋
     download.ts        把瀏覽器產生的文字存成檔案下載(Blob + object URL + <a download>);開啟伺服器給的下載 URL(跨網域 presigned 連結靠回應的 Content-Disposition 下載)
@@ -116,13 +117,14 @@ src/
     web-sources.ts     網頁連結(問答的網路來源、事實查核的來源):開新分頁的連結屬性、網址顯示成網站名稱(去掉 www.)
   pages/
     login-page.tsx / register-page.tsx(登入頁有「忘記密碼？」;註冊按鈕下方連到隱私權說明;註冊的密碼欄有強度提示)
-    forgot-password-page.tsx `/forgot-password`(不用登入):輸入 email 申請重設連結;送出後一律說「如果 … 有註冊，幾分鐘內會收到」(伺服器不透露有沒有註冊);沒有設定寄信(503)、太頻繁(429)時顯示伺服器的訊息
+    forgot-password-page.tsx `/forgot-password`(不用登入):輸入 email 申請重設連結;送出後一律說「如果 … 有註冊、而且確認過，幾分鐘內會收到」(伺服器不透露有沒有註冊);沒有設定寄信(503)、太頻繁(429)時顯示伺服器的訊息。「收不到信？用復原碼重設」:email、一組復原碼、新密碼(email 或復原碼不對時顯示伺服器的訊息)
+    verify-email-page.tsx    `/verify-email#token=…`(註冊時寄的確認信,不用登入):token 讀出來後從網址拿掉;按「確認這個 email 是我的」才確認(信箱的連結掃描不會代為確認);無效或過期時說到設定頁重寄
     reset-password-page.tsx  `/reset-password#token=…`(信裡的連結,不用登入):token 從 `#` 後面讀出來後就從網址拿掉;設新密碼(強度提示)→「密碼已重設，請用新密碼登入」;連結無效或過期(409)時給「重新申請」;沒有 token 時說連結不完整
     privacy-page.tsx        隱私權說明 `/privacy`(不用登入;存了哪些資料、每個第三方送什麼與什麼時候送、怎麼刪除與匯出)。系統由客戶部署在自己內部,所以不寫營運方的聯絡方式與伺服器地區,其他請求請洽部署的單位;新增會把資料送出去的服務時要一起更新這頁
     upload-page.tsx        presign(帶檔案的 MIME 類型,簽進上傳網址)→ PUT 上傳(含進度條,`Content-Type` 跟簽的一樣)→ complete;檔案長度限制 60 分鐘(前端先檢查;transcription-service 轉錄前再用實際長度檢查),音訊 120MB、影片 1GB 以內(後端檢查);錄音的語言:中文(預設)/ 英文 / 自動偵測(中文或英文,選它時提示判斷成中文的錯字較多)
     jobs-page.tsx           Job 列表(標題與類型徽章,有標題時檔名小字留在下面)、搜尋框(標題或檔名,輸入停 300ms 才查)與類型篩選;搜尋、類型、頁數都放在網址(`?q=&category=&page=`,打字用 replace 不堆歷史),重新整理與上一頁都保留,換條件從第 1 頁開始;沒有符合的顯示「找不到符合的 Job」與「清除搜尋與篩選」;分頁(頁數從 1 開始,跟後端一樣)、刪除
     decisions-page.tsx      決策頁(跨 Job):上方「問決策」(只根據使用者的決策、範圍跟篩選一樣,回答串流進來,下面列出依據的決策 [n] 與它們的會議;失敗顯示原因);所有會議的決策依會議日期(Job 上傳時間)由新到舊,每場會議一節(日期、可以點進去的名稱、類型),每個決策有取代的連結、時間點連到 `/jobs/:id?t=…&decision=…`;搜尋框(停 300ms 才查,字與意思,結果依符合程度、每筆附它的會議)、類型與 Job(可以勾好幾個)篩選都在網址裡;每個決策顯示存下來的提出者名稱;「下載 Markdown」下載目前顯示的(列出篩選與搜尋);沒有決策時說明怎麼會有
-    settings-page.tsx       設定頁(側邊欄「設定」):預設模型、自有金鑰、已連結的帳號、會後處理(Notion 位置、待辦去處)、本月用量、帳號(改密碼:目前的密碼與新密碼,目前的密碼錯 403 時顯示「目前的密碼不正確」、其他錯誤顯示伺服器的訊息,成功後清空欄位、提示其他裝置要重新登入;登出所有裝置;刪除帳號:列出會刪掉什麼、輸入密碼確認,密碼錯 403 時對話框留著並顯示「密碼不正確」);存入或刪除金鑰後重新載入可選的模型
+    settings-page.tsx       設定頁(側邊欄「設定」):預設模型、自有金鑰、已連結的帳號、會後處理(Notion 位置、待辦去處)、本月用量、帳號(email 與確認狀態,還沒確認時「重寄確認信」;復原碼:還剩幾組,「產生復原碼…」要目前的密碼,產生後只顯示這一次,可以複製、下載 .txt;改密碼:目前的密碼與新密碼,目前的密碼錯 403 時顯示「目前的密碼不正確」、其他錯誤顯示伺服器的訊息,成功後清空欄位、提示其他裝置要重新登入;登出所有裝置;刪除帳號:列出會刪掉什麼、輸入密碼確認,密碼錯 403 時對話框留著並顯示「密碼不正確」);存入或刪除金鑰後重新載入可選的模型
     settings/
       default-model-section.tsx 預設模型:平台模型與有金鑰的廠商的模型(單選),有 OpenRouter 金鑰時可輸入模型 ID;換模型不會重做既有內容
       post-meeting-settings-section.tsx 會後處理的設定:Notion 會議紀錄位置(每場會議在這個頁面底下新增一頁,含會議紀錄和待辦清單;說明去哪裡複製連結,不用另外分享;改過的網址儲存時後端先向 Notion 確認是頁面,不行就顯示原因;顯示目前的頁面標題)、待辦放在 Notion 會議紀錄裡(打勾清單)或 Google Tasks(選 Notion 又沒填位置時提醒)

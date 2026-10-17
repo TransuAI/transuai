@@ -8,6 +8,7 @@ import { RegisterPage } from '@/pages/register-page'
 import { PrivacyPage } from '@/pages/privacy-page'
 import { ForgotPasswordPage } from '@/pages/forgot-password-page'
 import { ResetPasswordPage } from '@/pages/reset-password-page'
+import { VerifyEmailPage } from '@/pages/verify-email-page'
 import { UploadPage } from '@/pages/upload-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { JobsPage } from '@/pages/jobs-page'
@@ -26,6 +27,7 @@ function App() {
           {/* 忘記密碼：還沒登入 */}
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
