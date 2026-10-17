@@ -82,7 +82,7 @@ docker compose up -d
 | `POST` | `/auth/register` | 註冊，不需要 token；回 `{ accessToken, user }`，refresh token 設在 cookie |
 | `POST` | `/auth/login` | 登入，不需要 token；回 `{ accessToken, user }`，refresh token 設在 cookie |
 | `POST` | `/auth/logout` | 登出：作廢 cookie 裡這個 refresh token 所在的那一串、清掉 cookie，回 `204`；不需要 `Authorization`（access token 可能已經過期），沒有 cookie 或 token 無效也回 `204` |
-| `POST` | `/auth/logout-all` | 登出所有裝置：作廢登入者所有的 refresh token、清掉這個瀏覽器的 cookie，回 `204`，需要 `Authorization`；已簽出的 access token 仍有效到過期（最多 15 分鐘） |
+| `POST` | `/auth/logout-all` | 登出所有裝置：作廢登入者所有的 refresh token、清掉這個瀏覽器的 cookie，回 `204`，需要 `Authorization`；在這之前簽的 access token 馬上不能用（見下方「登出之後的 access token」） |
 | `POST` | `/auth/account/delete` | 刪除帳號：body `{ password }`（再輸入一次密碼），需要 `Authorization`。成功 `204` 並清掉 cookie；密碼錯 `403`（不是 401，前端不會去換發 token）；沒帶密碼 `400`；猜錯太多次 `429`（見「限流」）。auth-service 刪掉使用者並發 `account.deleted`，其他服務清掉他的資料（見 auth-service README「刪除帳號」）。刪除之後，還沒過期的 access token 也不能用（見下方） |
 | `POST` | `/auth/password` | 改密碼：body `{ currentPassword, newPassword }`，需要 `Authorization`。成功回 `{ accessToken, user }` 並換一個新的 refresh cookie，這位使用者其他的登入全部作廢（其他裝置要重新登入）；目前的密碼錯 `403`，新密碼不合規則 `400`，猜錯太多次 `429`（跟刪除帳號合計） |
 | `POST` | `/auth/refresh` | 用 cookie 裡的 refresh token 換發：回 `{ accessToken, user }`，cookie 換成新的 refresh token；不需要 `Authorization`、沒有 body。沒有 cookie 或 token 不能用回 `401`（並清掉 cookie） |
@@ -264,11 +264,19 @@ negative cache）。只記擁有者、不記會變的 Job 狀態——`GET /jobs
 Job id 是 UUID、不會重用，標記在有效時間內直接回 404。有效時間是保險，也限制了「刪除時 Redis 剛好連不上、標記沒寫成」最多多久
 （10 分鐘，這段時間只有原本的擁有者讀得到）。
 
-### 刪除帳號之後
+### 登出之後的 access token（含刪除帳號）
 
-access token 是 stateless 的，帳號刪掉之後最多還能用到過期（15 分鐘）——其他分頁或裝置照樣能呼叫 API，甚至建出新的 Job、留下沒人刪的資料。
-所以刪除成功後在 Redis 記 `deleted-user:{id}`（有效時間＝access token 的有效時間，`security/DeletedUsers`），`JwtAuthenticationFilter` 驗完 token
-再查它，有就回 `401`。**Redis 連不上時放行**（跟限流、快取一樣），那段時間舊 token 照樣能用到過期。
+access token 是 stateless 的，作廢的只有 refresh token——不另外處理的話，登出、登出所有裝置、改密碼、刪除帳號之後，舊的 access token 最多還能用
+到過期（15 分鐘），刪掉的帳號甚至還能建出新的 Job、留下沒人刪的資料。所以在 Redis 記下（`security/RevokedAccessTokens`，有效時間＝access token
+的有效時間 `app.auth.revoked-token-ttl`）：
+
+- 登出：`signed-out-session:{sid}`——auth-service 的 `Logout` 回傳作廢的那一串（＝access token 的 `sid` claim），那次登入簽出的都不能用；其他登入不受影響
+- 登出所有裝置、改密碼：`signed-out-before:{userId}` = 呼叫 auth-service **之前**的時間（秒），`iat` 比它早的都不能用；改密碼時這次拿到的新 token 在它之後
+- 刪除帳號：`deleted-user:{userId}`，全部不能用
+
+`JwtAuthenticationFilter` 驗完簽章後用一次 MGET 查這三個鍵，擋下的回 `401`（前端會去換發，refresh token 也已作廢，所以回登入頁）。
+這個版本之前簽的 token 沒有 `sid`，只會被登出所有裝置／改密碼／刪除帳號擋下。**Redis 連不上時放行**（跟限流、快取一樣），那段時間舊 token 照樣
+能用到過期。WebSocket（notification-service）只在連上時驗一次 token，已經連上的不會被中斷（推播的只有那個 Job 的狀態）。
 
 ### 錯誤格式
 
@@ -317,7 +325,7 @@ log 裡同一個代碼那一行有完整的 status（ASVS 7.4.1）。503 的描�
 ```
 src/main/java/com/transuai/gateway/
   config/            GrpcClientConfig（4 個 ManagedChannel + blocking stub bean）、GrpcProperties、WebConfig
-  security/           JwtProperties、JwtService（只驗證 access token）、JwtAuthenticationFilter、InvalidTokenException、RefreshTokenCookie、DeletedUsers（剛刪除帳號的使用者）、SecurityHeadersFilter
+  security/           JwtProperties、JwtService（只驗證 access token）、JwtAuthenticationFilter、InvalidTokenException、RefreshTokenCookie、RevokedAccessTokens（登出、登出所有裝置、改密碼、刪除帳號之後還沒過期的 access token）、SecurityHeadersFilter
   web/                CurrentUserId annotation + CurrentUserIdArgumentResolver、AuthController、UploadController、
                        TranscriptionController、AiController、QuizController、UsageController、ModelController、
                        ProviderKeyController、ConnectionController、PostMeetingController
@@ -364,7 +372,7 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 
 - **Transcription / AI 這幾個端點的 ownership 檢查在 Gateway**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 在轉發前先確認 ownership（`JobOwnershipGuard`，別人的 job 回 404）：擁有者記在 Redis（見「快取」），沒記住時才呼叫 `upload-service` 的 `GetJob`
 - 每月用量上限在這裡用的是已記錄的用量加上這次檔案的長度（前端量的，可能不準）：排隊中、還沒轉錄完的檔案還沒算進去。transcription-service 在呼叫語音辨識之前會用實際長度再檢查一次（放不進剩下的分鐘數就讓 Job 失敗），所以轉錄用量不會超過上限，最多是被擋下的檔案已經上傳了
-- access token 在 gateway 本地驗章，登出後仍有效到過期（最多 15 分鐘）；要立即失效得每個請求回頭問 auth-service，目前不做
+- 登出之後的 access token 靠 Redis 擋（見「登出之後的 access token」）；Redis 連不上時，那段時間舊 token 照樣能用到過期（最多 15 分鐘）
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
 - 測試只涵蓋限流、每月用量上限與快取（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
   要有 Docker）；其他端點仍靠手動 smoke test（curl 跑過 register → login → me → presign → list jobs 全流程，以及 400/401/404/503 各種錯誤情境）

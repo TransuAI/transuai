@@ -25,6 +25,13 @@ public final class TestAuth {
                 .signWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).compact();
     }
 
+    /** 跟 auth-service 簽的一樣帶 sid（哪一次登入）與 iat（什麼時候簽的）。 */
+    public static String accessToken(JwtProperties jwt, UUID user, String sessionId, Instant issuedAt) {
+        return Jwts.builder().subject(user.toString()).claim("type", "access").claim("sid", sessionId)
+                .issuedAt(Date.from(issuedAt)).expiration(Date.from(Instant.now().plusSeconds(600)))
+                .signWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).compact();
+    }
+
     /** auth-service 登入（或註冊、換發）成功的回應。 */
     public static AuthResponse signedIn(String email) {
         return AuthResponse.newBuilder().setAccessToken("access").setRefreshToken("refresh")

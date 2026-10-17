@@ -2,7 +2,6 @@ package com.transuai.gateway.security;
 
 import java.io.IOException;
 import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 import org.springframework.http.HttpHeaders;
@@ -47,13 +46,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final ApiRateLimits rateLimits;
-    private final DeletedUsers deletedUsers;
+    private final RevokedAccessTokens revokedTokens;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public JwtAuthenticationFilter(JwtService jwtService, ApiRateLimits rateLimits, DeletedUsers deletedUsers) {
+    public JwtAuthenticationFilter(JwtService jwtService, ApiRateLimits rateLimits, RevokedAccessTokens revokedTokens) {
         this.jwtService = jwtService;
         this.rateLimits = rateLimits;
-        this.deletedUsers = deletedUsers;
+        this.revokedTokens = revokedTokens;
     }
 
     @Override
@@ -72,20 +71,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        UUID userId;
+        JwtService.AccessToken token;
         try {
-            userId = jwtService.validateAccessToken(header.substring(BEARER_PREFIX.length()));
+            token = jwtService.validateAccessToken(header.substring(BEARER_PREFIX.length()));
         } catch (InvalidTokenException e) {
             reject(request, response, e.getMessage());
             return;
         }
-        // 帳號剛刪掉：token 還沒過期也不能用（見 DeletedUsers）。
-        if (deletedUsers.isDeleted(userId)) {
-            reject(request, response, "account deleted");
+        // 登出、登出所有裝置、改密碼、刪除帳號之後：token 還沒過期也不能用（見 RevokedAccessTokens）。
+        if (revokedTokens.isRevoked(token)) {
+            reject(request, response, "signed out");
             return;
         }
 
-        request.setAttribute(USER_ID_ATTRIBUTE, userId);
+        request.setAttribute(USER_ID_ATTRIBUTE, token.userId());
         filterChain.doFilter(request, response);
     }
 

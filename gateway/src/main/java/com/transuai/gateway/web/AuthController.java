@@ -1,5 +1,6 @@
 package com.transuai.gateway.web;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -24,8 +25,8 @@ import com.transuai.auth.grpc.v1.User;
 import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.ratelimit.AuthRateLimits;
-import com.transuai.gateway.security.DeletedUsers;
 import com.transuai.gateway.security.RefreshTokenCookie;
+import com.transuai.gateway.security.RevokedAccessTokens;
 import com.transuai.gateway.web.dto.AuthResponseDto;
 import com.transuai.gateway.web.dto.ChangePasswordRequestDto;
 import com.transuai.gateway.web.dto.DeleteAccountRequestDto;
@@ -50,7 +51,7 @@ public class AuthController {
     private final AuthServiceGrpc.AuthServiceBlockingStub authServiceStub;
     private final AuthRateLimits rateLimits;
     private final RefreshTokenCookie refreshTokenCookie;
-    private final DeletedUsers deletedUsers;
+    private final RevokedAccessTokens revokedTokens;
 
     // 限流用的 IP 是 getRemoteAddr()，預設就是直接連進來的位址（不看使用者可以自己填的 X-Forwarded-For；在反向代理後面時
     // 怎麼設定見 gateway README「限流」）。
@@ -97,22 +98,29 @@ public class AuthController {
         return signedIn(response, servletResponse);
     }
 
-    // 登出：作廢 cookie 裡這個 refresh token 所在的那一串（auth-service 的 Logout），並清掉 cookie；不需要 access token，
-    // 沒有 cookie 或 token 無效也回成功。
+    // 登出：作廢 cookie 裡這個 refresh token 所在的那一串（auth-service 的 Logout），那一串簽出的 access token 也馬上不能用，並清掉
+    // cookie；不需要 access token，沒有 cookie 或 token 無效也回成功。
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(HttpServletRequest servletRequest, HttpServletResponse servletResponse) {
-        refreshTokenCookie.read(servletRequest).ifPresent(refreshToken -> authServiceStub.logout(
-                LogoutRequest.newBuilder().setRefreshToken(refreshToken).build()));
+        refreshTokenCookie.read(servletRequest).ifPresent(refreshToken -> {
+            String sessionId = authServiceStub.logout(LogoutRequest.newBuilder().setRefreshToken(refreshToken).build())
+                    .getSessionId();
+            if (!sessionId.isEmpty()) {
+                revokedTokens.sessionEnded(sessionId);
+            }
+        });
         refreshTokenCookie.clear(servletResponse);
     }
 
-    // 登出所有裝置：作廢這位使用者所有的 refresh token，並清掉這個瀏覽器的 cookie。已簽出的 access token 仍有效到過期（最多 15 分鐘）。
+    // 登出所有裝置：作廢這位使用者所有的 refresh token，在這之前簽的 access token 也馬上不能用，並清掉這個瀏覽器的 cookie。
     @PostMapping("/logout-all")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logoutAllDevices(@CurrentUserId UUID userId, HttpServletResponse servletResponse) {
+        Instant now = Instant.now();
         GrpcMetadataSupport.withUserId(authServiceStub, userId)
                 .logoutAllDevices(LogoutAllDevicesRequest.getDefaultInstance());
+        revokedTokens.sessionsEndedBefore(userId, now);
         refreshTokenCookie.clear(servletResponse);
     }
 
@@ -127,21 +135,24 @@ public class AuthController {
         }
         rateLimits.withPasswordCheck(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
                 .deleteAccount(DeleteAccountRequest.newBuilder().setPassword(request.password()).build()));
-        deletedUsers.remember(userId);
+        revokedTokens.userDeleted(userId);
         refreshTokenCookie.clear(servletResponse);
     }
 
-    // 改密碼：要目前的密碼（錯了 403，跟刪除帳號合計連續錯太多次 429）。auth-service 作廢這位使用者所有的 refresh token，這個瀏覽器
-    // 拿到新的一組（cookie 換掉）；其他裝置要重新登入。
+    // 改密碼：要目前的密碼（錯了 403，跟刪除帳號合計連續錯太多次 429）。auth-service 作廢這位使用者所有的 refresh token，在這之前
+    // 簽的 access token 也馬上不能用；這個瀏覽器拿到新的一組（cookie 換掉），其他裝置要重新登入。
     @PostMapping("/password")
     public AuthResponseDto changePassword(@CurrentUserId UUID userId, @RequestBody ChangePasswordRequestDto request,
             HttpServletResponse servletResponse) {
         if (request.currentPassword() == null || request.currentPassword().isEmpty() || request.newPassword() == null) {
             throw new IllegalArgumentException("currentPassword and newPassword are required");
         }
+        // 取在呼叫之前：新簽的 token 在這之後，不會被擋。
+        Instant now = Instant.now();
         AuthResponse response = rateLimits.withPasswordCheck(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
                 .changePassword(ChangePasswordRequest.newBuilder()
                         .setCurrentPassword(request.currentPassword()).setNewPassword(request.newPassword()).build()));
+        revokedTokens.sessionsEndedBefore(userId, now);
         return signedIn(response, servletResponse);
     }
 
