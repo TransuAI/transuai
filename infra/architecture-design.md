@@ -117,6 +117,7 @@ POST   /auth/logout            登出：作廢 cookie 裡的 refresh token 所�
 POST   /auth/logout-all        登出所有裝置：作廢登入者所有的 refresh token、清掉 cookie
 POST   /auth/account/delete    刪除帳號：body { password }（密碼錯 403、猜太多次 429）；刪掉使用者、發 account.deleted，其他服務清掉他的資料（用量去識別化）；
                                 刪除後還沒過期的 access token 也被擋下（gateway 在 Redis 記 15 分鐘）
+POST   /auth/password          改密碼：body { currentPassword, newPassword }（目前的密碼錯 403、猜太多次 429）；其他裝置的登入全部作廢，這次拿到新的 token 與 cookie
 GET    /auth/me                取得目前使用者資訊（需帶 access token）
 ```
 

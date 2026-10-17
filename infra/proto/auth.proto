@@ -35,6 +35,10 @@ service AuthService {
   // 刪除帳號（需要 x-user-id）：再確認一次密碼，錯了回 PERMISSION_DENIED（不是 UNAUTHENTICATED——那表示 token 不能用）。
   // 通過就刪掉使用者與他所有的 refresh token，並發 account.deleted 讓其他服務清掉他的資料；找不到使用者回 NOT_FOUND。
   rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
+
+  // 改密碼（需要 x-user-id）：目前的密碼錯回 PERMISSION_DENIED；新密碼不合規則回 INVALID_ARGUMENT。成功就作廢這位使用者所有的
+  // refresh token（其他裝置要重新登入），並為這次的請求簽一組新的 token。
+  rpc ChangePassword(ChangePasswordRequest) returns (AuthResponse);
 }
 
 message RegisterRequest {
@@ -83,4 +87,9 @@ message DeleteAccountRequest {
 }
 
 message DeleteAccountResponse {
+}
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
 }
