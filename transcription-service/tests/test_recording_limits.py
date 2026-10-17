@@ -36,7 +36,7 @@ def failure_reason(mocks, job_id):
 
 
 def test_a_recording_longer_than_an_hour_is_not_transcribed(mocks):
-    mocks.media_duration_seconds.return_value = 61 * 60.0
+    mocks.media_duration_seconds.return_value = 61 * 60.05  # ffmpeg often reads a little over
 
     job_id, publish_failed, saved_usage = run(mocks)
 

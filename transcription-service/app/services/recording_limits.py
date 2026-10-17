@@ -24,7 +24,8 @@ def check_recording(duration_seconds: float | None, owner: uuid.UUID | None) -> 
     舊訊息沒有擁有者時只檢查單一錄音的上限。"""
     if duration_seconds is None:
         raise RecordingRefused("無法判斷錄音的長度，沒有轉錄")
-    minutes = math.ceil(duration_seconds / 60)
+    # 給人看的分鐘數四捨五入（ffmpeg 量出來常多零點幾秒，61 分鐘不要說成 62）；比較用的是秒。
+    minutes = round(duration_seconds / 60)
     if duration_seconds > settings.max_recording_minutes * 60:
         raise RecordingRefused(
             f"錄音長 {minutes} 分鐘，超過每個檔案 {settings.max_recording_minutes} 分鐘的上限，沒有轉錄")
