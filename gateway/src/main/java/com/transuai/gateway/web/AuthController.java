@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.auth.grpc.v1.ChangePasswordRequest;
 import com.transuai.auth.grpc.v1.DeleteAccountRequest;
 import com.transuai.auth.grpc.v1.GetMeRequest;
 import com.transuai.auth.grpc.v1.LoginRequest;
@@ -26,6 +27,7 @@ import com.transuai.gateway.ratelimit.AuthRateLimits;
 import com.transuai.gateway.security.DeletedUsers;
 import com.transuai.gateway.security.RefreshTokenCookie;
 import com.transuai.gateway.web.dto.AuthResponseDto;
+import com.transuai.gateway.web.dto.ChangePasswordRequestDto;
 import com.transuai.gateway.web.dto.DeleteAccountRequestDto;
 import com.transuai.gateway.web.dto.LoginRequestDto;
 import com.transuai.gateway.web.dto.RegisterRequestDto;
@@ -123,10 +125,24 @@ public class AuthController {
         if (request.password() == null || request.password().isEmpty()) {
             throw new IllegalArgumentException("password is required");
         }
-        rateLimits.deleteAccount(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
+        rateLimits.withPasswordCheck(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
                 .deleteAccount(DeleteAccountRequest.newBuilder().setPassword(request.password()).build()));
         deletedUsers.remember(userId);
         refreshTokenCookie.clear(servletResponse);
+    }
+
+    // 改密碼：要目前的密碼（錯了 403，跟刪除帳號合計連續錯太多次 429）。auth-service 作廢這位使用者所有的 refresh token，這個瀏覽器
+    // 拿到新的一組（cookie 換掉）；其他裝置要重新登入。
+    @PostMapping("/password")
+    public AuthResponseDto changePassword(@CurrentUserId UUID userId, @RequestBody ChangePasswordRequestDto request,
+            HttpServletResponse servletResponse) {
+        if (request.currentPassword() == null || request.currentPassword().isEmpty() || request.newPassword() == null) {
+            throw new IllegalArgumentException("currentPassword and newPassword are required");
+        }
+        AuthResponse response = rateLimits.withPasswordCheck(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
+                .changePassword(ChangePasswordRequest.newBuilder()
+                        .setCurrentPassword(request.currentPassword()).setNewPassword(request.newPassword()).build()));
+        return signedIn(response, servletResponse);
     }
 
     @GetMapping("/me")

@@ -25,7 +25,8 @@ public class AuthRateLimits {
     private static final String LOGIN_BY_ADDRESS = "login:ip:";
     private static final String REGISTER_BY_ADDRESS = "register:ip:";
     private static final String LOGIN_FAILURES = "login-failures:";
-    private static final String DELETE_ACCOUNT_FAILURES = "delete-account-failures:";
+    // 刪除帳號與改密碼共用：兩邊都在猜同一個密碼。
+    private static final String PASSWORD_CHECK_FAILURES = "password-check-failures:";
 
     private final RateLimiter limiter;
     private final RateLimitProperties properties;
@@ -52,11 +53,11 @@ public class AuthRateLimits {
     }
 
     /**
-     * 刪除帳號要再輸入一次密碼：拿到別人開著的瀏覽器也不能一直猜。跟登入失敗同一個上限，算的是這位使用者的失敗次數（密碼錯是
-     * auth-service 的 PERMISSION_DENIED）；成功或 auth-service 沒回答就不算。
+     * 刪除帳號與改密碼要再輸入一次目前的密碼：拿到別人開著的瀏覽器也不能一直猜。跟登入失敗同一個上限，算的是這位使用者的失敗次數
+     * （兩個功能合計；密碼錯是 auth-service 的 PERMISSION_DENIED）；成功或 auth-service 沒回答就不算。
      */
-    public <T> T deleteAccount(UUID userId, Supplier<T> attempt) {
-        String failures = DELETE_ACCOUNT_FAILURES + userId;
+    public <T> T withPasswordCheck(UUID userId, Supplier<T> attempt) {
+        String failures = PASSWORD_CHECK_FAILURES + userId;
         limiter.hit(failures, properties.loginFailures()).orThrow(RateLimitedException::tooManyTries);
         T result;
         try {
