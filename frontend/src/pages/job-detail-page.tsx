@@ -5,7 +5,8 @@ import { ArrowLeft } from 'lucide-react'
 import { chapterApi, jobsApi, modelsApi, qaApi, speakerSuggestionsApi, summaryApi, transcriptApi, usageApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { findCurrentSegmentIndex } from '@/lib/current-segment'
-import { formatBytes, formatDuration } from '@/lib/media'
+import { jobDisplayName } from '@/lib/job-display'
+import { formatBytes, formatDateTime, formatDuration } from '@/lib/media'
 import { sameModel } from '@/lib/providers'
 import { useAutoFollow } from '@/hooks/use-auto-follow'
 import { useJobSocket } from '@/hooks/use-job-socket'
@@ -25,9 +26,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { CompletedWorkspace } from '@/pages/job-detail/completed-workspace'
+import { TranscriptView } from '@/pages/job-detail/transcript-view'
 import type { QaEntry } from '@/pages/job-detail/chat-pane'
 import type { SpeakerSuggestionActions } from '@/pages/job-detail/speaker-panel'
-import type { Chapter, Job, JobStatusEvent, JobUpdate, JobUsage, ModelChoice, SpeakerAssignment, SpeakerSuggestion, Summary, Transcript } from '@/types/api'
+import type { Chapter, Job, JobStatusEvent, JobUpdate, JobUsage, ModelChoice, Note, SpeakerAssignment, SpeakerSuggestion, Summary, Transcript } from '@/types/api'
+
+const NO_NOTES: Note[] = []
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -78,7 +82,7 @@ export function JobDetailPage() {
       setJob(data)
     } catch (err) {
       // 同一個 id：輪詢每 4 秒失敗一次（例如被限流）時換掉同一個提示，不要一直疊新的。
-      toast.error(err instanceof ApiError ? err.message : '無法載入 Job', { id: `load-job-${jobId}` })
+      toast.error(err instanceof ApiError ? err.message : '無法載入這個檔案', { id: `load-job-${jobId}` })
     } finally {
       setIsLoadingJob(false)
     }
@@ -328,14 +332,25 @@ export function JobDetailPage() {
   const handleAskQuestion = () => {
     const question = questionInput.trim()
     if (!jobId || !question || isAsking) return
+    setQuestionInput('')
+    ask(question)
+  }
 
+  // 重新提問: the failed answer makes way for a new try at the same question (with the model and 查網路 as set now).
+  const handleRetryQuestion = (failed: QaEntry) => {
+    if (!jobId || isAsking) return
+    setQaHistory((prev) => prev.filter((entry) => entry.id !== failed.id))
+    ask(failed.question)
+  }
+
+  const ask = (question: string) => {
+    if (!jobId) return
     const id = crypto.randomUUID()
     const searchesTheWeb = webSearchAvailable && webSearch && webSearchesLeft !== 0
     setQaHistory((prev) => [
       ...prev,
       { id, question, answer: '', sourceTimestamps: [], status: 'streaming', webSearch: searchesTheWeb },
     ])
-    setQuestionInput('')
     setIsAsking(true)
 
     const patchEntry = (patch: Partial<QaEntry>) =>
@@ -407,7 +422,7 @@ export function JobDetailPage() {
     return (
       <div className="mx-auto w-full max-w-5xl">
         <Alert variant="destructive">
-          <AlertTitle>找不到這個 Job</AlertTitle>
+          <AlertTitle>找不到這個檔案</AlertTitle>
           <AlertDescription>它可能已被刪除,或不屬於你的帳號。</AlertDescription>
         </Alert>
       </div>
@@ -427,10 +442,11 @@ export function JobDetailPage() {
         <Card>
           <CardHeader className="flex flex-row items-start justify-between gap-4">
             <div>
-              <CardTitle className="break-all">{job.fileName}</CardTitle>
+              <CardTitle className="break-all">{jobDisplayName(job)}</CardTitle>
+              {job.title && <p className="mt-0.5 text-xs break-all text-muted-foreground">{job.fileName}</p>}
               <p className="mt-1 text-sm text-muted-foreground">
                 {formatBytes(job.fileSizeBytes)} · {formatDuration(job.durationSeconds)} ·{' '}
-                {new Date(job.createdAt).toLocaleString()}
+                {formatDateTime(job.createdAt)}
               </p>
             </div>
             <JobStatusBadge status={job.status} />
@@ -445,7 +461,11 @@ export function JobDetailPage() {
           )}
           {isJobInProgress(job.status) && (
             <CardContent>
-              <p className="text-sm text-muted-foreground">處理中,完成後這裡會自動更新逐字稿與摘要...</p>
+              <p className="text-sm text-muted-foreground">
+                {transcript
+                  ? '逐字稿好了，正在產生摘要。完成後就能編輯逐字稿、提問與使用 AI 工具，這裡會自動切換。'
+                  : '處理中,完成後這裡會自動更新逐字稿與摘要...'}
+              </p>
             </CardContent>
           )}
           {mediaUrl && (
@@ -458,6 +478,31 @@ export function JobDetailPage() {
             </CardContent>
           )}
         </Card>
+
+        {/* The transcript is ready before the summary: let it be read (and played from) while the rest is made. */}
+        {transcript && isJobInProgress(job.status) && (
+          <Card className="h-[60vh] min-h-80 gap-0 py-0">
+            <CardHeader className="flex h-14 shrink-0 flex-row items-center border-b">
+              <CardTitle className="text-sm">逐字稿</CardTitle>
+            </CardHeader>
+            <CardContent className="min-h-0 flex-1 pt-3">
+              <TranscriptView
+                readOnly
+                segments={transcript.segments}
+                speakers={transcript.speakers}
+                currentSegmentIndex={currentSegmentIndex}
+                autoFollow={autoFollow}
+                mediaAvailable={Boolean(mediaUrl) && mediaElement !== null}
+                onSeek={seekTo}
+                onSaveSegmentText={handleSaveSegmentText}
+                onAssignSpeaker={handleAssignSpeaker}
+                notes={NO_NOTES}
+                onAddNoteAt={() => {}}
+                onOpenNote={() => {}}
+              />
+            </CardContent>
+          </Card>
+        )}
       </div>
     )
   }
@@ -478,6 +523,7 @@ export function JobDetailPage() {
       onQuestionInputChange={setQuestionInput}
       isAsking={isAsking}
       onAsk={handleAskQuestion}
+      onRetryQuestion={handleRetryQuestion}
       webSearchAvailable={webSearchAvailable}
       webSearch={webSearch}
       webSearchesLeft={webSearchesLeft}

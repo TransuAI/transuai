@@ -143,7 +143,7 @@ async function renderCompletedJob(
 
 // The Studio shows its tools as tiles; a tool's content is only on screen once its tile is opened.
 async function openStudioTool(name: string) {
-  const back = screen.queryByRole('button', { name: '返回 Studio' })
+  const back = screen.queryByRole('button', { name: '返回 AI 工具' })
   if (back) fireEvent.click(back)
   fireEvent.click(await screen.findByRole('button', { name }))
 }
@@ -201,7 +201,7 @@ describe('JobDetailPage status branches', () => {
     expect(await screen.findByText('轉錄中')).toBeInTheDocument()
     expect(screen.getByText('處理中,完成後這裡會自動更新逐字稿與摘要...')).toBeInTheDocument()
     expect(screen.queryByText('問答')).not.toBeInTheDocument()
-    expect(screen.queryByText('Studio')).not.toBeInTheDocument()
+    expect(screen.queryByText('AI 工具')).not.toBeInTheDocument()
   })
 
   it('shows a failure to load the job as one toast that later failures replace, not a new one every poll', async () => {
@@ -231,6 +231,33 @@ describe('JobDetailPage status branches', () => {
     expect(screen.getByText('轉錄服務逾時')).toBeInTheDocument()
   })
 
+  it('lets the transcript be read and played from while the summary is still being made, without editing it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'SUMMARIZING' })
+    vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
+
+    renderJobDetail()
+
+    expect(await screen.findByText('哈囉世界')).toBeInTheDocument()
+    expect(screen.getByText(/逐字稿好了，正在產生摘要/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '編輯片段' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '在這裡加筆記' })).not.toBeInTheDocument()
+    expect(screen.queryByText('問答')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '0:05' }))
+    expect(document.querySelector('audio')?.currentTime).toBe(5)
+  })
+
+  it('shows no transcript while it is still being transcribed', async () => {
+    vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'TRANSCRIBING' })
+
+    renderJobDetail()
+
+    expect(await screen.findByText('轉錄中')).toBeInTheDocument()
+    expect(transcriptApi.get).not.toHaveBeenCalled()
+    expect(screen.queryByText('逐字稿')).not.toBeInTheDocument()
+  })
+
   it('shows the Chat pane by default for a COMPLETED job, with Source/Studio reachable via triggers', async () => {
     vi.mocked(jobsApi.get).mockResolvedValue({ ...baseJob, status: 'COMPLETED' })
     vi.mocked(transcriptApi.get).mockResolvedValue(mockTranscript)
@@ -242,7 +269,7 @@ describe('JobDetailPage status branches', () => {
 
     expect(await screen.findByText('問答')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '來源' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Studio' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'AI 工具' })).toBeInTheDocument()
   })
 })
 
@@ -264,7 +291,7 @@ describe('JobDetailPage Source/Studio Sheets (COMPLETED, narrow viewport)', () =
 
     expect(screen.queryByText('這是摘要內容')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Studio' }))
+    await user.click(screen.getByRole('button', { name: 'AI 工具' }))
     await openStudioTool('AI 摘要')
     expect(await screen.findByText('這是摘要內容')).toBeInTheDocument()
 
@@ -375,10 +402,26 @@ describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
     stubDesktopLayout()
     await renderCompletedJob()
 
-    const tiles = within(await screen.findByRole('list', { name: 'Studio 功能' })).getAllByRole('button')
+    const tiles = within(await screen.findByRole('list', { name: 'AI 工具' })).getAllByRole('button')
     expect(tiles.map((tile) => tile.textContent?.slice(0, 4))).toEqual(['AI 摘', '章節1 ', '筆記還沒', '決策找出', '事實查核', '測驗還沒', '多格式輸', '會後處理', '用量尚無'])
     expect(screen.getByRole('button', { name: '章節' })).toHaveAccessibleDescription('1 個章節')
     expect(screen.queryByRole('button', { name: '0:12開場' })).not.toBeInTheDocument()
+  })
+
+  it('sums up the usage on its tile in minutes and searches, leaving tokens to the tool itself', async () => {
+    stubDesktopLayout()
+    vi.mocked(usageApi.getJobUsage).mockResolvedValue({
+      records: [
+        { kind: 'transcription', feature: 'transcription', provider: 'deepgram', model: 'nova-3', keySource: 'platform', inputTokens: null, outputTokens: null, audioSeconds: 1452, succeeded: true, createdAt: '2026-01-01T00:00:00Z' },
+        { kind: 'llm', feature: 'summary', provider: 'platform', model: 'qwen3:14b', keySource: 'platform', inputTokens: 300000, outputTokens: 39056, audioSeconds: null, succeeded: true, createdAt: '2026-01-01T00:01:00Z' },
+      ],
+      totals: { inputTokens: 300000, outputTokens: 39056, audioSeconds: 1452 },
+    })
+    await renderCompletedJob()
+
+    const tile = await screen.findByRole('button', { name: '用量' })
+    await waitFor(() => expect(tile).toHaveAccessibleDescription(/^轉錄 /))
+    expect(tile).not.toHaveTextContent('tokens')
   })
 
   it('opens a tool, and goes back to the tiles with the focus on the tool it came from', async () => {
@@ -388,11 +431,11 @@ describe('JobDetailPage Studio tiles (COMPLETED, desktop layout)', () => {
 
     await user.click(await screen.findByRole('button', { name: '章節' }))
     expect(screen.getByRole('button', { name: '0:12開場' })).toBeInTheDocument()
-    expect(screen.queryByRole('list', { name: 'Studio 功能' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '返回 Studio' })).toHaveFocus()
+    expect(screen.queryByRole('list', { name: 'AI 工具' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回 AI 工具' })).toHaveFocus()
 
-    await user.click(screen.getByRole('button', { name: '返回 Studio' }))
-    expect(screen.getByRole('list', { name: 'Studio 功能' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '返回 AI 工具' }))
+    expect(screen.getByRole('list', { name: 'AI 工具' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '章節' })).toHaveFocus()
   })
 })
@@ -629,14 +672,14 @@ describe('JobDetailPage Chat pane (COMPLETED, desktop layout)', () => {
     const audio = document.querySelector('audio')
 
     await user.click(screen.getByRole('button', { name: '收合來源' }))
-    await user.click(screen.getByRole('button', { name: '收合 Studio' }))
+    await user.click(screen.getByRole('button', { name: '收合 AI 工具' }))
     expect(screen.getByRole('button', { name: '展開來源' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '展開 Studio' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '展開 AI 工具' })).toBeInTheDocument()
     // Folded, not unmounted: playback carries on.
     expect(document.querySelector('audio')).toBe(audio)
 
     await user.click(screen.getByRole('button', { name: '展開來源' }))
-    await user.click(screen.getByRole('button', { name: '展開 Studio' }))
+    await user.click(screen.getByRole('button', { name: '展開 AI 工具' }))
     expect(screen.queryByRole('button', { name: '展開來源' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '收合來源' })).toBeInTheDocument()
     expect(document.querySelector('audio')).toBe(audio)
@@ -1208,6 +1251,33 @@ const soloTranscript: Transcript = {
 describe('JobDetailPage speakers (COMPLETED, desktop layout)', () => {
   const segmentRow = (text: string) => screen.getByText(text).closest('[data-segment-index]') as HTMLElement
 
+  it('folds a big meeting\'s speakers into their heading, and opens them on request', async () => {
+    stubDesktopLayout()
+    const user = userEvent.setup()
+    const labels = ['S1', 'S2', 'S3', 'S4', 'S5']
+    await renderCompletedJob({
+      ...multiSpeakerTranscript,
+      segments: labels.map((label, i) => ({ id: `seg-${i}`, startTime: i * 2, endTime: i * 2 + 2, speakerLabel: label, text: `第 ${i} 句`, originalText: `第 ${i} 句` })),
+      speakers: labels.map((label, i) => ({ label, displayName: `講者 ${i + 1}`, displayOrder: i + 1 })),
+    })
+
+    const heading = screen.getByRole('button', { name: /講者（5）/ })
+    expect(heading).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: '改名：講者 1' })).not.toBeInTheDocument()
+
+    await user.click(heading)
+    expect(heading).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: '改名：講者 5' })).toBeInTheDocument()
+  })
+
+  it('keeps a small meeting\'s speakers open', async () => {
+    stubDesktopLayout()
+    await renderCompletedJob(multiSpeakerTranscript)
+
+    expect(screen.getByRole('button', { name: /講者（2）/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: '改名：主持人' })).toBeInTheDocument()
+  })
+
   it("shows the speaker's name only on the first segment of each turn", async () => {
     stubDesktopLayout()
     await renderCompletedJob(multiSpeakerTranscript)
@@ -1634,7 +1704,7 @@ describe('JobDetailPage speaker stats (講者數據, COMPLETED, desktop layout)'
     stubDesktopLayout()
     await renderCompletedJob(soloTranscript)
 
-    await screen.findByRole('list', { name: 'Studio 功能' })
+    await screen.findByRole('list', { name: 'AI 工具' })
     expect(screen.queryByRole('button', { name: '講者數據' })).not.toBeInTheDocument()
   })
 
@@ -2012,7 +2082,7 @@ describe('JobDetailPage answering model (COMPLETED, desktop layout)', () => {
       '預算怎麼分？',
       expect.objectContaining({ model: { provider: 'openai', model: 'gpt-5' } }),
     )
-    expect(await screen.findByText('由 gpt-5 回答')).toBeInTheDocument()
+    expect(await screen.findByTitle('模型：gpt-5')).toBeInTheDocument()
   })
 
   it('says which model gave each earlier answer', async () => {
@@ -2022,8 +2092,8 @@ describe('JobDetailPage answering model (COMPLETED, desktop layout)', () => {
       { question: '第二題', answer: '第二答', sourceTimestamps: [], createdAt: '2026-01-01T00:01:00Z', modelProvider: null, model: null },
     ])
 
-    expect(await screen.findByText('由 Qwen/Qwen3.5-9B 回答')).toBeInTheDocument()
-    expect(screen.getAllByText(/^由 .+ 回答$/)).toHaveLength(1)
+    expect(await screen.findByTitle('模型：Qwen/Qwen3.5-9B')).toBeInTheDocument()
+    expect(screen.getAllByText('由 AI 回答')).toHaveLength(1)
   })
 })
 
@@ -2033,7 +2103,7 @@ describe('JobDetailPage summary model (COMPLETED, desktop layout)', () => {
     await renderCompletedJob()
     await openStudioTool('AI 摘要')
 
-    expect(await screen.findByText('由 gpt-5-mini 產生')).toBeInTheDocument()
+    expect(await screen.findByTitle('模型：gpt-5-mini')).toBeInTheDocument()
   })
 
   it('says nothing about the model for a summary made before models were recorded', async () => {
@@ -2884,7 +2954,7 @@ describe('JobDetailPage quizzes (測驗)', () => {
 
     const [newest, older] = await within(quizCard()).findAllByRole('listitem')
     expect(newest).toHaveTextContent('20 題')
-    expect(newest).toHaveTextContent('由 gpt-5 產生')
+    expect(newest).toHaveTextContent('由 AI 產生（模型：gpt-5）')
     expect(older).toHaveTextContent('10 題')
   })
 
@@ -2903,7 +2973,7 @@ describe('JobDetailPage quizzes (測驗)', () => {
     vi.mocked(usageApi.getJobUsage).mockClear()
     await vi.advanceTimersByTimeAsync(3000)
 
-    expect(await within(quizCard()).findByText('由 Qwen/Qwen3.5-9B 產生')).toBeInTheDocument()
+    expect(await within(quizCard()).findByTitle('模型：Qwen/Qwen3.5-9B')).toBeInTheDocument()
     expect(within(quizCard()).queryByText('產生中…')).not.toBeInTheDocument()
     expect(usageApi.getJobUsage).toHaveBeenCalled() // generating it used the model
   })
@@ -2990,11 +3060,11 @@ describe('JobDetailPage quizzes (測驗)', () => {
     await renderCompletedJob()
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
 
-    await user.click(screen.getByRole('button', { name: 'Studio' }))
+    await user.click(screen.getByRole('button', { name: 'AI 工具' }))
     await openStudioTool('測驗')
 
     const card = await screen.findByRole('region', { name: '測驗' })
-    expect(await within(card).findByRole('listitem')).toHaveTextContent('由 Qwen/Qwen3.5-9B 產生')
+    expect(await within(card).findByRole('listitem')).toHaveTextContent('由 AI 產生（模型：Qwen/Qwen3.5-9B）')
   })
 })
 
@@ -3129,7 +3199,7 @@ describe('JobDetailPage taking a quiz (作答)', () => {
   it('can be taken on a phone, from the Studio sheet', async () => {
     await renderCompletedJob()
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Studio' }))
+    await user.click(screen.getByRole('button', { name: 'AI 工具' }))
     await openStudioTool('測驗')
     const card = await screen.findByRole('region', { name: '測驗' })
 
@@ -3812,7 +3882,7 @@ describe('JobDetailPage generated outputs (多格式輸出, COMPLETED, desktop l
     await user.click(await screen.findByRole('button', { name: /^Podcast 介紹/ }))
     const document = screen.getByRole('article', { name: 'Podcast 介紹' })
     expect(document).toHaveTextContent('## 章節')
-    expect(screen.getByText('由 qwen3:14b 產生')).toBeInTheDocument()
+    expect(screen.getByTitle('模型：qwen3:14b')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '複製' }))
     expect(writeText).toHaveBeenCalledWith(done.content)
@@ -4125,6 +4195,18 @@ describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => 
     expect(within(row('大家好')).getByText('こんにちは', { selector: 'mark' })).toBeInTheDocument()
   })
 
+  it('keeps each translated language\'s files under its name, so the menu stays short', async () => {
+    stubDesktopLayout()
+    vi.mocked(translationsApi.list).mockResolvedValue([done])
+    await renderCompletedJob(multiSpeakerTranscript)
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+
+    await user.click(screen.getByRole('button', { name: '匯出' }))
+
+    expect(await screen.findByRole('menuitem', { name: '日本語' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '雙語字幕（日本語，SRT）' })).not.toBeInTheDocument()
+  })
+
   it('downloads bilingual subtitles for a translated language', async () => {
     stubDesktopLayout()
     const downloads = captureDownloads()
@@ -4134,7 +4216,10 @@ describe('JobDetailPage translation (譯文, COMPLETED, desktop layout)', () => 
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
 
     await user.click(screen.getByRole('button', { name: '匯出' }))
-    await user.click(await screen.findByRole('menuitem', { name: '雙語字幕（日本語，SRT）' }))
+    // Each translated language's files are a level down, under its name.
+    await user.click(await screen.findByRole('menuitem', { name: '日本語' }))
+    // A real pointer crossing over to the submenu is more than jsdom lays out: pick the item straight away.
+    fireEvent.click(await screen.findByRole('menuitem', { name: '雙語字幕（日本語，SRT）' }))
 
     await waitFor(() => expect(downloads).toHaveLength(1))
     expect(downloads[0].fileName).toBe('interview-雙語-ja.srt')
@@ -4757,5 +4842,94 @@ describe('JobDetailPage fact check (事實查核, COMPLETED, desktop layout)', (
       expect(await screen.findByText('這個部署沒有設定網路搜尋，無法查核')).toBeInTheDocument()
       expect(within(list).queryAllByRole('checkbox')).toHaveLength(0)
     })
+  })
+})
+
+describe('JobDetailPage answers (COMPLETED, desktop layout)', () => {
+  let matchMediaSpy: ReturnType<typeof stubDesktopLayout>
+  beforeEach(() => {
+    matchMediaSpy = stubDesktopLayout()
+  })
+  afterEach(() => matchMediaSpy.mockRestore())
+
+  it('shows an answer\'s Markdown as bold and quotes, not as raw marks', async () => {
+    await renderCompletedJob(mockTranscript, [
+      { question: '幾枚？', answer: '相關內容：\n> 上千枚的飛彈\n\n所以答案是**上千枚**。', sourceTimestamps: [], createdAt: '2026-01-01T00:00:00Z', modelProvider: null, model: null },
+    ])
+
+    expect(await screen.findByText('上千枚', { selector: 'strong' })).toBeInTheDocument()
+    expect(screen.getByText('上千枚的飛彈').closest('blockquote')).not.toBeNull()
+    expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument()
+  })
+
+  it('lists the passages an answer drew on in recording order, each once', async () => {
+    await renderCompletedJob(mockTranscript, [
+      { question: '幾枚？', answer: '上千枚', sourceTimestamps: [1258, 15, 64, 15, 598], createdAt: '2026-01-01T00:00:00Z', modelProvider: null, model: null },
+    ])
+
+    const passages = (await screen.findByText('相關段落')).parentElement as HTMLElement
+    expect(within(passages).getAllByRole('button').map((b) => b.textContent)).toEqual(['0:15', '1:04', '9:58', '20:58'])
+  })
+
+  it('asks a failed question again from its 重新提問, in place of the failed answer', async () => {
+    const user = userEvent.setup()
+    vi.mocked(qaApi.ask)
+      .mockImplementationOnce(async (_jobId, _question, handlers) => handlers.onError('模型暫時無法使用'))
+      .mockImplementationOnce(async (_jobId, _question, handlers) => handlers.onDelta('這次答得出來'))
+
+    await renderCompletedJob()
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), '這段在說什麼?')
+    await user.click(screen.getByRole('button', { name: '問' }))
+
+    expect(await screen.findByText('回答失敗')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重新提問' }))
+
+    expect(await screen.findByText('這次答得出來')).toBeInTheDocument()
+    expect(qaApi.ask).toHaveBeenLastCalledWith('job-1', '這段在說什麼?', expect.any(Object))
+    expect(screen.getAllByText('這段在說什麼?')).toHaveLength(1)
+    expect(screen.queryByText('回答失敗')).not.toBeInTheDocument()
+  })
+
+  it('goes down to a new question, and keeps following its answer only while the user stays at the bottom', async () => {
+    const user = userEvent.setup()
+    let sendDelta: (text: string) => void = () => {}
+    let finish: () => void = () => {}
+    vi.mocked(qaApi.ask).mockImplementation(
+      (_jobId, _question, handlers) =>
+        new Promise<void>((resolve) => {
+          sendDelta = handlers.onDelta
+          finish = resolve
+        }),
+    )
+    await renderCompletedJob(mockTranscript, [
+      { question: '第一題', answer: '第一個答案', sourceTimestamps: [], createdAt: '2026-01-01T00:00:00Z', modelProvider: null, model: null },
+    ])
+    // jsdom lays nothing out: give the history's viewport a size, and a scrollTop that remembers what it's set to.
+    const viewport = (await screen.findByText('第一題')).closest('[data-slot="scroll-area-viewport"]') as HTMLElement
+    let scrollTop = 0
+    let scrollHeight = 1000
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, get: () => 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => (scrollTop = value) },
+    })
+
+    await user.type(screen.getByPlaceholderText('針對這個內容提問...'), '第二題')
+    await user.click(screen.getByRole('button', { name: '問' }))
+    expect(scrollTop).toBe(1000)
+
+    // At the bottom, the answer is followed as it grows.
+    scrollHeight = 1200
+    act(() => sendDelta('一段'))
+    expect(scrollTop).toBe(1200)
+
+    // Scrolled up to read: left there.
+    scrollTop = 100
+    fireEvent.scroll(viewport)
+    scrollHeight = 1400
+    act(() => sendDelta('又一段'))
+    expect(scrollTop).toBe(100)
+
+    await act(async () => finish())
   })
 })

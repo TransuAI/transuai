@@ -1,14 +1,16 @@
-import { useId, useState } from 'react'
-import { AlertCircle, BookmarkPlus, Check, ChevronRight, CircleAlert, Globe, Loader2Icon, MessageCircle } from 'lucide-react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { AlertCircle, BookmarkPlus, Check, ChevronRight, CircleAlert, Globe, Loader2Icon, MessageCircle, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { modelLabel } from '@/lib/providers'
 import { cn } from '@/lib/utils'
 import { siteOf, WEB_LINK } from '@/lib/web-sources'
 import { TimestampButton } from '@/pages/job-detail/timestamp-button'
+import { MarkdownText } from '@/components/markdown-text'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { ModelCredit } from '@/components/model-credit'
 import type { AnswerStep, ModelChoice, WebSource } from '@/types/api'
 
 export type QaEntryStatus = 'streaming' | 'done' | 'error'
@@ -97,15 +99,33 @@ interface ChatPaneProps {
   onWebSearchChange: (on: boolean) => void
   /** 存成筆記: keeps a finished answer as a note; rejects when saving fails. */
   onSaveAsNote: (entry: QaEntry) => Promise<void>
+  /** 重新提問: asks a question whose answer failed again, in its place. */
+  onRetry: (entry: QaEntry) => void
 }
 
 const USED_UP = '這個月的網路搜尋已用完，下個月 1 日恢復'
 
+const inRecordingOrder = (times: number[]) => [...new Set(times)].sort((a, b) => a - b)
 
-// The answer, with each [n] that points at one of its web sources turned into a small link to that page. Any other
-// bracketed number is left as text.
+// Markup of the shadcn ScrollArea (components/ui/scroll-area.tsx) the history scrolls in.
+const VIEWPORT_SELECTOR = '[data-slot="scroll-area-viewport"]'
+// Within this much of the bottom still counts as reading the newest answer.
+const NEAR_BOTTOM_PX = 40
+
+
+// The answer's Markdown shown as such, with each [n] that points at one of its web sources turned into a small link to
+// that page. Any other bracketed number is left as text.
 function AnswerText({ text, webSources }: { text: string; webSources: WebSource[] }) {
-  if (webSources.length === 0) return <>{text}</>
+  return (
+    <MarkdownText
+      text={text}
+      renderText={webSources.length === 0 ? undefined : (run) => <WithCitations text={run} webSources={webSources} />}
+      className="text-sm leading-relaxed text-foreground/90"
+    />
+  )
+}
+
+function WithCitations({ text, webSources }: { text: string; webSources: WebSource[] }) {
   return (
     <>
       {text.split(/(\[\d+\])/).map((part, i) => {
@@ -199,7 +219,31 @@ export function ChatPane({
   webSearchesLeft,
   onWebSearchChange,
   onSaveAsNote,
+  onRetry,
 }: ChatPaneProps) {
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  // Follows the newest answer down as it streams in — unless the user has scrolled up to read an earlier one. Asking
+  // a new question always goes down to it.
+  const stickToBottomRef = useRef(true)
+  const entryCountRef = useRef(0)
+  const showsHistory = !isLoadingHistory && qaHistory.length > 0
+  useEffect(() => {
+    const viewport = scrollAreaRef.current?.querySelector<HTMLElement>(VIEWPORT_SELECTOR)
+    if (!viewport) return
+    const onScroll = () => {
+      stickToBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= NEAR_BOTTOM_PX
+    }
+    viewport.addEventListener('scroll', onScroll)
+    return () => viewport.removeEventListener('scroll', onScroll)
+  }, [showsHistory])
+  useLayoutEffect(() => {
+    const viewport = scrollAreaRef.current?.querySelector<HTMLElement>(VIEWPORT_SELECTOR)
+    if (!viewport) return
+    if (qaHistory.length > entryCountRef.current) stickToBottomRef.current = true
+    entryCountRef.current = qaHistory.length
+    if (stickToBottomRef.current) viewport.scrollTop = viewport.scrollHeight
+  }, [qaHistory, showsHistory])
+
   // Once this month's searches are used up the switch is off and can't be turned on; the questions themselves go on.
   const usedUp = webSearchesLeft === 0
   const searching = webSearch && !usedUp
@@ -223,12 +267,15 @@ export function ChatPane({
             <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
           </div>
         ) : qaHistory.length > 0 ? (
-          <ScrollArea className="h-full pr-4">
-            <div className="flex flex-col gap-4">
+          // Radix lays the content out as a table, which grows to fit a line that may not wrap (a truncated web source
+          // title) and pushes the answers past the pane on a phone: lay it out as a block so it keeps to the pane's width.
+          <ScrollArea ref={scrollAreaRef} className="h-full pr-4 [&_[data-slot=scroll-area-viewport]>div]:block!">
+            <div className="flex flex-col gap-6">
               {qaHistory.map((entry) => (
-                <div key={entry.id} className="flex flex-col gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
-                  <div className="flex items-start gap-1.5">
-                    <p className="text-sm font-medium">{entry.question}</p>
+                <div key={entry.id} className="flex flex-col gap-2">
+                  {/* The question as the user's own bubble, so it reads apart from the answer under it. */}
+                  <div className="flex max-w-[85%] items-start gap-1.5 self-end rounded-lg bg-muted px-3 py-2">
+                    <p className="text-sm font-medium whitespace-pre-wrap">{entry.question}</p>
                     {entry.webSearch && (
                       <span title="這一題也查了網路" className="mt-0.5 shrink-0 text-muted-foreground">
                         <Globe aria-hidden className="size-3.5" />
@@ -237,14 +284,10 @@ export function ChatPane({
                     )}
                   </div>
                   {entry.steps && entry.steps.length > 0 && <AnswerSteps steps={entry.steps} status={entry.status} />}
-                  {entry.answer && (
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                      <AnswerText text={entry.answer} webSources={entry.webSources ?? []} />
-                    </p>
-                  )}
+                  {entry.answer && <AnswerText text={entry.answer} webSources={entry.webSources ?? []} />}
                   {entry.status !== 'error' && (entry.model || (entry.status === 'done' && entry.answer)) && (
                     <div className="flex items-center gap-2">
-                      {entry.model && <p className="text-xs text-muted-foreground/80">由 {entry.model} 回答</p>}
+                      {entry.model && <ModelCredit model={entry.model} verb="回答" />}
                       {entry.status === 'done' && entry.answer && <SaveAsNoteButton onSave={() => onSaveAsNote(entry)} />}
                     </div>
                   )}
@@ -253,15 +296,24 @@ export function ChatPane({
                     <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
                   )}
                   {entry.status === 'error' && (
-                    <p className="flex items-center gap-1.5 text-sm text-destructive">
-                      <AlertCircle className="size-3.5" />
-                      回答失敗，請重新提問
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="flex items-center gap-1.5 text-sm text-destructive">
+                        <AlertCircle className="size-3.5" />
+                        回答失敗
+                      </p>
+                      <Button size="xs" variant="outline" disabled={isAsking} onClick={() => onRetry(entry)}>
+                        <RotateCcw />
+                        重新提問
+                      </Button>
+                    </div>
                   )}
                   {entry.sourceTimestamps.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {entry.sourceTimestamps.map((ts, j) => (
-                        <TimestampButton key={j} seconds={ts} onSeek={onSeek} mediaAvailable={mediaAvailable} />
+                    // The passages the answer drew on, as places to listen to — in the order they come in the recording
+                    // (they arrive by relevance).
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-xs text-muted-foreground">相關段落</span>
+                      {inRecordingOrder(entry.sourceTimestamps).map((ts) => (
+                        <TimestampButton key={ts} seconds={ts} onSeek={onSeek} mediaAvailable={mediaAvailable} />
                       ))}
                     </div>
                   )}

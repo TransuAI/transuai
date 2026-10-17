@@ -9,6 +9,7 @@ import { downloadTextFile, fileNameWithSuffix } from '@/lib/download'
 import { OUTPUT_FORMAT_LABELS, SOCIAL_PLATFORMS, outputLabel, postLength } from '@/lib/output-formats'
 import { formatShortDateTime } from '@/lib/media'
 import { isOutputStale } from '@/lib/staleness'
+import { ModelCredit } from '@/components/model-credit'
 import type { GeneratedOutput, OutputFormat, OutputRequest, SocialPlatform, Transcript } from '@/types/api'
 
 // 多格式輸出 (see ai-service CONTEXT.md): new documents written from the job — not 匯出, which turns what's already there
@@ -319,7 +320,7 @@ function OutputDocument({
           下載 Markdown
         </Button>
       </div>
-      {output.model && <p className="text-xs text-muted-foreground/80">由 {output.model} 產生</p>}
+      {output.model && <ModelCredit model={output.model} verb="產生" />}
     </section>
   )
 }

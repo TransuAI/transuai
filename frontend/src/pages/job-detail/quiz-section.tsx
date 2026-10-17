@@ -4,6 +4,7 @@ import { formatShortDateTime } from '@/lib/media'
 import { isQuizStale } from '@/lib/staleness'
 import { Button } from '@/components/ui/button'
 import { QuizDialog } from '@/pages/job-detail/quiz-dialog'
+import { ModelCredit } from '@/components/model-credit'
 import type { Quiz, Transcript } from '@/types/api'
 
 const QUESTION_COUNTS = [5, 10, 20] as const
@@ -83,7 +84,7 @@ export function QuizSection({
               )}
               {quiz.status === 'COMPLETED' && (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  {quiz.model && <p className="text-xs text-muted-foreground/80">由 {quiz.model} 產生</p>}
+                  {quiz.model && <ModelCredit model={quiz.model} verb="產生" />}
                   {quiz.bestCorrectCount !== null && (
                     <p className="text-xs text-muted-foreground">
                       最佳 {quiz.bestCorrectCount} / {quiz.questionCount}

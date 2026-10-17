@@ -29,6 +29,12 @@ export function formatDuration(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
+/** A moment in local time with its year, as 「2026/9/26 14:07」 (the job list, a job still being processed). */
+export function formatDateTime(isoTimestamp: string): string {
+  const date = new Date(isoTimestamp)
+  return `${date.getFullYear()}/${formatShortDateTime(isoTimestamp)}`
+}
+
 /** A moment in local time as 「9/26 14:07」. */
 export function formatShortDateTime(isoTimestamp: string): string {
   const date = new Date(isoTimestamp)

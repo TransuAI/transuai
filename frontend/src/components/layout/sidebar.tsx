@@ -20,7 +20,7 @@ import { DarkModeToggle } from '@/components/layout/dark-mode-toggle'
 const JOB_DETAIL_ROUTE_PATTERN = /^\/jobs\/[^/]+$/
 
 const NAV_ITEMS: { to: string; label: string; icon: ComponentType<{ className?: string }>; end?: boolean }[] = [
-  { to: '/jobs', label: '我的 Job', icon: Folder, end: true },
+  { to: '/jobs', label: '我的檔案', icon: Folder, end: true },
   { to: '/decisions', label: '決策', icon: Gavel },
   { to: '/upload', label: '上傳', icon: Upload },
   { to: '/settings', label: '設定', icon: Settings },

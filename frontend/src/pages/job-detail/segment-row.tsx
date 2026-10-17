@@ -69,6 +69,8 @@ interface SegmentRowProps {
   activeTranslationMatchStart?: number | null
   /** False while a translation is shown in place of the text (譯文): editing it would edit the original unseen. */
   textEditable?: boolean
+  /** Only reading and seeking (the transcript while the summary is still being made): no actions, no 改講者. */
+  readOnly?: boolean
 }
 
 // One 片段 of the transcript: its timestamp (click to seek), its text (search matches
@@ -97,8 +99,10 @@ export function SegmentRow({
   onOpenClaim = () => {},
   translation = null,
   activeTranslationMatchStart = null,
-  textEditable = true,
+  textEditable: textEditableWhenWritable = true,
+  readOnly = false,
 }: SegmentRowProps) {
+  const textEditable = textEditableWhenWritable && !readOnly
   const textMatches = matches.filter((match) => !match.inTranslation)
   const translationMatches = matches.filter((match) => match.inTranslation)
   // When the editor closes, give keyboard focus back to this segment's edit button rather than
@@ -223,7 +227,14 @@ export function SegmentRow({
           />
         </div>
       ) : (
-        turnSpeaker && (
+        turnSpeaker &&
+        (readOnly ? (
+          <p className="col-start-2 row-start-1 mb-0.5 flex w-fit max-w-full items-center gap-1.5 text-[13px] font-semibold">
+            <SpeakerDot speaker={turnSpeaker} />
+            <span className="min-w-0 truncate">{turnSpeaker.displayName}</span>
+            <span className="sr-only">：</span>
+          </p>
+        ) : (
           <button
             type="button"
             aria-label={`改講者：${turnSpeaker.displayName}`}
@@ -234,7 +245,7 @@ export function SegmentRow({
             <span className="min-w-0 truncate">{turnSpeaker.displayName}</span>
             <span className="sr-only">：</span>
           </button>
-        )
+        ))
       )}
       {isEditing ? (
         <SegmentEditor initialText={segment.text} onSave={onSave} onDone={onEndEdit} />
@@ -275,43 +286,45 @@ export function SegmentRow({
               <HighlightedText text={translation} matches={translationMatches} activeStart={activeTranslationMatchStart} />
             </p>
           )}
-          <div
-            className={cn(
-              'absolute top-1 right-1 flex items-center gap-0.5 rounded-md bg-popover p-0.5 shadow-sm ring-1 ring-foreground/10 transition-opacity',
-              'pointer-coarse:static pointer-coarse:col-start-3 pointer-coarse:row-start-2 pointer-coarse:h-fit pointer-coarse:bg-transparent pointer-coarse:p-0 pointer-coarse:shadow-none pointer-coarse:ring-0',
-              !speakerMenuOpen && toolbarHidden,
-            )}
-          >
-            {isEdited && textEditable && (
-              <button
-                type="button"
-                aria-label="還原成原始文字"
-                title={segment.originalText}
-                disabled={isRestoring}
-                onClick={() => void restore()}
-                className={toolbarButton}
-              >
-                <Undo2 className="size-3.5" />
+          {!readOnly && (
+            <div
+              className={cn(
+                'absolute top-1 right-1 flex items-center gap-0.5 rounded-md bg-popover p-0.5 shadow-sm ring-1 ring-foreground/10 transition-opacity',
+                'pointer-coarse:static pointer-coarse:col-start-3 pointer-coarse:row-start-2 pointer-coarse:h-fit pointer-coarse:bg-transparent pointer-coarse:p-0 pointer-coarse:shadow-none pointer-coarse:ring-0',
+                !speakerMenuOpen && toolbarHidden,
+              )}
+            >
+              {isEdited && textEditable && (
+                <button
+                  type="button"
+                  aria-label="還原成原始文字"
+                  title={segment.originalText}
+                  disabled={isRestoring}
+                  onClick={() => void restore()}
+                  className={toolbarButton}
+                >
+                  <Undo2 className="size-3.5" />
+                </button>
+              )}
+              <SegmentSpeakerMenu
+                open={speakerMenuOpen}
+                onOpenChange={setSpeakerMenuOpen}
+                currentLabel={segment.speakerLabel}
+                choices={speakerChoices}
+                onChoose={(label) => void giveToSpeaker(label)}
+                onAddSpeaker={() => setIsAddingSpeaker(true)}
+                triggerClassName={toolbarButton}
+              />
+              <button type="button" aria-label="在這裡加筆記" title="在這裡加筆記" onClick={onAddNote} className={toolbarButton}>
+                <BookmarkPlus className="size-3.5" />
               </button>
-            )}
-            <SegmentSpeakerMenu
-              open={speakerMenuOpen}
-              onOpenChange={setSpeakerMenuOpen}
-              currentLabel={segment.speakerLabel}
-              choices={speakerChoices}
-              onChoose={(label) => void giveToSpeaker(label)}
-              onAddSpeaker={() => setIsAddingSpeaker(true)}
-              triggerClassName={toolbarButton}
-            />
-            <button type="button" aria-label="在這裡加筆記" title="在這裡加筆記" onClick={onAddNote} className={toolbarButton}>
-              <BookmarkPlus className="size-3.5" />
-            </button>
-            {textEditable && (
-              <button ref={editButtonRef} type="button" aria-label="編輯片段" onClick={onStartEdit} className={toolbarButton}>
-                <Pencil className="size-3.5" />
-              </button>
-            )}
-          </div>
+              {textEditable && (
+                <button ref={editButtonRef} type="button" aria-label="編輯片段" onClick={onStartEdit} className={toolbarButton}>
+                  <Pencil className="size-3.5" />
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

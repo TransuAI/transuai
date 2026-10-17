@@ -60,9 +60,15 @@ export function DefaultModelSection({ keysVersion }: { keysVersion: number }) {
           預設模型
         </h2>
         <p className="text-sm text-muted-foreground">
-          上傳後的摘要與章節、重新產生、問答都用這個模型。換模型不會重做已經產生的內容；想用新模型重做，請在 Job 裡按「重新產生摘要與章節」。
+          上傳後的摘要與章節、重新產生、問答都用這個模型。換模型不會重做已經產生的內容；想用新模型重做，請在檔案的工作區裡按「重新產生摘要與章節」。
         </p>
       </div>
+      {/* Nothing to pick between: say which model it is, and how to get others, instead of a lone radio button. */}
+      {listed.length === 1 && !available?.openrouterCustom ? (
+        <p className="rounded-lg border p-3 text-sm">
+          目前使用 <span className="font-medium">{modelLabel(listed[0])}</span>。在下方「自有金鑰」存入 AI 廠商的金鑰後，就能改用其他模型。
+        </p>
+      ) : (
       <fieldset disabled={isSaving || !available} className="flex flex-col gap-1.5 rounded-lg border p-3">
         <legend className="sr-only">預設模型</legend>
         {listed.map((choice) => (
@@ -77,6 +83,7 @@ export function DefaultModelSection({ keysVersion }: { keysVersion: number }) {
           </label>
         ))}
       </fieldset>
+      )}
       {available?.openrouterCustom && (
         <form onSubmit={(event) => void chooseOpenrouterModel(event)} className="flex flex-wrap gap-2">
           <Input

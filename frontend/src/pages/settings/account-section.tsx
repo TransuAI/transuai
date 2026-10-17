@@ -352,7 +352,7 @@ function DeleteAccount() {
                 <div className="flex flex-col gap-2">
                   <p>以下會永久刪除，無法復原：</p>
                   <ul className="list-disc pl-5">
-                    <li>所有 Job 與上傳的錄音、影片</li>
+                    <li>所有上傳的錄音、影片</li>
                     <li>逐字稿、講者，以及 AI 產生的摘要、章節、問答、測驗、會後處理紀錄</li>
                     <li>筆記</li>
                     <li>自有金鑰、預設模型與其他設定</li>

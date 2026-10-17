@@ -198,7 +198,22 @@ describe('SettingsPage default model (預設模型)', () => {
     await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '刪除' }))
 
     expect(await screen.findByText('預設模型已改回平台模型')).toBeInTheDocument()
-    expect(await within(section).findByRole('radio', { name: '平台模型（Qwen/Qwen3.5-9B）' })).toBeChecked()
+    // Only the platform model left: said as text, not as a lone radio button.
+    expect(await within(section).findByText('平台模型（Qwen/Qwen3.5-9B）')).toBeInTheDocument()
+    expect(within(section).queryByRole('radio')).not.toBeInTheDocument()
+    expect(section).toHaveTextContent('在下方「自有金鑰」存入 AI 廠商的金鑰後，就能改用其他模型')
+  })
+})
+
+describe('SettingsPage layout', () => {
+  it('starts with this month\'s usage, keeps the AI model further down and the account last, with links to each', async () => {
+    await renderSettings()
+    await screen.findByRole('region', { name: '本月用量' })
+
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent?.trim())
+    expect(headings).toEqual(['本月用量', '已連結的帳號', '會後處理', '預設模型', '自有金鑰', '帳號'])
+    const nav = screen.getByRole('navigation', { name: '設定的各區' })
+    expect(within(nav).getByRole('link', { name: '本月用量' })).toHaveAttribute('href', '#monthly-usage-heading')
   })
 })
 
@@ -524,7 +539,7 @@ describe('SettingsPage deleting the account (刪除帳號)', () => {
   it('says what will be deleted and needs the password before it can be confirmed', async () => {
     const { dialog } = await openDialog()
 
-    expect(within(dialog).getByText('所有 Job 與上傳的錄音、影片')).toBeInTheDocument()
+    expect(within(dialog).getByText('所有上傳的錄音、影片')).toBeInTheDocument()
     expect(within(dialog).getByText('已連結的 Google、Notion 帳號（會向對方撤銷授權）')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '永久刪除帳號' })).toBeDisabled()
     expect(deleteAccount).not.toHaveBeenCalled()

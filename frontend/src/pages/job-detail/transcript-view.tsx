@@ -52,6 +52,8 @@ interface TranscriptViewProps {
   onOpenClaim?: (claimId: string) => void
   /** 譯文 shown in place of each segment's text, or under it (雙語); null shows the original. */
   translation?: { mode: 'translated' | 'bilingual'; texts: Map<string, string> } | null
+  /** Only reading, searching and seeking: no editing, 改講者 or notes (see SegmentRow's readOnly). */
+  readOnly?: boolean
 }
 
 // 譯文 in place of the text: search, highlighting and the rest work on what's shown. Not yet translated segments keep the
@@ -78,6 +80,7 @@ export function TranscriptView({
   claims = NO_CLAIMS,
   onOpenClaim,
   translation = null,
+  readOnly = false,
 }: TranscriptViewProps) {
   const { isFollowing, pause, resume } = autoFollow
   const showsTranslationInstead = translation?.mode === 'translated'
@@ -194,6 +197,7 @@ export function TranscriptView({
               onOpenClaim={onOpenClaim}
               translation={bilingualTexts?.[i] ?? null}
               textEditable={!showsTranslationInstead}
+              readOnly={readOnly}
             />
           ))}
         </div>

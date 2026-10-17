@@ -5,8 +5,8 @@ import { ChevronLeft, ChevronRight, Search, Trash2, Upload } from 'lucide-react'
 import { jobsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { CATEGORY_LABELS, jobDisplayName } from '@/lib/job-display'
-import { formatBytes, formatDuration } from '@/lib/media'
-import { JobStatusBadge } from '@/components/job-status-badge'
+import { formatBytes, formatDateTime, formatDuration } from '@/lib/media'
+import { JobStatusBadge, isJobInProgress } from '@/components/job-status-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -26,6 +26,7 @@ import type { Job, JobCategory } from '@/types/api'
 
 const PAGE_SIZE = 10
 const SEARCH_DELAY_MS = 300
+const REFRESH_INTERVAL_MS = 5000
 
 function isCategory(value: string | null): value is JobCategory {
   return value !== null && Object.hasOwn(CATEGORY_LABELS, value)
@@ -120,13 +121,35 @@ export function JobsPage() {
       })
       .catch((err: unknown) => {
         if (!current) return
-        toast.error(err instanceof ApiError ? err.message : '無法載入 Job 列表')
+        toast.error(err instanceof ApiError ? err.message : '無法載入檔案列表')
         setIsLoading(false)
       })
     return () => {
       current = false
     }
   }, [page, query, category, reloads, setSearchParams])
+
+  // While a job on this page is still being processed, look again every few seconds — quietly, without the skeleton —
+  // so its status moves on by itself. The detail page polls the same way.
+  const hasJobInProgress = !isLoading && jobs.some((job) => isJobInProgress(job.status))
+  useEffect(() => {
+    if (!hasJobInProgress) return
+    let current = true
+    const timer = setInterval(() => {
+      jobsApi
+        .list({ page, pageSize: PAGE_SIZE, ...(query && { query }), ...(category && { category }) })
+        .then((res) => {
+          if (!current) return
+          setJobs(res.jobs)
+          setTotalCount(res.totalCount)
+        })
+        .catch(() => {}) // keeps what's on screen; the next look may get through
+    }, REFRESH_INTERVAL_MS)
+    return () => {
+      current = false
+      clearInterval(timer)
+    }
+  }, [hasJobInProgress, page, query, category])
 
   const handleDelete = async () => {
     if (!deleteTarget) return
@@ -145,7 +168,7 @@ export function JobsPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">我的 Job</h1>
+        <h1 className="text-xl font-semibold">我的檔案</h1>
         <Button asChild size="sm">
           <Link to="/upload">
             <Upload className="size-4" />
@@ -192,7 +215,7 @@ export function JobsPage() {
       {!isLoading && jobs.length === 0 && filtered && (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
-            <p>找不到符合的 Job</p>
+            <p>找不到符合的檔案</p>
             <Button size="sm" variant="outline" onClick={() => setSearchParams(new URLSearchParams())}>
               清除搜尋與篩選
             </Button>
@@ -203,7 +226,7 @@ export function JobsPage() {
       {!isLoading && jobs.length === 0 && !filtered && (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
-            <p>還沒有任何 Job</p>
+            <p>還沒有任何檔案</p>
             <Button asChild size="sm">
               <Link to="/upload">上傳第一個檔案</Link>
             </Button>
@@ -228,7 +251,7 @@ export function JobsPage() {
                 {job.title && <p className="truncate text-xs text-muted-foreground">{job.fileName}</p>}
                 <p className="text-sm text-muted-foreground">
                   {formatBytes(job.fileSizeBytes)} · {formatDuration(job.durationSeconds)} ·{' '}
-                  {new Date(job.createdAt).toLocaleString()}
+                  {formatDateTime(job.createdAt)}
                 </p>
                 {job.status === 'FAILED' && job.errorReason && (
                   <p className="mt-1 text-sm text-destructive">{job.errorReason}</p>
@@ -272,9 +295,9 @@ export function JobsPage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>刪除這個 Job?</AlertDialogTitle>
+            <AlertDialogTitle>刪除這個檔案？</AlertDialogTitle>
             <AlertDialogDescription>
-              「{deleteTarget?.fileName}」與其逐字稿、摘要都會被永久刪除,無法復原。
+              「{deleteTarget && jobDisplayName(deleteTarget)}」與其逐字稿、摘要都會被永久刪除,無法復原。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

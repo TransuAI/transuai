@@ -55,8 +55,8 @@ export function speakersAtTurns(segments: TranscriptSegment[], speakers: Speaker
 }
 
 // A fixed palette (the --speaker-N tokens in index.css), picked by display order so a speaker keeps
-// its colour within the job; it wraps around after the last one.
-const PALETTE_SIZE = 8
+// its colour within the job; it wraps around after the last one. Twelve, so that a big meeting's speakers all differ.
+const PALETTE_SIZE = 12
 
 export function speakerColour(speaker: Speaker): string {
   return `var(--speaker-${((speaker.displayOrder - 1) % PALETTE_SIZE) + 1})`

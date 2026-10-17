@@ -25,7 +25,7 @@ describe('Sidebar route-driven collapse', () => {
   it('is expanded by default on a non-Job-Detail route', () => {
     renderShell('/jobs')
 
-    expect(screen.getByText('我的 Job')).toBeInTheDocument()
+    expect(screen.getByText('我的檔案')).toBeInTheDocument()
     expect(screen.getByText('上傳')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '收合側邊欄' })).toBeInTheDocument()
   })
@@ -33,7 +33,7 @@ describe('Sidebar route-driven collapse', () => {
   it('auto-collapses to an icon rail on a Job Detail route', () => {
     renderShell('/jobs/job-1')
 
-    expect(screen.queryByText('我的 Job')).not.toBeInTheDocument()
+    expect(screen.queryByText('我的檔案')).not.toBeInTheDocument()
     expect(screen.queryByText('上傳')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '展開側邊欄' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '上傳' })).toBeInTheDocument()
@@ -45,7 +45,7 @@ describe('Sidebar route-driven collapse', () => {
 
     await user.click(screen.getByRole('button', { name: '展開側邊欄' }))
 
-    expect(screen.getByText('我的 Job')).toBeInTheDocument()
+    expect(screen.getByText('我的檔案')).toBeInTheDocument()
     expect(screen.getByText('上傳')).toBeInTheDocument()
   })
 

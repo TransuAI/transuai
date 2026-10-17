@@ -105,7 +105,7 @@ export function PrivacyPage() {
 
       <Section title="保存多久">
         <ul className="flex list-disc flex-col gap-1 pl-5">
-          <li>錄音、逐字稿與 AI 產生的內容：保存到你刪除那個 Job，或刪除帳號。</li>
+          <li>錄音、逐字稿與 AI 產生的內容：保存到你刪除那個檔案，或刪除帳號。</li>
           <li>帳號資料、金鑰、授權權杖與設定：保存到你刪除它們（例如中斷連結），或刪除帳號。</li>
           <li>
             用量：刪除帳號時會<strong>去識別化</strong>——不再對應到你，只留下時間、模型與數量，用來計算平台每個月的總用量與成本。
@@ -118,11 +118,11 @@ export function PrivacyPage() {
         <p>依個人資料保護法第 3 條，你可以：</p>
         <ul className="flex list-disc flex-col gap-1 pl-5">
           <li>查詢、閱覽：登入後在服務裡就看得到你所有的資料。</li>
-          <li>製給複製本：每個 Job 都可以匯出逐字稿、摘要、問答、測驗與筆記。</li>
+          <li>製給複製本：每個檔案都可以匯出逐字稿、摘要、問答、測驗與筆記。</li>
           <li>補充、更正：可以編輯逐字稿、講者名稱、標題與筆記。</li>
           <li>
-            停止蒐集、處理、利用，或刪除：可以刪除單一 Job，或在<Link to="/settings" className="underline underline-offset-4">設定頁</Link>
-            「帳號」刪除整個帳號——你的 Job、檔案、逐字稿、AI 產生的內容、筆記、金鑰、設定都會刪除，已連結的帳號會撤銷授權，無法復原。
+            停止蒐集、處理、利用，或刪除：可以刪除單一檔案，或在<Link to="/settings" className="underline underline-offset-4">設定頁</Link>
+            「帳號」刪除整個帳號——你上傳的檔案、逐字稿、AI 產生的內容、筆記、金鑰、設定都會刪除，已連結的帳號會撤銷授權，無法復原。
           </li>
         </ul>
         <p>

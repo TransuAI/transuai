@@ -47,6 +47,29 @@ beforeEach(() => {
 })
 
 describe('DecisionsPage', () => {
+  it('points a proposer still called 「講者 N」 to where the speaker can be named', async () => {
+    const user = userEvent.setup()
+    vi.mocked(decisionsApi.timeline).mockResolvedValue({
+      items: [
+        { job: september, decision: decision({ proposedBy: 'S7', proposedByName: '講者 7' }) },
+        { job: september, decision: decision({ id: 'd2', statement: '週會改到週三' }) },
+      ],
+    })
+    renderPage()
+
+    expect(await screen.findByText(/提出：講者 7/)).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: '去命名' })).toHaveLength(1) // 主持人 already has a name
+    await user.click(screen.getByRole('link', { name: '去命名' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/jobs/job-a?t=8&decision=d1')
+  })
+
+  it('sets asking apart from searching, under its own heading', async () => {
+    renderPage()
+
+    expect(await screen.findByRole('heading', { name: /問 AI/ })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: '搜尋決策' })).toHaveAttribute('placeholder', expect.stringContaining('篩選'))
+  })
+
   it("shows every meeting's decisions on a timeline, newest meeting first", async () => {
     renderPage()
 
@@ -111,10 +134,10 @@ describe('DecisionsPage', () => {
     await screen.findAllByRole('region')
     expect(decisionsApi.timeline).toHaveBeenCalledWith({ category: 'meeting' })
 
-    await user.click(screen.getByRole('button', { name: 'Job：全部' }))
+    await user.click(screen.getByRole('button', { name: '檔案：全部' }))
     await user.click(await screen.findByRole('menuitemcheckbox', { name: '九月週會' }))
     await waitFor(() => expect(decisionsApi.timeline).toHaveBeenLastCalledWith({ category: 'meeting', jobIds: ['job-a'] }))
-    await user.click(screen.getByRole('button', { name: 'Job：1 個' }))
+    await user.click(screen.getByRole('button', { name: '檔案：1 個' }))
     await user.click(await screen.findByRole('menuitemcheckbox', { name: 'oct.mp3' }))
     await waitFor(() =>
       expect(decisionsApi.timeline).toHaveBeenLastCalledWith({ category: 'meeting', jobIds: ['job-a', 'job-b'] }),
@@ -175,7 +198,7 @@ describe('DecisionsPage', () => {
     expect(first).toHaveTextContent('[1]')
     expect(first).toHaveTextContent('資料庫用 MySQL')
     expect(within(first).getByRole('link', { name: '九月週會' })).toHaveAttribute('href', '/jobs/job-a')
-    expect(screen.getByText('由 qwen3:14b 回答')).toBeInTheDocument()
+    expect(screen.getByTitle('模型：qwen3:14b')).toBeInTheDocument()
   })
 
   it('says when answering failed', async () => {

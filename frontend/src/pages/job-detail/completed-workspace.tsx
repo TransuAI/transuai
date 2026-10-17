@@ -42,6 +42,8 @@ interface CompletedWorkspaceProps {
   onQuestionInputChange: (value: string) => void
   isAsking: boolean
   onAsk: () => void
+  /** 重新提問: asks a question whose answer failed again. */
+  onRetryQuestion: (entry: QaEntry) => void
   /** 查網路: whether questions can search the web at all, and whether the next one will. */
   webSearchAvailable: boolean
   webSearch: boolean
@@ -153,6 +155,7 @@ export function CompletedWorkspace({
   onQuestionInputChange,
   isAsking,
   onAsk,
+  onRetryQuestion,
   webSearchAvailable,
   webSearch,
   webSearchesLeft,
@@ -396,6 +399,7 @@ export function CompletedWorkspace({
       selectedModel={selectedModel}
       onSelectModel={onSelectModel}
       onSaveAsNote={saveAnswerAsNote}
+      onRetry={onRetryQuestion}
     />
   )
 
@@ -422,7 +426,7 @@ export function CompletedWorkspace({
             </Button>
             <Button variant="outline" size="sm" onClick={() => setStudioOpen(true)}>
               <Sparkles className="size-4" />
-              Studio
+              AI 工具
             </Button>
           </div>
         </div>
@@ -452,7 +456,7 @@ export function CompletedWorkspace({
           />
           {chatPane}
           {studioCollapsed && (
-            <CollapsedRail label="展開 Studio" icon={Sparkles} expandIcon={PanelRightOpen} onExpand={() => setStudioCollapsed(false)} />
+            <CollapsedRail label="展開 AI 工具" icon={Sparkles} expandIcon={PanelRightOpen} onExpand={() => setStudioCollapsed(false)} />
           )}
           {renderStudioPane({ onCollapse: () => setStudioCollapsed(true), className: cn(studioCollapsed && 'hidden') })}
         </div>
@@ -491,7 +495,7 @@ export function CompletedWorkspace({
 
       <Sheet open={studioOpen} onOpenChange={setStudioOpen}>
         <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
-          <SheetTitle className="sr-only">Studio</SheetTitle>
+          <SheetTitle className="sr-only">AI 工具</SheetTitle>
           {renderStudioPane(null)}
         </SheetContent>
       </Sheet>

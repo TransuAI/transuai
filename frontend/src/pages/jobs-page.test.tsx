@@ -1,7 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { jobsApi } from '@/lib/api'
 import type { Job } from '@/types/api'
 import { JobsPage } from './jobs-page'
@@ -68,6 +68,29 @@ describe('JobsPage', () => {
     expect(screen.getAllByText('interview.mp3')).toHaveLength(1)
   })
 
+  it('dates each job the way the rest of the page reads (year/month/day, no seconds), and deletes it by the name shown', async () => {
+    const user = userEvent.setup()
+    vi.mocked(jobsApi.list).mockResolvedValue({
+      jobs: [{ ...mockJob, title: '產品週會', createdAt: '2026-09-28T12:05:20Z' }],
+      totalCount: 1,
+      page: 0,
+      pageSize: 10,
+    })
+
+    render(
+      <MemoryRouter>
+        <JobsPage />
+      </MemoryRouter>,
+    )
+
+    const row = (await screen.findByText('產品週會')).closest('a') as HTMLElement
+    expect(row).toHaveTextContent(/2026\/9\/28 \d\d:\d\d(?!:)/)
+    expect(row).not.toHaveTextContent(/AM|PM/)
+
+    await user.click(screen.getByRole('button', { name: '刪除' }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('「產品週會」')
+  })
+
   it('shows an empty state when there are no jobs', async () => {
     vi.mocked(jobsApi.list).mockResolvedValue({
       jobs: [],
@@ -82,7 +105,7 @@ describe('JobsPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('還沒有任何 Job')).toBeInTheDocument()
+    expect(await screen.findByText('還沒有任何檔案')).toBeInTheDocument()
   })
 })
 
@@ -177,7 +200,7 @@ describe('JobsPage search and category filter', () => {
     expect(await screen.findByText('interview.mp3')).toBeInTheDocument()
     expect(jobsApi.list).toHaveBeenLastCalledWith({ page: 2, pageSize: 10 })
     expect(searchParamsShown().get('page')).toBe('2')
-    expect(screen.queryByText('還沒有任何 Job')).not.toBeInTheDocument()
+    expect(screen.queryByText('還沒有任何檔案')).not.toBeInTheDocument()
   })
 
   it('says when nothing matches, and clears the search and filter', async () => {
@@ -185,8 +208,8 @@ describe('JobsPage search and category filter', () => {
     vi.mocked(jobsApi.list).mockResolvedValue(listOf([]))
     renderAt('/jobs?q=xyz&category=podcast')
 
-    expect(await screen.findByText('找不到符合的 Job')).toBeInTheDocument()
-    expect(screen.queryByText('還沒有任何 Job')).not.toBeInTheDocument()
+    expect(await screen.findByText('找不到符合的檔案')).toBeInTheDocument()
+    expect(screen.queryByText('還沒有任何檔案')).not.toBeInTheDocument()
 
     vi.mocked(jobsApi.list).mockResolvedValue(listOf([mockJob]))
     await user.click(screen.getByRole('button', { name: '清除搜尋與篩選' }))
@@ -194,5 +217,51 @@ describe('JobsPage search and category filter', () => {
     await waitFor(() => expect(jobsApi.list).toHaveBeenLastCalledWith({ page: 1, pageSize: 10 }))
     expect(screen.getByRole('searchbox', { name: '搜尋標題或檔名' })).toHaveValue('')
     expect(searchParamsShown().toString()).toBe('')
+  })
+})
+
+describe('JobsPage while a job is being processed', () => {
+  beforeEach(() => {
+    vi.mocked(jobsApi.list).mockReset()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const listOf = (jobs: Job[]) => ({ jobs, totalCount: jobs.length, page: 0, pageSize: 10 })
+
+  it('moves its status on by itself, without the user reloading', async () => {
+    vi.mocked(jobsApi.list)
+      .mockResolvedValueOnce(listOf([{ ...mockJob, status: 'TRANSCRIBING' }]))
+      .mockResolvedValue(listOf([mockJob]))
+
+    render(
+      <MemoryRouter>
+        <JobsPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('轉錄中')).toBeInTheDocument()
+    await act(() => vi.advanceTimersByTimeAsync(5000))
+    expect(await screen.findByText('已完成')).toBeInTheDocument()
+
+    // Nothing left in progress: no more looking.
+    await act(() => vi.advanceTimersByTimeAsync(15000))
+    expect(jobsApi.list).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not look again when every job is done', async () => {
+    vi.mocked(jobsApi.list).mockResolvedValue(listOf([mockJob, { ...mockJob, jobId: 'job-2', status: 'FAILED' }]))
+
+    render(
+      <MemoryRouter>
+        <JobsPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('已完成')).toBeInTheDocument()
+    await act(() => vi.advanceTimersByTimeAsync(15000))
+    expect(jobsApi.list).toHaveBeenCalledTimes(1)
   })
 })

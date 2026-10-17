@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download } from 'lucide-react'
+import { Check, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { jobsApi, quizApi, translationsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
@@ -26,8 +26,13 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { currentTranslations } from '@/lib/current-translations'
@@ -35,6 +40,29 @@ import { TRANSLATION_LANGUAGES } from '@/lib/translation-languages'
 import type { Quiz, TranslationLanguage, TranslationSummary } from '@/types/api'
 
 const TRANSCRIPT_FORMATS: ExportFormat[] = [PLAIN_TEXT_FORMAT, TIMESTAMPED_TEXT_FORMAT, SRT_FORMAT, VTT_FORMAT]
+
+const GROUP_LABEL = 'text-xs font-medium text-muted-foreground'
+
+// 「報告包含…」: a box that shows whether it's ticked either way (the menu's own mark only shows once it is), and keeps
+// the menu open so the report can be downloaded next.
+function ReportOption({ checked, onChange, children }: { checked: boolean; onChange: (on: boolean) => void; children: string }) {
+  return (
+    <DropdownMenuCheckboxItem
+      checked={checked}
+      onCheckedChange={(on) => onChange(on === true)}
+      onSelect={(event) => event.preventDefault()}
+      className="[&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden"
+    >
+      <span
+        aria-hidden
+        className={`flex size-4 items-center justify-center rounded-sm border ${checked ? 'border-primary bg-primary text-primary-foreground' : 'bg-background'}`}
+      >
+        {checked && <Check className="size-3" />}
+      </span>
+      {children}
+    </DropdownMenuCheckboxItem>
+  )
+}
 
 // 匯出（見 frontend CONTEXT.md）：把工作區已經載入的內容轉成檔案，全部在瀏覽器裡完成。
 // The export content is only assembled when a format is picked, not on every workspace render.
@@ -131,76 +159,86 @@ export function ExportMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-64">
-        {TRANSCRIPT_FORMATS.map((format) => (
-          <DropdownMenuItem key={format.fileSuffix} disabled={!hasTranscript} onSelect={() => download(format)}>
-            {format.label}
-          </DropdownMenuItem>
-        ))}
-        {translated.map((t) => (
-          <div key={t.language}>
-            <DropdownMenuSeparator />
-            {TRANSLATED_FORMATS.map((choice) => (
-              <DropdownMenuItem key={choice.id} onSelect={() => void downloadTranslated(t.language, choice)}>
-                {choice.label(TRANSLATION_LANGUAGES[t.language])}
-              </DropdownMenuItem>
-            ))}
-          </div>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => download(reportFormat)}>{reportFormat.label}</DropdownMenuItem>
-        <DropdownMenuCheckboxItem
-          checked={reportIncludesQa}
-          onCheckedChange={(checked) => setReportIncludesQa(checked === true)}
-          // Keep the menu open so the user can go on to download the report.
-          onSelect={(event) => event.preventDefault()}
-        >
-          報告包含問答紀錄
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={reportIncludesNotes}
-          onCheckedChange={(checked) => setReportIncludesNotes(checked === true)}
-          onSelect={(event) => event.preventDefault()}
-        >
-          報告包含筆記
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuItem disabled={source.notes.length === 0} onSelect={() => download(NOTES_MARKDOWN_FORMAT)}>
-          {NOTES_MARKDOWN_FORMAT.label}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={(source.decisions ?? []).length === 0}
-          onSelect={() => download(DECISIONS_MARKDOWN_FORMAT)}
-        >
-          {DECISIONS_MARKDOWN_FORMAT.label}
-        </DropdownMenuItem>
-        {doneQuizzes.length > 0 && (
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className={GROUP_LABEL}>逐字稿</DropdownMenuLabel>
+          {TRANSCRIPT_FORMATS.map((format) => (
+            <DropdownMenuItem key={format.fileSuffix} disabled={!hasTranscript} onSelect={() => download(format)}>
+              {format.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        {translated.length > 0 && (
           <>
             <DropdownMenuSeparator />
-            {doneQuizzes.map((quiz) => (
-              <DropdownMenuItem key={quiz.id} onSelect={() => void downloadQuiz(quiz)}>
-                下載測驗（{quiz.questionCount} 題，{formatShortDateTime(quiz.completedAt ?? quiz.requestedAt)}，Markdown）
-              </DropdownMenuItem>
-            ))}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className={GROUP_LABEL}>譯文</DropdownMenuLabel>
+              {/* One entry per language, its six files a level down: the menu stays short however many there are. */}
+              {translated.map((t) => (
+                <DropdownMenuSub key={t.language}>
+                  <DropdownMenuSubTrigger>{TRANSLATION_LANGUAGES[t.language]}</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {TRANSLATED_FORMATS.map((choice) => (
+                      <DropdownMenuItem key={choice.id} onSelect={() => void downloadTranslated(t.language, choice)}>
+                        {choice.label(TRANSLATION_LANGUAGES[t.language])}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ))}
+            </DropdownMenuGroup>
           </>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          disabled={!hasTranscript}
-          // 複製逐字稿＝TXT 純文字的內容。
-          onSelect={() => copy(PLAIN_TEXT_FORMAT.render(buildExportContent(source)), '逐字稿')}
-        >
-          複製逐字稿
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!source.summary}
-          onSelect={() => {
-            const { summary } = buildExportContent(source)
-            if (summary) void copy(summary.text, '摘要')
-          }}
-        >
-          複製摘要
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className={GROUP_LABEL}>報告</DropdownMenuLabel>
+          {/* What goes into the report comes before downloading it. */}
+          <ReportOption checked={reportIncludesQa} onChange={setReportIncludesQa}>
+            報告包含問答紀錄
+          </ReportOption>
+          <ReportOption checked={reportIncludesNotes} onChange={setReportIncludesNotes}>
+            報告包含筆記
+          </ReportOption>
+          <DropdownMenuItem onSelect={() => download(reportFormat)}>{reportFormat.label}</DropdownMenuItem>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void downloadOriginal()}>下載原始檔</DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className={GROUP_LABEL}>筆記、決策與測驗</DropdownMenuLabel>
+          <DropdownMenuItem disabled={source.notes.length === 0} onSelect={() => download(NOTES_MARKDOWN_FORMAT)}>
+            {NOTES_MARKDOWN_FORMAT.label}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={(source.decisions ?? []).length === 0}
+            onSelect={() => download(DECISIONS_MARKDOWN_FORMAT)}
+          >
+            {DECISIONS_MARKDOWN_FORMAT.label}
+          </DropdownMenuItem>
+          {doneQuizzes.map((quiz) => (
+            <DropdownMenuItem key={quiz.id} onSelect={() => void downloadQuiz(quiz)}>
+              下載測驗（{quiz.questionCount} 題，{formatShortDateTime(quiz.completedAt ?? quiz.requestedAt)}，Markdown）
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className={GROUP_LABEL}>其他</DropdownMenuLabel>
+          <DropdownMenuItem
+            disabled={!hasTranscript}
+            // 複製逐字稿＝TXT 純文字的內容。
+            onSelect={() => copy(PLAIN_TEXT_FORMAT.render(buildExportContent(source)), '逐字稿')}
+          >
+            複製逐字稿
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!source.summary}
+            onSelect={() => {
+              const { summary } = buildExportContent(source)
+              if (summary) void copy(summary.text, '摘要')
+            }}
+          >
+            複製摘要
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void downloadOriginal()}>下載原始檔</DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )

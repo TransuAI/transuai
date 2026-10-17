@@ -105,25 +105,28 @@ export function SourcePane({
           />
         </div>
       )}
-      <div className="min-h-0 flex-1 px-4 pt-3">
+      {/* The translation bar takes what it needs; the transcript gets the rest of the pane's height, not all of it. */}
+      <div className="flex min-h-0 flex-1 flex-col px-4 pt-3">
         {transcript && <TranslationBar translations={translations} />}
         {transcript ? (
-          <TranscriptView
-            segments={transcript.segments}
-            speakers={transcript.speakers}
-            currentSegmentIndex={currentSegmentIndex}
-            autoFollow={autoFollow}
-            mediaAvailable={mediaAvailable}
-            onSeek={onSeek}
-            onSaveSegmentText={onSaveSegmentText}
-            onAssignSpeaker={onAssignSpeaker}
-            notes={notes}
-            onAddNoteAt={onAddNoteAt}
-            onOpenNote={onOpenNote}
-            claims={claims}
-            onOpenClaim={onOpenClaim}
-            translation={display.mode === 'original' ? null : { mode: display.mode, texts }}
-          />
+          <div className="min-h-0 flex-1">
+            <TranscriptView
+              segments={transcript.segments}
+              speakers={transcript.speakers}
+              currentSegmentIndex={currentSegmentIndex}
+              autoFollow={autoFollow}
+              mediaAvailable={mediaAvailable}
+              onSeek={onSeek}
+              onSaveSegmentText={onSaveSegmentText}
+              onAssignSpeaker={onAssignSpeaker}
+              notes={notes}
+              onAddNoteAt={onAddNoteAt}
+              onOpenNote={onOpenNote}
+              claims={claims}
+              onOpenClaim={onOpenClaim}
+              translation={display.mode === 'original' ? null : { mode: display.mode, texts }}
+            />
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
             <FileText className="size-4" />

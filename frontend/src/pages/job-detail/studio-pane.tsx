@@ -7,8 +7,10 @@ import type { SpeakerInsightsActions } from '@/hooks/use-speaker-insights'
 import type { OutputsActions } from '@/hooks/use-outputs'
 import { Button } from '@/components/ui/button'
 import { formatDuration } from '@/lib/media'
-import { formatCount, formatMinutes } from '@/lib/usage-format'
+import { formatMinutes } from '@/lib/usage-format'
 import { Card } from '@/components/ui/card'
+import { MarkdownText } from '@/components/markdown-text'
+import { markdownToPlainText } from '@/lib/markdown'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { DecisionsSection } from '@/pages/job-detail/decisions-section'
 import { FactCheckSection } from '@/pages/job-detail/fact-check-section'
@@ -20,6 +22,7 @@ import { OutputsSection } from '@/pages/job-detail/outputs-section'
 import { computeSpeakerStats, speakerStatsStatus } from '@/lib/speaker-stats'
 import { UsageSection } from '@/pages/job-detail/usage-section'
 import { cn } from '@/lib/utils'
+import { ModelCredit } from '@/components/model-credit'
 import type { Chapter, ConfirmedProposal, JobUsage, PostMeeting, Quiz, Summary, Transcript } from '@/types/api'
 
 /** A Studio tool; the pane shows either the tiles of all tools (none picked) or one tool. */
@@ -201,8 +204,8 @@ export function StudioPane({
               data-studio-back=""
               size="icon-sm"
               variant="ghost"
-              aria-label="返回 Studio"
-              title="返回 Studio"
+              aria-label="返回 AI 工具"
+              title="返回 AI 工具"
               onClick={() => onToolChange(null)}
               className="-ml-1.5"
             >
@@ -213,11 +216,11 @@ export function StudioPane({
         ) : (
           <>
             <Sparkles className="size-4 text-primary" />
-            <h2 className="flex-1 text-sm font-medium">Studio</h2>
+            <h2 className="flex-1 text-sm font-medium">AI 工具</h2>
           </>
         )}
         {onCollapse && (
-          <Button size="icon-sm" variant="ghost" aria-label="收合 Studio" title="收合 Studio" onClick={onCollapse} className="-mr-1.5">
+          <Button size="icon-sm" variant="ghost" aria-label="收合 AI 工具" title="收合 AI 工具" onClick={onCollapse} className="-mr-1.5">
             <PanelRightClose />
           </Button>
         )}
@@ -229,9 +232,9 @@ export function StudioPane({
           {tool === null && (
             <>
               {staleNotice}
-              <ul aria-label="Studio 功能" className="grid grid-cols-2 gap-2">
+              <ul aria-label="AI 工具" className="grid grid-cols-2 gap-2">
                 <ToolTile tool="summary" onOpen={onToolChange} attention={isStale}>
-                  {summary ? summary.summaryText : '尚無摘要'}
+                  {summary ? markdownToPlainText(summary.summaryText) : '尚無摘要'}
                 </ToolTile>
                 <ToolTile tool="chapters" onOpen={onToolChange} attention={isStale}>
                   {chapters.length > 0 ? `${chapters.length} 個章節` : '尚無章節'}
@@ -281,8 +284,8 @@ export function StudioPane({
                 <h3>AI 摘要</h3>
                 {summary ? (
                   <>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/85">{summary.summaryText}</p>
-                    {summary.model && <p className="text-xs text-muted-foreground/80">由 {summary.model} 產生</p>}
+                    <MarkdownText text={summary.summaryText} className="text-sm leading-relaxed text-foreground/85" />
+                    {summary.model && <ModelCredit model={summary.model} verb="產生" />}
                   </>
                 ) : (
                   <p className="text-sm text-muted-foreground">尚無摘要</p>
@@ -446,16 +449,15 @@ function factCheckStatus({ factCheck }: FactCheckActions): string {
   return factCheck?.extraction?.status === 'COMPLETED' ? '沒有可以查核的說法' : '找出可以查核的數字與說法'
 }
 
+// The tile says it in the units people count (minutes, searches, times the AI was used); tokens are in the tool itself.
 function usageStatus(usage: JobUsage | null): string {
   if (!usage || usage.records.length === 0) return '尚無紀錄'
-  const tokens = usage.totals.inputTokens + usage.totals.outputTokens
   const searches = usage.totals.webSearches ?? 0
   const parts = [
-    tokens > 0 && `${formatCount(tokens)} tokens`,
     usage.totals.audioSeconds > 0 && `轉錄 ${formatMinutes(usage.totals.audioSeconds)}`,
     searches > 0 && `網路搜尋 ${searches} 次`,
   ]
-  return parts.filter(Boolean).join(' · ') || `${usage.records.length} 次呼叫`
+  return parts.filter(Boolean).join(' · ') || `AI 處理 ${usage.records.length} 次`
 }
 
 function postMeetingStatus(postMeeting: PostMeeting | null, pendingProposals: number): string {

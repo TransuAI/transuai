@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ChevronDown, Download, Loader2Icon, MessageCircleQuestion, Search } from 'lucide-react'
+import { ChevronDown, Download, Loader2Icon, MessageCircleQuestion, Search, Sparkles } from 'lucide-react'
 import { decisionsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { decisionHref } from '@/lib/decision-links'
@@ -10,6 +10,7 @@ import { toDecisionTimelineMarkdown, type ExportDecision } from '@/lib/export-fo
 import { CATEGORY_LABELS, jobDate, jobDisplayName } from '@/lib/job-display'
 import { formatDuration } from '@/lib/media'
 import { DecisionSupersession } from '@/components/decision-supersession'
+import { MarkdownText } from '@/components/markdown-text'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ModelCredit } from '@/components/model-credit'
 import type { Decision, DecisionJob, DecisionTimeline, JobCategory } from '@/types/api'
 
 const SEARCH_DELAY_MS = 300
@@ -133,7 +135,7 @@ export function DecisionsPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold">決策</h1>
         <p className="text-sm text-muted-foreground">
-          所有會議做成的決定，依會議日期排列；可以只看某個類型或某個 Job，也可以搜尋——意思相近、沒有那幾個字的也找得到。
+          所有會議做成的決定，依會議日期排列；可以只看某個類型或某個檔案，也可以搜尋——意思相近、沒有那幾個字的也找得到。
         </p>
       </div>
 
@@ -143,7 +145,7 @@ export function DecisionsPage() {
           <Input
             type="search"
             aria-label="搜尋決策"
-            placeholder="例如：為什麼用 PostgreSQL"
+            placeholder="篩選下面的決策：關鍵字或意思相近的說法"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             className="pl-8"
@@ -165,13 +167,13 @@ export function DecisionsPage() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="h-9 font-normal">
-              {jobIds.length === 0 ? 'Job：全部' : `Job：${jobIds.length} 個`}
+              {jobIds.length === 0 ? '檔案：全部' : `檔案：${jobIds.length} 個`}
               <ChevronDown className="size-4 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-80 max-w-72 overflow-y-auto">
             <DropdownMenuItem disabled={jobIds.length === 0} onSelect={() => chooseJobs([])}>
-              全部 Job
+              全部檔案
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             {[...jobsSeen.values()].map((job) => (
@@ -204,7 +206,7 @@ export function DecisionsPage() {
         <p className="text-sm text-muted-foreground">
           {query || category || jobIds.length > 0
             ? '沒有符合的決策'
-            : '還沒有決策。會議與訪談轉錄完會自動抽出決策，其他 Job 可以在工作區的 Studio「決策」抽出。'}
+            : '還沒有決策。會議與訪談轉錄完會自動抽出決策，其他檔案可以在工作區的「AI 工具 → 決策」抽出。'}
         </p>
       ) : query ? (
         <ul aria-label="搜尋結果" className="flex flex-col gap-3">
@@ -276,11 +278,17 @@ function AskDecisions({ category, jobIds }: { category: JobCategory | null; jobI
   }
 
   return (
+    // Asking is its own card with a heading, so it doesn't read as a second search box: the search above filters the list,
+    // this gets an answer written from the decisions.
     <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-4">
+      <h2 className="flex items-center gap-1.5 text-sm font-medium">
+        <Sparkles className="size-4 text-primary" />
+        問 AI：用決策紀錄回答你的問題
+      </h2>
       <form onSubmit={(event) => void ask(event)} className="flex gap-2">
         <Input
           aria-label="問決策"
-          placeholder="問決策，例如：當初為什麼選 PostgreSQL？"
+          placeholder="例如：當初為什麼選 PostgreSQL？"
           value={question}
           disabled={asking}
           onChange={(event) => setQuestion(event.target.value)}
@@ -294,7 +302,7 @@ function AskDecisions({ category, jobIds }: { category: JobCategory | null; jobI
       {asked && (
         <div className="flex flex-col gap-2 text-sm">
           <p className="font-medium">{asked.question}</p>
-          {asked.answer && <p className="leading-relaxed whitespace-pre-wrap">{asked.answer}</p>}
+          {asked.answer && <MarkdownText text={asked.answer} className="leading-relaxed" />}
           {asking && !asked.answer && <p className="text-muted-foreground">找相關的決策…</p>}
           {asked.error && (
             <p role="alert" className="text-destructive">
@@ -321,7 +329,7 @@ function AskDecisions({ category, jobIds }: { category: JobCategory | null; jobI
               ))}
             </ol>
           )}
-          {asked.done && asked.model && <p className="text-xs text-muted-foreground/80">由 {asked.model} 回答</p>}
+          {asked.done && asked.model && <ModelCredit model={asked.model} verb="回答" />}
         </div>
       )}
     </div>
@@ -329,6 +337,9 @@ function AskDecisions({ category, jobIds }: { category: JobCategory | null; jobI
 }
 
 // One decision; in search results it also names its meeting (job), since they aren't grouped by meeting there.
+// The backend's default speaker name, until the user names the speaker.
+const UNNAMED_SPEAKER = /^講者 \d+$/
+
 function DecisionCard({ decision, job, jobId = job?.jobId }: { decision: Decision; job: DecisionJob | null; jobId?: string }) {
   return (
     <li className="flex flex-col gap-1.5 rounded-lg border p-3 text-sm">
@@ -354,7 +365,20 @@ function DecisionCard({ decision, job, jobId = job?.jobId }: { decision: Decisio
       )}
       {decision.rationale && <p className="text-foreground/85">理由：{decision.rationale}</p>}
       {decision.alternatives.length > 0 && <p className="text-muted-foreground">沒選：{decision.alternatives.join('、')}</p>}
-      {decision.proposedByName && <p className="text-xs text-muted-foreground">提出：{decision.proposedByName}</p>}
+      {decision.proposedByName && (
+        <p className="text-xs text-muted-foreground">
+          提出：{decision.proposedByName}
+          {/* 「講者 N」 says nothing across meetings: point to where it can be named (the name follows here once it is). */}
+          {UNNAMED_SPEAKER.test(decision.proposedByName) && jobId && (
+            <>
+              {' · '}
+              <Link to={decisionHref(jobId, decision.id, decision.startTime)} className="underline-offset-2 hover:underline">
+                去命名
+              </Link>
+            </>
+          )}
+        </p>
+      )}
       <DecisionSupersession decision={decision} />
       {decision.startTime !== null && (
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
