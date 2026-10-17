@@ -86,6 +86,10 @@ docker compose up -d
 | `POST` | `/auth/password` | 改密碼：body `{ currentPassword, newPassword }`，需要 `Authorization`。成功回 `{ accessToken, user }` 並換一個新的 refresh cookie，這位使用者其他的登入全部作廢（其他裝置要重新登入）；目前的密碼錯 `403`，新密碼不合規則 `400`，猜錯太多次 `429`（跟刪除帳號合計） |
 | `POST` | `/auth/password-reset` | 忘記密碼：body `{ email }`，不需要 token。一律回 `202`（不透露 email 有沒有註冊），有註冊就寄重設連結；這個部署沒有設定寄信時 `503`（訊息給使用者看）；超過上限 `429` |
 | `POST` | `/auth/password-reset/confirm` | 用重設連結設新密碼：body `{ token, newPassword }`，不需要 access token。成功 `204`，這位使用者所有的登入作廢、access token 馬上不能用；連結無效或過期 `409`、新密碼不合規則 `400` |
+| `POST` | `/auth/password-reset/recovery-code` | 用 email＋一組復原碼設新密碼：body `{ email, code, newPassword }`，不需要 token。成功 `204`，所有登入作廢、access token 馬上不能用；不對或用過了 `409`（猜錯的上限跟登入失敗一樣，同一個 IP 對同一個 email 15 分鐘 5 次） |
+| `POST` | `/auth/verify-email` | 確認 email：body `{ token }`（確認信的連結），不需要 token。成功 `204`；無效或過期 `409` |
+| `POST` | `/auth/verify-email/resend` | 重寄確認信，需要 `Authorization`；`202`；同一位使用者每小時 3 次；沒有設定寄信 `503` |
+| `POST` | `/auth/recovery-codes` | 產生復原碼：body `{ currentPassword }`，需要 `Authorization`。回 `{ codes: [...] }`（10 組，只有這一次）；目前的密碼錯 `403`（跟刪除帳號、改密碼合計 15 分鐘 5 次） |
 | `POST` | `/auth/refresh` | 用 cookie 裡的 refresh token 換發：回 `{ accessToken, user }`，cookie 換成新的 refresh token；不需要 `Authorization`、沒有 body。沒有 cookie 或 token 不能用回 `401`（並清掉 cookie） |
 | `GET` | `/auth/me` | 取得目前使用者資訊，需要 `Authorization: Bearer <access_token>` |
 
@@ -202,7 +206,9 @@ docker compose up -d
 | 刪除帳號、改密碼時的目前密碼 | 每位使用者，15 分鐘 5 次失敗（兩個功能合計） | 跟登入失敗同一組設定（`RATE_LIMIT_LOGIN_FAILURES`）。密碼錯（auth-service 的 `PERMISSION_DENIED`）才算，成功就清掉 |
 | 註冊 | 同一個 IP，每小時 5 次 | |
 | 忘記密碼（申請重設連結） | 同一個 IP 每小時 5 次（`RATE_LIMIT_PASSWORD_RESET`）、同一個 email 每小時 3 次（`RATE_LIMIT_PASSWORD_RESET_PER_EMAIL`，鍵只有雜湊） | 不讓人拿它一直寄信轟炸同一個信箱 |
-| 用重設連結設新密碼 | 同一個 IP，跟登入一樣的上限（15 分鐘 20 次） | token 有 256 bits 猜不到，這是多一層 |
+| 用重設連結設新密碼、確認 email | 同一個 IP，跟登入一樣的上限（15 分鐘 20 次） | token 有 256 bits 猜不到，這是多一層 |
+| 用復原碼設新密碼 | 同一個 IP 15 分鐘 20 次；同一個 IP 對同一個 email 猜錯 15 分鐘 5 次 | 跟登入一樣的設定；猜錯是 auth-service 的 `FAILED_PRECONDITION` 才算，成功就清掉 |
+| 重寄確認信 | 同一位使用者每小時 3 次 | 跟「同一個 email 申請重設」同一組設定（`RATE_LIMIT_PASSWORD_RESET_PER_EMAIL`） |
 | **所有 API**（登入後） | 每位使用者，每分鐘 600 個請求 | `ratelimit/ApiRateLimits`（HandlerInterceptor，在 JWT 驗證之後、controller 之前）；一個 Job 頁面的輪詢最多約每分鐘 75 個請求，同時開幾個分頁也碰不到 |
 | **所有 API**（沒登入的：登入、註冊、換發、OAuth 回呼、API 文件，以及 token 缺少或無效被擋下的） | 每個 IP，每分鐘 60 個請求 | 跟上面登入／註冊的限制**同時**生效；token 無效的請求在 `JwtAuthenticationFilter` 裡計數，超過時回 429 而不是 401（拿假 token 亂打的腳本也擋得到） |
 | 取得上傳網址（`POST /uploads/presign`） | 每人每小時 30 次 | 以下是**花錢的功能**（controller 方法上標了 `@CostlyFeature("名稱")`），在「所有 API」之外另外算、比較嚴；同一個名稱的 API 共用一個計數。上傳網址：擋住塞滿物件儲存 |

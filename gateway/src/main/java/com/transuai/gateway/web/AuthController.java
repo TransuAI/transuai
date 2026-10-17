@@ -21,11 +21,15 @@ import com.transuai.auth.grpc.v1.LoginRequest;
 import com.transuai.auth.grpc.v1.LogoutAllDevicesRequest;
 import com.transuai.auth.grpc.v1.LogoutRequest;
 import com.transuai.auth.grpc.v1.RefreshRequest;
+import com.transuai.auth.grpc.v1.GenerateRecoveryCodesRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
 import com.transuai.auth.grpc.v1.RequestPasswordResetRequest;
+import com.transuai.auth.grpc.v1.ResendEmailVerificationRequest;
 import com.transuai.auth.grpc.v1.ResetPasswordRequest;
 import com.transuai.auth.grpc.v1.ResetPasswordResponse;
+import com.transuai.auth.grpc.v1.ResetPasswordWithRecoveryCodeRequest;
 import com.transuai.auth.grpc.v1.User;
+import com.transuai.auth.grpc.v1.VerifyEmailRequest;
 import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcTimestamps;
 import com.transuai.gateway.ratelimit.AuthRateLimits;
@@ -37,8 +41,12 @@ import com.transuai.gateway.web.dto.DeleteAccountRequestDto;
 import com.transuai.gateway.web.dto.LoginRequestDto;
 import com.transuai.gateway.web.dto.PasswordResetConfirmDto;
 import com.transuai.gateway.web.dto.PasswordResetRequestDto;
+import com.transuai.gateway.web.dto.RecoveryCodeResetDto;
+import com.transuai.gateway.web.dto.RecoveryCodesDto;
+import com.transuai.gateway.web.dto.RecoveryCodesRequestDto;
 import com.transuai.gateway.web.dto.RegisterRequestDto;
 import com.transuai.gateway.web.dto.UserDto;
+import com.transuai.gateway.web.dto.VerifyEmailDto;
 
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -188,6 +196,54 @@ public class AuthController {
         revokedTokens.legacySessionsEndedBefore(UUID.fromString(response.getUserId()), Instant.now());
     }
 
+    // 確認 email：註冊時寄的連結裡的 token，不用登入。無效或過期 409。
+    @PostMapping("/verify-email")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void verifyEmail(@Valid @RequestBody VerifyEmailDto request, HttpServletRequest servletRequest) {
+        if (request.token() == null || request.token().isBlank()) {
+            throw new IllegalArgumentException("token is required");
+        }
+        rateLimits.beforePasswordResetConfirm(servletRequest.getRemoteAddr());
+        authServiceStub.verifyEmail(VerifyEmailRequest.newBuilder().setToken(request.token()).build());
+    }
+
+    // 重寄確認信（要登入）：已經確認過就什麼都不做；跟申請重設密碼一樣，每個 email 每小時有上限。沒有設定寄信 503。
+    @PostMapping("/verify-email/resend")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void resendEmailVerification(@CurrentUserId UUID userId) {
+        rateLimits.beforeMailTo("user:" + userId);
+        GrpcMetadataSupport.withUserId(authServiceStub, userId)
+                .resendEmailVerification(ResendEmailVerificationRequest.getDefaultInstance());
+    }
+
+    // 產生復原碼（要登入、要目前的密碼；錯了 403，跟刪除帳號、改密碼合計 15 分鐘 5 次）。回傳 10 組，只有這一次看得到。
+    @PostMapping("/recovery-codes")
+    public RecoveryCodesDto generateRecoveryCodes(@CurrentUserId UUID userId, @Valid @RequestBody RecoveryCodesRequestDto request) {
+        if (request.currentPassword() == null || request.currentPassword().isEmpty()) {
+            throw new IllegalArgumentException("currentPassword is required");
+        }
+        return new RecoveryCodesDto(rateLimits.withPasswordCheck(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
+                .generateRecoveryCodes(GenerateRecoveryCodesRequest.newBuilder()
+                        .setCurrentPassword(request.currentPassword()).build()))
+                .getCodesList());
+    }
+
+    // 忘記密碼的另一條路：email＋一組復原碼設新密碼，不用登入。猜錯（409）跟登入失敗一樣，同一個 IP 對同一個 email 15 分鐘 5 次；
+    // 成功 204，這位使用者所有的登入作廢、access token 馬上不能用。
+    @PostMapping("/password-reset/recovery-code")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void resetPasswordWithRecoveryCode(@Valid @RequestBody RecoveryCodeResetDto request,
+            HttpServletRequest servletRequest) {
+        if (request.email() == null || request.code() == null || request.newPassword() == null) {
+            throw new IllegalArgumentException("email, code and newPassword are required");
+        }
+        ResetPasswordResponse response = rateLimits.withRecoveryCode(servletRequest.getRemoteAddr(), request.email(),
+                () -> authServiceStub.resetPasswordWithRecoveryCode(ResetPasswordWithRecoveryCodeRequest.newBuilder()
+                        .setEmail(request.email()).setCode(request.code()).setNewPassword(request.newPassword()).build()));
+        response.getEndedSessionIdsList().forEach(revokedTokens::sessionEnded);
+        revokedTokens.legacySessionsEndedBefore(UUID.fromString(response.getUserId()), Instant.now());
+    }
+
     @GetMapping("/me")
     public UserDto me(@CurrentUserId UUID userId) {
         User user = GrpcMetadataSupport.withUserId(authServiceStub, userId)
@@ -210,6 +266,6 @@ public class AuthController {
 
     private static UserDto toDto(User user) {
         return new UserDto(user.getId(), user.getEmail(), user.getDisplayName(),
-                GrpcTimestamps.toInstant(user.getCreatedAt()));
+                GrpcTimestamps.toInstant(user.getCreatedAt()), user.getEmailVerified(), user.getRecoveryCodesLeft());
     }
 }

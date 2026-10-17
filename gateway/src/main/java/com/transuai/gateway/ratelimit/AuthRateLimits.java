@@ -27,6 +27,8 @@ public class AuthRateLimits {
     private static final String PASSWORD_RESET_BY_ADDRESS = "password-reset:ip:";
     private static final String PASSWORD_RESET_BY_EMAIL = "password-reset:email:";
     private static final String PASSWORD_RESET_CONFIRM_BY_ADDRESS = "password-reset-confirm:ip:";
+    private static final String RECOVERY_CODE_BY_ADDRESS = "recovery-code:ip:";
+    private static final String RECOVERY_CODE_FAILURES = "recovery-code-failures:";
     private static final String LOGIN_FAILURES = "login-failures:";
     // 刪除帳號與改密碼共用：兩邊都在猜同一個密碼。
     private static final String PASSWORD_CHECK_FAILURES = "password-check-failures:";
@@ -82,8 +84,33 @@ public class AuthRateLimits {
     /** 申請重設密碼：每個 IP 的次數，加上每個 email 的次數（不讓人一直寄信轟炸同一個信箱；email 只放雜湊）。 */
     public void beforePasswordReset(String address, String email) {
         limiter.hit(PASSWORD_RESET_BY_ADDRESS + address, properties.passwordReset()).orThrow(RateLimitedException::tooManyTries);
-        limiter.hit(PASSWORD_RESET_BY_EMAIL + sha256(email.trim().toLowerCase(Locale.ROOT)), properties.passwordResetPerEmail())
-                .orThrow(RateLimitedException::tooManyTries);
+        beforeMailTo(email.trim().toLowerCase(Locale.ROOT));
+    }
+
+    /** 會寄信給某個人的請求（重設連結、重寄確認信）：同一個收件人每小時的上限。who 只放雜湊。 */
+    public void beforeMailTo(String who) {
+        limiter.hit(PASSWORD_RESET_BY_EMAIL + sha256(who), properties.passwordResetPerEmail()).orThrow(RateLimitedException::tooManyTries);
+    }
+
+    /**
+     * 用復原碼重設密碼：跟登入一樣——這個 IP 的次數，加上這個 IP 對這個 email 猜錯的次數（先計成一次失敗，成功清掉；猜錯是 auth-service 的
+     * FAILED_PRECONDITION，其他錯誤退回）。
+     */
+    public <T> T withRecoveryCode(String address, String email, Supplier<T> attempt) {
+        limiter.hit(RECOVERY_CODE_BY_ADDRESS + address, properties.login()).orThrow(RateLimitedException::tooManyTries);
+        String failures = RECOVERY_CODE_FAILURES + sha256(address + "\n" + email.trim().toLowerCase(Locale.ROOT));
+        limiter.hit(failures, properties.loginFailures()).orThrow(RateLimitedException::tooManyTries);
+        T result;
+        try {
+            result = attempt.get();
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() != Status.Code.FAILED_PRECONDITION) {
+                limiter.release(failures);
+            }
+            throw e;
+        }
+        limiter.reset(failures);
+        return result;
     }
 
     /** 用重設連結設新密碼：每個 IP 跟登入一樣的上限（token 有 256 bits，猜不到；這是多一層）。 */
