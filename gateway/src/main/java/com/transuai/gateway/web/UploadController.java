@@ -61,6 +61,7 @@ public class UploadController {
                                                 .setFileName(request.fileName())
                                                 .setFileType(fileType(request.fileType()))
                                                 .setFileSizeBytes(request.fileSizeBytes())
+                                                .setContentType(GrpcStrings.nullToEmpty(request.contentType()))
                                                 .build());
                 return new PresignResponseDto(response.getUploadUrl(), response.getStoragePath(),
                                 GrpcTimestamps.toInstant(response.getExpiresAt()));
