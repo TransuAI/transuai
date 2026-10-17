@@ -957,7 +957,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 8. **正式環境的設定**：每個服務讀 `APP_ENV`（預設 `development`）；`production` 時啟動前檢查自己的密鑰（沒設、還是開發用預設值、或太短就不啟動，並說出是哪幾個環境變數），並關掉開發用的東西（gRPC reflection、gateway 與 notification-service 的 API 文件）。要換掉哪些值見 `infra/k8s/02-secret.yaml`，Redis 在正式環境要設密碼（`REDIS_PASSWORD`）。
 9. **依賴套件弱點掃描**：每個服務的 README 有「依賴套件弱點掃描」一節寫怎麼掃（Python：pip-audit；Java：用 Grype 掃 build 出來的 jar；前端：`npm audit`），上線前與之後每個月跑一次。2026-10-03 掃過一輪，高風險／嚴重的都升級或覆蓋版本修掉了（Spring Boot 4.1.0 → 4.1.1 加上 Jackson、Tomcat、amqp-client 的版本覆蓋；transcription-service 的 pillow、urllib3；前端 `npm audit fix`），只剩前端開發工具（shadcn CLI）裡一個還沒有修好版本、也不會進到瀏覽器的 `braces`（見 `frontend/README.md`）。只掃了語言套件，container image 的作業系統套件還沒掃
 10. **刪除帳號與揭露**（個資法）：使用者可以在設定頁刪除帳號（再輸入密碼），所有資料刪除、已連結帳號撤銷授權、用量去識別化（見 3.1、5.）；
-    前端 `/privacy` 列出每個第三方送什麼、什麼時候送（註冊頁與設定頁連過去）。隱私權說明還是草稿：聯絡 email、伺服器地區待補，上線前請懂法的人看過
+    前端 `/privacy` 列出每個第三方送什麼、什麼時候送（註冊頁與設定頁連過去）。系統由客戶部署在自己內部，蒐集者與聯絡窗口是部署的單位，所以這頁不寫營運方的聯絡方式與伺服器地區（2026-10-17 決定）
 
 ---
 
