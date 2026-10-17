@@ -45,26 +45,25 @@ data:
 
   # 外部 API 型號（key 本身是機敏資訊，放在 02-secret.yaml）
   # DEEPGRAM_MODEL / DEEPGRAM_LANGUAGE 是 transcription-service 的語音辨識（含講者分離，見
-  # transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md）；
-  # AI_HF_CHAT_MODEL 是 ai-service 平台模型的聊天模型（摘要/章節分段/RAG 問答；名稱沿用，跑在哪裡看下面的
-  # PLATFORM_LLM_BASE_URL，見 ai-service/docs/adr/0010）
+  # transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md）。
   DEEPGRAM_MODEL: "nova-3"
   DEEPGRAM_LANGUAGE: "zh-TW"
-  # 平台模型跑在哪裡：本機開發指向自己電腦上用 Docker 跑的 Ollama（infra/scripts/ollama.sh，用 GPU，不用付 AI API 的錢），
-  # pod 經由 Docker Desktop 的 host.docker.internal 連到它。模型名稱是 Ollama 的；Ollama 關 thinking 要帶 reasoning_effort。
-  # 切回 HF：PLATFORM_LLM_BASE_URL 設成 https://router.huggingface.co/v1、PLATFORM_LLM_API_KEY 設成空字串（改用
-  # HF_API_KEY）、PLATFORM_LLM_EXTRA_BODY 設成 {"chat_template_kwargs": {"enable_thinking": false}}，模型換回
-  # Qwen/Qwen3.5-9B 與 Qwen/Qwen3.8-27B:deepinfra（HF 免費帳號每月只有 US$0.10）。
-  PLATFORM_LLM_BASE_URL: "http://host.docker.internal:11434/v1"
-  PLATFORM_LLM_API_KEY: "ollama"
-  PLATFORM_LLM_EXTRA_BODY: '{"reasoning_effort": "none"}'
-  # 一般生成（摘要、章節、問答）跟會後處理用同一個 qwen3:14b：問答實測比 qwen3.5:9b 簡潔、少加油添醋，而且 16GB 只放一個模型
-  # 就不用來回換出（ai-service/docs/adr/0011）。
-  AI_HF_CHAT_MODEL: "qwen3:14b"
+  # 平台模型與 embedding 都跑在自己電腦上用 Docker 跑的 vLLM（infra/scripts/vllm.sh，用 GPU，不用付 AI API 的錢；見
+  # ai-service/docs/adr/0015），pod 經由 Docker Desktop 的 host.docker.internal 連到它。沒開 --api-key，金鑰留空。
+  # 模型名稱是 vLLM 服務的（HF 上的模型 ID），要跟 vllm.sh 的 VLLM_CHAT_MODEL、VLLM_EMBED_MODEL 一致。
+  PLATFORM_LLM_BASE_URL: "http://host.docker.internal:8000/v1"
+  PLATFORM_LLM_API_KEY: ""
+  PLATFORM_LLM_EXTRA_BODY: '{"chat_template_kwargs": {"enable_thinking": false}}'
+  # 一般生成（摘要、章節、問答）：16GB 的卡要同時放 embedding 與之後的語音辨識，用 8B 的 AWQ（4-bit）版本（見 ADR 0015）。
+  PLATFORM_LLM_MODEL: "Qwen/Qwen3-8B-AWQ"
   # 會後處理的平台模型（ai-service/docs/adr/0008）：有設定時，預設模型是平台模型的使用者也能跑會後處理；空字串就是不提供。
-  # 本機用 qwen3:14b：實測三個候選裡唯一穩定提案的（ai-service/docs/adr/0011）。
-  AI_POST_MEETING_PLATFORM_MODEL: "qwen3:14b"
-  HF_EMBEDDING_MODEL: "BAAI/bge-m3"
+  # 跟一般生成同一個（一張卡只放得下一個聊天模型）；工具呼叫的品質要用 ADR 0011 那套實測確認（見 ADR 0015）。
+  AI_POST_MEETING_PLATFORM_MODEL: "Qwen/Qwen3-8B-AWQ"
+  # Embedding：Qwen3-Embedding-0.6B，1024 維（資料庫的向量欄位）；問題前面加指示，檢索比較準。換模型後 ai-service 啟動時
+  # 會在背景重算既有的向量。
+  EMBEDDING_BASE_URL: "http://host.docker.internal:8001/v1"
+  EMBEDDING_MODEL: "Qwen/Qwen3-Embedding-0.6B"
+  EMBEDDING_QUERY_INSTRUCTION: "Given a question about a recording, retrieve the transcript passages that answer it"
 
   # 已連結的帳號（Google / Notion OAuth，gateway）：對方回呼 {OAUTH_CALLBACK_BASE_URL}/oauth/{service}/callback，這個網址要
   # 登記在 Google Cloud 的 OAuth client；完成後轉回 {FRONTEND_URL}/settings。前端目前在本機跑 Vite（/api proxy 到 gateway）。

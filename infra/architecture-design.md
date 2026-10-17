@@ -26,9 +26,9 @@ Transcription Service 消費訊息
   → 發送訊息「轉錄完成」到 MQ
 
 AI Service 消費訊息
-  → 讀取逐字稿，呼叫 HF Inference Providers 產出摘要（兩位以上講者時輸入帶講者名稱，章節也是）
-  → 呼叫 HF Inference Providers 依片段時間戳切章節
-  → 呼叫 HF Inference Providers 把逐字稿片段轉成向量，存進 embeddings（供之後 RAG 問答用）
+  → 讀取逐字稿，呼叫平台模型（自架的 vLLM 等 OpenAI 相容伺服器）產出摘要（兩位以上講者時輸入帶講者名稱，章節也是）
+  → 呼叫平台模型依片段時間戳切章節
+  → 呼叫 embedding 伺服器（自架的 vLLM）把逐字稿片段轉成向量，存進 embeddings（供之後 RAG 問答用；沒設定 embedding 就跳過）
   → 依摘要與章節替 Job 取標題、判斷類型，回寫 Upload Service（失敗只記 log，不影響 Job）
   → 兩位以上講者時，依錄音裡明確講出的話替講者提名字建議（程式驗證後存進 speaker_name_suggestions；失敗只記 log）
   → 更新 Job status: summarizing → completed
@@ -906,8 +906,8 @@ Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 改用在 gateway 的限流與快取、transcription-service 的逐字稿快取） |
 | ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體；ai-service 也用它把整段寫成簡體的問答回答與測驗轉成繁體（本機小模型偶爾會） |
-| LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型（問答可以臨時換成別的模型）：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型預設是 HF Inference Providers 的 OpenAI 相容路由（`PLATFORM_LLM_BASE_URL` 可以改指向任何 OpenAI 相容的伺服器：本機開發用 Docker 跑的 Ollama，一般生成與會後處理都用 `qwen3:14b`（見 `ai-service/docs/adr/0011-local-post-meeting-model-qwen3-14b.md`），上雲可以用自架 vLLM 或其他託管 API，見 `infra/README.md`）（`Qwen/Qwen3.5-9B`；原規劃/早期實作用 Gemini API 之後改 Groq，Groq 免費層 TPM 太小、加上對話記憶後很容易超過，已改用 HF Inference Providers，見 `ai-service/README.md`、`ai-service/docs/adr/0003-hf-inference-providers-for-generation.md`） |
-| Embedding | HF Inference Providers（`BAAI/bge-m3`，1024 維） |
+| LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型（問答可以臨時換成別的模型）：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型是部署設定的 OpenAI 相容伺服器（`PLATFORM_LLM_BASE_URL`、`PLATFORM_LLM_MODEL`），出廠不指向任何服務；本機開發用 Docker 跑的 vLLM，一般生成與會後處理都用 `Qwen/Qwen3-8B-AWQ`（見 `ai-service/docs/adr/0015-self-hosted-vllm-for-platform-model-and-embeddings.md`、`infra/README.md`）。歷史：Gemini → Groq → HF Inference Providers → 本機 Ollama → 本機 vLLM |
+| Embedding | OpenAI 相容的 `/v1/embeddings`（`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`；本機是 vLLM 上的 `Qwen/Qwen3-Embedding-0.6B`，1024 維）；換模型後 ai-service 啟動時自動重算既有向量 |
 | 網路搜尋（問答「查網路」、事實查核） | Tavily 官方遠端 MCP（`tavily_search`，平台付費的 `TAVILY_API_KEY`；由系統查，不給模型工具；問答在回答前查一次，只送出一句搜尋查詢，見 `ai-service/docs/adr/0014-qa-web-search-by-the-system.md`；事實查核每條主張查一次，只送整理過的那一句主張） |
 | 已連結的帳號（會後處理用） | Google OAuth（平台自己的 OAuth client，只要 Calendar 活動、Gmail 建立草稿、Tasks 的權限）與 Notion 官方遠端 MCP 的 OAuth（PKCE + 動態註冊 client）；權杖用自有金鑰那套 AES-GCM 加密存在 ai-service，state 綁定開始連結的瀏覽器（見 `ai-service/README.md`「已連結的帳號」） |
 | 容器化 | Docker；本機有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md` |
@@ -930,9 +930,9 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 | **物件儲存**（音訊/影片檔案） | **Cloudflare R2** | 10GB 儲存空間、每月 100 萬次操作 | 超過額度另計費；免費層無 CDN 加速額外保證，大流量下載需注意頻寬成本 |
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
 | **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
-| **LLM（摘要/章節分段/問答，ai-service）** | **HF Inference Providers** | 依 provider 而定，沒有像 Groq 那樣公開逐模型的固定數字 | 免費額度會隨政策調整而變動，需定期查閱官方文件確認當下額度；特定模型是否有 provider 承載也會隨時間變動，換模型前建議先查（見 `ai-service/README.md` 已知限制） |
+| **LLM（摘要/章節分段/問答，ai-service）** | **自架 vLLM**（地端 GPU） | 不用付費；要自己的 NVIDIA 顯示卡 | 16GB 的卡只放得下 8B 等級（4-bit）加 embedding 與語音辨識，見 `ai-service/docs/adr/0015`；使用者也可以用自有金鑰改用雲端模型 |
 | **網路搜尋（ai-service，問答「查網路」、事實查核）** | **Tavily** | 整個平台每月 1,000 credits（一般搜尋 1 credit／次），不用綁卡；之後 US$0.008／credit | 額度是整個平台共用，不是每位使用者；每人每月的搜尋次數有用量上限（預設 30 次，問答與事實查核共用，只算成功的，見 gateway README「每月用量上限」） |
-| **Embedding（ai-service）** | **HF Inference Providers** | 依 provider 而定，一般有免費額度，無需信用卡即可申請 | 特定模型是否有 provider 承載會隨時間變動，需留意 |
+| **Embedding（ai-service）** | **自架 vLLM**（地端 GPU） | 不用付費 | 換模型會自動重算既有向量 |
 
 **額度風險提醒**
 - 免費層額度通常是「組織/帳號」層級，不是「API Key」層級，開多組 Key 不會疊加額度
@@ -962,7 +962,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、筆記、決策、測驗、事實查核），含譯文與雙語字幕、複製、下載原始檔）混為一談
 5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天，一次登入最多 30 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow；密碼 12 到 128 字元，PBKDF2 雜湊（舊的 bcrypt 登入時換掉）；可以改密碼、忘記密碼（寄到確認過的 email 的重設連結，或復原碼），改了、重設了、產生復原碼都會寄通知信
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
-7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。問答的 embedding 呼叫失敗（例如 HF 額度用完回 402）時不重試，有摘要或章節就只根據它們回答（見 `ai-service/docs/adr/0012`）。用量已記錄（每一次 LLM 呼叫與轉錄都記在使用者與 Job 名下，Job 工作區逐筆列出、設定頁看得到每月依模型加總）；每位使用者每月有用量上限（轉錄分鐘數、平台模型 token，見 `gateway/README.md`「每月用量上限」），用量告警仍是缺口
+7. **免費 API 額度管理**：AI Service 呼叫平台模型與 embedding 伺服器（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。問答的 embedding 呼叫失敗（例如 HF 額度用完回 402）時不重試，有摘要或章節就只根據它們回答（見 `ai-service/docs/adr/0012`）。用量已記錄（每一次 LLM 呼叫與轉錄都記在使用者與 Job 名下，Job 工作區逐筆列出、設定頁看得到每月依模型加總）；每位使用者每月有用量上限（轉錄分鐘數、平台模型 token，見 `gateway/README.md`「每月用量上限」），用量告警仍是缺口
 8. **正式環境的設定**：每個服務讀 `APP_ENV`（預設 `development`）；`production` 時啟動前檢查自己的密鑰（沒設、還是開發用預設值、或太短就不啟動，並說出是哪幾個環境變數），並關掉開發用的東西（gRPC reflection、gateway 與 notification-service 的 API 文件）。要換掉哪些值見 `infra/k8s/02-secret.yaml`，Redis 在正式環境要設密碼（`REDIS_PASSWORD`）。
 9. **依賴套件弱點掃描**：每個服務的 README 有「依賴套件弱點掃描」一節寫怎麼掃（Python：pip-audit；Java：用 Grype 掃 build 出來的 jar；前端：`npm audit`），上線前與之後每個月跑一次。2026-10-03 掃過一輪，高風險／嚴重的都升級或覆蓋版本修掉了（Spring Boot 4.1.0 → 4.1.1 加上 Jackson、Tomcat、amqp-client 的版本覆蓋；transcription-service 的 pillow、urllib3；前端 `npm audit fix`），只剩前端開發工具（shadcn CLI）裡一個還沒有修好版本、也不會進到瀏覽器的 `braces`（見 `frontend/README.md`）。只掃了語言套件，container image 的作業系統套件還沒掃
 10. **刪除帳號與揭露**（個資法）：使用者可以在設定頁刪除帳號（再輸入密碼），所有資料刪除、已連結帳號撤銷授權、用量去識別化（見 3.1、5.）；
@@ -980,11 +980,11 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 ## 8. 待確認事項（開發前建議先想清楚）
 
 - [x] 30 分鐘音訊限制是否要做「檔案大小」而非「時長」的替代限制——**已解決**：不是二選一，兩者對應不同的東西，分開處理（見 `upload-service/docs/adr/0001-upload-size-limit-is-file-type-aware.md`）。時長限制（30 分鐘，前端強制）維持現狀，是獨立的 MVP 產品決策，當時也是 VIDEO 上傳唯一有意義的 Groq 相關把關（VIDEO 原始檔案大小含容器/畫面編碼開銷，不等於最終送進 Groq 的音軌大小）。新增兩層後端強制的大小限制：AUDIO 專用上限（20MB，當時對齊 Groq 免費層）跟不分類型的濫用防護上限（1GB）——過去這兩層完全沒有後端驗證，`file_size_bytes` 只檢查是否為正數，繞過前端就能上傳任意大小。`GetPresignedUploadUrl` 用呼叫端回報的大小做早期擋檢查，`CompleteUpload` 改問物件儲存實際存了多大（不信任呼叫端回報的數字），超過限制立即刪除物件。語音辨識已從 Groq 換成 Deepgram（沒有 25MB 上限），2026-09-28 兩個限制一起放寬、抓在大約 1 小時：時長 60 分鐘、AUDIO 上限 120MB，1GB 的濫用防護上限不變（見 upload-service ADR 0001 的修訂）。
-- [x] embedding model 選擇——**已解決**：`BAAI/bge-m3`（透過 HF Inference API），1024 維，
-      query/document 對稱不用加 instruction 前綴；選型過程見 `ai-service/README.md` 已知限制
-      （HF Inference Providers 當下有沒有 provider 實際托管該模型會隨時間變動，換模型前建議先查）
+- [x] embedding model 選擇——**已解決**：`Qwen/Qwen3-Embedding-0.6B`（自架 vLLM），1024 維，
+      問題前面加指示、文件不加；原本是 HF Inference API 上的 `BAAI/bge-m3`，HF 額度用完（402）後改成自架，
+      見 `ai-service/docs/adr/0015-self-hosted-vllm-for-platform-model-and-embeddings.md`
 - [x] 章節自動分段的演算法/prompt 設計——**已解決**：純 LLM 判斷（把逐字稿片段連同時間戳丟給
-      HF Inference Providers 的聊天模型，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見
+      平台模型，要求回傳 JSON 章節列表），沒有搭配語音停頓偵測，見
       `ai-service/app/services/chapter_generator.py`
 - [x] 多格式輸出的模板內容——**已解決**：每種格式一份 prompt（`ai-service/app/services/output_generator.py`），只根據摘要與章節、不編造、不寫時間（章節時間由程式附上）
 - [ ] Google 的權限審查——連結 Google 帳號已實作，但 `gmail.compose`（建立草稿）是 Google 的受限權限，通過 Google 的
@@ -1009,4 +1009,6 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
+- **完全離線的語音辨識**：transcription-service 仍用 Deepgram（雲端）。本機的 `infra/scripts/vllm.sh` 已經起了 `MediaTek-Research/Breeze-ASR-25`（`:8002`，OpenAI 相容的 `/v1/audio/transcriptions`，有片段時間；RTX 5080 上 90 秒約 13 秒），但 transcription-service 還沒改用它；講者分離 vLLM 不提供，要另外做（例如 pyannote），見 `ai-service/docs/adr/0015`
+- **系統設定頁（管理員）**：平台模型、embedding、語音辨識、網路搜尋的網址與金鑰目前是環境變數（k8s configmap／secret），還沒有管理員在介面上設定的地方
 - **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做
