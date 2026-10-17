@@ -2,8 +2,9 @@
 
 本機開發環境的基礎設施：PostgreSQL、Redis、RabbitMQ、MinIO，以及完整服務的 Kubernetes 部署。
 
-這裡的設定都是**本機開發用**的（預設密碼、NodePort、`emptyDir`）。客戶在自己的環境部署時，照 [`docs/deployment-checklist.md`](docs/deployment-checklist.md)
-（密鑰、TLS 與同一個網站、前端的安全標頭、網路隔離、物件儲存、image 掃描、監控）。
+這裡的 `docker-compose.yaml` 與 `k8s/` 都是**本機開發用**的（預設密碼、NodePort、`emptyDir`）。客戶裝在自己的伺服器上用
+[`deploy/`](deploy/README.md)：一台機器的 Docker Compose 安裝包（`install.sh` 產生密鑰與憑證，HTTPS、同一個網站、選用的本地模型都設好），
+另外照 [`docs/deployment-checklist.md`](docs/deployment-checklist.md) 做程式碼做不到的事（換憑證、egress、image 掃描、監控）。
 
 ## 目錄結構
 
@@ -11,7 +12,7 @@
 
 ```
 transuai/
-  infra/                 <- 這個目錄
+  infra/                 <- 這個目錄（deploy/ 是客戶的安裝包，k8s/ 與 docker-compose.yaml 是本機開發用）
   auth-service/
   upload-service/
   transcription-service/

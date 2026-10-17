@@ -3,6 +3,10 @@
 TransuAI 由客戶部署在自己的環境（2026-10-17 決定）。這份清單是程式碼**做不到、要在部署環境做**的事，來自上線前驗證
 （`.scratch/pre-launch-hardening/asvs-l1.md` 標「部署時要做」的項目，與 `issues/01`、`09`、`11` 留下的事項）。上線前逐項打勾。
 
+**用安裝包（`infra/deploy`，Docker Compose）裝的話**，這些已經做好：第 1 節的密鑰與 `APP_ENV=production`（`install.sh` 隨機產生）、第 2 節的
+TLS（`edge`）、同一個網站、前端與 gateway 的網址與來源 IP 設定、第 4 節只對外開 `edge`、第 5 節私有的 bucket、第 7 節的備份（`backup.sh`）。
+還要自己做的：換成單位的憑證（`infra/deploy/docs/tls.md`）、`verify-deployment.sh`、egress 限制、image 掃描、監控、個資說明。
+
 ## 1. 密鑰與正式環境的設定
 
 - [ ] 每個服務設 `APP_ENV=production`：啟動時檢查自己的密鑰（沒設、是開發用的預設值、或太短就不啟動，並說出是哪個環境變數），
@@ -10,9 +14,9 @@ TransuAI 由客戶部署在自己的環境（2026-10-17 決定）。這份清單
 - [ ] 換掉 `infra/k8s/02-secret.yaml` 的每一個值：`DB_PASSWORD`／`POSTGRES_PASSWORD`、`RABBITMQ_PASSWORD`、`STORAGE_SECRET_KEY`／`MINIO_ROOT_PASSWORD`
       （至少 12 字元），`JWT_SECRET`（至少 32 字元，隨機產生，auth-service、gateway、notification-service 用同一把），`REDIS_PASSWORD`，
       `KEY_ENCRYPTION_KEY`（自有金鑰與 OAuth 權杖的主金鑰，**遺失就解不開已存的金鑰**，要另外備份），外部服務的金鑰（`DEEPGRAM_API_KEY`、
-      `HF_API_KEY`、`TAVILY_API_KEY`、`GOOGLE_OAUTH_*`）。
-- [ ] 寄信：`app-config` 的 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`MAIL_FROM`，app-secrets 的 `SMTP_PASSWORD`（單位的郵件伺服器，STARTTLS）。
-      沒設的話「忘記密碼」不能用（畫面說請洽管理員），改密碼的通知信也不寄。
+      `TAVILY_API_KEY`、`GOOGLE_OAUTH_*`）。
+- [ ] 寄信：管理員在「系統設定」頁填單位的郵件伺服器（STARTTLS），或用環境變數（`SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`SMTP_PASSWORD`、
+      `MAIL_FROM`）。沒設的話畫面不顯示「忘記密碼」與 email 確認，改用復原碼，改密碼的通知信也不寄。
 - [ ] 轉錄的上限（`app-config` 的 `USAGE_LIMIT_TRANSCRIPTION_MINUTES`、`MAX_RECORDING_MINUTES`）依單位的需要調；gateway 與 transcription-service 讀同一個值。
 - [ ] secret 建好之後用 `kubectl patch` 一個一個改，**不要重新 `kubectl apply` 整份 `02-secret.yaml`**（會把改過的值蓋回空字串）。
 - [ ] 密鑰不進版控、不放進 image；用客戶環境的 secret 管理（Kubernetes Secret、Vault 等）。
@@ -59,17 +63,18 @@ TransuAI 附了前端的 image（`transuai/frontend`，`frontend/Dockerfile`，k
 - [ ] 不要用 `infra/k8s` 的 NodePort（30080）對外；那是本機開發用的。
 - [ ] ai-service 與 transcription-service 在程式裡已經只連允許的網域（`OUTBOUND_ALLOWED_HOSTS`，預設是用到的服務，見各自 README）；不用的廠商
       可以從清單拿掉。網路層也建議同樣限制（多一層）。
-- [ ] 對外連線（egress）只開需要的網域（ASVS 12.6.1）：`api.deepgram.com`、`router.huggingface.co`（平台模型與 embedding；改用自架的
-      OpenAI 相容端點時換成那個）、`mcp.tavily.com`（查網路、事實查核）、Google（`accounts.google.com`、`oauth2.googleapis.com`、`www.googleapis.com`、
+- [ ] 對外連線（egress）只開需要的網域（ASVS 12.6.1）：`api.deepgram.com`、系統設定頁填的模型與語音辨識伺服器
+      （自架在內部的 vLLM 不用開）、`mcp.tavily.com`（查網路、事實查核）、Google（`accounts.google.com`、`oauth2.googleapis.com`、`www.googleapis.com`、
       `gmail.googleapis.com`、`tasks.googleapis.com`）、`mcp.notion.com`；使用者可以存自己金鑰的廠商（`api.openai.com`、`api.anthropic.com`、
       `generativelanguage.googleapis.com`、`openrouter.ai`）。不用的功能就不開。
 
 ## 5. 物件儲存
 
 - [ ] bucket 不開匿名讀取、不開列表；只用 presigned URL（ASVS 4.3.2、12.4.1）。
-- [ ] 物件儲存建議放在**跟前端不同的網域**（例如 `storage.<網域>`）。上傳時 Content-Type 已經綁進簽章、只能是音訊或影片，播放時舊的
+- [ ] 物件儲存建議放在**跟前端不同的網域**（例如 `storage.<網域>`）。安裝包為了只要一張憑證、一個網址，預設放在同一個網站的 bucket 路徑
+      （`/media-uploads/`，edge 轉給 MinIO）；要分開的話改 `STORAGE_PUBLIC_ENDPOINT` 與 edge 的設定，再加一張憑證。上傳時 Content-Type 已經綁進簽章、只能是音訊或影片，播放時舊的
       非媒體物件也強制回 `application/octet-stream`；分開網域是多一層保險。
-- [ ] 物件儲存的 CORS 只允許前端的網域（瀏覽器直接 PUT 上傳、播放器直接讀）。
+- [ ] 物件儲存的 CORS 只允許前端的網域（瀏覽器直接 PUT 上傳、播放器直接讀）。跟前端同一個網站時不用 CORS。
 
 ## 6. Container image 與依賴
 
@@ -87,8 +92,8 @@ TransuAI 附了前端的 image（`transuai/frontend`，`frontend/Dockerfile`，k
 ## 8. 個資與說明
 
 - [ ] `/privacy` 列出了資料會送到哪些外部服務；部署的單位要補上自己的個資政策與聯絡窗口（`/privacy` 寫「請洽你的單位管理這套系統的人員」）。
-- [ ] 確認要開的外部服務（Deepgram、HF、Tavily、Google、Notion）符合單位的規定；不用的功能就不設金鑰，對應的項目在 `/privacy` 也要跟著拿掉。
+- [ ] 確認要開的外部服務（外部的模型與語音辨識服務、Deepgram、Tavily、Google、Notion）符合單位的規定；不用的功能就不設金鑰，對應的項目在 `/privacy` 也要跟著拿掉。
 - [ ] 上傳的檔案**沒有掃毒**（使用者決定，`.scratch/pre-launch-hardening/issues/19`）：檔案只會送去轉錄、給上傳者本人播放與下載。單位規定要掃的話，
       在物件儲存那一層接（例如 bucket 的事件觸發 ClamAV）。
-- [ ] 忘記密碼：重設信只寄給確認過的 email（註冊時寄確認信），要設好 SMTP（第 1 節）；收不到信時可以用復原碼。在設定 SMTP 之前就註冊的帳號
+- [ ] 忘記密碼：重設信只寄給確認過的 email（註冊時寄確認信），要設好寄信（第 1 節）；收不到信時可以用復原碼。在設定 SMTP 之前就註冊的帳號
       要到設定頁「重寄確認信」；請使用者在設定頁產生復原碼、存好。

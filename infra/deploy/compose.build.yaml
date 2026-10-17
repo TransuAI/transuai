@@ -1,0 +1,17 @@
+# 從原始碼 build image（install.sh --images build，或 `docker compose -f compose.yaml -f compose.build.yaml build`）。
+# Java 服務的 build context 是 repo 的根目錄（要讀 infra/proto），其他是各自的目錄。
+services:
+  auth-service:
+    build: { context: ../.., dockerfile: auth-service/Dockerfile }
+  upload-service:
+    build: { context: ../.., dockerfile: upload-service/Dockerfile }
+  gateway:
+    build: { context: ../.., dockerfile: gateway/Dockerfile }
+  transcription-service:
+    build: { context: ../../transcription-service }
+  ai-service:
+    build: { context: ../../ai-service }
+  notification-service:
+    build: { context: ../../notification-service }
+  frontend:
+    build: { context: ../../frontend }

@@ -1,0 +1,299 @@
+# TransuAI 的一台伺服器安裝（客戶內部部署）：整套服務用 Docker Compose 跑，資料都在 named volume。
+# 用 install.sh 安裝（它產生 .env 與憑證）；之後的操作見 README.md：
+#   docker compose up -d                    啟動（沒有本地模型）
+#   docker compose --profile gpu up -d      連同本地模型（vLLM，要 NVIDIA GPU）一起啟動
+#
+# 只有 edge 對外開 port（TRANSUAI_HTTPS_PORT、TRANSUAI_HTTP_PORT）：它終結 TLS，網頁、/api、/ws 轉給 frontend，物件儲存的 bucket 路徑轉給 minio
+#（presigned URL 簽的就是對外網址，瀏覽器上傳與播放都在同一個網站）。其他服務都只在內部網路。
+# 設定都在 .env（所有服務共用，跟 k8s 的 configmap＋secret 一樣）；每個服務另外設自己的 DB_NAME。
+
+name: transuai
+
+x-app: &app
+  restart: unless-stopped
+  env_file: .env
+  networks: [internal]
+  # 模型伺服器跑在這台主機上（不在 compose 裡）時，系統設定頁填 http://host.docker.internal:<port>/v1。
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    minio-init:
+      condition: service_completed_successfully
+
+networks:
+  internal:
+    # 固定的子網。frontend 與 edge 用固定位址：gateway、notification-service、frontend 只信它們帶的 X-Forwarded-For。
+    # nginx（frontend、edge）只在啟動時查一次上游的位址，所以上游（gateway、notification-service、minio、frontend）也用固定位址：
+    # 單獨重建某個服務（升級、改 .env）時位址不變，不會 502。
+    # 跟公司的網段衝突時改 .env 的 TRANSUAI_NET（前三段）。
+    ipam:
+      config:
+        - subnet: ${TRANSUAI_NET:-172.29.0}.0/24
+          # 其他容器的位址從 .128 之後自動分配，不會搶走固定的位址（.10–.14）。
+          ip_range: ${TRANSUAI_NET:-172.29.0}.128/25
+
+volumes:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:
+  minio-data:
+  vllm-models:
+    # 已經有下載好模型的 volume（例如 infra/scripts/vllm.sh 的 transuai-vllm-models）時設 VLLM_MODELS_VOLUME 沿用它。
+    name: ${VLLM_MODELS_VOLUME:-transuai_vllm-models}
+
+configs:
+  create-databases:
+    content: |
+      CREATE DATABASE auth_db;
+      CREATE DATABASE upload_db;
+      CREATE DATABASE transcription_db;
+      CREATE DATABASE ai_db;
+      \c ai_db
+      CREATE EXTENSION IF NOT EXISTS vector;
+
+services:
+  # ---------------------------------------------------------------- 基礎設施
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    configs:
+      - source: create-databases
+        target: /docker-entrypoint-initdb.d/01-create-databases.sql
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    # 限流計數與快取，都有有效時間：記憶體上限，滿了淘汰最久沒用的（跟 k8s/11-redis.yaml 一樣）。
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --maxmemory 256mb --maxmemory-policy allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  # MinIO 官方的 image 已經從 Docker Hub 下架（2025 年起社群版不再發行 image）：用 Pigsty 維護的同一套程式（pgsty/minio，AGPL，
+  # 設定、mc 都一樣），固定版本。
+  minio:
+    image: &minio-image pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    restart: unless-stopped
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
+      MC_HOST_local: http://${STORAGE_ACCESS_KEY}:${STORAGE_SECRET_KEY}@localhost:9000
+    volumes:
+      - minio-data:/data
+    networks:
+      internal:
+        ipv4_address: ${TRANSUAI_NET:-172.29.0}.14
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # 建 bucket（私有；已經有就跳過）。minio 的 image 裡就有 mc。
+  minio-init:
+    image: *minio-image
+    environment:
+      MC_HOST_local: http://${STORAGE_ACCESS_KEY}:${STORAGE_SECRET_KEY}@minio:9000
+    entrypoint: ["mc", "mb", "--ignore-existing", "local/${STORAGE_BUCKET:-media-uploads}"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [internal]
+
+  # ---------------------------------------------------------------- 服務
+  auth-service:
+    <<: *app
+    image: ${TRANSUAI_REGISTRY:-transuai}/auth-service:${TRANSUAI_VERSION:-local}
+    environment:
+      DB_NAME: auth_db
+
+  upload-service:
+    <<: *app
+    image: ${TRANSUAI_REGISTRY:-transuai}/upload-service:${TRANSUAI_VERSION:-local}
+    environment:
+      DB_NAME: upload_db
+
+  transcription-service:
+    <<: *app
+    image: ${TRANSUAI_REGISTRY:-transuai}/transcription-service:${TRANSUAI_VERSION:-local}
+    environment:
+      DB_NAME: transcription_db
+
+  ai-service:
+    <<: *app
+    image: ${TRANSUAI_REGISTRY:-transuai}/ai-service:${TRANSUAI_VERSION:-local}
+    environment:
+      DB_NAME: ai_db
+
+  notification-service:
+    <<: *app
+    image: ${TRANSUAI_REGISTRY:-transuai}/notification-service:${TRANSUAI_VERSION:-local}
+    environment:
+      # WebSocket 經過 edge → frontend 進來：只信 frontend 帶的 X-Forwarded-For（CIDR）。
+      TRUSTED_PROXIES: ${TRANSUAI_NET:-172.29.0}.10/32
+    networks:
+      internal:
+        ipv4_address: ${TRANSUAI_NET:-172.29.0}.13
+
+  gateway:
+    <<: *app
+    image: ${TRANSUAI_REGISTRY:-transuai}/gateway:${TRANSUAI_VERSION:-local}
+    environment:
+      FORWARD_HEADERS_STRATEGY: native
+      # Tomcat 的 internal-proxies 是正規表示式：只信 frontend。
+      TRUSTED_PROXIES: ${TRANSUAI_NET:-172.29.0}.10
+    networks:
+      internal:
+        ipv4_address: ${TRANSUAI_NET:-172.29.0}.12
+
+  frontend:
+    image: ${TRANSUAI_REGISTRY:-transuai}/frontend:${TRANSUAI_VERSION:-local}
+    restart: unless-stopped
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      NOTIFICATION_URL: http://notification-service:8085
+      # 物件儲存跟網頁同一個網站（edge 轉 bucket 路徑），CSP 寫對外網址本身。
+      STORAGE_ORIGIN: ${TRANSUAI_URL}
+      TRUSTED_PROXY_CIDR: ${TRANSUAI_NET:-172.29.0}.11/32
+    networks:
+      internal:
+        ipv4_address: ${TRANSUAI_NET:-172.29.0}.10
+    depends_on: [gateway, notification-service]
+
+  # 對外的唯一入口：HTTPS（憑證在 ./tls），HTTP 只轉址。
+  edge:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    environment:
+      TRANSUAI_URL: ${TRANSUAI_URL}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-media-uploads}
+    ports:
+      - "${TRANSUAI_HTTPS_PORT:-443}:8443"
+      - "${TRANSUAI_HTTP_PORT:-80}:8080"
+    volumes:
+      - ./edge/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./tls:/etc/nginx/tls:ro
+    networks:
+      internal:
+        ipv4_address: ${TRANSUAI_NET:-172.29.0}.11
+    depends_on: [frontend, minio]
+
+  # ---------------------------------------------------------------- 本地模型（--profile gpu）
+  # 三個 OpenAI 相容的伺服器，參數跟 infra/scripts/vllm.sh 一樣（RTX 5080 16GB 實測，見 ai-service ADR 0015）；換卡或換模型時調 .env 的
+  # VLLM_*。每個 vLLM 啟動時要看到它那份顯示記憶體是空的，所以依序啟動：embedding → 語音辨識 → 聊天。
+  # 模型權重第一次啟動時從 Hugging Face 下載到 vllm-models；不能連外的環境先把模型放進這個 volume，VLLM_OFFLINE=1（見 docs/offline.md）。
+  vllm-embed:
+    profiles: [gpu]
+    image: &vllm-image vllm/vllm-openai:${VLLM_VERSION:-v0.31.0}
+    restart: unless-stopped
+    command:
+      - ${VLLM_EMBED_MODEL:-Qwen/Qwen3-Embedding-0.6B}
+      - --runner=pooling
+      - --convert=embed
+      - --max-model-len=${VLLM_EMBED_MAX_LEN:-2048}
+      - --gpu-memory-utilization=${VLLM_EMBED_GPU_SHARE:-0.12}
+    environment: &vllm-env
+      HF_HUB_OFFLINE: ${VLLM_OFFLINE:-0}
+    ipc: host
+    volumes: &vllm-volumes
+      - vllm-models:/root/.cache/huggingface
+    networks: [internal]
+    deploy: &gpu
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck: &vllm-health
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/models')"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15m
+      retries: 6
+
+  vllm-stt:
+    profiles: [gpu]
+    image: *vllm-image
+    restart: unless-stopped
+    # Breeze-ASR-25：Whisper-large-v2 針對台灣華語與中英夾雜調過。fp8 載入、不錄 CUDA graph、一次一段（省顯示記憶體）。
+    command:
+      - ${VLLM_STT_MODEL:-MediaTek-Research/Breeze-ASR-25}
+      - --quantization=fp8
+      - --enforce-eager
+      - --gpu-memory-utilization=${VLLM_STT_GPU_SHARE:-0.16}
+      - --max-num-seqs=1
+      - --max-num-batched-tokens=1500
+      - '--limit-mm-per-prompt={"audio": 1}'
+    environment: *vllm-env
+    ipc: host
+    volumes: *vllm-volumes
+    networks: [internal]
+    deploy: *gpu
+    healthcheck: *vllm-health
+    depends_on:
+      vllm-embed:
+        condition: service_healthy
+
+  vllm-chat:
+    profiles: [gpu]
+    image: *vllm-image
+    restart: unless-stopped
+    # 會後處理要呼叫工具：Qwen3 的格式是 hermes。thinking 由 ai-service 每次呼叫關掉（PLATFORM_LLM_EXTRA_BODY）。
+    command:
+      - ${VLLM_CHAT_MODEL:-Qwen/Qwen3-8B-AWQ}
+      - --max-model-len=${VLLM_CHAT_MAX_LEN:-28672}
+      - --kv-cache-dtype=fp8
+      - --gpu-memory-utilization=${VLLM_CHAT_GPU_SHARE:-0.53}
+      - --max-num-seqs=4
+      - --enable-auto-tool-choice
+      - --tool-call-parser=hermes
+    environment: *vllm-env
+    ipc: host
+    volumes: *vllm-volumes
+    networks: [internal]
+    deploy: *gpu
+    healthcheck: *vllm-health
+    depends_on:
+      vllm-stt:
+        condition: service_healthy

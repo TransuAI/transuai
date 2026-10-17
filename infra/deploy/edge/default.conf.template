@@ -1,0 +1,61 @@
+# TransuAI 對外的入口（compose 的 edge）：終結 TLS，網頁、/api、/ws 轉給 frontend，物件儲存的 bucket 路徑轉給 minio。nginx 的 image
+# 啟動時用環境變數換掉 ${TRANSUAI_URL}、${STORAGE_BUCKET}。TLS 是 Mozilla 的 "intermediate"（跟 frontend/nginx/tls.conf.example 一樣，
+# ASVS 9.1.1–9.1.3）；憑證在 ./tls（tls.crt＝完整的憑證鏈、tls.key），換成單位自己的之後 `docker compose restart edge`。
+
+server_tokens off;
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# HTTP 只轉址到 HTTPS。
+server {
+    listen 8080;
+    server_name _;
+    return 301 ${TRANSUAI_URL}$request_uri;
+}
+
+server {
+    listen 8443 ssl;
+    http2 on;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/tls/tls.crt;
+    ssl_certificate_key /etc/nginx/tls/tls.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:TLS:10m;
+    ssl_session_tickets off;
+
+    # 物件儲存：瀏覽器直接 PUT 上傳、GET 播放與下載，用 upload-service 簽的 presigned URL（STORAGE_PUBLIC_ENDPOINT＝對外網址）。
+    # 簽章包含 Host 與路徑，原樣轉給 minio；bucket 是私有的，沒有簽章的請求 minio 自己拒絕。檔案很大，不限大小、不緩衝。
+    location /${STORAGE_BUCKET}/ {
+        proxy_pass http://minio:9000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        client_max_body_size 0;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # 其他都給 frontend（它再轉 /api 到 gateway、/ws 到 notification-service）。Host 帶 port：frontend 的 CSP 用它寫 WebSocket 的網址。
+    # X-Forwarded-For 只放直接連進來的位址（frontend 只信這一層）。
+    location / {
+        proxy_pass http://frontend:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+}
