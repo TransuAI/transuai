@@ -63,8 +63,8 @@ autoindex off;
 ## 5. 物件儲存
 
 - [ ] bucket 不開匿名讀取、不開列表；只用 presigned URL（ASVS 4.3.2、12.4.1）。
-- [ ] 物件儲存放在**跟前端不同的網域**（例如 `storage.<網域>`），不要用同一個網域的子路徑：上傳的檔案目前沒有綁 Content-Type
-      （`.scratch/pre-launch-hardening/issues/16`），同一個網域時存成 HTML 的檔案就能在前端的網域執行 script。票 16 做完之前這點一定要做。
+- [ ] 物件儲存建議放在**跟前端不同的網域**（例如 `storage.<網域>`）。上傳時 Content-Type 已經綁進簽章、只能是音訊或影片，播放時舊的
+      非媒體物件也強制回 `application/octet-stream`；分開網域是多一層保險。
 - [ ] 物件儲存的 CORS 只允許前端的網域（瀏覽器直接 PUT 上傳、播放器直接讀）。
 
 ## 6. Container image 與依賴

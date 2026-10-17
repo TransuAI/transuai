@@ -133,7 +133,7 @@ auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user
 ### 3.2 Upload Service
 
 ```
-POST   /uploads/presign         取得物件儲存的 presigned upload URL（尚未建立 Job；帶檔案長度，先檢查每月用量上限）
+POST   /uploads/presign         取得物件儲存的 presigned upload URL（尚未建立 Job；帶檔案長度，先檢查每月用量上限；帶 MIME 類型，簽進網址）
 POST   /uploads/complete        前端上傳完成後呼叫，建立 Job record 並發送 transcription.requested 事件；
                                  body 的 transcriptionLanguage 是轉錄語言（zh-TW 預設 / en / auto）
 GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊（含標題、類型）

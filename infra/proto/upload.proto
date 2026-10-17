@@ -150,6 +150,9 @@ message GetPresignedUploadUrlRequest {
   string file_name = 1;
   FileType file_type = 2;
   int64 file_size_bytes = 3;
+  // 檔案的 MIME 類型（瀏覽器的 File.type）：AUDIO 要 audio/*、VIDEO 要 video/*。簽進 presigned PUT，上傳時 Content-Type
+  // 必須一字不差，存不成 text/html 之類能在瀏覽器執行的類型。
+  string content_type = 4;
 }
 
 message GetPresignedUploadUrlResponse {
