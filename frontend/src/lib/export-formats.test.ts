@@ -659,6 +659,13 @@ describe('toFactCheckMarkdown', () => {
     expect(markdown).toContain('# 節目.m4a：事實查核\n\n> AI 依網路搜尋整理，請自行確認來源\n>\n> 逐字稿在找出主張後有修改，這些主張可能過時\n\n')
   })
 
+  it("doesn't say the results come from web searches when none has been checked", () => {
+    const markdown = toFactCheckMarkdown({ fileName: '節目.m4a', isStale: false, claims: [notCheckable, { ...unchecked, isStale: false }] })
+
+    expect(markdown).not.toContain('AI 依網路搜尋整理')
+    expect(markdown.startsWith('# 節目.m4a：事實查核\n\n## 結論\n\n### 1. 主持人最近很忙')).toBe(true)
+  })
+
   it('says there are no claims yet', () => {
     expect(toFactCheckMarkdown({ fileName: '節目.m4a', isStale: false, claims: [] })).toBe('# 節目.m4a：事實查核\n\n尚無主張\n')
   })

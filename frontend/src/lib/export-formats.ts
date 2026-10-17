@@ -422,7 +422,8 @@ export function buildFactCheckExport(
   }
 }
 
-// 事實查核的 Markdown：大標「標題：事實查核」，有標題時多一行檔名，然後是「AI 依網路搜尋整理」的提示（與過時提示）。
+// 事實查核的 Markdown：大標「標題：事實查核」，有標題時多一行檔名，然後是提示：有查核結果時「AI 依網路搜尋整理」（跟畫面一樣），
+// 逐字稿改過時的過時提示。
 // 有結論的主張（含無法查核）依時間在前，還沒查的列在最後；編號整份連續。每條主張一節：結論、類型、時間點與講者的原話、
 // 說明，最後是來源（編號跟說明裡的 [n] 一樣）。
 export function toFactCheckMarkdown(content: FactCheckExport): string {
@@ -432,12 +433,12 @@ export function toFactCheckMarkdown(content: FactCheckExport): string {
     blocks.push('尚無主張')
     return blocks.join('\n\n') + '\n'
   }
-  blocks.push(
-    [
-      '> AI 依網路搜尋整理，請自行確認來源',
-      ...(content.isStale ? ['>', '> 逐字稿在找出主張後有修改，這些主張可能過時'] : []),
-    ].join('\n'),
-  )
+  const anyChecked = content.claims.some((claim) => claim.verdict !== null && claim.verdict !== 'not_checkable')
+  const notices = [
+    ...(anyChecked ? ['AI 依網路搜尋整理，請自行確認來源'] : []),
+    ...(content.isStale ? ['逐字稿在找出主張後有修改，這些主張可能過時'] : []),
+  ]
+  if (notices.length > 0) blocks.push(notices.map((notice) => `> ${notice}`).join('\n>\n'))
 
   const withVerdict = content.claims.filter((claim) => claim.verdict !== null)
   const unchecked = content.claims.filter((claim) => claim.verdict === null)
