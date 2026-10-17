@@ -1,0 +1,5 @@
+# 本機的 issue tracker 與一次性的研究、實測資料（見 CLAUDE.md）：留在本機，不進版控——裡面有真實會議的逐字稿。
+.scratch/
+# 個人編輯器設定、根目錄沒有 package.json 的空 node_modules
+.vscode/
+node_modules/

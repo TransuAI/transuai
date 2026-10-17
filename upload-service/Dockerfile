@@ -1,4 +1,4 @@
-# Build context 必須是 transuai/（repo 們的共同上層目錄），因為 build.gradle 用
+# Build context 必須是 transuai/（repo 的根目錄），因為 build.gradle 用
 # srcDir '../infra/proto' 讀 proto 定義：
 #   docker build -f upload-service/Dockerfile -t transuai/upload-service:dev .
 FROM eclipse-temurin:26-jdk AS build

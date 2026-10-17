@@ -1,0 +1,8 @@
+# Java 服務（auth、upload、gateway）的 build context 是 repo 根目錄（要讀 infra/proto）：版控、本機資料、各服務的依賴與產物不送進 build。
+.git
+.scratch
+**/node_modules
+**/.venv
+**/build
+**/.gradle
+**/.env

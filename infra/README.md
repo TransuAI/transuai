@@ -5,13 +5,13 @@
 這裡的設定都是**本機開發用**的（預設密碼、NodePort、`emptyDir`）。客戶在自己的環境部署時，照 [`docs/deployment-checklist.md`](docs/deployment-checklist.md)
 （密鑰、TLS 與同一個網站、前端的安全標頭、網路隔離、物件儲存、image 掃描、監控）。
 
-## 目錄結構假設
+## 目錄結構
 
-所有 repo clone 在同一層：
+所有服務都在同一個 repo（monorepo）裡，各自一個目錄：
 
 ```
-projects/
-  infra/                 <- 這個 repo
+transuai/
+  infra/                 <- 這個目錄
   auth-service/
   upload-service/
   transcription-service/
@@ -110,7 +110,7 @@ docker compose exec rabbitmq rabbitmqctl list_queues
 它做的事（拆開列出來方便手動除錯用）：
 
 1. 確認 context 是 `docker-desktop`。
-2. Build 六個服務的 image（Java 服務的 build context 要是三個 repo 的共同上層目錄，因為 `build.gradle` 用 `srcDir '../infra/proto'` 讀共用 proto 定義；Python 服務的 `proto_gen` 已 commit 進版控，各自的 repo 目錄就夠）：
+2. Build 六個服務的 image（Java 服務的 build context 要是 repo 的根目錄，因為 `build.gradle` 用 `srcDir '../infra/proto'` 讀共用 proto 定義；Python 服務的 `proto_gen` 已 commit 進版控，各自的 repo 目錄就夠）：
    ```bash
    docker build -f "$ROOT_DIR/auth-service/Dockerfile" -t transuai/auth-service:dev "$ROOT_DIR"
    docker build -f "$ROOT_DIR/gateway/Dockerfile" -t transuai/gateway:dev "$ROOT_DIR"

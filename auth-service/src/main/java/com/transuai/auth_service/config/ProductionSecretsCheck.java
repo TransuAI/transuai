@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 /**
  * 正式環境（{@code APP_ENV=production}，也就是 production profile）啟動前檢查密鑰：沒設、還是 application.properties 裡的開發用預設值、
  * 或太短，就拒絕啟動並說出是哪幾個環境變數——少設一個不能默默用開發值跑起來。開發環境不檢查。gateway、auth-service、upload-service
- * 各有一份（各自的 repo），檢查的密鑰不同。
+ * 各有一份（各自的目錄），檢查的密鑰不同。
  */
 @Component
 @Profile("production")

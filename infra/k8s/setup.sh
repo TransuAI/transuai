@@ -27,7 +27,7 @@ fi
 kubectl get nodes
 
 echo "== 2/6 build 六個服務與前端的 image =="
-# Java 服務：build context 要是 repo 們的共同上層目錄（transuai/），因為
+# Java 服務：build context 要是 repo 的根目錄（transuai/），因為
 # build.gradle 用 srcDir '../infra/proto' 讀共用 proto 定義。
 docker build -f "$ROOT_DIR/auth-service/Dockerfile" -t transuai/auth-service:dev "$ROOT_DIR"
 docker build -f "$ROOT_DIR/gateway/Dockerfile" -t transuai/gateway:dev "$ROOT_DIR"
