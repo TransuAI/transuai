@@ -21,6 +21,7 @@ import com.transuai.auth.grpc.v1.RegisterRequest;
 import com.transuai.auth.grpc.v1.User;
 import com.transuai.auth_service.grpc.auth.GrpcAuthContext;
 import com.transuai.auth_service.repository.UserRepository;
+import com.transuai.auth_service.security.CommonPasswords;
 import com.transuai.auth_service.security.JwtService;
 import com.transuai.auth_service.security.RefreshTokens;
 import com.transuai.auth_service.service.AccountDeletion;
@@ -42,6 +43,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     private final JwtService jwtService;
     private final RefreshTokens refreshTokens;
     private final AccountDeletion accountDeletion;
+    private final CommonPasswords commonPasswords;
     // 帳號不存在時也拿密碼比對這個雜湊，回應時間才跟「密碼錯」一樣長，不能用來猜哪些 email 註冊過。第一次用到才產生
     // （跟真的密碼用同一個 encoder、同樣的成本）。
     private volatile String unknownUserHash;
@@ -175,14 +177,17 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
         responseObserver.onCompleted();
     }
 
-    // ASVS 2.1.1、2.1.2：以字元算（中文與 emoji 一個算一個）；不限制要有哪些種類的字元。null：可以用。
-    private static String passwordProblem(String password) {
+    // ASVS 2.1.1、2.1.2、2.1.7：以字元算（中文與 emoji 一個算一個），不在常見密碼清單裡；不限制要有哪些種類的字元。null：可以用。
+    private String passwordProblem(String password) {
         int length = password.codePointCount(0, password.length());
         if (length < MIN_PASSWORD_LENGTH) {
             return "密碼至少要 " + MIN_PASSWORD_LENGTH + " 個字元";
         }
         if (length > MAX_PASSWORD_LENGTH) {
             return "密碼最多 " + MAX_PASSWORD_LENGTH + " 個字元";
+        }
+        if (commonPasswords.isTooCommon(password)) {
+            return "這個密碼太常見，很容易被猜到，請換一個";
         }
         return null;
     }

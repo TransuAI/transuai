@@ -45,10 +45,15 @@ class PasswordPolicyTest {
 
     @Test
     void aPasswordCanBeUpToOneHundredTwentyEightCharactersOfAnyKind() {
-        register(newEmail(), "密".repeat(128));
-        register(newEmail(), "😀 ".repeat(6));  // 12 characters, though 18 UTF-16 units
+        register(newEmail(), "密碼" + "一二三四五六七八九十".repeat(12) + "百千萬億零壹");  // 128 characters
+        register(newEmail(), "😀 my 🎉 pass 🚀");  // 15 characters, though 18 UTF-16 units
 
         assertInvalidArgument(() -> register(newEmail(), "a".repeat(129)), "密碼最多 128 個字元");
+    }
+
+    @Test
+    void aCommonPasswordIsRejected() {
+        assertInvalidArgument(() -> register(newEmail(), "Password1234!"), "這個密碼太常見，很容易被猜到，請換一個");
     }
 
     @Test

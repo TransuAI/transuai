@@ -98,7 +98,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 
 | RPC | 說明 |
 |---|---|
-| `Register` | 建立帳號，email 已存在回 `ALREADY_EXISTS`；密碼 12 到 128 個字元（以字元算，任何字元都可以，不限制種類），不合回 `INVALID_ARGUMENT`（「密碼至少要 12 個字元」）；成功直接簽發 token，不用再呼叫一次 `Login` |
+| `Register` | 建立帳號，email 已存在回 `ALREADY_EXISTS`；密碼 12 到 128 個字元（以字元算，任何字元都可以，不限制種類），而且不能太常見（`security/CommonPasswords`），不合回 `INVALID_ARGUMENT`（「密碼至少要 12 個字元」「這個密碼太常見，很容易被猜到，請換一個」）；成功直接簽發 token，不用再呼叫一次 `Login` |
 | `Login` | email/password 其中一項錯誤都回 `UNAUTHENTICATED`（不細分，避免帳號列舉）；帳號不存在時也比對一次雜湊，回應時間跟密碼錯一樣長，不能用時間猜帳號。猜密碼的次數由 gateway 限流 |
 | `Refresh` | 用 refresh token 換發新的 access/refresh token 組合，舊的作廢（輪替）；token 無效、過期、型別不對（例如誤傳 access token）、查不到、已經作廢都回 `UNAUTHENTICATED`；已經換發過的又被用一次（超過 10 秒寬限）視為被盜，整串作廢 |
 | `Logout` | 作廢這個 refresh token 所在的那一串；token 無效或已經作廢也回成功 |
@@ -135,7 +135,7 @@ fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（
 src/main/java/com/transuai/auth_service/
   domain/           User entity、RefreshToken、OutboxEventEntity（outbox）
   repository/        Spring Data JPA repository
-  security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）
+  security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）、CommonPasswords（太常見的密碼：SecLists 10k-most-common，打包在 `resources/common-passwords.txt`，MIT 授權見同目錄的 `.LICENSE`；不連外。也擋清單裡的密碼前後加數字或符號、同一段重複）
   config/             SecurityConfig（PasswordEncoder bean：PBKDF2，認得舊的 bcrypt）、RabbitConfig（account.deleted fanout exchange）
   service/            AccountDeletion（刪使用者與 refresh token，account.deleted 寫進 outbox）
   event/              OutboxPublisher（把 outbox 送到 RabbitMQ，publisher confirm）
@@ -179,5 +179,5 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
 - 過期、作廢的 `refresh_tokens` 不會自動清掉（每次登入、換發多一列），量大了要加定期清理
-- 沒有密碼重設（忘記密碼）、email 驗證；不檢查密碼是否在外洩清單裡（見 `.scratch/pre-launch-hardening/asvs-l1.md`）
+- 沒有密碼重設（忘記密碼）、email 驗證；常見密碼只比對打包的 10,000 個（客戶內部部署可能不能連外，不查 Have I Been Pwned）
 - 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出、30 天上限，密碼規則與改密碼（`RefreshTokenTest`、`RefreshTokenGraceTest`、`PasswordPolicyTest`、`ChangePasswordTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）
