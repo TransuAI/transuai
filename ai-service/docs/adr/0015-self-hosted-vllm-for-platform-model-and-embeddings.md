@@ -67,4 +67,4 @@ Accepted（2026-10-17）。取代 ADR 0010 裡「本機用 Ollama」的部分、
   RTX 5090 才放得下它加 embedding 與語音辨識），或改走自有金鑰的雲端模型。
 - 每次換聊天模型都要用 ADR 0011 的會後處理實測重跑（`.scratch/local-platform-model/bakeoff/`，`BAKEOFF_BASE_URL` 指向 vLLM）。
 - 換 embedding 模型後，重算完成前還沒輪到的 Job 找段落不準；本機 18 個 Job、5 個決策約 5 秒算完。
-- 講者分離（Deepgram 現在一起做）vLLM 不提供：語音辨識改到本機時另外處理（例如 pyannote 在 CPU 上跑），見之後的 ADR。
+- 講者分離 vLLM 不提供：transcription-service 用 CPU 跑 sherpa-onnx，語音辨識送到這裡的 Breeze-ASR-25，見 transcription-service ADR 0003。
