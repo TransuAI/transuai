@@ -42,7 +42,7 @@ npm test
 
 Vitest + React Testing Library + `jsdom`。頁面測試一律 mock `src/lib/api.ts`（或 `api-client.ts`）當作對外邊界,其餘透過使用者看得到的行為（文字、role、點擊）驅動,不測內部實作細節。不碰畫面也沒有 I/O 的純函式模組(例如 `lib/export-formats.ts`,規則組合多、直接比對輸出文字比透過頁面可靠)則直接測它的 export。設定在 `vite.config.ts` 的 `test` 欄位,共用的測試環境設定在 `src/test/setup.ts`。
 
-`vite.config.ts` 把 `/api` proxy 到 `http://localhost:8080`（Gateway),所以本機開發預設 `VITE_API_BASE_URL=/api` 即可,不會有 CORS 問題。**API 一定要跟前端同源**(正式環境也是經反向代理的 `/api`):refresh token 的 cookie 是 `SameSite=Strict`、`Path=/api/auth`,`VITE_API_BASE_URL` 設成別的網站的網址,重新整理頁面就會被登出(見 gateway README「refresh token 的 cookie」)。notification-service 的 WebSocket(`8085`)沒有走 Gateway,前端直連,見 `.env.example` 的 `VITE_WS_BASE_URL`。
+`vite.config.ts` 把 `/api` proxy 到 `http://localhost:8080`（Gateway),所以本機開發預設 `VITE_API_BASE_URL=/api` 即可,不會有 CORS 問題。**API 一定要跟前端同源**(正式環境也是經反向代理的 `/api`):refresh token 的 cookie 是 `SameSite=Strict`(名稱 `__Host-refresh_token`),`VITE_API_BASE_URL` 設成別的網站的網址,重新整理頁面就會被登出(見 gateway README「refresh token 的 cookie」)。notification-service 的 WebSocket(`8085`)沒有走 Gateway,前端直連,見 `.env.example` 的 `VITE_WS_BASE_URL`。
 
 ### 環境變數
 
