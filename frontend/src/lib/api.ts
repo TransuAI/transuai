@@ -69,6 +69,10 @@ export const authApi = {
   // 刪除帳號: the password again (403 when wrong). Everything of the user's is deleted on the server and the refresh-token
   // cookie cleared.
   deleteAccount: (password: string) => apiFetchVoid('/auth/account/delete', { method: 'POST', body: { password } }),
+  // 改密碼: the current password (403 when wrong) and the new one. Every other sign-in ends; this one gets a new access
+  // token here and a new refresh-token cookie.
+  changePassword: (params: { currentPassword: string; newPassword: string }) =>
+    apiFetch<AuthResponse>('/auth/password', { method: 'POST', body: params }),
 }
 
 export const uploadApi = {

@@ -17,8 +17,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
-// 帳號: signing out of every device, e.g. after using a shared computer or losing a phone. Sessions elsewhere end at
-// their next token refresh (within 15 minutes); this one ends now. And deleting the account.
+// 帳號: changing the password, signing out of every device (e.g. after using a shared computer or losing a phone —
+// sessions elsewhere end at their next token refresh, within 15 minutes; this one ends now), and deleting the account.
 export function AccountSection() {
   const { logoutEverywhere } = useAuth()
   const [isWorking, setIsWorking] = useState(false)
@@ -36,6 +36,7 @@ export function AccountSection() {
         <LogOut className="size-4" />
         帳號
       </h2>
+      <ChangePassword />
       <p className="text-sm text-muted-foreground">
         在別的電腦登入過、或手機遺失時，可以登出所有裝置：其他裝置最晚 15 分鐘內會被登出，這台也會登出。
       </p>
@@ -50,6 +51,78 @@ export function AccountSection() {
       </p>
       <DeleteAccount />
     </section>
+  )
+}
+
+// 改密碼: the current password too (someone at an unlocked computer can't change it). Other devices are signed out; this
+// one stays signed in. Only a wrong current password is singled out; anything else shows the server's message.
+function ChangePassword() {
+  const { changePassword } = useAuth()
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    setIsSaving(true)
+    setError(null)
+    changePassword(currentPassword, newPassword)
+      .then(() => {
+        toast.success('密碼已更新，其他裝置要重新登入')
+        setCurrentPassword('')
+        setNewPassword('')
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 403) setError('目前的密碼不正確')
+        else setError(err instanceof ApiError ? err.message : '無法更新密碼，請稍後再試')
+      })
+      .finally(() => setIsSaving(false))
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      aria-labelledby="change-password-heading"
+      className="flex max-w-sm flex-col gap-3 rounded-md border p-4"
+    >
+      <h3 id="change-password-heading" className="text-sm font-medium">改密碼</h3>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="current-password">目前的密碼</Label>
+        <Input
+          id="current-password"
+          type="password"
+          autoComplete="current-password"
+          value={currentPassword}
+          onChange={(event) => setCurrentPassword(event.target.value)}
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="new-password">新密碼</Label>
+        <Input
+          id="new-password"
+          type="password"
+          autoComplete="new-password"
+          minLength={12}
+          aria-describedby="new-password-hint"
+          value={newPassword}
+          onChange={(event) => setNewPassword(event.target.value)}
+        />
+        <p id="new-password-hint" className="text-xs text-muted-foreground">
+          至少 12 個字元，最多 128 個。改好之後，其他裝置要重新登入。
+        </p>
+      </div>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <div>
+        <Button type="submit" variant="outline" disabled={!currentPassword || !newPassword || isSaving}>
+          {isSaving ? '更新中…' : '更新密碼'}
+        </Button>
+      </div>
+    </form>
   )
 }
 

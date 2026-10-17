@@ -20,7 +20,8 @@ vi.mock('@/lib/navigation', () => ({ leaveTo: vi.fn() }))
 
 const logoutEverywhere = vi.fn()
 const deleteAccount = vi.fn()
-vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ logoutEverywhere, deleteAccount }) }))
+const changePassword = vi.fn()
+vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ logoutEverywhere, deleteAccount, changePassword }) }))
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -554,5 +555,51 @@ describe('SettingsPage deleting the account (刪除帳號)', () => {
     await clicker.click(within(dialog).getByRole('button', { name: '永久刪除帳號' }))
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('嘗試太多次，請 15 分鐘後再試')
+  })
+})
+
+describe('SettingsPage changing the password (改密碼)', () => {
+  async function form() {
+    const clicker = userEvent.setup()
+    await renderSettings()
+    return { clicker, form: screen.getByRole('form', { name: '改密碼' }) }
+  }
+
+  it('changes it with the current password, says other devices are signed out, and clears the fields', async () => {
+    changePassword.mockResolvedValue(undefined)
+    const { clicker, form: section } = await form()
+    expect(within(section).getByRole('button', { name: '更新密碼' })).toBeDisabled()
+
+    await clicker.type(within(section).getByLabelText('目前的密碼'), 'the old password')
+    await clicker.type(within(section).getByLabelText('新密碼'), 'a much longer new one')
+    await clicker.click(within(section).getByRole('button', { name: '更新密碼' }))
+
+    expect(changePassword).toHaveBeenCalledWith('the old password', 'a much longer new one')
+    expect(await screen.findByText('密碼已更新，其他裝置要重新登入')).toBeInTheDocument()
+    expect(within(section).getByLabelText('目前的密碼')).toHaveValue('')
+    expect(within(section).getByLabelText('新密碼')).toHaveValue('')
+  })
+
+  it('says when the current password is wrong, keeping what was typed', async () => {
+    changePassword.mockRejectedValue(new ApiError(403, { error: 'PERMISSION_DENIED', message: 'wrong password' }))
+    const { clicker, form: section } = await form()
+
+    await clicker.type(within(section).getByLabelText('目前的密碼'), 'not it')
+    await clicker.type(within(section).getByLabelText('新密碼'), 'a much longer new one')
+    await clicker.click(within(section).getByRole('button', { name: '更新密碼' }))
+
+    expect(await within(section).findByRole('alert')).toHaveTextContent('目前的密碼不正確')
+    expect(within(section).getByLabelText('新密碼')).toHaveValue('a much longer new one')
+  })
+
+  it("shows the server's reason otherwise, such as a new password that is too short", async () => {
+    changePassword.mockRejectedValue(new ApiError(400, { error: 'INVALID_ARGUMENT', message: '密碼至少要 12 個字元' }))
+    const { clicker, form: section } = await form()
+
+    await clicker.type(within(section).getByLabelText('目前的密碼'), 'the old password')
+    await clicker.type(within(section).getByLabelText('新密碼'), 'short')
+    await clicker.click(within(section).getByRole('button', { name: '更新密碼' }))
+
+    expect(await within(section).findByRole('alert')).toHaveTextContent('密碼至少要 12 個字元')
   })
 })

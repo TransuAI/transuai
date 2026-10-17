@@ -14,6 +14,8 @@ interface AuthContextValue {
   logoutEverywhere: () => Promise<void>
   /** Deletes the account (confirmed with the password), then signs out here. */
   deleteAccount: (password: string) => Promise<void>
+  /** Changes the password (confirmed with the current one); other devices are signed out, this one stays signed in. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -76,8 +78,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    const res = await authApi.changePassword({ currentPassword, newPassword })
+    setAccessToken(res.accessToken)
+    setUser(res.user)
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout, logoutEverywhere, deleteAccount }}>
+    <AuthContext.Provider
+      value={{ user, isLoading, login, register, logout, logoutEverywhere, deleteAccount, changePassword }}
+    >
       {children}
     </AuthContext.Provider>
   )
