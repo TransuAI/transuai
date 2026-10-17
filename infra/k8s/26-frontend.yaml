@@ -1,0 +1,56 @@
+# 前端（nginx：靜態檔＋同一個網站轉 /api 到 gateway、/ws 到 notification-service，見 frontend/nginx/default.conf.template）。
+# 本機：kubectl -n transuai port-forward svc/frontend 8088:8080，打開 http://localhost:8088。開發時照舊用 Vite（5173）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: transuai
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: transuai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: frontend
+          image: transuai/frontend:dev
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: GATEWAY_URL
+              value: "http://gateway:8080"
+            - name: NOTIFICATION_URL
+              value: "http://notification-service:8085"
+            # 瀏覽器連物件儲存的網址（跟 app-config 的 STORAGE_PUBLIC_ENDPOINT 一樣），進頁面的 CSP。
+            - name: STORAGE_ORIGIN
+              value: "http://localhost:19000"
+            # 前面那層反向代理；本機經 port-forward 進來，沒有代理。
+            - name: TRUSTED_PROXY_CIDR
+              value: "127.0.0.1/32"
+          securityContext:
+            allowPrivilegeEscalation: false
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 5

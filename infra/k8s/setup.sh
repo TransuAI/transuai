@@ -1,5 +1,5 @@
 #!/bin/bash
-# 一次把六個服務 + 基礎設施（Postgres/Redis/RabbitMQ/MinIO）跑在本機 Docker Desktop
+# 一次把六個服務、前端 + 基礎設施（Postgres/Redis/RabbitMQ/MinIO）跑在本機 Docker Desktop
 # 內建的 Kubernetes（kind，三節點：desktop-control-plane/desktop-worker/desktop-worker2）上。
 #
 # 用法：
@@ -26,7 +26,7 @@ if [ "$CURRENT_CONTEXT" != "docker-desktop" ]; then
 fi
 kubectl get nodes
 
-echo "== 2/6 build 六個服務的 image =="
+echo "== 2/6 build 六個服務與前端的 image =="
 # Java 服務：build context 要是 repo 們的共同上層目錄（transuai/），因為
 # build.gradle 用 srcDir '../infra/proto' 讀共用 proto 定義。
 docker build -f "$ROOT_DIR/auth-service/Dockerfile" -t transuai/auth-service:dev "$ROOT_DIR"
@@ -38,11 +38,14 @@ docker build -t transuai/transcription-service:dev "$ROOT_DIR/transcription-serv
 docker build -t transuai/ai-service:dev "$ROOT_DIR/ai-service"
 docker build -t transuai/notification-service:dev "$ROOT_DIR/notification-service"
 
+# 前端：nginx 的部署包（靜態檔＋同一個網站轉 /api、/ws）。
+docker build -t transuai/frontend:dev "$ROOT_DIR/frontend"
+
 echo "== 3/6 把 image 載進 kind 叢集的每個節點 =="
 # kind 每個節點各自有獨立 containerd image store，跟 host 的 docker image store 是分開的，
 # 即使背後同一顆 Docker Engine 也不會自動同步，一定要用 kind load 明確載入，
 # 不然 pod 會 ErrImageNeverPull（manifests 全部設 imagePullPolicy: Never，沒架 registry）。
-for img in auth-service gateway upload-service transcription-service ai-service notification-service; do
+for img in auth-service gateway upload-service transcription-service ai-service notification-service frontend; do
     echo "loading transuai/$img:dev into kind cluster '$KIND_CLUSTER' ..."
     kind load docker-image "transuai/$img:dev" --name "$KIND_CLUSTER"
 done
@@ -56,7 +59,7 @@ kubectl -n "$NAMESPACE" rollout status statefulset/postgres --timeout=300s
 kubectl -n "$NAMESPACE" rollout status statefulset/rabbitmq --timeout=300s
 kubectl -n "$NAMESPACE" rollout status statefulset/minio --timeout=300s
 kubectl -n "$NAMESPACE" wait --for=condition=complete job/minio-init --timeout=120s
-for d in auth-service upload-service transcription-service ai-service notification-service gateway; do
+for d in auth-service upload-service transcription-service ai-service notification-service gateway frontend; do
     kubectl -n "$NAMESPACE" rollout status deployment/"$d" --timeout=300s
 done
 

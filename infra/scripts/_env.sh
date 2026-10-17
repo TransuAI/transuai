@@ -10,7 +10,8 @@ KIND_CLUSTER=desktop
 # Python 服務 proto_gen 已 commit 進版控，context 是各自 repo 目錄就夠。
 java_services="auth-service gateway upload-service"
 python_services="transcription-service ai-service notification-service"
-all_services="auth-service gateway upload-service transcription-service ai-service notification-service"
+# frontend 的 context 也是它自己的 repo 目錄（nginx 的部署包）。
+all_services="auth-service gateway upload-service transcription-service ai-service notification-service frontend"
 
 docker_build() {
     service="$1"

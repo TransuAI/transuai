@@ -22,33 +22,32 @@ TransuAI 由客戶部署在自己的環境（2026-10-17 決定）。這份清單
 前端、API、WebSocket 放在**同一個網站**（同一個網域）：refresh token 的 cookie 是 `__Host-refresh_token`（`SameSite=Strict`、`Path=/`、`Secure`），跨網站或
 沒有 HTTPS 時瀏覽器不會送，使用者會一直被登出。
 
-- [ ] 反向代理終結 TLS（只開 TLS 1.2 以上、強的 cipher suite；HTTP 只轉址到 HTTPS）。ASVS 9.1.1–9.1.3
-- [ ] 路由：`/` → 前端的靜態檔案；`/api/*` → gateway（去掉 `/api` 前綴，跟 `vite.config.ts` 的 proxy 一樣）；`/ws/*` → notification-service（WebSocket upgrade）。
-- [ ] 前端 build 時設 `VITE_WS_BASE_URL=wss://<網域>`（預設是開發用的 `ws://localhost:8085`）；`VITE_API_BASE_URL` 維持 `/api`。
-- [ ] gateway 設 `FRONTEND_URL=https://<網域>`、`OAUTH_CALLBACK_BASE_URL=https://<網域>/api`，並把這個 callback 加進 Google／Notion 的 OAuth 設定。
-- [ ] gateway 與 notification-service 設 `FORWARD_HEADERS_STRATEGY=native`（gateway）、`TRUSTED_PROXIES=<反向代理的位址>`（兩個都要）：
-      限流看真正的來源 IP。**不要**信任所有位址——使用者自己填的 `X-Forwarded-For` 會讓每 IP 的限流失效。
-- [ ] gateway 與 notification-service 只能經反向代理連到（不能繞過代理直接打）。
-- [ ] 反向代理加 `Strict-Transport-Security: max-age=31536000; includeSubDomains`（ASVS 14.4.5）。
+TransuAI 附了前端的 image（`transuai/frontend`，`frontend/Dockerfile`，k8s 是 `infra/k8s/26-frontend.yaml`）：nginx 提供頁面，同一個網站把 `/api/*`
+（去掉 `/api`）轉給 gateway、`/ws/*` 轉給 notification-service，頁面的安全標頭、CSP、只提供允許的檔案都已經設好（第 3 節）。單位只要在它前面放
+一層終結 TLS 的反向代理。
 
-## 3. 前端靜態伺服器的標頭
+- [ ] 前面那層反向代理終結 TLS（TLS 1.2 以上、強的 cipher；HTTP 只轉址到 HTTPS）：範本是 `frontend/nginx/tls.conf.example`（Mozilla intermediate）。
+      ASVS 9.1.1–9.1.3。HSTS 前端與 gateway 都已經帶（14.4.5）。
+- [ ] 前端的環境變數：`GATEWAY_URL`、`NOTIFICATION_URL`（k8s 的 Service，預設就是）、`STORAGE_ORIGIN`（瀏覽器連物件儲存的網址，跟
+      `STORAGE_PUBLIC_ENDPOINT` 一樣，進 CSP）、`TRUSTED_PROXY_CIDR`（前面那層代理的位址，只信它帶的 `X-Forwarded-For`）。
+- [ ] gateway 設 `FRONTEND_URL=https://<網域>`、`OAUTH_CALLBACK_BASE_URL=https://<網域>/api`，並把這個 callback 加進 Google／Notion 的 OAuth 設定；
+      auth-service 的 `FRONTEND_URL` 一樣（重設密碼信裡的連結）。
+- [ ] 來源 IP：前端的 nginx 把真正的來源放在 `X-Forwarded-For` 轉給後面。gateway 設 `FORWARD_HEADERS_STRATEGY=native`、`TRUSTED_PROXIES=<前端 pod
+      的網段，正規表示式>`；notification-service 設 `TRUSTED_PROXIES=<同一個網段，CIDR>`（`infra/k8s/25-gateway.yaml`、`24-notification-service.yaml`
+      有 kind 的寫法）。**不要**信任所有位址——使用者自己填的 `X-Forwarded-For` 會讓每 IP 的限流失效。
+- [ ] gateway 與 notification-service 只能經前端的 nginx 連到（不能繞過代理直接打）。
+- [ ] 部署好之後從使用者的網路跑一次 `infra/scripts/verify-deployment.sh https://<網域> <內部的 host:port …>`：TLS 版本與 cipher、HTTP 轉址、
+      HSTS、安全標頭與 CSP、`Server` 不露版本、不提供 `.git`／`.env`／原始碼、API 文件不對外、內部的埠連不到。要全部 PASS。
 
-gateway 的 API 回應已經自己帶安全標頭；前端頁面（`index.html` 與 JS／CSS）由提供靜態檔案的伺服器加。建議（nginx 寫法，`<storage>` 換成
-物件儲存的網址，見第 5 節）：
+## 3. 前端頁面的標頭（前端的 image 已經設好）
 
-```nginx
-add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' wss://<網域>; media-src 'self' blob: https://<storage>; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
-add_header X-Content-Type-Options "nosniff" always;
-add_header X-Frame-Options "DENY" always;
-add_header Referrer-Policy "no-referrer" always;
-autoindex off;
-```
+`frontend/nginx/default.conf.template` 與 `page-headers.conf`：頁面與檔案都帶 CSP（`script-src 'self'`，連線只到自己的網站與物件儲存，
+`frame-ancestors 'none'`）、`nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Permissions-Policy`、`Cross-Origin-Opener-Policy`、HSTS；
+`server_tokens off`；只提供 `/assets/` 底下的 `.js .css .woff2 .svg .png` 與 `favicon.svg`，其他路徑一律給 `index.html`（image 裡沒有原始碼或
+`.git`）；`index.html` 不快取、帶雜湊的檔案長期快取；請求本文最多 1MB（上傳是瀏覽器直接 PUT 到物件儲存）。ASVS 4.3.2、12.5.1、14.3.3、14.4。
 
-- [ ] 加上面的標頭（ASVS 14.4.3、14.4.4、14.4.6、14.4.7）。`style-src 'unsafe-inline'` 是因為 UI 元件用 inline style；上線前用瀏覽器的
-      console 確認沒有被 CSP 擋掉的資源（播放器、WebSocket、字型）。
-- [ ] 關掉目錄列表（`autoindex off`），只提供 build 出來的副檔名（`.html .js .css .woff2 .svg .ico .png`）；網站目錄只放 `npm run build` 的
-      `dist/`，不要有 `.git` 或原始碼（ASVS 4.3.2、12.5.1）。
-- [ ] `index.html` 設 `Cache-Control: no-cache`，帶雜湊的 JS／CSS 可以長期快取。
+- [ ] 不用附的 image、自己提供前端檔案的話，照上面兩個檔案設定一樣的標頭與規則。
+- [ ] 上線前用瀏覽器打開一次，看 console 有沒有被 CSP 擋掉的東西（播放器、WebSocket、字型、上傳）。
 
 ## 4. 網路隔離
 

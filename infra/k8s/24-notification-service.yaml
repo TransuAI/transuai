@@ -36,6 +36,10 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8085
+          # 經前端的 nginx 進來的 WebSocket：只信 pod 網段（kind 的 10.244.0.0/16）帶的 X-Forwarded-For（這裡是 CIDR）。
+          env:
+            - name: TRUSTED_PROXIES
+              value: "10.244.0.0/16"
           envFrom:
             - configMapRef:
                 name: app-config

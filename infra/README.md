@@ -197,7 +197,8 @@ kubectl -n transuai rollout restart deployment/auth-service
 
 | 腳本 | 用途 |
 |---|---|
-| `forward.sh` | 一次開好前端開發要用的 port-forward：gateway `8080`、notification-service `8085`、minio `19000`。前景執行，`Ctrl-C` 全部關閉；對應 pod 重啟過的話連線會斷，重跑即可 |
+| `forward.sh` | 一次開好前端開發要用的 port-forward（前端的 nginx 也部署在叢集裡，要看部署包的樣子時另外 `kubectl -n transuai port-forward svc/frontend 8088:8080`）：gateway `8080`、notification-service `8085`、minio `19000`。前景執行，`Ctrl-C` 全部關閉；對應 pod 重啟過的話連線會斷，重跑即可 |
+| `verify-deployment.sh <https://網址> [內部 host:port …]` | 在客戶環境驗收部署（TLS、標頭、CSP、不該提供的檔案、API 文件、內部的埠），每項 PASS／FAIL，見 `docs/deployment-checklist.md` 第 2 節 |
 | `rebuild.sh <service>...` / `--all` | 改了程式碼後用：build image -> `kind load` -> `rollout restart` |
 | `restart.sh <service>...` / `--all` | 改了 `k8s/01-configmap.yaml`（或用 `kubectl patch` 改了 secret）後用：重新 apply configmap 並重啟，讓 pod 重新讀環境變數。**不會**重新 apply `02-secret.yaml`（只在 secret 還不存在時建立）——裡面真的金鑰是空的，重新 apply 會把 patch 進去的蓋掉 |
 | `status.sh` | 快速看目前 context / nodes / pods / 正在跑的 port-forward |

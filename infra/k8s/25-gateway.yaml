@@ -45,6 +45,13 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8080
+          # 經前端的 nginx（26-frontend.yaml）進來的請求，來源 IP 在 X-Forwarded-For：只信 pod 網段（kind 的 10.244.0.0/16）的代理。
+          # Tomcat 的 internal-proxies 是正規表示式。經 port-forward 直接打進來的是 127.0.0.1，不受影響。
+          env:
+            - name: FORWARD_HEADERS_STRATEGY
+              value: "native"
+            - name: TRUSTED_PROXIES
+              value: "10\\.244\\.\\d{1,3}\\.\\d{1,3}"
           envFrom:
             - configMapRef:
                 name: app-config

@@ -65,7 +65,7 @@ Notification Service 消費訊息
 | **Transcription Service** | 抽音軌（moviepy/ffmpeg）、呼叫 Deepgram 轉錄與講者分離、逐字稿產出與儲存 | Python + gRPC Server + Redis（逐字稿快取） | 對內（MQ 驅動，查詢走 gRPC） |
 | **AI Service** | 摘要生成、章節分段、embedding + RAG 問答（見上方實作現況） | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
 | **Notification Service** | Job 狀態即時推播 | Python + FastAPI（WebSocket）+ pika | 對內（WebSocket 對外） |
-| **Frontend** | 使用者介面、播放器、時間戳跳轉 | React | 對外 |
+| **Frontend** | 使用者介面、播放器、時間戳跳轉；部署時是 nginx 的 image，同一個網站轉 `/api` 到 Gateway、`/ws` 到 Notification Service，帶頁面的 CSP 與安全標頭（`frontend/Dockerfile`） | React + nginx | 對外 |
 
 > **技術棧更正**：API Gateway 不是用 Spring Cloud Gateway 的宣告式路由，是一般 Spring Boot Web MVC
 > 應用，手刻 REST Controller，內部用 gRPC client 呼叫下游服務——本質上是個 REST↔gRPC 轉譯層。
