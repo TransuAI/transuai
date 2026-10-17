@@ -257,18 +257,30 @@ def stream_answer(
     if history:
         yield _understand("done")
     yield _retrieve("running")
-    query_vector = embed_query(condensed_question)
-    chunks = find_similar(session, job_id, query_vector, limit=_TOP_K)
-    if not chunks:  # the embeddings went away in between (e.g. being rebuilt after an edit)
-        raise NoEmbeddingsError(f"no embeddings found for job {job_id}")
-    yield _retrieve("done", f"找到 {len(chunks)} 段")
+    overview = _overview(session, job_id)
+    try:
+        query_vector = embed_query(condensed_question)
+    except Exception:
+        # 找段落要先把問題轉成向量（外部服務，可能額度用完或連不上）。有摘要或章節時照樣回答——概括性的問題本來就靠它們，
+        # 細節只是少了原話；什麼都沒有時才讓這一題失敗。
+        if not overview:
+            raise
+        logger.warning("job %s: could not embed the question, answering from the summary and chapters", job_id,
+                       exc_info=True)
+        chunks = []
+        yield _retrieve("failed", "這次找不到相關的原話，只根據摘要與章節回答")
+    else:
+        chunks = find_similar(session, job_id, query_vector, limit=_TOP_K)
+        if not chunks:  # the embeddings went away in between (e.g. being rebuilt after an edit)
+            raise NoEmbeddingsError(f"no embeddings found for job {job_id}")
+        yield _retrieve("done", f"找到 {len(chunks)} 段")
 
-    speaker_by_time = _current_speaker_names_by_time(job_id)
+    speaker_by_time = _current_speaker_names_by_time(job_id) if chunks else {}
     context = "\n\n".join(
         f"[{clock(float(chunk.start_time))}] "
         + with_speaker_name(chunk.chunk_text, speaker_by_time.get(time_key(chunk.start_time, chunk.end_time)))
         for chunk in chunks
-    )
+    ) or "（這次沒有找到相關的原話，只能根據上面的摘要與章節回答；問到細節時說明目前查不到原話。）"
     source_timestamps = [float(chunk.start_time) for chunk in chunks]
     yield ("sources", source_timestamps)
 
@@ -298,7 +310,7 @@ def stream_answer(
         "role": "system",
         "content": _ANSWER_SYSTEM_PROMPT_TEMPLATE.format(
             speaker_instruction=speaker_instruction, web_instruction=_WEB_INSTRUCTION if pages else "",
-            overview=_overview(session, job_id), context=context, web_results=_web_results(pages)),
+            overview=overview, context=context, web_results=_web_results(pages)),
     }]
     for turn in history:
         messages.append({"role": "user", "content": turn.question})

@@ -162,3 +162,38 @@ def test_an_answer_that_drifts_into_simplified_chinese_reaches_the_user_in_tradi
         events = list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "做了哪些決定？", user_id=None))
 
     assert "".join(str(payload) for kind, payload in events if kind == "delta") == "這場會議確定了三項核心決策。"
+
+
+def _answer_without_embeddings(fake_llm, summary, chapters=()):
+    """Runs stream_answer() with the embedding service failing (e.g. out of credits); returns the events."""
+    fake_llm.stream(["這場在談預算。"])
+    with (
+        patch.object(qa, "find_by_job_id", return_value=[]),
+        patch.object(qa, "has_embeddings", return_value=True),
+        patch.object(qa, "find_summary", return_value=SimpleNamespace(summary_text=summary) if summary else None),
+        patch.object(qa, "find_chapters", return_value=[
+            SimpleNamespace(title=title, start_time=Decimal(start)) for title, start in chapters]),
+        patch.object(qa, "embed_query", side_effect=RuntimeError("402 Payment Required")),
+        patch.object(qa, "find_similar") as find_similar,
+        patch.object(qa, "transcript_client"),
+    ):
+        events = list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "這場在講什麼？", user_id=None))
+    find_similar.assert_not_called()
+    return events
+
+
+def test_when_passages_cannot_be_looked_up_it_still_answers_from_the_summary_and_chapters(fake_llm):
+    events = _answer_without_embeddings(fake_llm, summary="這場會議在討論明年的預算。", chapters=[("開場", "0.00")])
+
+    steps = [payload for kind, payload in events if kind == "step" and payload.id == "retrieve"]
+    assert steps[-1].state == "failed" and "只根據摘要與章節" in steps[-1].detail
+    assert ("sources", []) in events
+    assert "".join(str(payload) for kind, payload in events if kind == "delta") == "這場在談預算。"
+    prompt = fake_llm.bodies()[-1]["messages"][0]["content"]
+    assert "這場會議在討論明年的預算。" in prompt and "[00:00] 開場" in prompt
+    assert "沒有找到相關的原話" in prompt
+
+
+def test_when_passages_cannot_be_looked_up_and_there_is_no_summary_the_question_fails(fake_llm):
+    with pytest.raises(RuntimeError, match="402"):
+        _answer_without_embeddings(fake_llm, summary=None)
