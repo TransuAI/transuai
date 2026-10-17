@@ -50,10 +50,11 @@ def suggest_details(summary: str, chapters: list[tuple[str, float]], *, model: C
     try:
         data = parse_json_reply(reply.text)
     except ValueError:
-        logger.warning("the title answer is not JSON: %r", reply.text[:200])
+        # 只記長度：回覆是依摘要寫的，可能含錄音內容（ASVS 7.1.2）。
+        logger.warning("the title answer is not JSON (%d characters)", len(reply.text))
         return None
     if not isinstance(data, dict) or not isinstance(data.get("title"), str):
-        logger.warning("the title answer has no title: %r", reply.text[:200])
+        logger.warning("the title answer has no title (%s)", type(data).__name__)
         return None
     title = to_traditional(data["title"]).strip().strip("「」『』\"'“”").strip()[:_MAX_TITLE_CHARS].strip()
     if not title:

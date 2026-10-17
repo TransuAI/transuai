@@ -2,7 +2,6 @@
 可靠來源——說明要標出引用的編號。程式再把關：引用的編號要是給它看的網頁；說有依據或有出入卻沒有引用任何一個，就當成查不到可靠來源。
 搜尋沒有結果時不用問模型（呼叫端處理）。"""
 
-import json
 import re
 from dataclasses import dataclass
 
@@ -56,7 +55,9 @@ def judge_claim(claim: str, pages: list[WebPage], *, model: ChatModel, meter: Us
     except ValueError as exc:
         raise JudgeFormatError("not JSON") from exc
     if not isinstance(data, dict) or data.get("verdict") not in _VERDICTS or not isinstance(data.get("explanation"), str):
-        raise JudgeFormatError(f"not a judgement: {json.dumps(data, ensure_ascii=False)[:200]}")
+        # 只說缺了什麼，不帶模型寫的內容：這個例外會進 log（ASVS 7.1.2）。
+        keys = sorted(data) if isinstance(data, dict) else type(data).__name__
+        raise JudgeFormatError(f"not a judgement: {keys}")
     cited = [n for n in data.get("sources") or [] if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= len(pages)]
     cited = list(dict.fromkeys(cited))
     verdict = Verdict(data["verdict"])

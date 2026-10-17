@@ -53,7 +53,8 @@ def suggest_speaker_names(transcript: transcription_pb2.Transcript, *, model: Ch
     try:
         data = parse_json_reply(reply.text)
     except ValueError:
-        logger.warning("the speaker names answer is not JSON: %r", reply.text[:200])
+        # 只記長度：回覆裡是錄音裡講到的名字（ASVS 7.1.2）。
+        logger.warning("the speaker names answer is not JSON (%d characters)", len(reply.text))
         return None
     if not isinstance(data, list):
         return None
