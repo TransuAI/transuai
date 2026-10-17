@@ -39,7 +39,9 @@ public class UserIdServerInterceptor implements ServerInterceptor {
             "transuai.auth.v1.AuthService/Register",
             "transuai.auth.v1.AuthService/Login",
             "transuai.auth.v1.AuthService/Refresh",
-            "transuai.auth.v1.AuthService/Logout");
+            "transuai.auth.v1.AuthService/Logout",
+            "transuai.auth.v1.AuthService/RequestPasswordReset",
+            "transuai.auth.v1.AuthService/ResetPassword");
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> call, Metadata headers,

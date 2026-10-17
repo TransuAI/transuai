@@ -1,5 +1,6 @@
 package com.transuai.auth_service.grpc;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -20,11 +21,18 @@ import com.transuai.auth.grpc.v1.LogoutRequest;
 import com.transuai.auth.grpc.v1.LogoutResponse;
 import com.transuai.auth.grpc.v1.RefreshRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
+import com.transuai.auth.grpc.v1.RequestPasswordResetRequest;
+import com.transuai.auth.grpc.v1.RequestPasswordResetResponse;
+import com.transuai.auth.grpc.v1.ResetPasswordRequest;
+import com.transuai.auth.grpc.v1.ResetPasswordResponse;
 import com.transuai.auth.grpc.v1.User;
 import com.transuai.auth_service.grpc.auth.GrpcAuthContext;
 import com.transuai.auth_service.repository.UserRepository;
+import com.transuai.auth_service.mail.AccountMail;
+import com.transuai.auth_service.security.AuthLinks;
 import com.transuai.auth_service.security.CommonPasswords;
 import com.transuai.auth_service.security.JwtService;
+import com.transuai.auth_service.security.PasswordResets;
 import com.transuai.auth_service.security.RefreshTokens;
 import com.transuai.auth_service.service.AccountDeletion;
 
@@ -46,6 +54,9 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     private final RefreshTokens refreshTokens;
     private final AccountDeletion accountDeletion;
     private final CommonPasswords commonPasswords;
+    private final PasswordResets passwordResets;
+    private final AccountMail accountMail;
+    private final AuthLinks links;
     // 帳號不存在時也拿密碼比對這個雜湊，回應時間才跟「密碼錯」一樣長，不能用來猜哪些 email 註冊過。第一次用到才產生
     // （跟真的密碼用同一個 encoder、同樣的成本）。
     private volatile String unknownUserHash;
@@ -177,8 +188,54 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
         List<UUID> ended = refreshTokens.logoutAll(userId);
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user = userRepository.save(user);
+        accountMail.passwordChanged(user.getEmail(), Instant.now());
         responseObserver.onNext(ChangePasswordResponse.newBuilder()
                 .setSignedIn(buildAuthResponse(user, refreshTokens.issue(userId)))
+                .addAllEndedSessionIds(ended.stream().map(UUID::toString).toList())
+                .build());
+        responseObserver.onCompleted();
+    }
+
+    // 忘記密碼：有這個帳號就寄重設連結；沒有也一樣回成功（不透露 email 有沒有註冊）。信在背景寄，回應時間不因為有帳號而變長。
+    // 沒有設定寄信時整個功能不能用（UNAVAILABLE，跟 email 無關，所以也不透露什麼）。
+    @Override
+    public void requestPasswordReset(RequestPasswordResetRequest request,
+            StreamObserver<RequestPasswordResetResponse> responseObserver) {
+        if (!accountMail.available()) {
+            responseObserver.onError(Status.UNAVAILABLE
+                    .withDescription("這個系統沒有設定寄信，不能用「忘記密碼」；請洽管理這套系統的人員重設密碼").asRuntimeException());
+            return;
+        }
+        String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
+        userRepository.findByEmail(email).ifPresent(user -> accountMail.passwordResetLink(user.getEmail(),
+                links.passwordReset(passwordResets.issue(user.getId())), passwordResets.ttl().toMinutes()));
+        responseObserver.onNext(RequestPasswordResetResponse.getDefaultInstance());
+        responseObserver.onCompleted();
+    }
+
+    // 重設密碼：新密碼先照規則檢查（不合就不用掉連結），再用掉 token；成功後這位使用者的登入全部作廢（gateway 也擋下 access token）、
+    // 寄通知信。連結無效、過期、用過了是 FAILED_PRECONDITION。
+    @Override
+    public void resetPassword(ResetPasswordRequest request, StreamObserver<ResetPasswordResponse> responseObserver) {
+        String passwordProblem = passwordProblem(request.getNewPassword());
+        if (passwordProblem != null) {
+            responseObserver.onError(Status.INVALID_ARGUMENT.withDescription(passwordProblem).asRuntimeException());
+            return;
+        }
+        com.transuai.auth_service.domain.User user = passwordResets.useUp(request.getToken())
+                .flatMap(userRepository::findById).orElse(null);
+        if (user == null) {
+            responseObserver.onError(Status.FAILED_PRECONDITION
+                    .withDescription("這個重設連結無效或已過期，請重新申請").asRuntimeException());
+            return;
+        }
+
+        List<UUID> ended = refreshTokens.logoutAll(user.getId());
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user = userRepository.save(user);
+        accountMail.passwordWasReset(user.getEmail(), Instant.now());
+        responseObserver.onNext(ResetPasswordResponse.newBuilder()
+                .setUserId(user.getId().toString())
                 .addAllEndedSessionIds(ended.stream().map(UUID::toString).toList())
                 .build());
         responseObserver.onCompleted();

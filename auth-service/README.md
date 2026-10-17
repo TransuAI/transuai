@@ -25,8 +25,22 @@ access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）�
 登出 → POST /auth/logout（帶 refresh_token）→ AuthService.Logout 作廢那一串；登出所有裝置 → POST /auth/logout-all → AuthService.LogoutAllDevices
 刪除帳號 → POST /auth/account/delete（再輸入密碼）→ AuthService.DeleteAccount：刪掉使用者、發 account.deleted
 
-改密碼 → POST /auth/password（目前的密碼＋新密碼）→ AuthService.ChangePassword：作廢這位使用者所有的 refresh token、存新的雜湊、為這次簽一組新的 token
+改密碼 → POST /auth/password（目前的密碼＋新密碼）→ AuthService.ChangePassword：作廢這位使用者所有的 refresh token、存新的雜湊、為這次簽一組新的 token、寄通知信
+
+忘記密碼 → POST /auth/password-reset { email } → AuthService.RequestPasswordReset：有這個帳號就寄重設連結（`{FRONTEND_URL}/reset-password#token=…`），沒有也一樣回成功
+  → 使用者點連結 → POST /auth/password-reset/confirm { token, newPassword } → AuthService.ResetPassword：用掉 token、作廢所有登入、存新的雜湊、寄通知信
 ```
+
+### 寄信（忘記密碼、帳號異動通知）
+
+`mail/AccountMail` 用 SMTP 寄純文字信（ASVS 2.2.3、2.5.5）：重設密碼的連結、密碼改了／重設了的通知（含時間，「如果不是你本人做的，請馬上用忘記密碼重設」）。
+SMTP 由部署的單位提供（`SMTP_*`、`MAIL_FROM`，見「環境變數」）；`SMTP_HOST` 或 `MAIL_FROM` 空的時候，忘記密碼回 `UNAVAILABLE`（「這個系統沒有設定寄信…」，
+跟 email 無關，不透露有沒有這個帳號），通知只記 log 不寄。信在背景的一條 thread 寄，呼叫端不等 SMTP：寄不出去只記 log，忘記密碼的回應時間也
+不會因為「有這個帳號、要寄信」而變長。
+
+重設 token（`security/PasswordResets`，`password_reset_tokens`）：256 bits 隨機、只存 SHA-256、一次性、`PASSWORD_RESET_TTL`（30 分鐘）內有效；申請新的、
+或重設成功時，同一位使用者其他還沒用的都作廢；刪除帳號時一起刪。token 放在連結的 `#` 後面，瀏覽器不會把它送到伺服器、也不會出現在存取紀錄或
+Referer 裡。新密碼先照規則檢查，不合就不用掉連結。
 
 每個簽出去的 refresh token 在 `refresh_tokens` 有一列（只存 SHA-256 雜湊；JWT 的 `jti` 對到這一列）。同一次登入一路換發出來的屬於
 同一串（family）。換發時舊的作廢（輪替）、同一串簽新的；已經換發過的又被用一次，表示有兩個人拿著同一個 token——視為被盜，整串作廢
@@ -105,6 +119,8 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `LogoutAllDevices` | 依 `x-user-id` 作廢這位使用者所有的 refresh token，回傳 access token 可能還沒過期的那幾串（`ended_session_ids`） |
 | `GetMe` | 依 `x-user-id` 查目前使用者資訊，找不到（例如帳號已被刪除）回 `NOT_FOUND` |
 | `DeleteAccount` | 刪除帳號（`x-user-id`）：再確認一次密碼，錯了回 `PERMISSION_DENIED`（不是 `UNAUTHENTICATED`——前端會以為 token 過期去換發）；通過就在同一個交易裡刪掉使用者、他所有的 refresh token，並把 `account.deleted { userId }` 寫進 outbox（見下方「刪除帳號」）。找不到使用者回 `NOT_FOUND`。猜密碼的次數由 gateway 限流 |
+| `RequestPasswordReset` | 忘記密碼（不需要 `x-user-id`）：email 有註冊就寄重設連結，沒有也回成功；沒有設定寄信時 `UNAVAILABLE`（見「寄信」） |
+| `ResetPassword` | 用重設連結的 token 設新密碼（不需要 `x-user-id`）：token 無效、過期、用過了回 `FAILED_PRECONDITION`；新密碼照註冊的規則（`INVALID_ARGUMENT`，不合時 token 不用掉）；成功就作廢所有登入、寄通知信，回傳 `user_id` 與作廢的那幾串（`ended_session_ids`） |
 | `ChangePassword` | 改密碼（`x-user-id`）：目前的密碼錯回 `PERMISSION_DENIED`（理由同 `DeleteAccount`），新密碼照註冊的規則（`INVALID_ARGUMENT`）。通過就先作廢這位使用者所有的 refresh token（改密碼常是懷疑被盜用；中途失敗頂多被登出），再存新的雜湊，回一組新的 token 與作廢的那幾串（`ended_session_ids`：最近一個 access token 效期內簽過 token 的，gateway 讓那些 access token 也馬上不能用） |
 
 ## 刪除帳號
@@ -126,6 +142,12 @@ fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（
 | `JWT_REFRESH_TOKEN_TTL_DAYS` | `7` | refresh token 效期 |
 | `JWT_REFRESH_REUSE_GRACE_SECONDS` | `10` | 已經換發過的 refresh token 在這幾秒內再用一次不算被盜（多個分頁同時換發） |
 | `JWT_SESSION_MAX_DAYS` | `30` | 一次登入最多維持幾天（一路換發也不超過），之後要重新登入 |
+| `SMTP_HOST` / `SMTP_PORT` | 空 / `587` | 寄信的 SMTP 主機；空的時候忘記密碼不能用、通知不寄 |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | 空 | SMTP 帳密（`SMTP_AUTH=true` 時用） |
+| `SMTP_AUTH` / `SMTP_STARTTLS` | `true` / `true` | 要不要登入 SMTP、要不要（而且一定要）STARTTLS；本機的測試用 SMTP 才設 `false` |
+| `MAIL_FROM` | 空 | 寄件人；空的時候同樣不寄 |
+| `FRONTEND_URL` | `http://localhost:5173` | 信裡連結指向的前端（跟 gateway 同一個值） |
+| `PASSWORD_RESET_TTL` | `30m` | 重設連結多久內有效 |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ（刪除帳號時發 `account.deleted`） |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `admin` / `0000` | RabbitMQ 帳密 |
 
@@ -133,11 +155,12 @@ fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（
 
 ```
 src/main/java/com/transuai/auth_service/
-  domain/           User entity、RefreshToken、OutboxEventEntity（outbox）
+  domain/           User entity、RefreshToken、PasswordResetToken、OutboxEventEntity（outbox）
   repository/        Spring Data JPA repository
-  security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）、CommonPasswords（太常見的密碼：SecLists 10k-most-common，打包在 `resources/common-passwords.txt`，MIT 授權見同目錄的 `.LICENSE`；不連外。也擋清單裡的密碼前後加數字或符號、同一段重複）
+  security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）、PasswordResets（忘記密碼的重設 token）、AuthLinks（信裡的連結）、CommonPasswords（太常見的密碼：SecLists 10k-most-common，打包在 `resources/common-passwords.txt`，MIT 授權見同目錄的 `.LICENSE`；不連外。也擋清單裡的密碼前後加數字或符號、同一段重複）
   config/             SecurityConfig（PasswordEncoder bean：PBKDF2，認得舊的 bcrypt）、RabbitConfig（account.deleted fanout exchange）
-  service/            AccountDeletion（刪使用者與 refresh token，account.deleted 寫進 outbox）
+  service/            AccountDeletion（刪使用者、refresh token、重設 token，account.deleted 寫進 outbox）
+  mail/               AccountMail（重設連結與帳號異動通知的信，SMTP，背景寄）
   event/              OutboxPublisher（把 outbox 送到 RabbitMQ，publisher confirm）
   grpc/               AuthGrpcService（rpc 實作）、UserMapper（domain ↔ proto）
   grpc/auth/          UserIdServerInterceptor（依 method 豁免，見上方「身分模型」）、GrpcAuthContext
@@ -179,5 +202,5 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
 - 過期、作廢的 `refresh_tokens` 不會自動清掉（每次登入、換發多一列），量大了要加定期清理
-- 沒有密碼重設（忘記密碼）、email 驗證；常見密碼只比對打包的 10,000 個（客戶內部部署可能不能連外，不查 Have I Been Pwned）
-- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出、30 天上限，密碼規則與改密碼（`RefreshTokenTest`、`RefreshTokenGraceTest`、`PasswordPolicyTest`、`ChangePasswordTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）
+- 沒有 email 驗證（註冊時不確認 email 是本人的，忘記密碼的信就寄到註冊時填的地址）；忘記密碼只有 email 連結，沒有 TOTP 等其他復原方式；常見密碼只比對打包的 10,000 個（客戶內部部署可能不能連外，不查 Have I Been Pwned）
+- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出、30 天上限，密碼規則、改密碼、忘記密碼與通知信（`RefreshTokenTest`、`RefreshTokenGraceTest`、`PasswordPolicyTest`、`ChangePasswordTest`、`PasswordResetTest`（SMTP 用 mock）、`PasswordResetWithoutMailTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）
