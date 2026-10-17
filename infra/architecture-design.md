@@ -116,7 +116,7 @@ POST   /auth/refresh           用 cookie 裡的 refresh token 換發新的 acce
 POST   /auth/logout            登出：作廢 cookie 裡的 refresh token 所在的那一串、清掉 cookie（不需要 access token）
 POST   /auth/logout-all        登出所有裝置：作廢登入者所有的 refresh token、清掉 cookie
 POST   /auth/account/delete    刪除帳號：body { password }（密碼錯 403、猜太多次 429）；刪掉使用者、發 account.deleted，其他服務清掉他的資料（用量去識別化）；
-                                刪除後還沒過期的 access token 也被擋下（gateway 在 Redis 記 15 分鐘）
+                                刪除後還沒過期的 access token 也被擋下（gateway 在 Redis 記 15 分鐘；登出、登出所有裝置、改密碼也一樣）
 POST   /auth/password          改密碼：body { currentPassword, newPassword }（目前的密碼錯 403、猜太多次 429）；其他裝置的登入全部作廢，這次拿到新的 token 與 cookie
 GET    /auth/me                取得目前使用者資訊（需帶 access token）
 ```
@@ -125,7 +125,7 @@ GET    /auth/me                取得目前使用者資訊（需帶 access token
 gateway 共用同一把。access token 15 分鐘、refresh token 7 天過期（皆可透過
 `app.jwt.access-token-ttl-minutes` / `app.jwt.refresh-token-ttl-days` 覆蓋）。refresh token 記在 auth-service 的
 `refresh_tokens`（只存雜湊）：每次換發輪替、登出作廢，已經換發過的又被用一次視為被盜、整串作廢（見 `auth-service/README.md`）。
-access token 仍是 stateless，登出後有效到過期（最多 15 分鐘）。前端不把 token 存在 localStorage：access token 只放在記憶體，
+access token 仍是 stateless，但帶 `sid`（這次登入）：登出、登出所有裝置、改密碼、刪除帳號之後，gateway 在 Redis 記下哪些不能用，馬上擋下（Redis 連不上時放行）。前端不把 token 存在 localStorage：access token 只放在記憶體，
 refresh token 由 gateway 放在 httpOnly、Secure、`SameSite=Strict`、`Path=/api/auth` 的 cookie，重新整理頁面時用它換新的 access token
 （見 `gateway/README.md`「refresh token 的 cookie」）。所以**前端與 API 要在同一個網站**（同源最單純：前端經反向代理的 `/api` 呼叫 gateway）。Gateway 收到請求後在本地驗證 access token（不會回頭呼叫
 auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user-id` 轉發給下游服務。

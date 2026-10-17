@@ -29,7 +29,7 @@ service AuthService {
   // token 無效或已經作廢也回成功（登出本來就是要它不能用）。
   rpc Logout(LogoutRequest) returns (LogoutResponse);
 
-  // 登出所有裝置：作廢這位使用者所有的 refresh token（需要 x-user-id）。已簽出的 access token 仍有效到過期（最多 15 分鐘）。
+  // 登出所有裝置：作廢這位使用者所有的 refresh token（需要 x-user-id）。已簽出的 access token 由 gateway 擋下（記下「這之前簽的不算」）。
   rpc LogoutAllDevices(LogoutAllDevicesRequest) returns (LogoutResponse);
 
   // 刪除帳號（需要 x-user-id）：再確認一次密碼，錯了回 PERMISSION_DENIED（不是 UNAUTHENTICATED——那表示 token 不能用）。
@@ -80,6 +80,9 @@ message LogoutAllDevicesRequest {
 }
 
 message LogoutResponse {
+  // Logout：作廢的那一串（這次登入）的 id，跟 access token 的 sid 一樣，gateway 用它讓那一串簽出的 access token 也馬上失效；
+  // token 無效或不認得時是空的。LogoutAllDevices 不填。
+  string session_id = 1;
 }
 
 message DeleteAccountRequest {
