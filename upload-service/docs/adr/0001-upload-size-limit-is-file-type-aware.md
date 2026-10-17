@@ -36,7 +36,8 @@ MVP 階段的 30 分鐘時長限制（`frontend/src/pages/upload-page.tsx` 的 `
 語音辨識從 Groq 換成 Deepgram（`transcription-service/docs/adr/0001`）之後，20MB 的 Groq 前提已經不在，實際使用時一般的
 會議錄音（例如高音質的 m4a）就會被擋下。決定把兩個限制一起抓在「大約 1 小時的會議」，不要放寬太多：
 
-- **時長上限**：30 分鐘 → **60 分鐘**（前端 `upload-page.tsx` 的 `MAX_DURATION_SECONDS`，仍然只在前端檢查）。
+- **時長上限**：30 分鐘 → **60 分鐘**（前端 `upload-page.tsx` 的 `MAX_DURATION_SECONDS`）。2026-10-17 起 transcription-service 在呼叫 Deepgram
+  之前也用實際長度檢查（`MAX_RECORDING_MINUTES`，見 `.scratch/pre-launch-hardening/issues/17`），不再只靠前端；upload-service 本身仍然不量長度。
 - **AUDIO 專用上限**：20MB → **120MB**（`app.upload.max-audio-file-size-bytes`）。1 小時 256kbps 的錄音約 115MB，放得下；
   未壓縮的 WAV（1 小時約 635MB）放不下，要先轉檔。
 - **不分類型的上限**：維持 1GB。1 小時的會議錄影（Zoom、螢幕錄影）通常放得下；手機拍的 1080p 影片會超過，要先降解析度
