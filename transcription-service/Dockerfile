@@ -7,10 +7,24 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
+# 講者分離的模型（本地語音辨識用，見 docs/adr/0003）：build 時下載進 image，執行時不用連網（客戶內部的伺服器可能完全不能連外）。
+# pyannote segmentation-3.0 的 ONNX（MIT）與 3D-Speaker 的 CAM++ 中文講者向量（Apache-2.0），都從 sherpa-onnx 的 GitHub release。
+RUN python - <<'PY'
+import tarfile, urllib.request
+from pathlib import Path
+models = Path("/app/models/diarization")
+models.mkdir(parents=True, exist_ok=True)
+base = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
+archive, _ = urllib.request.urlretrieve(f"{base}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2")
+with tarfile.open(archive) as tar:
+    tar.extractall(models, filter="data")
+urllib.request.urlretrieve(f"{base}/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+                           models / "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx")
+PY
+
 COPY app ./app
 
-# moviepy 底層用 imageio-ffmpeg，第一次執行時會下載 ffmpeg binary 到 cache（需要 outbound
-# 網路 + 可寫檔案系統），不是 image build 期間就打包好。
+# moviepy 與本地語音辨識的解碼都用 imageio-ffmpeg：它的 wheel 已經附了 ffmpeg 執行檔，不用另外下載。
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8083
 CMD ["python", "-m", "app.main"]

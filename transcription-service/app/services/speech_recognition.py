@@ -1,9 +1,11 @@
-"""語音辨識 adapter：把音檔交給語音辨識服務，回傳不綁定廠商的逐字資料（偵測到的語言 + 每個字的起訖時間、
-含標點的文字、廠商給的原始講者標籤）。之後的切片段、講者編號都只看這個格式（見 app/services/segmentation.py），
-換廠商只需要換這個模組。
+"""語音辨識 adapter：把音檔交給語音辨識服務，回傳不綁定廠商的逐字資料（偵測到的語言 + 每個字（或一小段話）的起訖時間、
+含標點的文字、原始講者標籤）。之後的切片段、講者編號都只看這個格式（見 app/services/segmentation.py）。
 
-目前用 Deepgram Nova-3，一次呼叫同時完成轉錄和講者分離；為什麼不是 Groq Whisper 見
-docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md。
+跑在哪裡是設定（見 docs/adr/0003）：
+- 本地（STT_BASE_URL）：自架的 vLLM 跑 Breeze-ASR-25，講者分離在這個服務裡用 CPU 跑，見 local_speech.py。有設定就用它。
+- Deepgram Nova-3（DEEPGRAM_API_KEY）：一次呼叫同時完成轉錄和講者分離；為什麼不是 Groq Whisper 見
+  docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md。
+兩個都沒設時 raise RecognitionNotConfigured（不重試，Job 失敗並說明）。
 """
 
 import logging
@@ -35,17 +37,32 @@ class Recognition:
     audio_seconds: float | None = None
 
 
+class RecognitionNotConfigured(Exception):
+    """部署的人還沒設定語音辨識（本地伺服器或 Deepgram）。"""
+
+
 _DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"
-PROVIDER = "deepgram"
+DEEPGRAM = "deepgram"
 # 上傳時選「自動偵測」（見 docs/adr/0002）：請 Deepgram 在這幾種語言之間判斷整個檔案是哪一種。Deepgram 的中文偵測只有 zh，
 # 沒有 zh-TW。
 AUTO = "auto"
 _DETECTABLE_LANGUAGES = ("zh", "en")
 
 
+def _is_local() -> bool:
+    return bool(settings.stt_base_url and settings.stt_model)
+
+
+def provider() -> str:
+    """目前用的語音辨識服務（記轉錄用量用）。"""
+    from app.services import local_speech
+
+    return local_speech.PROVIDER if _is_local() else DEEPGRAM
+
+
 def model_name() -> str:
     """目前用的語音辨識模型（記轉錄用量用）。"""
-    return settings.deepgram_model
+    return settings.stt_model if _is_local() else settings.deepgram_model
 
 # 音檔直接以檔案內容上傳（不傳 URL：本機的 MinIO 從網際網路上連不到）。幾十分鐘的音檔上傳加處理要一點時間，
 # 讀取逾時放寬；連不上則很快放棄，交給訊息層級重試。
@@ -56,6 +73,13 @@ def recognize(audio_path: Path, language: str | None = None) -> Recognition:
     """轉錄並做講者分離。language 是上傳時選的語言（zh-TW、en，或 AUTO 自動偵測）；沒有（升級前的舊訊息）就用設定的預設。
     HTTP 錯誤一律 raise（暫時性與否由 is_transient_recognition_error() 判斷）。"""
     chosen = language or settings.deepgram_language
+    if _is_local():
+        from app.services import local_speech  # local_speech 用到這裡的資料型別
+
+        return local_speech.recognize(audio_path, chosen)
+    if not settings.deepgram_api_key:
+        raise RecognitionNotConfigured(
+            "語音辨識尚未設定：請部署的人設定本地語音辨識（STT_BASE_URL、STT_MODEL）或 Deepgram（DEEPGRAM_API_KEY）")
     logger.info("calling Deepgram (%s, %s) for %s", settings.deepgram_model, chosen, audio_path)
     language_params = ([("detect_language", code) for code in _DETECTABLE_LANGUAGES] if chosen == AUTO
                        else [("language", chosen)])

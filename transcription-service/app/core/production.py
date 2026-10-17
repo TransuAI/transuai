@@ -7,18 +7,23 @@ from app.core.config import Settings
 _DEVELOPMENT_DEFAULTS = frozenset({"", "0000", "00000000", "admin", "dev-only-shared-secret-change-me-before-any-real-deployment"})
 _MIN_LENGTH = 12
 # 設定欄位（環境變數是它的大寫）。
-_REQUIRED = ("db_password", "rabbitmq_password", "storage_secret_key", "redis_password", "deepgram_api_key")
+_REQUIRED = ("db_password", "rabbitmq_password", "storage_secret_key", "redis_password")
 
 
 def secret_problems(settings: Settings) -> list[str]:
     """正式環境下有問題的密鑰（空的就是沒問題；不是正式環境一律沒問題）。"""
     if not settings.is_production:
         return []
+    required = list(_REQUIRED)
+    # 語音辨識要有一個：本地的（不用金鑰）或 Deepgram 的金鑰。
+    if not (settings.stt_base_url and settings.stt_model):
+        required.append("deepgram_api_key")
     problems = []
-    for field in _REQUIRED:
+    for field in required:
         value = getattr(settings, field)
         if value in _DEVELOPMENT_DEFAULTS:
-            problems.append(f"{field.upper()} is not set (or is the development default)")
+            hint = " (or set STT_BASE_URL and STT_MODEL for local speech recognition)" if field == "deepgram_api_key" else ""
+            problems.append(f"{field.upper()} is not set (or is the development default){hint}")
         elif len(value) < _MIN_LENGTH:
             problems.append(f"{field.upper()} must be at least {_MIN_LENGTH} characters")
     return problems

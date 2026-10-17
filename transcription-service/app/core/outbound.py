@@ -1,8 +1,10 @@
 """對外連線的允許清單（ASVS 12.6.1）：transcription-service 只連語音辨識服務。對外的 HTTP client 用這裡的 client() 建，送出前看網域，
-不在清單裡就不送、記 log、raise OutboundBlocked。預設只有 Deepgram；OUTBOUND_ALLOWED_HOSTS（逗號分隔）整份換掉。
+不在清單裡就不送、記 log、raise OutboundBlocked。預設只有 Deepgram；OUTBOUND_ALLOWED_HOSTS（逗號分隔）整份換掉。本地語音辨識伺服器
+（STT_BASE_URL，通常是自架的 vLLM）一律自動加進去。
 物件儲存（boto3）是內部服務，不經過這裡；網路層的對外限制另外寫在部署清單。"""
 
 import logging
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -19,7 +21,10 @@ class OutboundBlocked(httpx.RequestError):
 
 def allowed_hosts() -> frozenset[str]:
     configured = [host.strip().lower() for host in settings.outbound_allowed_hosts.split(",") if host.strip()]
-    return frozenset(configured or DEFAULT_ALLOWED_HOSTS)
+    hosts = set(configured or DEFAULT_ALLOWED_HOSTS)
+    if local := urlsplit(settings.stt_base_url).hostname:
+        hosts.add(local.lower())
+    return frozenset(hosts)
 
 
 def check(request: httpx.Request) -> None:

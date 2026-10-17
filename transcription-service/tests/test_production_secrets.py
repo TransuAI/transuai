@@ -29,6 +29,12 @@ def test_real_secrets_pass_in_production():
     check_secrets(Settings(app_env="production", db_password=REAL, rabbitmq_password=REAL, storage_secret_key=REAL, redis_password=REAL, deepgram_api_key=REAL))
 
 
+def test_local_speech_recognition_needs_no_deepgram_key_in_production():
+    assert secret_problems(Settings(app_env="production", db_password=REAL, rabbitmq_password=REAL, storage_secret_key=REAL,
+                                    redis_password=REAL, deepgram_api_key="", stt_base_url="http://vllm:8000/v1",
+                                    stt_model="MediaTek-Research/Breeze-ASR-25")) == []
+
+
 def test_development_is_not_checked():
     assert secret_problems(Settings(app_env="development", db_password="0000", rabbitmq_password="0000", storage_secret_key="00000000", redis_password="", deepgram_api_key="")) == []
 

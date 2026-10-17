@@ -55,8 +55,22 @@ class Settings(BaseSettings):
     max_recording_minutes: int = 60
     usage_limit_transcription_minutes: int = 600
 
-    # 對外連線的允許清單（逗號分隔的網域，見 app/core/outbound.py）；空的就只有 Deepgram。
+    # 對外連線的允許清單（逗號分隔的網域，見 app/core/outbound.py）；空的就只有 Deepgram。本地語音辨識伺服器的網域自動加入。
     outbound_allowed_hosts: str = ""
+
+    # 語音辨識跑在哪裡（見 docs/adr/0003）。出廠什麼都不設：
+    # - 本地：STT_BASE_URL 指向 OpenAI 相容的 /v1/audio/transcriptions（自架的 vLLM 跑 Breeze-ASR-25），講者分離在這個服務裡用
+    #   CPU 跑（sherpa-onnx，模型打包在 image 裡）。有設定就用它。
+    # - Deepgram（雲端）：沒設本地、有 DEEPGRAM_API_KEY 時用它，轉錄與講者分離一次完成。
+    # 兩個都沒設時轉錄會說「語音辨識尚未設定」。
+    stt_base_url: str = ""
+    stt_api_key: str = ""
+    stt_model: str = ""
+    # 講者分離的模型目錄（pyannote segmentation-3.0 的 ONNX 與 3D-Speaker 的 CAM++，Dockerfile 下載進 image）；沒有模型就不分講者。
+    diarization_models_dir: str = "/app/models/diarization"
+    # 兩段聲音的講者向量相似到什麼程度算同一個人（越大分出越少人）；用 CPU 的執行緒數。
+    diarization_threshold: float = 0.6
+    diarization_threads: int = 4
 
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-3"

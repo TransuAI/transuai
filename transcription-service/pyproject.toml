@@ -10,13 +10,17 @@ dependencies = [
     "grpcio-health-checking>=1.83.0",
     "grpcio-reflection>=1.83.0",
     "httpx>=0.28.1",
+    "imageio-ffmpeg>=0.6",
     "moviepy>=2.2.1",
+    "numpy>=2.3",
     "opencc>=1.4.2",
     "pika>=1.4.4",
     "protobuf>=7.35.1",
     "psycopg2-binary>=2.9.12",
     "pydantic-settings>=2.15.0",
     "redis>=8.1.0",
+    "sherpa-onnx>=1.13.8",
+    "sherpa-onnx-core>=1.13.8",
     "sqlalchemy>=2.0.51",
 ]
 

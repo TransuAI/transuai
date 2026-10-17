@@ -1,6 +1,6 @@
 # transcription-service
 
-音訊/影片逐字稿 + AI 分析平台的 Transcription Service。消費 Upload Service 發出的 `transcription.requested` 事件，抽音軌、呼叫 Deepgram 一次完成轉錄與**講者分離**、切成片段後把逐字稿存進自己的 `transcription_db`（每次轉錄也記一筆轉錄用量），並回寫 Job 狀態、發送 `transcription.completed` 事件給下游的 AI Service；也保存使用者對逐字稿的**編輯**（見 [`CONTEXT.md`](CONTEXT.md)）。是純內部服務（轉錄由 MQ 驅動），只暴露 gRPC 給其他內部服務查詢與編輯——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service) 一致）。
+音訊/影片逐字稿 + AI 分析平台的 Transcription Service。消費 Upload Service 發出的 `transcription.requested` 事件，抽音軌、做轉錄與**講者分離**（地端：自架 vLLM 的 Breeze-ASR-25 加上在 CPU 上跑的講者分離；或雲端的 Deepgram，見 [ADR 0003](docs/adr/0003-local-speech-recognition-and-diarization.md)）、切成片段後把逐字稿存進自己的 `transcription_db`（每次轉錄也記一筆轉錄用量），並回寫 Job 狀態、發送 `transcription.completed` 事件給下游的 AI Service；也保存使用者對逐字稿的**編輯**（見 [`CONTEXT.md`](CONTEXT.md)）。是純內部服務（轉錄由 MQ 驅動），只暴露 gRPC 給其他內部服務查詢與編輯——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service) 一致）。
 
 ## 技術棧
 
@@ -9,7 +9,8 @@
 | 框架          | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework                                                                                |
 | API           | gRPC（`TranscriptionService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費          | RabbitMQ（`pika`），消費 `transcription.requested`，發送 `transcription.completed` / `job.failed`；使用者編輯逐字稿後發送 `transcript.edited`     |
-| 轉錄 + 講者分離 | Deepgram Nova-3（語言依上傳時的選擇：中文 `zh-TW`（預設）、英文 `en` 或自動偵測中英文，見 [ADR 0002](docs/adr/0002-transcription-language-chosen-at-upload.md)；`httpx` 直接打 REST API），每個字的 timestamp 與講者；為什麼不是 Groq Whisper 見 [ADR 0001](docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md) |
+| 轉錄 + 講者分離（地端） | `STT_BASE_URL`／`STT_MODEL` 有設定時：先在這個服務裡用 CPU 分講者（sherpa-onnx：pyannote segmentation-3.0 的 ONNX＋3D-Speaker CAM++，模型打包在 image 的 `/app/models/diarization`，門檻 `DIARIZATION_THRESHOLD` 預設 0.6），每段講者的話（最長 30 秒）再送到自架 vLLM 的 OpenAI 相容 `/v1/audio/transcriptions`（`MediaTek-Research/Breeze-ASR-25`），拿回片段的起訖時間，見 [ADR 0003](docs/adr/0003-local-speech-recognition-and-diarization.md)。約 3 倍速 |
+| 轉錄 + 講者分離（雲端） | 沒設本地、有 `DEEPGRAM_API_KEY` 時：Deepgram Nova-3（語言依上傳時的選擇：中文 `zh-TW`（預設）、英文 `en` 或自動偵測中英文，見 [ADR 0002](docs/adr/0002-transcription-language-chosen-at-upload.md)；`httpx` 直接打 REST API），每個字的 timestamp 與講者；為什麼不是 Groq Whisper 見 [ADR 0001](docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md) |
 | 影片抽音軌    | moviepy（底層用 ffmpeg，經 `imageio-ffmpeg` 首次執行時自動下載 binary，本機不需另外安裝系統 ffmpeg）                                             |
 | 繁體轉換      | OpenCC（`opencc`，`s2tw` 逐字轉台灣標準字形，離線執行、預編譯 wheel），只套用在中文逐字稿                                                         |
 | 資料庫        | PostgreSQL（`transcription_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級                        |
@@ -21,10 +22,10 @@
 
 - 先啟動基礎設施：`cd ../infra && docker compose up -d`（Postgres、RabbitMQ、MinIO、Redis；Redis 沒開時逐字稿快取略過，照樣讀資料庫）
 - Upload Service 要跑在 `localhost:9090`（見 [`../upload-service`](../upload-service)），因為要呼叫它的 `InternalJobService.UpdateJobStatus`
-- 一組 Deepgram API Key（[console.deepgram.com](https://console.deepgram.com)，新帳號送 $200 額度、不用綁卡），填進 `.env` 的 `DEEPGRAM_API_KEY`
+- 語音辨識二選一：本地的（`../infra/scripts/vllm.sh up` 起的 `localhost:8002`，`.env` 填 `STT_BASE_URL`、`STT_MODEL`；本機跑時講者分離的模型要自己下載，見 `Dockerfile`，或設 `DIARIZATION_MODELS_DIR`），或一組 Deepgram API Key（[console.deepgram.com](https://console.deepgram.com)，新帳號送 $200 額度、不用綁卡），填進 `.env` 的 `DEEPGRAM_API_KEY`。都沒設時轉錄會說「語音辨識尚未設定」
 
 ```bash
-cp .env.example .env   # 第一次使用才需要，填入 DEEPGRAM_API_KEY
+cp .env.example .env   # 第一次使用才需要；預設指向 vllm.sh 起的本地語音辨識
 uv sync
 ```
 
@@ -47,11 +48,11 @@ uv run python -m app.main
   → UpdateJobStatus(TRANSCRIBING)
   → 從物件儲存下載檔案
   → 用 ffmpeg 讀檔案的實際長度（不解碼），超過每個檔案的上限（`MAX_RECORDING_MINUTES`，60）、超過擁有者這個月剩下的轉錄分鐘數
-    （`USAGE_LIMIT_TRANSCRIPTION_MINUTES`，600，跟 gateway 同一個值；台灣時間的月份）、或讀不出長度 → 不呼叫 Deepgram，直接走下面的 FAILED，
+    （`USAGE_LIMIT_TRANSCRIPTION_MINUTES`，600，跟 gateway 同一個值；台灣時間的月份）、或讀不出長度 → 不做語音辨識，直接走下面的 FAILED，
     原因寫給使用者看（`services/recording_limits.py`；上傳時的長度是前端量的，可以亂填）。影片在抽音軌之前就量
   → file_type == VIDEO 才用 moviepy 抽音軌，AUDIO 直接用原始檔案
-  → 呼叫 Deepgram（音檔內容直接上傳，不傳 URL），拿回每個字的起訖時間、文字與講者
-  → 記一筆轉錄用量（音檔秒數取 Deepgram 回報的長度；呼叫失敗也記一筆沒有秒數的失敗紀錄，存不進去只記 log）
+  → 語音辨識：本地的是先分講者、每段送 vLLM，拿回片段的起訖時間與文字（講者是那一段的）；Deepgram 是音檔內容直接上傳（不傳 URL），拿回每個字的起訖時間、文字與講者
+  → 記一筆轉錄用量（音檔秒數：Deepgram 回報的長度，本地的是解碼後的長度；廠商記成 `deepgram` 或 `local`；呼叫失敗也記一筆沒有秒數的失敗紀錄，存不進去只記 log）
   → 切成片段：換講者、句末標點、字間停頓 ≥ 0.5 秒時切，片段即將超過 15 秒時在字的邊界強制切
     （每個片段只屬於一位講者；中文字之間不加空白、英文字之間加一個）
   → 講者依第一次開口的順序換成這個 Job 的標籤 S1、S2…（預設名稱「講者 N」）
@@ -60,7 +61,7 @@ uv run python -m app.main
   → UpdateJobStatus(TRANSCRIBED)
   → 發送 transcription.completed { jobId, userId }（userId 原樣往下傳，ai-service 把用量記在他名下）
 
-Deepgram 呼叫遇到暫時性錯誤（429、5xx、逾時或連不上）且訊息還有重試預算 → 送進 TTL retry queue，過一段
+語音辨識（Deepgram 或本地的 vLLM）遇到暫時性錯誤（429、5xx、逾時或連不上）且訊息還有重試預算 → 送進 TTL retry queue，過一段
 時間後自動送回原 queue 重新處理整個 pipeline（訊息層級 requeue，最多 2 次、共 3 次嘗試，見下方
 「已知限制 / 待辦」跟 `app/services/retry.py`）。
 
@@ -98,7 +99,7 @@ Redis 的 `transcript:v1:{job_id}` 是一個 hash，存序列化的 `Transcript`
 - Redis 連不上時照樣讀資料庫，只記 log，而且不重試（redis-py 預設重試 10 次，實測連不上時一次要 3.7 秒以上；逾時 0.5 秒）；編輯時
   連不上的話，舊內容最多留到有效時間結束。
 
-對外連線只准連 `OUTBOUND_ALLOWED_HOSTS`（逗號分隔；空的就只有 `api.deepgram.com`，`app/core/outbound.py`，ASVS 12.6.1）：語音辨識的 client
+對外連線只准連 `OUTBOUND_ALLOWED_HOSTS`（逗號分隔；空的就只有 `api.deepgram.com`，本地語音辨識伺服器（`STT_BASE_URL`）的網域自動加入，`app/core/outbound.py`，ASVS 12.6.1）：語音辨識的 client
 送出前看網域，不在清單裡就不送、記 log（不算暫時性失敗、不重試）。物件儲存（boto3）是內部服務，不經過它。
 
 轉錄上限的環境變數：`MAX_RECORDING_MINUTES`（`60`）、`USAGE_LIMIT_TRANSCRIPTION_MINUTES`（`600`，要跟 gateway 一樣；k8s 都在 `app-config`）。
@@ -152,7 +153,7 @@ Postgres（`transcription_test_db`）與 Redis（隨機 port），跑完自動�
 `tests/test_pipeline_traditional_chinese.py` 驗證存進去的逐字稿有轉成繁體（以及非中文不轉、只換字形不換詞）；
 `tests/test_retry.py` 直接測 retry queue 路由，不碰真正的 RabbitMQ/pika。
 
-廠商邊界只有一組測試：`tests/test_speech_recognition.py` 用 ADR 0001 實測時錄下的真實 Deepgram 回應
+本地語音辨識另有 `tests/test_local_speech.py`（送去轉錄的段落怎麼切、送給 vLLM 的請求、時間與講者怎麼對回整段錄音、自動偵測語言、錯誤分類、沒設定時）。Deepgram 的廠商邊界：`tests/test_speech_recognition.py` 用 ADR 0001 實測時錄下的真實 Deepgram 回應
 （`tests/fixtures/`）驗證解析結果與暫時性錯誤的判斷，HTTP 層用 httpx 的 `MockTransport`。
 
 Mock 一定要 patch 在 `app/services/pipeline.py`「使用端」import 進來的名稱（例如
@@ -191,7 +192,9 @@ app/
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     storage.py                         從 MinIO/R2 下載檔案
     audio.py                            moviepy 抽音軌
-    speech_recognition.py                語音辨識 adapter（Deepgram）：回傳不綁定廠商的逐字資料與計費的音檔秒數，並判斷錯誤是否暫時性
+    speech_recognition.py                語音辨識 adapter：依設定選本地或 Deepgram（都沒有就 RecognitionNotConfigured），回傳不綁定廠商的逐字資料與音檔秒數，並判斷錯誤是否暫時性
+    local_speech.py                      本地語音辨識：解碼成 16kHz、分講者、切成每段最長 30 秒、送 vLLM 的 /v1/audio/transcriptions、把時間對回整段錄音
+    diarization.py                       講者分離（sherpa-onnx，CPU；模型在 DIARIZATION_MODELS_DIR，沒有就不分）
     transcription_usage.py               記錄轉錄用量（Job 擁有者、音檔秒數、成功或失敗），存檔失敗只記 log
     segmentation.py                       把逐字資料切成片段、講者依第一次開口的順序編號（跟廠商無關）
     transcript_result.py                  切好片段、準備存檔的逐字稿（dataclass）
@@ -229,7 +232,7 @@ upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanou
 
 `APP_ENV` 預設是 `development`；設成 `production`時：
 
-- 啟動前檢查密鑰（`app/core/production.py`）：`DB_PASSWORD`、`RABBITMQ_PASSWORD`、`STORAGE_SECRET_KEY`、`REDIS_PASSWORD`、`DEEPGRAM_API_KEY` 沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
+- 啟動前檢查密鑰（`app/core/production.py`）：`DB_PASSWORD`、`RABBITMQ_PASSWORD`、`STORAGE_SECRET_KEY`、`REDIS_PASSWORD`、`DEEPGRAM_API_KEY`（有設本地語音辨識 `STT_BASE_URL`＋`STT_MODEL` 時不需要）沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
   或少於 12 字元，就不啟動，錯誤訊息列出是哪幾個環境變數。
 - gRPC reflection 關掉（`app/main.py` 的 `build_server`）。
 
@@ -251,9 +254,10 @@ uvx pip-audit --no-deps --disable-pip -r /tmp/requirements.txt
 
 ## 已知限制 / 待辦
 
-- `recognize()` 呼叫 Deepgram 遇到暫時性錯誤（429、5xx、逾時、連不上）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、認證失敗、額度用完的 402 等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
+- `recognize()` 呼叫 Deepgram 或本地的 vLLM 遇到暫時性錯誤（429、5xx、逾時、連不上）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、認證失敗、額度用完的 402 等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——`ai-service` 已經幫這一段補上獨立的 in-process 重試 + 高嚴重度 log marker，這裡還沒跟進，是目前真實存在的已知限制
-- 講者分離只在新轉錄的 Job 上做，舊 Job 不回填（沒有講者，當成只有一位講者）。自動分離不完美：很短的插話（「對」「真的」）常被併進前一位講者，三人以上的對話偶爾只分出兩位（見 ADR 0001 的實測）
+- 講者分離只在新轉錄的 Job 上做，舊 Job 不回填（沒有講者，當成只有一位講者）。自動分離不完美：Deepgram 很短的插話（「對」「真的」）常被併進前一位講者，三人以上的對話偶爾只分出兩位（見 ADR 0001 的實測）；本地的同一個人可能被拆成兩位、分出幾個人很受 `DIARIZATION_THRESHOLD` 影響（見 ADR 0003 的實測）
+- 本地語音辨識只有片段（不是每個字）的時間，片段最長近 30 秒；比 Deepgram 慢很多（約 3 倍速，一小時的錄音約 20 分鐘），vLLM 一次只處理一段是瓶頸；Whisper 系的模型偶爾會在很短或很吵的段落聽出不存在的字
 - 語言由上傳時選（ADR 0002）：中文（`zh-TW`，預設，也是沒帶語言時的 `DEEPGRAM_LANGUAGE`）、英文（`en`）、自動偵測（`detect_language=zh&detect_language=en`）。自動偵測判斷成中文時走通用中文模型，錯字明顯較多（ADR 0001 的實測），所以不是預設；整個檔案只判斷一種語言，中英夾雜的錄音仍然辨識不好。語言選錯要重新上傳
 - Deepgram 的 $200 是一次性額度，用完就要付費（$0.0043/分鐘），不像 Groq 每天重置；額度監控與告警仍然沒有（`architecture-design.md` 第 7 節第 7 點）
 - 中文轉錄幾乎沒有標點，片段主要靠停頓切開；`smart_format` 偶爾把中文裡的數字和英文切碎（例如「200 3年」），照原樣保留
