@@ -3,7 +3,9 @@ import type { JobStatusEvent } from '@/types/api'
 import { renewAccessToken } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/access-token'
 
-const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8085'
+// 跟頁面同一個網站的 /ws（開發時 Vite 轉到 notification-service，正式環境由前端的 nginx 轉）；要直連別的位址才設 VITE_WS_BASE_URL。
+const WS_BASE_URL =
+  import.meta.env.VITE_WS_BASE_URL ?? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
 // notification-service 關閉連線的代碼（見 notification-service/app/controllers/ws_controller.py）。
 export const CLOSE_UNAUTHORIZED = 4401

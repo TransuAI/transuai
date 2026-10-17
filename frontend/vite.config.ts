@@ -18,6 +18,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/api/, ''),
       },
+      // Job 狀態的 WebSocket（notification-service），跟正式環境的 nginx 一樣走同一個網站
+      '/ws': {
+        target: 'ws://localhost:8085',
+        ws: true,
+      },
     },
   },
   test: {

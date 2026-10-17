@@ -44,12 +44,20 @@ Vitest + React Testing Library + `jsdom`。頁面測試一律 mock `src/lib/api.
 
 `vite.config.ts` 把 `/api` proxy 到 `http://localhost:8080`（Gateway),所以本機開發預設 `VITE_API_BASE_URL=/api` 即可,不會有 CORS 問題。**API 一定要跟前端同源**(正式環境也是經反向代理的 `/api`):refresh token 的 cookie 是 `SameSite=Strict`(名稱 `__Host-refresh_token`),`VITE_API_BASE_URL` 設成別的網站的網址,重新整理頁面就會被登出(見 gateway README「refresh token 的 cookie」)。notification-service 的 WebSocket(`8085`)沒有走 Gateway,前端直連,見 `.env.example` 的 `VITE_WS_BASE_URL`。
 
+### 部署包（nginx）
+
+`Dockerfile` build 出 `transuai/frontend`：`npm run build` 的檔案由 nginx（`nginxinc/nginx-unprivileged`，不用 root）提供，同一個網站把 `/api/*`
+（去掉 `/api`）轉給 gateway、`/ws/*` 轉給 notification-service（`nginx/default.conf.template`，啟動時用環境變數 `GATEWAY_URL`、`NOTIFICATION_URL`、
+`STORAGE_ORIGIN`、`TRUSTED_PROXY_CIDR` 換掉）。頁面的安全標頭與 CSP 在 `nginx/page-headers.conf`；只提供 `/assets/` 的 `.js .css .woff2 .svg .png`
+與 `favicon.svg`，其他路徑都給 `index.html`；SSE 不緩衝；請求本文最多 1MB。TLS 在前面那層做，範本是 `nginx/tls.conf.example`。kind 上是
+`infra/k8s/26-frontend.yaml`（`kubectl -n transuai port-forward svc/frontend 8088:8080`）；開發照舊用 `npm run dev`。
+
 ### 環境變數
 
 | 變數 | 預設值 | 說明 |
 |---|---|---|
 | `VITE_API_BASE_URL` | `/api` | Gateway REST base URL,dev 模式靠 vite proxy 轉發到 `localhost:8080` |
-| `VITE_WS_BASE_URL` | `ws://localhost:8085` | notification-service WebSocket base URL |
+| `VITE_WS_BASE_URL` | 同一個網站（`ws(s)://<頁面的 host>`） | notification-service 的 WebSocket。預設走同一個網站的 `/ws`（開發時 Vite 轉到 `localhost:8085`，部署時前端的 nginx 轉）；要直連別的位址才設 |
 
 ## 專案結構
 
