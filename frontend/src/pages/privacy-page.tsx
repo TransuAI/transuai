@@ -1,17 +1,11 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-// 隱私權說明（個資法第 8 條的告知事項）。草稿：上線前補上聯絡方式與伺服器地區，並請懂法的人看過（見
-// .scratch/account-deletion/issues/04）。第三方清單是照程式碼盤點的——新增會把資料送出去的服務時要一起更新這裡。
-const OPERATOR = 'TransuAI'
-const CONTACT_EMAIL: string | null = null
-const SERVER_REGION: string | null = null
-const LAST_UPDATED = '2026-10-03'
-
-function ToFill({ value, what }: { value: string | null; what: string }) {
-  if (value) return <>{value}</>
-  return <mark className="rounded bg-amber-200 px-1 text-amber-950">［待補：{what}］</mark>
-}
+// 隱私權說明：資料存在哪裡、哪些會送到外部服務。系統由客戶部署在自己內部，蒐集者與聯絡窗口是部署的單位，
+// 所以這頁不寫營運方與伺服器地區（見 .scratch/account-deletion/issues/04）。第三方清單是照程式碼盤點的——
+// 新增會把資料送出去的服務時要一起更新這裡。
+const APP_NAME = 'TransuAI'
+const LAST_UPDATED = '2026-10-17'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -62,19 +56,13 @@ export function PrivacyPage() {
   return (
     <div className="mx-auto flex min-h-screen max-w-2xl flex-col gap-8 px-4 py-10 text-sm leading-relaxed">
       <header className="flex flex-col gap-2">
-        <Link to="/" className="text-muted-foreground underline underline-offset-4">回到 {OPERATOR}</Link>
+        <Link to="/" className="text-muted-foreground underline underline-offset-4">回到 {APP_NAME}</Link>
         <h1 className="text-2xl font-semibold">隱私權說明</h1>
         <p className="text-muted-foreground">最後更新：{LAST_UPDATED}</p>
         <p>
-          {OPERATOR}（以下稱「我們」）依個人資料保護法，說明我們蒐集哪些資料、為什麼、會交給誰，以及你可以怎麼行使你的權利。
+          {APP_NAME} 由你的單位部署在自己的伺服器上並自行管理。這裡說明系統存了哪些資料、為什麼、哪些會送到外部服務，以及你可以怎麼行使你的權利。
         </p>
       </header>
-
-      <Section title="蒐集者">
-        <p>
-          {OPERATOR}。聯絡方式：<ToFill value={CONTACT_EMAIL} what="聯絡 email" />。
-        </p>
-      </Section>
 
       <Section title="蒐集的目的">
         <p>
@@ -98,8 +86,8 @@ export function PrivacyPage() {
 
       <Section title="誰會拿到你的資料">
         <p>
-          為了提供上面的功能，部分資料會送到以下第三方處理；它們的伺服器多在美國，資料會傳到臺灣以外的地方，並依各自的隱私權政策保存與使用。
-          我們不會出售你的資料，也不會用於廣告。
+          資料存在你的單位部署這套系統的伺服器與檔案儲存。為了提供上面的功能，部分資料會送到以下第三方處理；它們的伺服器多在美國，
+          資料會傳到臺灣以外的地方，並依各自的隱私權政策保存與使用。
         </p>
         <div className="flex flex-col gap-3">
           {THIRD_PARTIES.map((party) => (
@@ -112,9 +100,6 @@ export function PrivacyPage() {
         </div>
         <p>
           Tavily 的政策表示查詢內容保留到不再需要為止、沒有明確期限，並可能用部分查詢內容改進他們的服務。介意的話，問答時不要打開「查網路」，也不要查核事實查核的主張。
-        </p>
-        <p>
-          我們自己的伺服器與檔案儲存位於 <ToFill value={SERVER_REGION} what="伺服器與檔案儲存的所在地區" />。
         </p>
       </Section>
 
@@ -141,7 +126,7 @@ export function PrivacyPage() {
           </li>
         </ul>
         <p>
-          其他請求請來信 <ToFill value={CONTACT_EMAIL} what="聯絡 email" />。
+          其他請求請洽你的單位管理這套系統的人員。
         </p>
       </Section>
 

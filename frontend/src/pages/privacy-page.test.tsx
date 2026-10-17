@@ -8,7 +8,7 @@ vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ register: vi.fn() }
 
 // 隱私權說明（.scratch/account-deletion/issues/04）：註冊前就看得到，列出每個第三方送什麼、什麼時候送。
 describe('PrivacyPage', () => {
-  it('names the operator and every third party the recordings or their content go to', () => {
+  it('names the product and every third party the recordings or their content go to', () => {
     render(<MemoryRouter><PrivacyPage /></MemoryRouter>)
 
     expect(screen.getByRole('heading', { name: '隱私權說明' })).toBeInTheDocument()
@@ -28,10 +28,13 @@ describe('PrivacyPage', () => {
     expect(within(tavily).getByText(/只有你在問答時打開「查網路」的那一題，以及你在事實查核按下查核的主張（每條一次）/)).toBeInTheDocument()
   })
 
-  it('marks what still has to be filled in instead of making it up', () => {
+  // 部署在客戶內部：沒有營運方的聯絡方式與伺服器地區要填，其他請求找部署的單位
+  it('points other requests to the organization that deployed it, with nothing left to fill in', () => {
     render(<MemoryRouter><PrivacyPage /></MemoryRouter>)
 
-    expect(screen.getAllByText('［待補：聯絡 email］').length).toBeGreaterThan(0)
+    expect(screen.getByText(/由你的單位部署在自己的伺服器上/)).toBeInTheDocument()
+    expect(screen.getByText(/其他請求請洽你的單位管理這套系統的人員/)).toBeInTheDocument()
+    expect(screen.queryByText(/待補/)).not.toBeInTheDocument()
   })
 })
 
