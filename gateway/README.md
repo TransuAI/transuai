@@ -36,16 +36,15 @@ access token 過期、或重新整理頁面 → 前端呼叫 POST /auth/refresh�
 refresh token 不在任何回應本文裡，只在 cookie（`security/RefreshTokenCookie`）：JavaScript 讀不到，XSS 偷不走；access token 只放在前端記憶體。
 
 ```
-Set-Cookie: refresh_token=…; Path=/api/auth; Max-Age=604800; Secure; HttpOnly; SameSite=Strict
+Set-Cookie: __Host-refresh_token=…; Path=/; Max-Age=604800; Secure; HttpOnly; SameSite=Strict
 ```
 
 - **`SameSite=Strict`**：別的網站發起的請求不帶這個 cookie，換發、登出不會被跨站偽造。也因此**前端跟 API 一定要在同一個網站**
  （同一個網域，或同一個網域底下的子網域）——前端 `fetch('/api/…')` 同源呼叫、由反向代理（本機是 Vite 的 proxy）把 `/api` 拿掉轉到
   這個 Gateway 最單純。前端放在 `*.vercel.app`、API 放在 `*.onrender.com` 這種兩個不同網站的部署，cookie 不會送出、登入撐不過重新整理。
-- **`Path`**（`REFRESH_COOKIE_PATH`，預設 `/api/auth`）：是**瀏覽器看到的**路徑，只有換發、登出（還有同一路徑底下的登入、註冊）會帶它，
-  其他 API 不帶。API 不是掛在 `/api` 底下時要改。
-- **`Secure`**（`REFRESH_COOKIE_SECURE`，預設 `true`）：只在 HTTPS 送。Chrome、Firefox 把 `http://localhost` 當成安全的，本機開發照樣能用；
-  Safari 不行，本機用 Safari 要設 `false`。正式環境（`APP_ENV=production`）固定是 `true`，不看這個變數。
+- **`__Host-` 前綴**（ASVS 3.4.4）：瀏覽器只接受 `Secure`、`Path=/`、沒有 `Domain` 的這種 cookie，所以別的子網域設不了同名的 cookie 來蓋掉它。
+  代價是 `Path=/`：每個請求都會帶（仍是 httpOnly、`SameSite=Strict`，gateway 只在換發與登出時讀）。沒有可以調的設定。
+- **`Secure`**：只在 HTTPS 送。Chrome、Firefox 把 `http://localhost` 當成安全的，本機開發照樣能用；Safari 不行，本機開發請用 Chrome 或 Firefox。
 - **`Max-Age`**：跟 auth-service 的 refresh token 一樣長，讀同一個 `JWT_REFRESH_TOKEN_TTL_DAYS`（預設 7 天）。
 - 換發時 auth-service 不認這個 token（過期、作廢、被盜）就清掉 cookie、回 401；登出、登出所有裝置也會清掉 cookie。
 
@@ -318,7 +317,6 @@ log 裡同一個代碼那一行有完整的 status（ASVS 7.4.1）。503 的描�
 | `CACHE_JOB_OWNER_TTL` | `10m` | Job 擁有者快取的有效時間，見「快取」 |
 | `USAGE_LIMIT_TRANSCRIPTION_MINUTES` / `USAGE_LIMIT_PLATFORM_TOKENS` / `USAGE_LIMIT_WEB_SEARCHES` | `600` / `2000000` / `30` | 每月用量上限，見「每月用量上限」 |
 | `FORWARD_HEADERS_STRATEGY` / `TRUSTED_PROXIES` | `none` / 空 | 取得來源 IP 的方式與信任的反向代理，見「限流」 |
-| `REFRESH_COOKIE_PATH` / `REFRESH_COOKIE_SECURE` | `/api/auth` / `true` | refresh token 的 cookie，見「refresh token 的 cookie」 |
 | `JWT_REFRESH_TOKEN_TTL_DAYS` | `7` | refresh token 的 cookie 多久過期（跟 auth-service 讀同一個變數） |
 | `JWT_ACCESS_TOKEN_TTL_MINUTES` | `15` | 剛刪除帳號的使用者記多久（跟 access token 一樣長，跟 auth-service 讀同一個變數），見「刪除帳號之後」 |
 

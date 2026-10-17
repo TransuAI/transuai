@@ -70,7 +70,7 @@ class ChangePasswordTest {
 
         verify(authServiceStub).changePassword(argThat(request -> request.getCurrentPassword().equals("the-password")
                 && request.getNewPassword().equals("a brand new password")));
-        assertThat(result.getResponse().getHeader(HttpHeaders.SET_COOKIE)).startsWith("refresh_token=refresh;").contains("HttpOnly");
+        assertThat(result.getResponse().getHeader(HttpHeaders.SET_COOKIE)).startsWith("__Host-refresh_token=refresh;").contains("HttpOnly");
     }
 
     @Test

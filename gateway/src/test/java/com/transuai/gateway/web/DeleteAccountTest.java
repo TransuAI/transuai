@@ -67,7 +67,7 @@ class DeleteAccountTest {
         MvcResult result = delete("the-password").andExpect(status().isNoContent()).andReturn();
 
         verify(authServiceStub).deleteAccount(argThat(request -> request.getPassword().equals("the-password")));
-        assertThat(result.getResponse().getHeader(HttpHeaders.SET_COOKIE)).startsWith("refresh_token=;").contains("Max-Age=0");
+        assertThat(result.getResponse().getHeader(HttpHeaders.SET_COOKIE)).startsWith("__Host-refresh_token=;").contains("Max-Age=0");
         mvc.perform(get("/auth/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
     }
 

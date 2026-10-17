@@ -69,7 +69,7 @@ class RevokedAccessTokensTest {
         String otherDevice = token(otherSignIn, Instant.now());
         me(token).andExpect(status().isOk());
 
-        mvc.perform(post("/auth/logout").cookie(new Cookie("refresh_token", "refresh"))).andExpect(status().isNoContent());
+        mvc.perform(post("/auth/logout").cookie(new Cookie("__Host-refresh_token", "refresh"))).andExpect(status().isNoContent());
 
         me(token).andExpect(status().isUnauthorized());
         me(otherDevice).andExpect(status().isOk());
@@ -103,7 +103,7 @@ class RevokedAccessTokensTest {
     @Test
     void aTokenFromBeforeSignInsHadAnIdStillWorksUntilEveryDeviceIsLoggedOut() throws Exception {
         String old = TestAuth.accessToken(jwt, user);  // no sid, no iat
-        mvc.perform(post("/auth/logout").cookie(new Cookie("refresh_token", "refresh"))).andExpect(status().isNoContent());
+        mvc.perform(post("/auth/logout").cookie(new Cookie("__Host-refresh_token", "refresh"))).andExpect(status().isNoContent());
         me(old).andExpect(status().isOk());
 
         mvc.perform(post("/auth/logout-all").header("Authorization", "Bearer " + old)).andExpect(status().isNoContent());

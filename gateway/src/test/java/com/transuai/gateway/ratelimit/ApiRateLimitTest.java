@@ -192,7 +192,7 @@ class ApiRateLimitTest {
         return mvc.perform(MockMvcRequestBuilders.post("/auth/refresh").with(request -> {
             request.setRemoteAddr(address);
             return request;
-        }).cookie(new jakarta.servlet.http.Cookie("refresh_token", "x")));
+        }).cookie(new jakarta.servlet.http.Cookie("__Host-refresh_token", "x")));
     }
 
     private ResultActions call(UUID user, HttpMethod method, String path) throws Exception {

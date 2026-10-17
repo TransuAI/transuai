@@ -75,21 +75,23 @@ class RefreshTokenCookieTest {
                     .andExpect(jsonPath("$.refreshToken").doesNotExist())
                     .andReturn();
 
-            assertThat(setCookie(result)).startsWith("refresh_token=refresh-1;")
-                    .contains("Path=/api/auth", "Max-Age=604800", "Secure", "HttpOnly", "SameSite=Strict");
+            assertThat(setCookie(result)).startsWith("__Host-refresh_token=refresh-1;")
+                    .contains("Path=/;", "Max-Age=604800", "Secure", "HttpOnly", "SameSite=Strict")
+                    // __Host- (ASVS 3.4.4): browsers only accept it Secure, with Path=/ and no Domain.
+                    .doesNotContain("Domain");
         }
     }
 
     @Test
     void refreshingUsesTheCookieAndRotatesIt() throws Exception {
-        MvcResult result = mvc.perform(post("/auth/refresh").cookie(new Cookie("refresh_token", "refresh-1")))
+        MvcResult result = mvc.perform(post("/auth/refresh").cookie(new Cookie("__Host-refresh_token", "refresh-1")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("access-2"))
                 .andExpect(jsonPath("$.refreshToken").doesNotExist())
                 .andReturn();
 
         verify(authServiceStub).refresh(argThat(request -> request.getRefreshToken().equals("refresh-1")));
-        assertThat(setCookie(result)).startsWith("refresh_token=refresh-2;");
+        assertThat(setCookie(result)).startsWith("__Host-refresh_token=refresh-2;");
     }
 
     @Test
@@ -103,21 +105,21 @@ class RefreshTokenCookieTest {
     void aRefreshTokenAuthServiceRejectsIsClearedFromTheBrowser() throws Exception {
         when(authServiceStub.refresh(any())).thenThrow(Status.UNAUTHENTICATED.asRuntimeException());
 
-        MvcResult result = mvc.perform(post("/auth/refresh").cookie(new Cookie("refresh_token", "revoked")))
+        MvcResult result = mvc.perform(post("/auth/refresh").cookie(new Cookie("__Host-refresh_token", "revoked")))
                 .andExpect(status().isUnauthorized())
                 .andReturn();
 
-        assertThat(setCookie(result)).startsWith("refresh_token=;").contains("Max-Age=0", "Path=/api/auth");
+        assertThat(setCookie(result)).startsWith("__Host-refresh_token=;").contains("Max-Age=0", "Path=/");
     }
 
     @Test
     void loggingOutRevokesTheCookiesRefreshTokenWithoutNeedingAnAccessTokenAndClearsIt() throws Exception {
-        MvcResult result = mvc.perform(post("/auth/logout").cookie(new Cookie("refresh_token", "the-token")))
+        MvcResult result = mvc.perform(post("/auth/logout").cookie(new Cookie("__Host-refresh_token", "the-token")))
                 .andExpect(status().isNoContent())
                 .andReturn();
 
         verify(authServiceStub).logout(argThat(request -> request.getRefreshToken().equals("the-token")));
-        assertThat(setCookie(result)).startsWith("refresh_token=;").contains("Max-Age=0");
+        assertThat(setCookie(result)).startsWith("__Host-refresh_token=;").contains("Max-Age=0");
     }
 
     @Test
@@ -137,7 +139,7 @@ class RefreshTokenCookieTest {
                 .andExpect(status().isNoContent())
                 .andReturn();
         verify(authServiceStub).logoutAllDevices(any());
-        assertThat(setCookie(result)).startsWith("refresh_token=;").contains("Max-Age=0");
+        assertThat(setCookie(result)).startsWith("__Host-refresh_token=;").contains("Max-Age=0");
     }
 
     private static AuthResponse issued(String accessToken, String refreshToken) {
