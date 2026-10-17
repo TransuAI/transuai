@@ -44,8 +44,12 @@ data:
   JOB_FAILED_QUEUE: "job.failed"
 
   # 外部 API 型號（key 本身是機敏資訊，放在 02-secret.yaml）
-  # DEEPGRAM_MODEL / DEEPGRAM_LANGUAGE 是 transcription-service 的語音辨識（含講者分離，見
-  # transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md）。
+  # 語音辨識（transcription-service，見 transcription-service/docs/adr/0003）：本機 vLLM 跑的 Breeze-ASR-25（infra/scripts/vllm.sh
+  # 的 :8002），講者分離在 transcription-service 裡用 CPU 跑（模型打包在 image 裡）。有設定 STT_BASE_URL 就不用 Deepgram。
+  STT_BASE_URL: "http://host.docker.internal:8002/v1"
+  STT_MODEL: "MediaTek-Research/Breeze-ASR-25"
+  # 改用 Deepgram（雲端，含講者分離，見 transcription-service/docs/adr/0001）：上面兩個設成空字串、secret 補 DEEPGRAM_API_KEY。
+  # DEEPGRAM_LANGUAGE 也是沒指定語言的舊訊息的預設語言（本地辨識一樣用它）。
   DEEPGRAM_MODEL: "nova-3"
   DEEPGRAM_LANGUAGE: "zh-TW"
   # 平台模型與 embedding 都跑在自己電腦上用 Docker 跑的 vLLM（infra/scripts/vllm.sh，用 GPU，不用付 AI API 的錢；見

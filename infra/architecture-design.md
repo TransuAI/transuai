@@ -18,7 +18,7 @@
 
 Transcription Service 消費訊息
   → 抽音軌（若為影片，用 FFmpeg）
-  → 呼叫 Deepgram Nova-3 一次完成轉錄與講者分離（每個字的 timestamp 與講者）
+  → 轉錄與講者分離：地端是先在 CPU 上分講者、每段送到自架 vLLM 的 Breeze-ASR-25（片段的 timestamp 與講者）；或雲端的 Deepgram Nova-3（每個字的 timestamp 與講者）
   → 依換講者、句末標點、停頓、約 15 秒上限把字切成片段（每個片段只屬於一位講者）
   → 中文轉成繁體（OpenCC s2tw，只換字形不換詞）
   → 更新 Job status: transcribing → transcribed
@@ -62,7 +62,7 @@ Notification Service 消費訊息
 | **API Gateway** | 統一入口、JWT 本地驗證、REST↔gRPC 轉譯、限流 | Spring Boot（Web MVC）+ gRPC Client + Redis（限流計數、快取） | 對外 |
 | **Auth Service** | 使用者註冊/登入、JWT 簽發與刷新 | Spring Boot + gRPC Server | 對內（僅供 Gateway 呼叫） |
 | **Upload Service** | 檔案上傳、產生 presigned URL、Job 建立與狀態管理 | Spring Boot + gRPC Server | 對內（僅供 Gateway / 下游服務呼叫） |
-| **Transcription Service** | 抽音軌（moviepy/ffmpeg）、呼叫 Deepgram 轉錄與講者分離、逐字稿產出與儲存 | Python + gRPC Server + Redis（逐字稿快取） | 對內（MQ 驅動，查詢走 gRPC） |
+| **Transcription Service** | 抽音軌（moviepy/ffmpeg）、轉錄與講者分離（地端 vLLM＋CPU 講者分離，或 Deepgram）、逐字稿產出與儲存 | Python + gRPC Server + Redis（逐字稿快取） | 對內（MQ 驅動，查詢走 gRPC） |
 | **AI Service** | 摘要生成、章節分段、embedding + RAG 問答（見上方實作現況） | Python + gRPC Server | 對內（MQ 驅動，查詢走 gRPC） |
 | **Notification Service** | Job 狀態即時推播 | Python + FastAPI（WebSocket）+ pika | 對內（WebSocket 對外） |
 | **Frontend** | 使用者介面、播放器、時間戳跳轉；部署時是 nginx 的 image，同一個網站轉 `/api` 到 Gateway、`/ws` 到 Notification Service，帶頁面的 CSP 與安全標頭（`frontend/Dockerfile`） | React + nginx | 對外 |
@@ -905,7 +905,7 @@ Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登
 | 向量資料庫 | pgvector（`ai_db.embeddings`，`BAAI/bge-m3` 1024 維，已在用） |
 | 物件儲存 | MinIO（本機開發）／ Cloudflare R2（正式環境，尚未設定） |
 | 訊息佇列 | **RabbitMQ**（實際採用，非原規劃的 Redis Queue；Redis 改用在 gateway 的限流與快取、transcription-service 的逐字稿快取） |
-| ASR + 講者分離 | Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離，僅 transcription-service 使用；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體；ai-service 也用它把整段寫成簡體的問答回答與測驗轉成繁體（本機小模型偶爾會） |
+| ASR + 講者分離 | 地端（`STT_BASE_URL` 有設定時）：講者分離在 transcription-service 裡用 CPU 跑（sherpa-onnx，模型打包在 image），每段講者的話送到自架 vLLM 的 `MediaTek-Research/Breeze-ASR-25`，見 `transcription-service/docs/adr/0003-local-speech-recognition-and-diarization.md`；雲端（有 `DEEPGRAM_API_KEY` 時）：Deepgram Nova-3（`zh-TW`，一次呼叫完成轉錄與講者分離；取代原本的 Groq Whisper，見 `transcription-service/docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md`）；都沒設就不能轉錄；中文逐字稿存檔前用 OpenCC（`s2tw`，只換字形不換詞）轉成繁體；ai-service 也用它把整段寫成簡體的問答回答與測驗轉成繁體（本機小模型偶爾會） |
 | LLM（摘要/章節分段/RAG 問答） | 透過 OpenAI 相容介面呼叫（見 `ai-service/docs/adr/0004-generation-calls-through-openai-compatible-interface.md`），用使用者的預設模型（問答可以臨時換成別的模型）：平台模型，或使用者自有金鑰的 OpenAI／Anthropic／Google Gemini／OpenRouter 模型（金鑰加密存放，見 `ai-service/docs/adr/0005-own-api-keys-encrypted-in-ai-service.md`）。平台模型是部署設定的 OpenAI 相容伺服器（`PLATFORM_LLM_BASE_URL`、`PLATFORM_LLM_MODEL`），出廠不指向任何服務；本機開發用 Docker 跑的 vLLM，一般生成與會後處理都用 `Qwen/Qwen3-8B-AWQ`（見 `ai-service/docs/adr/0015-self-hosted-vllm-for-platform-model-and-embeddings.md`、`infra/README.md`）。歷史：Gemini → Groq → HF Inference Providers → 本機 Ollama → 本機 vLLM |
 | Embedding | OpenAI 相容的 `/v1/embeddings`（`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`；本機是 vLLM 上的 `Qwen/Qwen3-Embedding-0.6B`，1024 維）；換模型後 ai-service 啟動時自動重算既有向量 |
 | 網路搜尋（問答「查網路」、事實查核） | Tavily 官方遠端 MCP（`tavily_search`，平台付費的 `TAVILY_API_KEY`；由系統查，不給模型工具；問答在回答前查一次，只送出一句搜尋查詢，見 `ai-service/docs/adr/0014-qa-web-search-by-the-system.md`；事實查核每條主張查一次，只送整理過的那一句主張） |
@@ -929,7 +929,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 | **Redis**（gateway 的限流計數與快取、transcription-service 的逐字稿快取；訊息佇列實際用 RabbitMQ；上限 256MB、滿了淘汰最久沒用的） | **Upstash** | 每月 50 萬次指令、256MB 資料量，按需計費（Serverless） | 超過額度需升級；限流讓每個 API 請求都要 1～2 個指令（登入、註冊更多），每個 Job 的請求再加 1 個查快取，每次讀逐字稿再加 1～2 個，要留意用量 |
 | **物件儲存**（音訊/影片檔案） | **Cloudflare R2** | 10GB 儲存空間、每月 100 萬次操作 | 超過額度另計費；免費層無 CDN 加速額外保證，大流量下載需注意頻寬成本 |
 | **前端託管** | **Vercel** 或 **Cloudflare Pages** | 個人專案額度足夠，無需信用卡 | 商業用途需確認條款（Vercel 免費層條款僅限個人/非商業用途，正式商用需留意） |
-| **ASR + 講者分離（transcription-service）** | **Deepgram Nova-3** | 新帳號一次性 $200 額度（不用綁卡），講者分離不另外收費；之後 $0.0043/分鐘 | 額度是一次性的，不像 Groq 每天重置，用完就要付費（約 775 小時音訊）；額度監控仍是缺口（見 7. 第 7 點） |
+| **ASR + 講者分離（transcription-service）** | **自架 vLLM（Breeze-ASR-25）＋ CPU 講者分離**；可改用 Deepgram Nova-3 | 地端不用付費；Deepgram 新帳號一次性 $200 額度、之後 $0.0043/分鐘 | 地端約 3 倍速（一小時的錄音約 20 分鐘），Deepgram 快很多 |
 | **LLM（摘要/章節分段/問答，ai-service）** | **自架 vLLM**（地端 GPU） | 不用付費；要自己的 NVIDIA 顯示卡 | 16GB 的卡只放得下 8B 等級（4-bit）加 embedding 與語音辨識，見 `ai-service/docs/adr/0015`；使用者也可以用自有金鑰改用雲端模型 |
 | **網路搜尋（ai-service，問答「查網路」、事實查核）** | **Tavily** | 整個平台每月 1,000 credits（一般搜尋 1 credit／次），不用綁卡；之後 US$0.008／credit | 額度是整個平台共用，不是每位使用者；每人每月的搜尋次數有用量上限（預設 30 次，問答與事實查核共用，只算成功的，見 gateway README「每月用量上限」） |
 | **Embedding（ai-service）** | **自架 vLLM**（地端 GPU） | 不用付費 | 換模型會自動重算既有向量 |
@@ -957,7 +957,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
    沒有額外抽象一層 interface，各服務直接用 pika（Python）/ Spring AMQP（Java）。三個 Python
    consumer（ai-service/transcription-service/notification-service）連線斷線時有指數退避自動
    重連；upload-service（唯一的 producer-only 服務）用 Spring AMQP 的 `RabbitTemplate` 發送重試
-3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
+3. **講者分離**：轉錄時自動做（地端的 sherpa-onnx 或 Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
 4. **多格式輸出**：Studio「多格式輸出」產生 Podcast 介紹、YouTube 描述、部落格文章、電子報、社群貼文（依平台），依摘要、章節與使用者取過名字的講者寫成 Markdown，可以複製、下載。「會議紀錄」不另外做——會後處理寫進 Notion 的會議紀錄就是它。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、筆記、決策、測驗、事實查核），含譯文與雙語字幕、複製、下載原始檔）混為一談
 5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天，一次登入最多 30 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow；密碼 12 到 128 字元，PBKDF2 雜湊（舊的 bcrypt 登入時換掉）；可以改密碼、忘記密碼（寄到確認過的 email 的重設連結，或復原碼），改了、重設了、產生復原碼都會寄通知信
@@ -1009,6 +1009,5 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
-- **完全離線的語音辨識**：transcription-service 仍用 Deepgram（雲端）。本機的 `infra/scripts/vllm.sh` 已經起了 `MediaTek-Research/Breeze-ASR-25`（`:8002`，OpenAI 相容的 `/v1/audio/transcriptions`，有片段時間；RTX 5080 上 90 秒約 13 秒），但 transcription-service 還沒改用它；講者分離 vLLM 不提供，要另外做（例如 pyannote），見 `ai-service/docs/adr/0015`
 - **系統設定頁（管理員）**：平台模型、embedding、語音辨識、網路搜尋的網址與金鑰目前是環境變數（k8s configmap／secret），還沒有管理員在介面上設定的地方
 - **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做

@@ -3,7 +3,7 @@
 #   聊天模型（平台模型：摘要、章節、問答、會後處理……）  http://localhost:8000/v1
 #   embedding（問答找段落、決策的搜尋）                   http://localhost:8001/v1
 #   語音辨識（/v1/audio/transcriptions，有片段時間）      http://localhost:8002/v1
-#     transcription-service 之後改用它（現在還是 Deepgram），先一起起來、把顯示記憶體佔好。
+#     transcription-service 用它（STT_BASE_URL）；講者分離不在這裡，在 transcription-service 裡用 CPU 跑。
 # k8s 裡的 pod 經由 Docker Desktop 的 host.docker.internal 連到它們（01-configmap.yaml 的 PLATFORM_LLM_BASE_URL、
 # EMBEDDING_BASE_URL）。模型權重第一次啟動時從 Hugging Face Hub 下載（只是下載，推論都在本機），存在 Docker volume，
 # 之後不用再下載。見 ai-service/docs/adr/0015。
