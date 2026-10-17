@@ -53,7 +53,7 @@ Upload Service 沒有 Swagger/OpenAPI —— 那是 REST 專屬的規格，gRPC 
 
   # 呼叫一個 rpc（所有 rpc 都需要帶 x-user-id metadata，模擬 Gateway 轉發的身分）
   grpcurl -plaintext -H "x-user-id: 11111111-1111-1111-1111-111111111111" \
-    -d '{"fileName":"meeting.mp3","fileType":"AUDIO","fileSizeBytes":1024}' \
+    -d '{"fileName":"meeting.mp3","fileType":"AUDIO","contentType":"audio/mpeg","fileSizeBytes":1024}' \
     localhost:9090 transuai.upload.v1.UploadService/GetPresignedUploadUrl
   ```
 
@@ -65,10 +65,10 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/upl
 
 | RPC | 說明 |
 |---|---|
-| `GetPresignedUploadUrl` | 取得物件儲存的 presigned PUT URL，此階段尚未建立 Job；`file_size_bytes` 超過上傳大小限制會回 `INVALID_ARGUMENT`（見下方「上傳大小限制」） |
+| `GetPresignedUploadUrl` | 取得物件儲存的 presigned PUT URL，此階段尚未建立 Job；`file_size_bytes` 超過上傳大小限制會回 `INVALID_ARGUMENT`（見下方「上傳大小限制」）。`content_type` 必填：AUDIO 要 `audio/*`、VIDEO 要 `video/*`（不帶參數），簽進 URL（`X-Amz-SignedHeaders=content-type;host`），PUT 時的 `Content-Type` 必須一字不差，否則物件儲存回 403——存不成 `text/html` 之類能在瀏覽器執行的類型（ASVS 12.5.2） |
 | `CompleteUpload` | 前端完成上傳後呼叫，建立 Job（status=`UPLOADED`）並發送 `transcription.requested { jobId, userId, storagePath, fileType, transcriptionLanguage }` 事件（`userId` 一路帶到 ai-service，用量記在他名下；`transcription_language` 是 `zh-TW`（中文，沒帶時的預設）、`en` 或 `auto`，其他值回 `INVALID_ARGUMENT`，存在 Job 上，見 transcription-service ADR 0002）；會改問物件儲存實際存了多大（不信任請求帶的 `file_size_bytes`），超過限制回 `INVALID_ARGUMENT` 並刪除該物件 |
 | `GetJob` | 查詢單一 Job，強制 ownership 檢查（別人的 Job 回 `NOT_FOUND`） |
-| `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md`。`as_attachment=true` 時 URL 會覆寫回應的 `Content-Disposition` 為 attachment、檔名＝Job 原始檔名（RFC 6266 ASCII 備援＋RFC 5987 UTF-8），供前端「匯出 → 下載原始檔」 |
+| `GetPresignedDownloadUrl` | 取得該 Job 媒體檔案的 presigned **GET** URL，供前端播放器直接讀取（物件存的類型不是 `audio/*`、`video/*`——簽 Content-Type 之前上傳的舊物件——時，URL 帶 `response-content-type=application/octet-stream`，直接打開也不會被當成網頁）；ownership 檢查方式跟 `GetJob` 一樣（別人的 Job 回 `NOT_FOUND`），見 `docs/adr/0002-presigned-get-url-for-media-playback.md`。`as_attachment=true` 時 URL 會覆寫回應的 `Content-Disposition` 為 attachment、檔名＝Job 原始檔名（RFC 6266 ASCII 備援＋RFC 5987 UTF-8），供前端「匯出 → 下載原始檔」 |
 | `ListJobs` | 分頁查詢目前使用者的 Job（新的在前，`page` 從 1 開始，0 或沒帶當成 1）：`query` 找**標題**或**檔名**包含它的（去頭尾空白、不分大小寫，`%` `_` `\` 照字面比對），`category` 只看某個類型（不在清單回 `INVALID_ARGUMENT`）；空字串＝不篩，`total_count` 跟著條件算 |
 | `DeleteJob` | 刪除 Job record、它的筆記與物件儲存檔案，並發 `job.deleted`（見下方「刪除 Job」） |
 | `UpdateJob` | 使用者改**標題**與**類型**（見 `CONTEXT.md`）：只改有帶的欄位（`optional`），帶了的記為使用者設定過（`*_set_by_user`），`SetSuggestedDetails` 之後不會再寫；標題去頭尾空白、空字串＝清空（顯示檔名，仍算設定過）；標題超過 100 字或類型不在清單回 `INVALID_ARGUMENT`，別人的 Job 回 `NOT_FOUND` |

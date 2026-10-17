@@ -197,9 +197,9 @@ class NoteGrpcServiceIT {
     private Job createJob(UUID userId, int durationSeconds) throws Exception {
         UploadServiceGrpc.UploadServiceBlockingStub stub = uploads(userId);
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
-                .setFileName("meeting.mp3").setFileType(FileType.AUDIO).setFileSizeBytes(1024L).build());
+                .setFileName("meeting.mp3").setFileType(FileType.AUDIO).setContentType("audio/mpeg").setFileSizeBytes(1024L).build());
         HttpResponse<String> put = HttpClient.newHttpClient().send(
-                HttpRequest.newBuilder(URI.create(presigned.getUploadUrl())).PUT(HttpRequest.BodyPublishers.ofString("bytes")).build(),
+                HttpRequest.newBuilder(URI.create(presigned.getUploadUrl())).header("Content-Type", "audio/mpeg").PUT(HttpRequest.BodyPublishers.ofString("bytes")).build(),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(put.statusCode()).isEqualTo(200);
         Job job = stub.completeUpload(CompleteUploadRequest.newBuilder().setStoragePath(presigned.getStoragePath())

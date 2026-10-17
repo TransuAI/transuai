@@ -176,12 +176,12 @@ class InternalJobGrpcServiceIT {
 
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName(fileName)
-                .setFileType(FileType.AUDIO)
+                .setFileType(FileType.AUDIO).setContentType("audio/mpeg")
                 .setFileSizeBytes(1024L)
                 .build());
         HttpResponse<String> putResponse = HttpClient.newHttpClient().send(
                 HttpRequest.newBuilder(URI.create(presigned.getUploadUrl()))
-                        .PUT(HttpRequest.BodyPublishers.ofString("bytes"))
+                        .header("Content-Type", "audio/mpeg").PUT(HttpRequest.BodyPublishers.ofString("bytes"))
                         .build(),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(putResponse.statusCode()).isEqualTo(200);

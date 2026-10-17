@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
@@ -28,14 +29,18 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 @RequiredArgsConstructor
 public class StorageService {
 
+    private static final Pattern MEDIA_TYPE = Pattern.compile("(audio|video)/[a-z0-9][a-z0-9.+-]*", Pattern.CASE_INSENSITIVE);
+
     private final S3Presigner s3Presigner;
     private final S3Client s3Client;
     private final StorageProperties storageProperties;
 
-    public PresignedUpload createPresignedUploadUrl(String objectKey) {
+    // contentType 簽進 URL：上傳時的 Content-Type 必須跟它一樣，存下來的物件類型就是驗證過的這個（有效期間內重新 PUT 也一樣）。
+    public PresignedUpload createPresignedUploadUrl(String objectKey, String contentType) {
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(storageProperties.bucket())
                 .key(objectKey)
+                .contentType(contentType)
                 .build();
 
         Duration expiry = Duration.ofMinutes(storageProperties.presignExpiryMinutes());
@@ -48,12 +53,32 @@ public class StorageService {
         return new PresignedUpload(presigned.url().toString(), objectKey, Instant.now().plus(expiry));
     }
 
-    // 給播放器 inline 讀取的 URL。
+    // 給播放器 inline 讀取的 URL。存下來的類型不是音訊或影片（簽 Content-Type 之前上傳的舊物件）時，要物件儲存回
+    // application/octet-stream：瀏覽器直接打開也不會當成網頁執行（ASVS 12.5.2），播放器照樣認得音訊與影片的內容。
     public PresignedDownload createPresignedDownloadUrl(String objectKey) {
-        return presignGet(GetObjectRequest.builder()
+        GetObjectRequest.Builder request = GetObjectRequest.builder()
                 .bucket(storageProperties.bucket())
-                .key(objectKey)
-                .build());
+                .key(objectKey);
+        if (!isMediaType(headObjectContentType(objectKey))) {
+            request.responseContentType("application/octet-stream");
+        }
+        return presignGet(request.build());
+    }
+
+    /** 上傳的檔案可以是的類型：audio/* 或 video/*（不帶參數）。 */
+    public static boolean isMediaType(String contentType) {
+        return contentType != null && MEDIA_TYPE.matcher(contentType).matches();
+    }
+
+    private String headObjectContentType(String objectKey) {
+        try {
+            return s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(storageProperties.bucket())
+                    .key(objectKey)
+                    .build()).contentType();
+        } catch (NoSuchKeyException e) {
+            return null;
+        }
     }
 
     // 要求物件儲存以 Content-Disposition: attachment 回應的 URL：瀏覽器直接下載、存成 fileName。

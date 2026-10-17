@@ -40,6 +40,9 @@ import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 import com.transuai.upload_service.config.MqProperties;
 import com.transuai.upload_service.repository.JobRepository;
 
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import com.transuai.upload_service.service.StorageService;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
@@ -64,6 +67,15 @@ class UploadGrpcServiceIT {
 
     @Autowired
     private GrpcChannelFactory channelFactory;
+
+    @Autowired
+    private StorageService storageService;
+
+    @Autowired
+    private software.amazon.awssdk.services.s3.S3Client s3Client;
+
+    @Autowired
+    private com.transuai.upload_service.config.StorageProperties storageProperties;
 
     @Autowired
     private JobRepository jobRepository;
@@ -115,6 +127,7 @@ class UploadGrpcServiceIT {
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName("standup.mp3")
                 .setFileType(FileType.AUDIO)
+                .setContentType("audio/mpeg")
                 .setFileSizeBytes(2048L)
                 .build());
         assertThat(presigned.getUploadUrl()).contains("/media-uploads/");
@@ -457,6 +470,63 @@ class UploadGrpcServiceIT {
         assertThat(response.headers().firstValue("Content-Disposition")).isEmpty();
     }
 
+    // 上傳的檔案不能被當成網頁開（.scratch/pre-launch-hardening/issues/16，ASVS 12.5.2）。
+    @Test
+    void getPresignedUploadUrl_needsAnAudioTypeForAudioAndAVideoTypeForVideo() {
+        UploadServiceGrpc.UploadServiceBlockingStub stub = stubFor(UUID.randomUUID());
+
+        for (String contentType : new String[] {"", "text/html", "video/mp4", "audio/mpeg; charset=utf-8"}) {
+            assertThatThrownBy(() -> stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
+                    .setFileName("a.mp3").setFileType(FileType.AUDIO).setContentType(contentType).setFileSizeBytes(10L).build()))
+                    .as(contentType)
+                    .isInstanceOfSatisfying(StatusRuntimeException.class,
+                            e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT));
+        }
+        assertThat(stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
+                .setFileName("a.m4a").setFileType(FileType.AUDIO).setContentType("audio/x-m4a").setFileSizeBytes(10L).build())
+                .getUploadUrl()).contains("content-type");
+    }
+
+    @Test
+    void thePresignedUploadOnlyTakesTheTypeItWasSignedFor() throws Exception {
+        UploadServiceGrpc.UploadServiceBlockingStub stub = stubFor(UUID.randomUUID());
+        GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
+                .setFileName("a.mp3").setFileType(FileType.AUDIO).setContentType("audio/mpeg").setFileSizeBytes(10L).build());
+
+        HttpResponse<String> asHtml = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(presigned.getUploadUrl()))
+                .header("Content-Type", "text/html").PUT(HttpRequest.BodyPublishers.ofString("<script>alert(1)</script>")).build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertThat(asHtml.statusCode()).isEqualTo(403);
+        assertThat(storageService.headObjectSize(presigned.getStoragePath())).isEmpty();
+    }
+
+    @Test
+    void theInlineUrlOfAnOlderFileStoredAsAWebPageIsServedAsPlainBytes() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job job = createJob(userId, "older.mp3");
+        // Uploaded before the type was signed: stored as whatever the uploader said.
+        s3Client.putObject(PutObjectRequest.builder().bucket(storageProperties.bucket()).key(job.getStoragePath())
+                .contentType("text/html").build(), RequestBody.fromString("<script>alert(1)</script>"));
+
+        HttpResponse<String> response = get(stubFor(userId).getPresignedDownloadUrl(GetPresignedDownloadUrlRequest.newBuilder()
+                .setJobId(job.getJobId()).build()).getDownloadUrl());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.headers().firstValue("Content-Type")).hasValue("application/octet-stream");
+    }
+
+    @Test
+    void theInlineUrlOfAnAudioFileKeepsItsType() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Job job = createJob(userId, "standup.mp3");
+
+        HttpResponse<String> response = get(stubFor(userId).getPresignedDownloadUrl(GetPresignedDownloadUrlRequest.newBuilder()
+                .setJobId(job.getJobId()).build()).getDownloadUrl());
+
+        assertThat(response.headers().firstValue("Content-Type")).hasValue("audio/mpeg");
+    }
+
     private Job createJob(UUID userId, String fileName) throws Exception {
         return uploadedJob(stubFor(userId), fileName, "");
     }
@@ -467,6 +537,7 @@ class UploadGrpcServiceIT {
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName(fileName)
                 .setFileType(FileType.AUDIO)
+                .setContentType("audio/mpeg")
                 .setFileSizeBytes(1024L)
                 .build());
         putBytes(presigned.getUploadUrl());
@@ -506,7 +577,7 @@ class UploadGrpcServiceIT {
 
     private static void putBytes(String uploadUrl) throws Exception {
         HttpResponse<String> response = HttpClient.newHttpClient().send(
-                HttpRequest.newBuilder(URI.create(uploadUrl)).PUT(HttpRequest.BodyPublishers.ofString("bytes")).build(),
+                HttpRequest.newBuilder(URI.create(uploadUrl)).header("Content-Type", "audio/mpeg").PUT(HttpRequest.BodyPublishers.ofString("bytes")).build(),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(response.statusCode()).isEqualTo(200);
     }

@@ -70,6 +70,13 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
                     Status.INVALID_ARGUMENT.withDescription("file_size_bytes must be positive").asRuntimeException());
             return;
         }
+        String expectedKind = request.getFileType() == FileType.AUDIO ? "audio/" : "video/";
+        if (!StorageService.isMediaType(request.getContentType())
+                || !request.getContentType().toLowerCase(Locale.ROOT).startsWith(expectedKind)) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("content_type must be %s* for this file type".formatted(expectedKind)).asRuntimeException());
+            return;
+        }
         long presignMaxFileSizeBytes = uploadLimitsProperties.applicableMaxFileSizeBytes(request.getFileType());
         if (request.getFileSizeBytes() > presignMaxFileSizeBytes) {
             responseObserver.onError(Status.INVALID_ARGUMENT
@@ -81,7 +88,7 @@ public class UploadGrpcService extends UploadServiceGrpc.UploadServiceImplBase {
 
         UUID userId = GrpcAuthContext.currentUserId();
         String objectKey = StorageService.buildObjectKey(userId, request.getFileName());
-        StorageService.PresignedUpload presigned = storageService.createPresignedUploadUrl(objectKey);
+        StorageService.PresignedUpload presigned = storageService.createPresignedUploadUrl(objectKey, request.getContentType());
 
         responseObserver.onNext(GetPresignedUploadUrlResponse.newBuilder()
                 .setUploadUrl(presigned.uploadUrl())

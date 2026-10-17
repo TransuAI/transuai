@@ -86,6 +86,7 @@ class UploadGrpcServiceUploadLimitsIT {
         assertThatThrownBy(() -> stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName("huge.mp4")
                 .setFileType(FileType.VIDEO)
+                .setContentType("video/mp4")
                 .setFileSizeBytes(201L) // above the 200-byte test general limit
                 .build()))
                 .isInstanceOfSatisfying(StatusRuntimeException.class,
@@ -100,6 +101,7 @@ class UploadGrpcServiceUploadLimitsIT {
         assertThatThrownBy(() -> stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName("long-podcast.mp3")
                 .setFileType(FileType.AUDIO)
+                .setContentType("audio/mpeg")
                 .setFileSizeBytes(sizeBetweenAudioAndGeneralLimit)
                 .build()))
                 .isInstanceOfSatisfying(StatusRuntimeException.class,
@@ -109,6 +111,7 @@ class UploadGrpcServiceUploadLimitsIT {
         GetPresignedUploadUrlResponse videoPresigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName("clip.mp4")
                 .setFileType(FileType.VIDEO)
+                .setContentType("video/mp4")
                 .setFileSizeBytes(sizeBetweenAudioAndGeneralLimit)
                 .build());
         assertThat(videoPresigned.getStoragePath()).startsWith("uploads/");
@@ -123,6 +126,7 @@ class UploadGrpcServiceUploadLimitsIT {
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName("lying-about-size.mp3")
                 .setFileType(FileType.AUDIO)
+                .setContentType("audio/mpeg")
                 .setFileSizeBytes(10L)
                 .build());
         String oversizedBody = "x".repeat(150); // exceeds the 100-byte test audio limit
@@ -149,6 +153,7 @@ class UploadGrpcServiceUploadLimitsIT {
         GetPresignedUploadUrlResponse presigned = stub.getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
                 .setFileName("fits.mp3")
                 .setFileType(FileType.AUDIO)
+                .setContentType("audio/mpeg")
                 .setFileSizeBytes(10L)
                 .build());
         String smallBody = "x".repeat(50); // within the 100-byte test audio limit
@@ -173,7 +178,7 @@ class UploadGrpcServiceUploadLimitsIT {
 
     private static void putBytes(String uploadUrl, String body) throws Exception {
         HttpResponse<String> response = HttpClient.newHttpClient().send(
-                HttpRequest.newBuilder(URI.create(uploadUrl)).PUT(HttpRequest.BodyPublishers.ofString(body)).build(),
+                HttpRequest.newBuilder(URI.create(uploadUrl)).header("Content-Type", "audio/mpeg").PUT(HttpRequest.BodyPublishers.ofString(body)).build(),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(response.statusCode()).isEqualTo(200);
     }
