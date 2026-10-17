@@ -38,7 +38,7 @@ service AuthService {
 
   // 改密碼（需要 x-user-id）：目前的密碼錯回 PERMISSION_DENIED；新密碼不合規則回 INVALID_ARGUMENT。成功就作廢這位使用者所有的
   // refresh token（其他裝置要重新登入），並為這次的請求簽一組新的 token。
-  rpc ChangePassword(ChangePasswordRequest) returns (AuthResponse);
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
 }
 
 message RegisterRequest {
@@ -83,6 +83,8 @@ message LogoutResponse {
   // Logout：作廢的那一串（這次登入）的 id，跟 access token 的 sid 一樣，gateway 用它讓那一串簽出的 access token 也馬上失效；
   // token 無效或不認得時是空的。LogoutAllDevices 不填。
   string session_id = 1;
+  // LogoutAllDevices：作廢的、access token 可能還沒過期的那幾串（最近一個 access token 效期內簽過 token 的）。Logout 不填。
+  repeated string ended_session_ids = 2;
 }
 
 message DeleteAccountRequest {
@@ -95,4 +97,11 @@ message DeleteAccountResponse {
 message ChangePasswordRequest {
   string current_password = 1;
   string new_password = 2;
+}
+
+message ChangePasswordResponse {
+  // 這次請求的新登入。
+  AuthResponse signed_in = 1;
+  // 作廢的、access token 可能還沒過期的那幾串（同 LogoutResponse.ended_session_ids）。
+  repeated string ended_session_ids = 2;
 }
