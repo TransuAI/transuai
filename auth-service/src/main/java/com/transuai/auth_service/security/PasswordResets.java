@@ -1,14 +1,8 @@
 package com.transuai.auth_service.security;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -25,8 +19,6 @@ import com.transuai.auth_service.repository.PasswordResetTokenRepository;
  */
 @Service
 public class PasswordResets {
-
-    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final PasswordResetTokenRepository repository;
     private final Duration ttl;
@@ -45,11 +37,9 @@ public class PasswordResets {
     public String issue(UUID userId) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         repository.useUpAllOf(userId, now);
-        byte[] bytes = new byte[32];
-        RANDOM.nextBytes(bytes);
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        String token = OneTimeTokens.newToken();
         repository.save(PasswordResetToken.builder()
-                .id(UUID.randomUUID()).userId(userId).tokenHash(sha256(token)).expiresAt(now.plus(ttl))
+                .id(UUID.randomUUID()).userId(userId).tokenHash(OneTimeTokens.sha256(token)).expiresAt(now.plus(ttl))
                 .build());
         return token;
     }
@@ -58,17 +48,9 @@ public class PasswordResets {
     @Transactional
     public Optional<UUID> useUp(String token) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        Optional<PasswordResetToken> stored = repository.findForUpdate(sha256(token))
+        Optional<PasswordResetToken> stored = repository.findForUpdate(OneTimeTokens.sha256(token))
                 .filter(found -> found.getUsedAt() == null && found.getExpiresAt().isAfter(now));
         stored.ifPresent(found -> repository.useUpAllOf(found.getUserId(), now));
         return stored.map(PasswordResetToken::getUserId);
-    }
-
-    private static String sha256(String text) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is always available", e);
-        }
     }
 }

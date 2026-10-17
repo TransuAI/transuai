@@ -37,6 +37,7 @@ import com.transuai.auth.grpc.v1.RegisterRequest;
 import com.transuai.auth.grpc.v1.RequestPasswordResetRequest;
 import com.transuai.auth.grpc.v1.ResetPasswordRequest;
 import com.transuai.auth.grpc.v1.ResetPasswordResponse;
+import com.transuai.auth.grpc.v1.VerifyEmailRequest;
 import com.transuai.auth_service.PostgresContainerConfig;
 
 import io.grpc.Metadata;
@@ -73,6 +74,11 @@ class PasswordResetTest {
     void setUp() {
         user = stub().register(RegisterRequest.newBuilder()
                 .setEmail("user-" + UUID.randomUUID() + "@example.com").setPassword(PASSWORD).build());
+        // 忘記密碼只寄給確認過的 email：先點註冊時寄的確認信，之後的信從頭算。
+        Matcher confirm = Pattern.compile("verify-email#token=([A-Za-z0-9_-]{43})").matcher(lastMail(1).getText());
+        assertThat(confirm.find()).isTrue();
+        stub().verifyEmail(VerifyEmailRequest.newBuilder().setToken(confirm.group(1)).build());
+        Mockito.clearInvocations(mail);
     }
 
     @Test

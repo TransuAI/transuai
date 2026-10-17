@@ -1,6 +1,8 @@
 package com.transuai.auth_service.grpc;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -14,6 +16,8 @@ import com.transuai.auth.grpc.v1.ChangePasswordRequest;
 import com.transuai.auth.grpc.v1.ChangePasswordResponse;
 import com.transuai.auth.grpc.v1.DeleteAccountRequest;
 import com.transuai.auth.grpc.v1.DeleteAccountResponse;
+import com.transuai.auth.grpc.v1.GenerateRecoveryCodesRequest;
+import com.transuai.auth.grpc.v1.GenerateRecoveryCodesResponse;
 import com.transuai.auth.grpc.v1.GetMeRequest;
 import com.transuai.auth.grpc.v1.LoginRequest;
 import com.transuai.auth.grpc.v1.LogoutAllDevicesRequest;
@@ -23,16 +27,23 @@ import com.transuai.auth.grpc.v1.RefreshRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
 import com.transuai.auth.grpc.v1.RequestPasswordResetRequest;
 import com.transuai.auth.grpc.v1.RequestPasswordResetResponse;
+import com.transuai.auth.grpc.v1.ResendEmailVerificationRequest;
+import com.transuai.auth.grpc.v1.ResendEmailVerificationResponse;
 import com.transuai.auth.grpc.v1.ResetPasswordRequest;
 import com.transuai.auth.grpc.v1.ResetPasswordResponse;
+import com.transuai.auth.grpc.v1.ResetPasswordWithRecoveryCodeRequest;
 import com.transuai.auth.grpc.v1.User;
+import com.transuai.auth.grpc.v1.VerifyEmailRequest;
+import com.transuai.auth.grpc.v1.VerifyEmailResponse;
 import com.transuai.auth_service.grpc.auth.GrpcAuthContext;
 import com.transuai.auth_service.repository.UserRepository;
 import com.transuai.auth_service.mail.AccountMail;
 import com.transuai.auth_service.security.AuthLinks;
 import com.transuai.auth_service.security.CommonPasswords;
+import com.transuai.auth_service.security.EmailVerifications;
 import com.transuai.auth_service.security.JwtService;
 import com.transuai.auth_service.security.PasswordResets;
+import com.transuai.auth_service.security.RecoveryCodes;
 import com.transuai.auth_service.security.RefreshTokens;
 import com.transuai.auth_service.service.AccountDeletion;
 
@@ -57,6 +68,8 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     private final PasswordResets passwordResets;
     private final AccountMail accountMail;
     private final AuthLinks links;
+    private final EmailVerifications emailVerifications;
+    private final RecoveryCodes recoveryCodes;
     // 帳號不存在時也拿密碼比對這個雜湊，回應時間才跟「密碼錯」一樣長，不能用來猜哪些 email 註冊過。第一次用到才產生
     // （跟真的密碼用同一個 encoder、同樣的成本）。
     private volatile String unknownUserHash;
@@ -86,6 +99,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
                 .displayName(request.getDisplayName().isBlank() ? null : request.getDisplayName())
                 .build();
         user = userRepository.save(user);
+        sendEmailVerification(user);
 
         responseObserver.onNext(buildAuthResponse(user, refreshTokens.issue(user.getId())));
         responseObserver.onCompleted();
@@ -207,8 +221,10 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
             return;
         }
         String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
-        userRepository.findByEmail(email).ifPresent(user -> accountMail.passwordResetLink(user.getEmail(),
-                links.passwordReset(passwordResets.issue(user.getId())), passwordResets.ttl().toMinutes()));
+        // 只寄給確認過的 email：沒確認的地址可能根本不是這個人的，寄重設連結過去等於把帳號交給那個信箱的主人。
+        userRepository.findByEmail(email).filter(user -> user.getEmailVerifiedAt() != null)
+                .ifPresent(user -> accountMail.passwordResetLink(user.getEmail(),
+                        links.passwordReset(passwordResets.issue(user.getId())), passwordResets.ttl().toMinutes()));
         responseObserver.onNext(RequestPasswordResetResponse.getDefaultInstance());
         responseObserver.onCompleted();
     }
@@ -265,8 +281,99 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
             return;
         }
 
-        responseObserver.onNext(UserMapper.toProto(user));
+        responseObserver.onNext(UserMapper.toProto(user, recoveryCodes.left(user.getId())));
         responseObserver.onCompleted();
+    }
+
+    @Override
+    public void verifyEmail(VerifyEmailRequest request, StreamObserver<VerifyEmailResponse> responseObserver) {
+        com.transuai.auth_service.domain.User user = emailVerifications.useUp(request.getToken())
+                .flatMap(userRepository::findById).orElse(null);
+        if (user == null) {
+            responseObserver.onError(Status.FAILED_PRECONDITION
+                    .withDescription("這個確認連結無效或已過期，請到設定頁重寄確認信").asRuntimeException());
+            return;
+        }
+        if (user.getEmailVerifiedAt() == null) {
+            user.setEmailVerifiedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            userRepository.save(user);
+        }
+        responseObserver.onNext(VerifyEmailResponse.getDefaultInstance());
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void resendEmailVerification(ResendEmailVerificationRequest request,
+            StreamObserver<ResendEmailVerificationResponse> responseObserver) {
+        com.transuai.auth_service.domain.User user = userRepository.findById(GrpcAuthContext.currentUserId()).orElse(null);
+        if (user == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("user not found").asRuntimeException());
+            return;
+        }
+        if (user.getEmailVerifiedAt() == null && !accountMail.available()) {
+            responseObserver.onError(Status.UNAVAILABLE
+                    .withDescription("這個系統沒有設定寄信，不能寄確認信").asRuntimeException());
+            return;
+        }
+        sendEmailVerification(user);
+        responseObserver.onNext(ResendEmailVerificationResponse.getDefaultInstance());
+        responseObserver.onCompleted();
+    }
+
+    // 復原碼要目前的密碼才能產生（錯了 PERMISSION_DENIED，理由同 deleteAccount）；舊的作廢，寄通知信。
+    @Override
+    public void generateRecoveryCodes(GenerateRecoveryCodesRequest request,
+            StreamObserver<GenerateRecoveryCodesResponse> responseObserver) {
+        com.transuai.auth_service.domain.User user = userRepository.findById(GrpcAuthContext.currentUserId()).orElse(null);
+        if (user == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("user not found").asRuntimeException());
+            return;
+        }
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+            responseObserver.onError(Status.PERMISSION_DENIED.withDescription("wrong password").asRuntimeException());
+            return;
+        }
+        List<String> codes = recoveryCodes.generate(user.getId());
+        accountMail.recoveryCodesGenerated(user.getEmail(), Instant.now());
+        responseObserver.onNext(GenerateRecoveryCodesResponse.newBuilder().addAllCodes(codes).build());
+        responseObserver.onCompleted();
+    }
+
+    // 忘記密碼的另一條路（ASVS 2.5.6）：email＋一組復原碼。email 或復原碼不對都是同一個錯誤（不透露有沒有這個帳號）。
+    @Override
+    public void resetPasswordWithRecoveryCode(ResetPasswordWithRecoveryCodeRequest request,
+            StreamObserver<ResetPasswordResponse> responseObserver) {
+        String passwordProblem = passwordProblem(request.getNewPassword());
+        if (passwordProblem != null) {
+            responseObserver.onError(Status.INVALID_ARGUMENT.withDescription(passwordProblem).asRuntimeException());
+            return;
+        }
+        String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
+        com.transuai.auth_service.domain.User user = userRepository.findByEmail(email)
+                .filter(found -> recoveryCodes.useUp(found.getId(), request.getCode())).orElse(null);
+        if (user == null) {
+            responseObserver.onError(Status.FAILED_PRECONDITION
+                    .withDescription("email 或復原碼不對，或這組復原碼已經用過了").asRuntimeException());
+            return;
+        }
+
+        List<UUID> ended = refreshTokens.logoutAll(user.getId());
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user = userRepository.save(user);
+        accountMail.passwordResetWithRecoveryCode(user.getEmail(), Instant.now());
+        responseObserver.onNext(ResetPasswordResponse.newBuilder()
+                .setUserId(user.getId().toString())
+                .addAllEndedSessionIds(ended.stream().map(UUID::toString).toList())
+                .build());
+        responseObserver.onCompleted();
+    }
+
+    // 有設定寄信、還沒確認的才寄（沒有寄信的部署不要求確認，也沒辦法確認）。
+    private void sendEmailVerification(com.transuai.auth_service.domain.User user) {
+        if (user.getEmailVerifiedAt() == null && accountMail.available()) {
+            accountMail.emailVerificationLink(user.getEmail(),
+                    links.emailVerification(emailVerifications.issue(user.getId())), emailVerifications.ttl().toHours());
+        }
     }
 
     private String unknownUserHash() {
@@ -280,7 +387,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
         return AuthResponse.newBuilder()
                 .setAccessToken(jwtService.issueAccessToken(user.getId(), user.getEmail(), issued.sessionId()))
                 .setRefreshToken(issued.refreshToken())
-                .setUser(UserMapper.toProto(user))
+                .setUser(UserMapper.toProto(user, recoveryCodes.left(user.getId())))
                 .build();
     }
 }

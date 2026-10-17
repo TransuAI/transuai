@@ -27,9 +27,24 @@ access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）�
 
 改密碼 → POST /auth/password（目前的密碼＋新密碼）→ AuthService.ChangePassword：作廢這位使用者所有的 refresh token、存新的雜湊、為這次簽一組新的 token、寄通知信
 
-忘記密碼 → POST /auth/password-reset { email } → AuthService.RequestPasswordReset：有這個帳號就寄重設連結（`{FRONTEND_URL}/reset-password#token=…`），沒有也一樣回成功
+註冊 → 有設定寄信時寄確認信（`{FRONTEND_URL}/verify-email#token=…`，24 小時、一次性）→ 使用者按「確認」→ POST /auth/verify-email → AuthService.VerifyEmail
+忘記密碼 → POST /auth/password-reset { email } → AuthService.RequestPasswordReset：有這個帳號**而且 email 確認過**才寄重設連結（`{FRONTEND_URL}/reset-password#token=…`），不然也一樣回成功
   → 使用者點連結 → POST /auth/password-reset/confirm { token, newPassword } → AuthService.ResetPassword：用掉 token、作廢所有登入、存新的雜湊、寄通知信
+收不到信 → POST /auth/password-reset/recovery-code { email, code, newPassword } → AuthService.ResetPasswordWithRecoveryCode：用掉那組復原碼、作廢所有登入、存新的雜湊、寄通知信
 ```
+
+### 確認 email 與復原碼
+
+忘記密碼不只靠 email（ASVS 2.5.6）：
+
+- **確認 email**（`security/EmailVerifications`，`email_verification_tokens`，`users.email_verified_at`）：有設定寄信時，註冊後寄確認信（token 跟重設連結
+  一樣：256 bits、只存雜湊、一次性，`EMAIL_VERIFICATION_TTL` 24 小時；重寄時舊的作廢）。**重設密碼的信只寄給確認過的 email**——沒確認的地址可能根本
+  不是這個人的。確認頁要使用者按一下才確認（信箱的連結掃描程式打開頁面不會代為確認）。沒有設定寄信的部署不寄、也不要求確認。這個功能上線前註冊的
+  帳號都是「還沒確認」，要到設定頁重寄確認信。
+- **復原碼**（`security/RecoveryCodes`，`recovery_codes`）：要目前的密碼才能產生（錯了 `PERMISSION_DENIED`），一次 10 組、每組 20 個字（從 32 個不容易
+  看錯的字母數字挑，100 bits，格式 `XXXXX-XXXXX-XXXXX-XXXXX`），只存正規化後（大寫、去掉空白與 -）的 SHA-256；產生新的時舊的全部作廢；只有產生的
+  那一次回傳明文；一組只能用一次。用 email＋一組復原碼可以直接設新密碼（email 或復原碼不對是同一個錯誤），之後作廢所有登入。產生與使用都寄通知信。
+  `GetMe` 與登入的回應帶 `email_verified`、`recovery_codes_left`。
 
 ### 寄信（忘記密碼、帳號異動通知）
 
@@ -119,7 +134,11 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `LogoutAllDevices` | 依 `x-user-id` 作廢這位使用者所有的 refresh token，回傳 access token 可能還沒過期的那幾串（`ended_session_ids`） |
 | `GetMe` | 依 `x-user-id` 查目前使用者資訊，找不到（例如帳號已被刪除）回 `NOT_FOUND` |
 | `DeleteAccount` | 刪除帳號（`x-user-id`）：再確認一次密碼，錯了回 `PERMISSION_DENIED`（不是 `UNAUTHENTICATED`——前端會以為 token 過期去換發）；通過就在同一個交易裡刪掉使用者、他所有的 refresh token，並把 `account.deleted { userId }` 寫進 outbox（見下方「刪除帳號」）。找不到使用者回 `NOT_FOUND`。猜密碼的次數由 gateway 限流 |
-| `RequestPasswordReset` | 忘記密碼（不需要 `x-user-id`）：email 有註冊就寄重設連結，沒有也回成功；沒有設定寄信時 `UNAVAILABLE`（見「寄信」） |
+| `VerifyEmail` | 確認 email（不需要 `x-user-id`）：確認信裡的 token；無效、過期、用過了回 `FAILED_PRECONDITION` |
+| `ResendEmailVerification` | 重寄確認信（`x-user-id`）：已經確認就什麼都不做；沒有設定寄信 `UNAVAILABLE` |
+| `GenerateRecoveryCodes` | 產生復原碼（`x-user-id`）：目前的密碼錯了 `PERMISSION_DENIED`；舊的作廢，回傳新的 10 組，寄通知信 |
+| `ResetPasswordWithRecoveryCode` | 用 email＋一組復原碼設新密碼（不需要 `x-user-id`）：不對（不分是 email 還是復原碼）或用過了 `FAILED_PRECONDITION`；新密碼不合規則 `INVALID_ARGUMENT`（不用掉復原碼）；成功就作廢所有登入、寄通知信，回傳同 `ResetPassword` |
+| `RequestPasswordReset` | 忘記密碼（不需要 `x-user-id`）：email 有註冊、而且確認過就寄重設連結，不然也回成功；沒有設定寄信時 `UNAVAILABLE`（見「寄信」） |
 | `ResetPassword` | 用重設連結的 token 設新密碼（不需要 `x-user-id`）：token 無效、過期、用過了回 `FAILED_PRECONDITION`；新密碼照註冊的規則（`INVALID_ARGUMENT`，不合時 token 不用掉）；成功就作廢所有登入、寄通知信，回傳 `user_id` 與作廢的那幾串（`ended_session_ids`） |
 | `ChangePassword` | 改密碼（`x-user-id`）：目前的密碼錯回 `PERMISSION_DENIED`（理由同 `DeleteAccount`），新密碼照註冊的規則（`INVALID_ARGUMENT`）。通過就先作廢這位使用者所有的 refresh token（改密碼常是懷疑被盜用；中途失敗頂多被登出），再存新的雜湊，回一組新的 token 與作廢的那幾串（`ended_session_ids`：最近一個 access token 效期內簽過 token 的，gateway 讓那些 access token 也馬上不能用） |
 
@@ -148,6 +167,7 @@ fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（
 | `MAIL_FROM` | 空 | 寄件人；空的時候同樣不寄 |
 | `FRONTEND_URL` | `http://localhost:5173` | 信裡連結指向的前端（跟 gateway 同一個值） |
 | `PASSWORD_RESET_TTL` | `30m` | 重設連結多久內有效 |
+| `EMAIL_VERIFICATION_TTL` | `24h` | 確認 email 的連結多久內有效 |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ（刪除帳號時發 `account.deleted`） |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `admin` / `0000` | RabbitMQ 帳密 |
 
@@ -155,11 +175,11 @@ fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（
 
 ```
 src/main/java/com/transuai/auth_service/
-  domain/           User entity、RefreshToken、PasswordResetToken、OutboxEventEntity（outbox）
+  domain/           User entity、RefreshToken、PasswordResetToken、EmailVerificationToken、RecoveryCode、OutboxEventEntity（outbox）
   repository/        Spring Data JPA repository
-  security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）、PasswordResets（忘記密碼的重設 token）、AuthLinks（信裡的連結）、CommonPasswords（太常見的密碼：SecLists 10k-most-common，打包在 `resources/common-passwords.txt`，MIT 授權見同目錄的 `.LICENSE`；不連外。也擋清單裡的密碼前後加數字或符號、同一段重複）
+  security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）、PasswordResets（忘記密碼的重設 token）、EmailVerifications（確認 email 的 token）、RecoveryCodes（復原碼）、OneTimeTokens（信裡的一次性 token 與雜湊）、AuthLinks（信裡的連結）、CommonPasswords（太常見的密碼：SecLists 10k-most-common，打包在 `resources/common-passwords.txt`，MIT 授權見同目錄的 `.LICENSE`；不連外。也擋清單裡的密碼前後加數字或符號、同一段重複）
   config/             SecurityConfig（PasswordEncoder bean：PBKDF2，認得舊的 bcrypt）、RabbitConfig（account.deleted fanout exchange）
-  service/            AccountDeletion（刪使用者、refresh token、重設 token，account.deleted 寫進 outbox）
+  service/            AccountDeletion（刪使用者、refresh token、重設與確認的 token、復原碼，account.deleted 寫進 outbox）
   mail/               AccountMail（重設連結與帳號異動通知的信，SMTP，背景寄）
   event/              OutboxPublisher（把 outbox 送到 RabbitMQ，publisher confirm）
   grpc/               AuthGrpcService（rpc 實作）、UserMapper（domain ↔ proto）
@@ -202,5 +222,5 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
 - 過期、作廢的 `refresh_tokens` 不會自動清掉（每次登入、換發多一列），量大了要加定期清理
-- 沒有 email 驗證（註冊時不確認 email 是本人的，忘記密碼的信就寄到註冊時填的地址）；忘記密碼只有 email 連結，沒有 TOTP 等其他復原方式；常見密碼只比對打包的 10,000 個（客戶內部部署可能不能連外，不查 Have I Been Pwned）
-- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出、30 天上限，密碼規則、改密碼、忘記密碼與通知信（`RefreshTokenTest`、`RefreshTokenGraceTest`、`PasswordPolicyTest`、`ChangePasswordTest`、`PasswordResetTest`（SMTP 用 mock）、`PasswordResetWithoutMailTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）
+- 沒有 MFA／TOTP（復原方式是 email 連結與復原碼）；改不了 email；常見密碼只比對打包的 10,000 個（客戶內部部署可能不能連外，不查 Have I Been Pwned）
+- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出、30 天上限，密碼規則、改密碼、忘記密碼與通知信（`RefreshTokenTest`、`RefreshTokenGraceTest`、`PasswordPolicyTest`、`ChangePasswordTest`、`PasswordResetTest`（SMTP 用 mock）、`PasswordResetWithoutMailTest`、`EmailVerificationAndRecoveryCodesTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）

@@ -38,7 +38,9 @@ class AuthGrpcServiceLoginTest {
                 mock(com.transuai.auth_service.security.CommonPasswords.class),
                 mock(com.transuai.auth_service.security.PasswordResets.class),
                 mock(com.transuai.auth_service.mail.AccountMail.class),
-                mock(com.transuai.auth_service.security.AuthLinks.class)).login(
+                mock(com.transuai.auth_service.security.AuthLinks.class),
+                mock(com.transuai.auth_service.security.EmailVerifications.class),
+                mock(com.transuai.auth_service.security.RecoveryCodes.class)).login(
                 LoginRequest.newBuilder().setEmail("nobody@example.com").setPassword("guess").build(), observer);
 
         verify(encoder).matches(eq("guess"), argThat(hash -> hash != null && hash.startsWith("{pbkdf2}")));

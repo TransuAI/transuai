@@ -61,6 +61,28 @@ public class AccountMail {
                 """.formatted(to, validMinutes, link));
     }
 
+    public void emailVerificationLink(String to, String link, long validHours) {
+        send(to, "確認你的 TransuAI email", """
+                請打開下面的連結，確認這個 email（%s）是你的（%d 小時內有效、只能用一次）：
+
+                %s
+
+                確認之後，忘記密碼時才能用 email 重設。如果你沒有註冊 TransuAI，不用理會這封信。
+                """.formatted(to, validHours, link));
+    }
+
+    public void recoveryCodesGenerated(String to, Instant at) {
+        send(to, "你的 TransuAI 復原碼已更新", """
+                你的帳號（%s）在 %s（台灣時間）產生了一組新的復原碼，之前的復原碼都不能用了。
+
+                如果不是你本人做的，請馬上到登入頁用「忘記密碼」重設密碼，並通知管理這套系統的人員。
+                """.formatted(to, WHEN.format(at)));
+    }
+
+    public void passwordResetWithRecoveryCode(String to, Instant at) {
+        send(to, "你的 TransuAI 密碼已重設", changedBody(to, "用復原碼重設", at));
+    }
+
     public void passwordChanged(String to, Instant at) {
         send(to, "你的 TransuAI 密碼已更改", changedBody(to, "更改", at));
     }

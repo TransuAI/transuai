@@ -40,6 +40,10 @@ public class User {
     @Column(name = "display_name", length = 100)
     private String displayName;
 
+    /** 點了確認信的時間；null 是還沒確認（忘記密碼的信只寄給確認過的 email）。 */
+    @Column(name = "email_verified_at")
+    private OffsetDateTime emailVerifiedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;

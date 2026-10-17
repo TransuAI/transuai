@@ -27,6 +27,20 @@ class PasswordResetWithoutMailTest {
     private GrpcChannelFactory channels;
 
     @Test
+    void confirmingTheEmailIsNotAsked() {
+        var stub = AuthServiceGrpc.newBlockingStub(channels.createChannel("auth"));
+        var user = stub.register(com.transuai.auth.grpc.v1.RegisterRequest.newBuilder()
+                .setEmail("user-" + java.util.UUID.randomUUID() + "@example.com").setPassword("a-good-password").build());
+        io.grpc.Metadata headers = new io.grpc.Metadata();
+        headers.put(io.grpc.Metadata.Key.of("x-user-id", io.grpc.Metadata.ASCII_STRING_MARSHALLER), user.getUser().getId());
+
+        assertThatThrownBy(() -> stub.withInterceptors(io.grpc.stub.MetadataUtils.newAttachHeadersInterceptor(headers))
+                .resendEmailVerification(com.transuai.auth.grpc.v1.ResendEmailVerificationRequest.getDefaultInstance()))
+                .isInstanceOfSatisfying(StatusRuntimeException.class,
+                        e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.UNAVAILABLE));
+    }
+
+    @Test
     void forgotPasswordSaysItIsNotAvailable() {
         assertThatThrownBy(() -> AuthServiceGrpc.newBlockingStub(channels.createChannel("auth"))
                 .requestPasswordReset(RequestPasswordResetRequest.newBuilder().setEmail("a@example.com").build()))

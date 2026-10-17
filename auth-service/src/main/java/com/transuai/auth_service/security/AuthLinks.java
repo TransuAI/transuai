@@ -19,4 +19,8 @@ public class AuthLinks {
     public String passwordReset(String token) {
         return frontendUrl + "/reset-password#token=" + token;
     }
+
+    public String emailVerification(String token) {
+        return frontendUrl + "/verify-email#token=" + token;
+    }
 }

@@ -8,7 +8,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.transuai.auth_service.domain.OutboxEventEntity;
 import com.transuai.auth_service.repository.OutboxEventRepository;
+import com.transuai.auth_service.repository.EmailVerificationTokenRepository;
 import com.transuai.auth_service.repository.PasswordResetTokenRepository;
+import com.transuai.auth_service.repository.RecoveryCodeRepository;
 import com.transuai.auth_service.repository.RefreshTokenRepository;
 import com.transuai.auth_service.repository.UserRepository;
 
@@ -22,15 +24,20 @@ public class AccountDeletion {
     private final UserRepository users;
     private final RefreshTokenRepository refreshTokens;
     private final PasswordResetTokenRepository passwordResetTokens;
+    private final EmailVerificationTokenRepository emailVerificationTokens;
+    private final RecoveryCodeRepository recoveryCodes;
     private final OutboxEventRepository outbox;
     private final String exchange;
 
     public AccountDeletion(UserRepository users, RefreshTokenRepository refreshTokens,
-            PasswordResetTokenRepository passwordResetTokens, OutboxEventRepository outbox,
+            PasswordResetTokenRepository passwordResetTokens, EmailVerificationTokenRepository emailVerificationTokens,
+            RecoveryCodeRepository recoveryCodes, OutboxEventRepository outbox,
             @Value("${app.mq.account-deleted-exchange}") String exchange) {
         this.users = users;
         this.refreshTokens = refreshTokens;
         this.passwordResetTokens = passwordResetTokens;
+        this.emailVerificationTokens = emailVerificationTokens;
+        this.recoveryCodes = recoveryCodes;
         this.outbox = outbox;
         this.exchange = exchange;
     }
@@ -39,6 +46,8 @@ public class AccountDeletion {
     public void delete(UUID userId) {
         refreshTokens.deleteByUserId(userId);
         passwordResetTokens.deleteByUserId(userId);
+        emailVerificationTokens.deleteByUserId(userId);
+        recoveryCodes.deleteByUserId(userId);
         users.deleteById(userId);
         outbox.save(OutboxEventEntity.builder()
                 .exchange(exchange)
