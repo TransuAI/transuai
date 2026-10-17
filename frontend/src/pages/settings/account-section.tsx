@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/alert-dialog'
 
 // 帳號: changing the password, signing out of every device (e.g. after using a shared computer or losing a phone —
-// sessions elsewhere end at their next token refresh, within 15 minutes; this one ends now), and deleting the account.
+// sessions elsewhere end at their next request), and deleting the account.
 export function AccountSection() {
   const { logoutEverywhere } = useAuth()
   const [isWorking, setIsWorking] = useState(false)
@@ -38,7 +38,7 @@ export function AccountSection() {
       </h2>
       <ChangePassword />
       <p className="text-sm text-muted-foreground">
-        在別的電腦登入過、或手機遺失時，可以登出所有裝置：其他裝置最晚 15 分鐘內會被登出，這台也會登出。
+        在別的電腦登入過、或手機遺失時，可以登出所有裝置：其他裝置馬上會被登出，這台也會登出。
       </p>
       <div>
         <Button variant="outline" disabled={isWorking} onClick={signOutEverywhere}>
