@@ -1,0 +1,75 @@
+# 發行：推 tag v*（例如 v1.0.0）時 build 七個服務的 image，推到 GHCR：ghcr.io/<owner>/transuai/<service>:<tag>（也標 latest）。
+# 客戶的 .env 設 TRANSUAI_REGISTRY=ghcr.io/<owner>/transuai、TRANSUAI_VERSION=<tag>，用 install.sh --images pull 安裝。
+# 另外把 infra/deploy 打包成 transuai-deploy-<tag>.tar.gz 附在 GitHub Release（不用 clone 原始碼也能裝）。
+name: release-images
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 建 GitHub Release
+  packages: write   # 推到 GHCR
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Java 服務的 build context 是 repo 根目錄（要讀 infra/proto），其他是各自的目錄。
+          - { service: auth-service, context: ., dockerfile: auth-service/Dockerfile }
+          - { service: upload-service, context: ., dockerfile: upload-service/Dockerfile }
+          - { service: gateway, context: ., dockerfile: gateway/Dockerfile }
+          - { service: transcription-service, context: transcription-service, dockerfile: transcription-service/Dockerfile }
+          - { service: ai-service, context: ai-service, dockerfile: ai-service/Dockerfile }
+          - { service: notification-service, context: notification-service, dockerfile: notification-service/Dockerfile }
+          - { service: frontend, context: frontend, dockerfile: frontend/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: name
+        # GHCR 的名稱要小寫。
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/transuai/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.name.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.name.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  release:
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 打包安裝檔（預設用這次發行的 image）
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          mkdir -p dist/transuai
+          cp -r infra/deploy/. dist/transuai/
+          rm -f dist/transuai/compose.build.yaml
+          sed -i "s|^TRANSUAI_REGISTRY=.*|TRANSUAI_REGISTRY=ghcr.io/$owner/transuai|; s|^TRANSUAI_VERSION=.*|TRANSUAI_VERSION=${GITHUB_REF_NAME}|" \
+            dist/transuai/.env.example
+          sed -i 's|^url="" http_port=80 gpu="" images="build"|url="" http_port=80 gpu="" images="pull"|' dist/transuai/install.sh
+          tar -C dist -czf "transuai-deploy-${GITHUB_REF_NAME}.tar.gz" transuai
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: transuai-deploy-*.tar.gz
+          generate_release_notes: true
