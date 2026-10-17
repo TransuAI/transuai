@@ -1,0 +1,362 @@
+"""翻譯逐字稿怎麼跑（.scratch/transcript-translation/issues/01）：gRPC 要求、列出、取得（真的 Postgres，RabbitMQ 換成記錄發了什麼的
+假的），以及背景翻譯——直接呼叫處理 translation.requested 的函式，模型是假的 AI 廠商，逐字稿 client mock 掉。"""
+
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import grpc
+import pytest
+from sqlalchemy import select
+
+from app.db import new_session
+from app.models import LlmUsage
+from app.proto_gen import ai_pb2
+from app.models import Translation, TranslationStatus
+from app.services import job_deletion, translations
+from app.services.retry import RetryableMessageError
+
+USER = uuid.UUID("00000000-0000-0000-0000-00000000a11e")
+SEG = [str(uuid.uuid4()) for _ in range(4)]
+
+
+def segment(i, text, speaker="S1"):
+    return SimpleNamespace(id=SEG[i], start_time=i * 2.0, end_time=i * 2.0 + 2, speaker_label=speaker, text=text)
+
+
+def transcript(segments):
+    return SimpleNamespace(full_text="", revision=0, language="en", segments=segments, speakers=[])
+
+
+TRANSCRIPT = transcript([segment(0, "Hi."), segment(1, ""), segment(2, "Budget first."), segment(3, "Okay.")])
+
+
+@pytest.fixture
+def rabbitmq():
+    with patch("app.services.translations.BlockingConnection") as connection_class:
+        channel = MagicMock(name="channel")
+        connection_class.return_value.channel.return_value = channel
+        yield channel
+
+
+def published(channel):
+    return [(c.kwargs["routing_key"], json.loads(c.kwargs["body"])) for c in channel.basic_publish.call_args_list]
+
+
+def request(stub, job_id, language="zh-TW"):
+    return stub.RequestTranslation(ai_pb2.RequestTranslationRequest(job_id=str(job_id), user_id=str(USER), language=language))
+
+
+def get(stub, job_id, language="zh-TW"):
+    return stub.GetTranslation(ai_pb2.GetTranslationRequest(job_id=str(job_id), language=language))
+
+
+def process(job_id, the_transcript=TRANSCRIPT, language="zh-TW", retry_count=0):
+    with patch.object(translations, "transcript_client") as client:
+        client.get_transcript.return_value = the_transcript
+        translations.process_translation_requested(
+            json.dumps({"jobId": str(job_id), "language": language}).encode(), retry_count=retry_count)
+
+
+def answer(fake_llm, *texts):
+    fake_llm.reply(json.dumps([{"n": n, "text": t} for n, t in enumerate(texts, start=1)], ensure_ascii=False))
+
+
+def test_requesting_marks_it_being_translated_and_queues_it(ai_stub, db_session, rabbitmq):
+    job_id = uuid.uuid4()
+
+    translation = request(ai_stub, job_id)
+
+    assert (translation.language, translation.status) == ("zh-TW", ai_pb2.TRANSLATION_STATUS_GENERATING)
+    assert published(rabbitmq) == [("translation.requested", {"jobId": str(job_id), "language": "zh-TW"})]
+
+
+def test_an_unknown_language_is_invalid(ai_stub, db_session, rabbitmq):
+    with pytest.raises(grpc.RpcError) as error:
+        request(ai_stub, uuid.uuid4(), "fr")
+
+    assert error.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_every_spoken_segment_is_translated_under_its_id_and_cleared_ones_are_skipped(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+
+    process(job_id)
+
+    done = get(ai_stub, job_id)
+    assert done.status == ai_pb2.TRANSLATION_STATUS_COMPLETED
+    assert (done.total_segments, done.translated_segments) == (3, 3)
+    assert {s.segment_id: s.text for s in done.segments} == {SEG[0]: "嗨。", SEG[2]: "先談預算。", SEG[3]: "好。"}
+    assert {s.segment_id: s.source_text for s in done.segments}[SEG[2]] == "Budget first."  # what it was translated from
+    with new_session() as session:
+        assert {u.feature for u in session.scalars(select(LlmUsage).where(LlmUsage.job_id == job_id))} == {"translation"}
+
+
+def test_it_goes_in_batches_and_each_batch_is_saved_as_it_finishes(ai_stub, db_session, rabbitmq, fake_llm, monkeypatch):
+    monkeypatch.setattr(translations, "BATCH_SIZE", 2)
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。")
+    fake_llm.fail(400, {"error": {"message": "bad request"}})  # the second batch fails for good
+
+    process(job_id)
+
+    failed = get(ai_stub, job_id)
+    assert failed.status == ai_pb2.TRANSLATION_STATUS_FAILED
+    assert (failed.total_segments, failed.translated_segments) == (3, 2)  # the first batch is kept
+    second_prompt = fake_llm.bodies()[1]["messages"][0]["content"]
+    assert "Hi." in second_prompt and "Budget first." in second_prompt  # earlier lines as context
+    assert '{"n": 1, "text": "Okay."}' in second_prompt
+
+
+def test_asking_again_only_translates_what_is_missing_or_changed(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+
+    request(ai_stub, job_id)
+    answer(fake_llm, "預算第二。")
+    process(job_id, transcript([segment(0, "Hi."), segment(2, "Budget second."), segment(3, "Okay.")]))
+
+    assert len(fake_llm.bodies()) == 2
+    assert '{"n": 1, "text": "Budget second."}' in fake_llm.bodies()[1]["messages"][0]["content"]
+    assert {s.segment_id: s.text for s in get(ai_stub, job_id).segments}[SEG[2]] == "預算第二。"
+
+
+def test_a_segment_cleared_since_loses_its_translation(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+
+    request(ai_stub, job_id)
+    process(job_id, transcript([segment(0, "Hi."), segment(2, ""), segment(3, "Okay.")]))
+
+    assert SEG[2] not in {s.segment_id for s in get(ai_stub, job_id).segments}
+
+
+def test_a_batch_that_comes_back_wrong_is_split_in_half_and_each_half_translated(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    fake_llm.reply('[{"n": 1, "text": "合併了三句"}]')  # the model merged the lines
+    answer(fake_llm, "嗨。")  # first half: line 1
+    answer(fake_llm, "先談預算。", "好。")  # second half: lines 2–3
+
+    process(job_id)
+
+    done = get(ai_stub, job_id)
+    assert done.status == ai_pb2.TRANSLATION_STATUS_COMPLETED
+    assert {s.segment_id: s.text for s in done.segments} == {SEG[0]: "嗨。", SEG[2]: "先談預算。", SEG[3]: "好。"}
+    second_half = fake_llm.bodies()[2]["messages"][0]["content"]
+    assert "Hi." in second_half and '{"n": 1, "text": "Budget first."}' in second_half  # the first half as context
+
+
+def test_a_single_line_that_comes_back_wrong_twice_fails_with_a_reason(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    fake_llm.reply("不是 JSON")
+    fake_llm.reply("還是不是 JSON")
+
+    process(job_id, transcript([segment(0, "Hi.")]))
+
+    assert get(ai_stub, job_id).failure_reason == translations.FORMAT_REASON
+
+
+def test_a_passing_failure_is_retried_as_a_message(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    fake_llm.fail(503)
+
+    with pytest.raises(RetryableMessageError):
+        process(job_id)
+
+
+def test_each_language_is_listed_with_its_progress(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id, "zh-TW")
+    request(ai_stub, job_id, "ja")
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id, language="zh-TW")
+
+    listed = {t.language: (t.status, t.translated_segments) for t in
+              ai_stub.ListTranslations(ai_pb2.ListTranslationsRequest(job_id=str(job_id))).translations}
+    assert listed == {"zh-TW": (ai_pb2.TRANSLATION_STATUS_COMPLETED, 3), "ja": (ai_pb2.TRANSLATION_STATUS_GENERATING, 0)}
+
+
+def test_a_language_never_asked_for_is_not_found(ai_stub, db_session):
+    with pytest.raises(grpc.RpcError) as error:
+        get(ai_stub, uuid.uuid4(), "ko")
+
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_deleting_the_job_deletes_its_translations(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+
+    job_deletion.delete_job_data(job_id)
+
+    assert list(ai_stub.ListTranslations(ai_pb2.ListTranslationsRequest(job_id=str(job_id))).translations) == []
+
+
+def edited(job_id, the_transcript):
+    with patch.object(translations, "transcript_client") as client:
+        client.get_transcript.return_value = the_transcript
+        translations.follow_transcript_edit(json.dumps({"jobId": str(job_id)}).encode())
+
+
+def test_an_edit_re_translates_only_the_changed_segments_and_drops_cleared_ones(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+    rabbitmq.reset_mock()
+    after_edit = transcript([segment(0, "Hello."), segment(2, ""), segment(3, "Okay.")])
+
+    edited(job_id, after_edit)
+
+    assert published(rabbitmq) == [("translation.requested", {"jobId": str(job_id), "language": "zh-TW"})]
+    following = get(ai_stub, job_id)
+    assert following.status == ai_pb2.TRANSLATION_STATUS_GENERATING
+    assert {s.segment_id for s in following.segments} == {SEG[3]}  # the edited one's old translation is gone too
+    assert (following.total_segments, following.translated_segments) == (2, 1)
+    answer(fake_llm, "哈囉。")
+    process(job_id, after_edit)
+    assert '{"n": 1, "text": "Hello."}' in fake_llm.bodies()[1]["messages"][0]["content"]
+    done = get(ai_stub, job_id)
+    assert (done.status, done.total_segments) == (ai_pb2.TRANSLATION_STATUS_COMPLETED, 2)
+    assert {s.segment_id: s.text for s in done.segments} == {SEG[0]: "哈囉。", SEG[3]: "好。"}
+
+
+def test_an_edit_that_changes_no_text_re_translates_nothing(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+    rabbitmq.reset_mock()
+
+    edited(job_id, TRANSCRIPT)  # e.g. a speaker was renamed
+
+    assert published(rabbitmq) == []
+    assert get(ai_stub, job_id).status == ai_pb2.TRANSLATION_STATUS_COMPLETED
+
+
+def test_an_edit_leaves_a_failed_translation_for_the_user_to_retry(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    fake_llm.fail(400, {"error": {"message": "bad request"}})
+    process(job_id)
+    rabbitmq.reset_mock()
+
+    edited(job_id, transcript([segment(0, "Hello.")]))
+
+    assert published(rabbitmq) == []
+    assert get(ai_stub, job_id).status == ai_pb2.TRANSLATION_STATUS_FAILED
+
+
+def test_a_job_without_translations_does_not_even_read_the_transcript(db_session, rabbitmq):
+    with patch.object(translations, "transcript_client") as client:
+        translations.follow_transcript_edit(json.dumps({"jobId": str(uuid.uuid4())}).encode())
+
+    client.get_transcript.assert_not_called()
+
+
+def test_a_deleted_language_is_gone(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    process(job_id)
+
+    ai_stub.DeleteTranslation(ai_pb2.DeleteTranslationRequest(job_id=str(job_id), language="zh-TW"))
+
+    assert list(ai_stub.ListTranslations(ai_pb2.ListTranslationsRequest(job_id=str(job_id))).translations) == []
+    with pytest.raises(grpc.RpcError) as error:
+        ai_stub.DeleteTranslation(ai_pb2.DeleteTranslationRequest(job_id=str(job_id), language="zh-TW"))
+    assert error.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_a_translation_deleted_while_it_was_being_made_stays_deleted(ai_stub, db_session, rabbitmq, fake_llm, monkeypatch):
+    monkeypatch.setattr(translations, "BATCH_SIZE", 2)
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。")
+
+    def delete_after_first_batch(*args, **kwargs):
+        ai_stub.DeleteTranslation(ai_pb2.DeleteTranslationRequest(job_id=str(job_id), language="zh-TW"))
+        return {SEG[3]: "好。"}
+    real = translations.translate_batch
+    monkeypatch.setattr(translations, "translate_batch",
+                        lambda pairs, *a, **k: real(pairs, *a, **k) if pairs[0][0] == SEG[0] else delete_after_first_batch())
+
+    process(job_id)
+
+    assert list(ai_stub.ListTranslations(ai_pb2.ListTranslationsRequest(job_id=str(job_id))).translations) == []
+
+
+def test_each_batch_gets_the_lines_around_it_as_context(ai_stub, db_session, rabbitmq, fake_llm, monkeypatch):
+    monkeypatch.setattr(translations, "BATCH_SIZE", 2)
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。")
+    answer(fake_llm, "好。")
+
+    process(job_id)
+
+    first_prompt = fake_llm.bodies()[0]["messages"][0]["content"]
+    after = first_prompt.split("後面的句子")[1]
+    assert "Okay." in after and '"Okay."' not in first_prompt  # the next line, as context only
+
+
+def test_reaching_the_monthly_platform_limit_stops_it_keeping_what_is_done(ai_stub, db_session, rabbitmq, fake_llm,
+                                                                         monkeypatch):
+    monkeypatch.setattr(translations, "BATCH_SIZE", 2)
+    left = iter([True, False])
+    monkeypatch.setattr(translations, "platform_tokens_left", lambda user_id, model: next(left))
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。")
+
+    process(job_id)
+
+    stopped = get(ai_stub, job_id)
+    assert (stopped.status, stopped.failure_reason) == (ai_pb2.TRANSLATION_STATUS_FAILED, translations.LIMIT_REASON)
+    assert stopped.translated_segments == 2
+    assert len(fake_llm.bodies()) == 1
+
+
+def test_an_edit_made_while_it_was_translating_is_caught_up_before_it_completes(ai_stub, db_session, rabbitmq, fake_llm):
+    job_id = uuid.uuid4()
+    request(ai_stub, job_id)
+    answer(fake_llm, "嗨。", "先談預算。", "好。")
+    answer(fake_llm, "先談時程。")
+    edited_meanwhile = transcript([segment(0, "Hi."), segment(2, "Schedule first."), segment(3, "Okay.")])
+    reads = iter([TRANSCRIPT, edited_meanwhile, edited_meanwhile])
+
+    with patch.object(translations, "transcript_client") as client:
+        client.get_transcript.side_effect = lambda _job_id: next(reads)
+        translations.process_translation_requested(json.dumps({"jobId": str(job_id), "language": "zh-TW"}).encode())
+
+    done = get(ai_stub, job_id)
+    assert done.status == ai_pb2.TRANSLATION_STATUS_COMPLETED
+    assert {s.segment_id: s.text for s in done.segments}[SEG[2]] == "先談時程。"
+
+
+def test_a_long_translation_still_saving_batches_is_not_taken_for_stuck():
+    now = datetime.now(timezone.utc)
+    translation = Translation(status=TranslationStatus.GENERATING, requested_at=now - timedelta(minutes=40),
+                              progressed_at=now - timedelta(minutes=1))
+    assert translations.effective_status(translation, now)[0] == TranslationStatus.GENERATING
+
+    translation.progressed_at = now - translations.STUCK_AFTER
+    assert translations.effective_status(translation, now)[0] == TranslationStatus.FAILED
+
+
+def test_a_malformed_edit_message_is_only_logged(db_session):
+    translations.follow_transcript_edit(b"not json")
