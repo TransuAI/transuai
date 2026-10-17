@@ -6,6 +6,9 @@ from dataclasses import dataclass
 
 import httpx2
 
+from app.core import outbound
+
+
 @dataclass(frozen=True)
 class ModelChoice:
     provider: str  # PLATFORM，或廠商名稱
@@ -36,7 +39,7 @@ OPENROUTER = "openrouter"
 _OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 # 使用者在設定頁等著的請求：很快放棄。測試會換掉它。
-_http_client = httpx2.Client(timeout=httpx2.Timeout(10.0, connect=5.0))
+_http_client = outbound.client(timeout=httpx2.Timeout(10.0, connect=5.0))
 
 
 class UnknownModel(Exception):

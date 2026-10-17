@@ -12,6 +12,8 @@ import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
+from app.core import outbound
+
 NOTION_MCP_URL = "https://mcp.notion.com/mcp"
 server_override: Any = None
 
@@ -35,7 +37,7 @@ async def _call_tool(access_token: str, name: str, arguments: dict[str, Any]) ->
             async with Client(server_override) as client:
                 result = await client.call_tool(name, arguments)
         else:
-            async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {access_token}"},
+            async with outbound.async_client(headers={"Authorization": f"Bearer {access_token}"},
                                           timeout=httpx2.Timeout(30.0, connect=10.0)) as http:
                 async with Client(streamable_http_client(NOTION_MCP_URL, http_client=http)) as client:
                     result = await client.call_tool(name, arguments)

@@ -5,10 +5,11 @@ from email.message import EmailMessage
 
 import httpx2
 
+from app.core import outbound
 from app.services.google_api import google_error_message
 
 _API = "https://gmail.googleapis.com/gmail/v1"
-_http_client = httpx2.Client(timeout=httpx2.Timeout(15.0, connect=5.0))
+_http_client = outbound.client(timeout=httpx2.Timeout(15.0, connect=5.0))
 
 
 class GmailError(Exception):

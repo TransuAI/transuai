@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 import httpx2
 from cryptography.exceptions import InvalidTag
 
+from app.core import outbound
 from app.core.config import settings
 from app.db import new_session
 from app.models import ConnectionStatus, OAuthClient, OAuthConnection, OAuthPendingAuthorization
@@ -32,7 +33,7 @@ from app.services.key_encryption import EncryptionUnavailable, decrypt, encrypt,
 
 logger = logging.getLogger(__name__)
 
-_http_client = httpx2.Client(timeout=httpx2.Timeout(10.0, connect=5.0))
+_http_client = outbound.client(timeout=httpx2.Timeout(10.0, connect=5.0))
 
 PENDING_FOR = timedelta(minutes=10)
 # Renew a little before the provider's deadline, so a token handed out isn't about to expire.

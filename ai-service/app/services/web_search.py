@@ -16,6 +16,7 @@ import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
+from app.core import outbound
 from app.core.config import settings
 
 TAVILY_MCP_URL = "https://mcp.tavily.com/mcp/"
@@ -84,7 +85,7 @@ async def _search(query: str) -> list[WebPage]:
         async with Client(server_override) as client:
             result = await client.call_tool("tavily_search", arguments)
     else:
-        async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {settings.tavily_api_key}"},
+        async with outbound.async_client(headers={"Authorization": f"Bearer {settings.tavily_api_key}"},
                                       timeout=httpx2.Timeout(_TIMEOUT_SECONDS)) as http:
             async with Client(streamable_http_client(TAVILY_MCP_URL, http_client=http)) as client:
                 result = await client.call_tool("tavily_search", arguments)

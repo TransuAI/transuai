@@ -1,8 +1,21 @@
 from functools import lru_cache
 
-from huggingface_hub import InferenceClient
+import httpx
+from huggingface_hub import InferenceClient, set_client_factory
+from huggingface_hub.utils._http import default_client_factory
 
+from app.core import outbound
 from app.core.config import settings
+
+
+# huggingface_hub 底層用 httpx：它建的 client 也要經過對外連線的允許清單（保留它自己的 hook，再加上我們的）。
+def _client_through_the_allowlist() -> httpx.Client:
+    client = default_client_factory()
+    client.event_hooks["request"] = [*client.event_hooks["request"], outbound.check]
+    return client
+
+
+set_client_factory(_client_through_the_allowlist)
 
 
 @lru_cache(maxsize=1)

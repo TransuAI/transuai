@@ -655,6 +655,14 @@ commit 新增或修改了哪些 Job 的資料，commit 之後查這些 Job 有�
 log）；刪掉自有金鑰、預設模型、會後處理設定、還沒完成的連結授權；`llm_usage`、`web_search_usage` **去識別化**（`user_id` 設成 NULL）。他的 Job
 的資料由每個 Job 的 `job.deleted` 清。
 
+## 對外連線的允許清單
+
+ai-service 只連設定好的外部服務（`app/core/outbound.py`，ASVS 12.6.1）：每個對外的 HTTP client（OpenAI 相容的模型 client、自有金鑰的驗證、
+模型清單、Google、Notion 與 Tavily 的 MCP、huggingface_hub）送出前都看網域，不在清單裡就不送、記 log、raise `OutboundBlocked`（不是暫時性的錯誤，
+不重試）。預設清單是程式用到的服務（HF 的路由與 huggingface.co、Tavily、Notion、Google 的 OAuth／日曆／Gmail／Tasks、OpenAI、Anthropic、Gemini、
+OpenRouter）；部署者用 `OUTBOUND_ALLOWED_HOSTS`（逗號分隔）整份換掉，例如拿掉不用的廠商。`PLATFORM_LLM_BASE_URL` 的網域一律自動加進去。
+新增會連外的 client 時用 `outbound.client()`／`async_client()` 建，並加進 `tests/test_outbound.py` 的清單。網路層的限制另外寫在部署清單。
+
 ## 正式環境（`APP_ENV=production`）
 
 `APP_ENV` 預設是 `development`；設成 `production`時：

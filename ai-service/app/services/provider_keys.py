@@ -4,6 +4,7 @@ import uuid
 
 import httpx2
 
+from app.core import outbound
 from app.db import new_session
 from app.models import ProviderKey
 from app.repositories.provider_key_repository import upsert_provider_key
@@ -11,7 +12,7 @@ from app.services.key_encryption import encrypt, key_binding
 from app.services.providers import PROVIDERS, Provider
 
 # 驗證是使用者在等的請求：很快放棄，讓使用者稍後再試。測試會換掉它。
-_http_client = httpx2.Client(timeout=httpx2.Timeout(10.0, connect=5.0))
+_http_client = outbound.client(timeout=httpx2.Timeout(10.0, connect=5.0))
 
 
 class UnknownProvider(Exception):

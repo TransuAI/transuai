@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # 問答「查網路」用的 Tavily 金鑰（平台付費，見 app/services/web_search.py）。沒設定時這個功能關閉，前端不顯示開關。
     tavily_api_key: str = ""
 
+    # 對外連線的允許清單（逗號分隔的網域，見 app/core/outbound.py）；空的就用程式裡的預設清單。平台模型的網域一律自動加進去。
+    outbound_allowed_hosts: str = ""
+
     grpc_port: int = 8084
 
     @property

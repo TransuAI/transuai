@@ -15,6 +15,7 @@ import httpx2
 import openai
 from openai import OpenAI
 
+from app.core import outbound
 from app.core.config import settings
 
 PLATFORM = "platform"
@@ -115,7 +116,7 @@ class LlmError(Exception):
 
 # openai SDK 底層用 httpx2。讀取逾時放寬（長逐字稿的摘要要一點時間）；連不上則很快放棄，交給訊息層級重試。
 # 測試會換掉它（見 tests/conftest.py 的假 AI 廠商）。
-_http_client = httpx2.Client(timeout=httpx2.Timeout(300.0, connect=10.0))
+_http_client = outbound.client(timeout=httpx2.Timeout(300.0, connect=10.0))
 
 
 def _client(model: ChatModel) -> OpenAI:
