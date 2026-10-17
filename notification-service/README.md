@@ -89,7 +89,7 @@ WS /ws/jobs/{jobId}   訂閱單一 Job 的狀態更新事件（對應 architectu
 | `4429` | 超過同時連線數上限（每位使用者 `WS_MAX_CONNECTIONS_PER_USER`，預設 10；每個來源 IP `WS_MAX_CONNECTIONS_PER_ADDRESS`，預設 20，還沒驗證的也算） | 隔久一點再連 |
 | `1011` | 問不到 upload-service | 照常重連 |
 
-token 只在連上時驗證一次，之後 token 過期不會把已經連上的連線關掉（推播的只有這個 Job 的狀態，跟建立連線時是同一位使用者）。
+token 只在連上時驗證一次，之後 token 過期、或使用者登出（gateway 擋下那些 access token）都不會把已經連上的連線關掉（推播的只有這個 Job 的狀態，跟建立連線時是同一位使用者）；也不查 gateway 的登出紀錄，登出後到 token 過期前（最多 15 分鐘）用舊 token 仍連得上。
 來源 IP 預設看直接連進來的位址、不看 `X-Forwarded-For`（使用者可以自己填）；在反向代理後面時把 `TRUSTED_PROXIES` 設成代理的位址。
 client 送來的訊息超過 16 KiB 會直接斷線（只需要收一則帶 token 的訊息）。
 
