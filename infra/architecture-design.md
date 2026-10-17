@@ -146,7 +146,8 @@ GET    /jobs/{jobId}            查詢單一 Job 狀態與基本資訊（含標�
 PATCH  /jobs/{jobId}            使用者改標題／類型 { title?, category? }；改過的欄位 AI 之後不會再寫（upload-service 的 UpdateJob）
 GET    /jobs/{jobId}/media-url  取得該 Job 媒體檔案的 presigned 播放 URL（見 docs/adr/0002-presigned-get-url-for-media-playback.md）；
                                   query download=true 時改給「以附件方式下載、存成原始檔名」的 URL（前端匯出 → 下載原始檔）
-GET    /jobs                    查詢使用者的 Job（分頁，query: page（從 1 開始）, pageSize, query（標題或檔名包含，不分大小寫）, category）
+GET    /jobs                    查詢使用者的 Job（分頁，query: page（從 1 開始）, pageSize, query（標題或檔名包含，不分大小寫）, category）；
+                                 列表頁那一頁有處理中的 Job 時，前端每 5 秒重新查一次讓狀態自己更新（列表沒有訂 WebSocket）
 DELETE /jobs/{jobId}            刪除 Job 與相關資料（包括筆記）
 GET    /jobs/{jobId}/notes      筆記（依時間排序，沒有時間的在最後）；POST 新增 { timeSeconds?, text?, source? }，
                                 PATCH /jobs/{jobId}/notes/{noteId} 改文字，DELETE 刪除（upload-service 的 NoteService）
@@ -158,6 +159,7 @@ pending → uploading → uploaded → transcribing → transcribed
   → summarizing → completed
   （任一階段失敗 → failed，記錄 error reason）
 ```
+transcribed 之後（摘要還在產生）前端就顯示唯讀的逐字稿（讀、搜尋、點時間戳播放）；completed 才進三欄工作區，可以編輯、問答、用 Studio（畫面上叫「AI 工具」；Job 在畫面上叫「檔案」，見 `frontend/CONTEXT.md`）。
 
 ### 3.3 Transcription Service
 
@@ -960,7 +962,7 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、筆記、決策、測驗、事實查核），含譯文與雙語字幕、複製、下載原始檔）混為一談
 5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天，一次登入最多 30 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow；密碼 12 到 128 字元，PBKDF2 雜湊（舊的 bcrypt 登入時換掉）；可以改密碼、忘記密碼（寄到確認過的 email 的重設連結，或復原碼），改了、重設了、產生復原碼都會寄通知信
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
-7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。用量已記錄（每一次 LLM 呼叫與轉錄都記在使用者與 Job 名下，Job 工作區逐筆列出、設定頁看得到每月依模型加總）；每位使用者每月有用量上限（轉錄分鐘數、平台模型 token，見 `gateway/README.md`「每月用量上限」），用量告警仍是缺口
+7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。問答的 embedding 呼叫失敗（例如 HF 額度用完回 402）時不重試，有摘要或章節就只根據它們回答（見 `ai-service/docs/adr/0012`）。用量已記錄（每一次 LLM 呼叫與轉錄都記在使用者與 Job 名下，Job 工作區逐筆列出、設定頁看得到每月依模型加總）；每位使用者每月有用量上限（轉錄分鐘數、平台模型 token，見 `gateway/README.md`「每月用量上限」），用量告警仍是缺口
 8. **正式環境的設定**：每個服務讀 `APP_ENV`（預設 `development`）；`production` 時啟動前檢查自己的密鑰（沒設、還是開發用預設值、或太短就不啟動，並說出是哪幾個環境變數），並關掉開發用的東西（gRPC reflection、gateway 與 notification-service 的 API 文件）。要換掉哪些值見 `infra/k8s/02-secret.yaml`，Redis 在正式環境要設密碼（`REDIS_PASSWORD`）。
 9. **依賴套件弱點掃描**：每個服務的 README 有「依賴套件弱點掃描」一節寫怎麼掃（Python：pip-audit；Java：用 Grype 掃 build 出來的 jar；前端：`npm audit`），上線前與之後每個月跑一次。2026-10-03 掃過一輪，高風險／嚴重的都升級或覆蓋版本修掉了（Spring Boot 4.1.0 → 4.1.1 加上 Jackson、Tomcat、amqp-client 的版本覆蓋；transcription-service 的 pillow、urllib3；前端 `npm audit fix`），只剩前端開發工具（shadcn CLI）裡一個還沒有修好版本、也不會進到瀏覽器的 `braces`（見 `frontend/README.md`）。只掃了語言套件，container image 的作業系統套件還沒掃
 10. **刪除帳號與揭露**（個資法）：使用者可以在設定頁刪除帳號（再輸入密碼），所有資料刪除、已連結帳號撤銷授權、用量去識別化（見 3.1、5.）；
