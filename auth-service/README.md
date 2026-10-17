@@ -24,6 +24,8 @@ access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）�
   → AuthService 驗證 refresh token（自己簽的，自己驗；還要在 refresh_tokens 查得到、沒有作廢），舊的作廢、換發新的一組 access/refresh token
 登出 → POST /auth/logout（帶 refresh_token）→ AuthService.Logout 作廢那一串；登出所有裝置 → POST /auth/logout-all → AuthService.LogoutAllDevices
 刪除帳號 → POST /auth/account/delete（再輸入密碼）→ AuthService.DeleteAccount：刪掉使用者、發 account.deleted
+
+改密碼 → POST /auth/password（目前的密碼＋新密碼）→ AuthService.ChangePassword：作廢這位使用者所有的 refresh token、存新的雜湊、為這次簽一組新的 token
 ```
 
 每個簽出去的 refresh token 在 `refresh_tokens` 有一列（只存 SHA-256 雜湊；JWT 的 `jti` 對到這一列）。同一次登入一路換發出來的屬於
@@ -103,6 +105,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `LogoutAllDevices` | 依 `x-user-id` 作廢這位使用者所有的 refresh token |
 | `GetMe` | 依 `x-user-id` 查目前使用者資訊，找不到（例如帳號已被刪除）回 `NOT_FOUND` |
 | `DeleteAccount` | 刪除帳號（`x-user-id`）：再確認一次密碼，錯了回 `PERMISSION_DENIED`（不是 `UNAUTHENTICATED`——前端會以為 token 過期去換發）；通過就在同一個交易裡刪掉使用者、他所有的 refresh token，並把 `account.deleted { userId }` 寫進 outbox（見下方「刪除帳號」）。找不到使用者回 `NOT_FOUND`。猜密碼的次數由 gateway 限流 |
+| `ChangePassword` | 改密碼（`x-user-id`）：目前的密碼錯回 `PERMISSION_DENIED`（理由同 `DeleteAccount`），新密碼照註冊的規則（`INVALID_ARGUMENT`）。通過就先作廢這位使用者所有的 refresh token（改密碼常是懷疑被盜用；中途失敗頂多被登出），再存新的雜湊，回一組新的 token |
 
 ## 刪除帳號
 
@@ -176,5 +179,5 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
 - 過期、作廢的 `refresh_tokens` 不會自動清掉（每次登入、換發多一列），量大了要加定期清理
-- 沒有改密碼、密碼重設（忘記密碼）、email 驗證；不檢查密碼是否在外洩清單裡（見 `.scratch/pre-launch-hardening/asvs-l1.md`）
-- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出、30 天上限，與密碼規則（`RefreshTokenTest`、`RefreshTokenGraceTest`、`PasswordPolicyTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）
+- 沒有密碼重設（忘記密碼）、email 驗證；不檢查密碼是否在外洩清單裡（見 `.scratch/pre-launch-hardening/asvs-l1.md`）
+- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出、30 天上限，密碼規則與改密碼（`RefreshTokenTest`、`RefreshTokenGraceTest`、`PasswordPolicyTest`、`ChangePasswordTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）

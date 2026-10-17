@@ -8,6 +8,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.auth.grpc.v1.ChangePasswordRequest;
 import com.transuai.auth.grpc.v1.DeleteAccountRequest;
 import com.transuai.auth.grpc.v1.DeleteAccountResponse;
 import com.transuai.auth.grpc.v1.GetMeRequest;
@@ -53,15 +54,9 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
                     .withDescription("email must be a valid email address").asRuntimeException());
             return;
         }
-        int passwordLength = request.getPassword().codePointCount(0, request.getPassword().length());
-        if (passwordLength < MIN_PASSWORD_LENGTH) {
-            responseObserver.onError(Status.INVALID_ARGUMENT
-                    .withDescription("密碼至少要 " + MIN_PASSWORD_LENGTH + " 個字元").asRuntimeException());
-            return;
-        }
-        if (passwordLength > MAX_PASSWORD_LENGTH) {
-            responseObserver.onError(Status.INVALID_ARGUMENT
-                    .withDescription("密碼最多 " + MAX_PASSWORD_LENGTH + " 個字元").asRuntimeException());
+        String passwordProblem = passwordProblem(request.getPassword());
+        if (passwordProblem != null) {
+            responseObserver.onError(Status.INVALID_ARGUMENT.withDescription(passwordProblem).asRuntimeException());
             return;
         }
         if (userRepository.existsByEmail(email)) {
@@ -149,6 +144,47 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
         accountDeletion.delete(userId);
         responseObserver.onNext(DeleteAccountResponse.getDefaultInstance());
         responseObserver.onCompleted();
+    }
+
+    // 改密碼：要目前的密碼（ASVS 2.1.6；錯了是 PERMISSION_DENIED，理由同 deleteAccount）。改好之後其他裝置的登入全部作廢——
+    // 改密碼常常是因為懷疑被盜用——這次的請求拿到新的一串。
+    @Override
+    public void changePassword(ChangePasswordRequest request, StreamObserver<AuthResponse> responseObserver) {
+        UUID userId = GrpcAuthContext.currentUserId();
+        com.transuai.auth_service.domain.User user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("user not found").asRuntimeException());
+            return;
+        }
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+            responseObserver.onError(
+                    Status.PERMISSION_DENIED.withDescription("wrong password").asRuntimeException());
+            return;
+        }
+        String passwordProblem = passwordProblem(request.getNewPassword());
+        if (passwordProblem != null) {
+            responseObserver.onError(Status.INVALID_ARGUMENT.withDescription(passwordProblem).asRuntimeException());
+            return;
+        }
+
+        // 先作廢再改：中途失敗頂多是被登出，不會留下改了密碼、舊的登入卻還能用的情況。
+        refreshTokens.logoutAll(userId);
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user = userRepository.save(user);
+        responseObserver.onNext(buildAuthResponse(user, refreshTokens.issue(userId)));
+        responseObserver.onCompleted();
+    }
+
+    // ASVS 2.1.1、2.1.2：以字元算（中文與 emoji 一個算一個）；不限制要有哪些種類的字元。null：可以用。
+    private static String passwordProblem(String password) {
+        int length = password.codePointCount(0, password.length());
+        if (length < MIN_PASSWORD_LENGTH) {
+            return "密碼至少要 " + MIN_PASSWORD_LENGTH + " 個字元";
+        }
+        if (length > MAX_PASSWORD_LENGTH) {
+            return "密碼最多 " + MAX_PASSWORD_LENGTH + " 個字元";
+        }
+        return null;
     }
 
     @Override
