@@ -126,7 +126,7 @@ gateway 共用同一把。access token 15 分鐘、refresh token 7 天過期（�
 `app.jwt.access-token-ttl-minutes` / `app.jwt.refresh-token-ttl-days` 覆蓋）。refresh token 記在 auth-service 的
 `refresh_tokens`（只存雜湊）：每次換發輪替、登出作廢，已經換發過的又被用一次視為被盜、整串作廢（見 `auth-service/README.md`）。
 access token 仍是 stateless，但帶 `sid`（這次登入）：登出、登出所有裝置、改密碼、刪除帳號之後，gateway 在 Redis 記下哪些不能用，馬上擋下（Redis 連不上時放行）。前端不把 token 存在 localStorage：access token 只放在記憶體，
-refresh token 由 gateway 放在 httpOnly、Secure、`SameSite=Strict`、`Path=/api/auth` 的 cookie，重新整理頁面時用它換新的 access token
+refresh token 由 gateway 放在 httpOnly、Secure、`SameSite=Strict`、`Path=/`、名稱 `__Host-` 開頭的 cookie，重新整理頁面時用它換新的 access token
 （見 `gateway/README.md`「refresh token 的 cookie」）。所以**前端與 API 要在同一個網站**（同源最單純：前端經反向代理的 `/api` 呼叫 gateway）。Gateway 收到請求後在本地驗證 access token（不會回頭呼叫
 auth-service 確認），驗證通過後把 user id 透過 gRPC metadata `x-user-id` 轉發給下游服務。
 
@@ -935,7 +935,7 @@ MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務�
 
 **前端與 API 要同一個網站**：refresh token 的 cookie 是 `SameSite=Strict`（見 3.1），`*.vercel.app` 的前端直接呼叫 `*.onrender.com` 的 gateway
 是兩個不同網站，cookie 不會送出、重新整理頁面就被登出。做法：用 Vercel 的 rewrites 把 `/api/*` 轉到 gateway（瀏覽器看來是同源），
-或兩邊都掛在自己的網域底下（例如 `app.example.com` 與 `api.example.com`，並調整 `REFRESH_COOKIE_PATH`）。notification-service 的
+或兩邊都掛在自己的網域底下（例如 `app.example.com` 與 `api.example.com`）。notification-service 的
 WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣直連。
 
 ---

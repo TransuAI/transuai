@@ -17,7 +17,7 @@ TransuAI 由客戶部署在自己的環境（2026-10-17 決定）。這份清單
 
 ## 2. 網址、TLS 與反向代理
 
-前端、API、WebSocket 放在**同一個網站**（同一個網域）：refresh token 的 cookie 是 `SameSite=Strict`、`Path=/api/auth`、`Secure`，跨網站或
+前端、API、WebSocket 放在**同一個網站**（同一個網域）：refresh token 的 cookie 是 `__Host-refresh_token`（`SameSite=Strict`、`Path=/`、`Secure`），跨網站或
 沒有 HTTPS 時瀏覽器不會送，使用者會一直被登出。
 
 - [ ] 反向代理終結 TLS（只開 TLS 1.2 以上、強的 cipher suite；HTTP 只轉址到 HTTPS）。ASVS 9.1.1–9.1.3
