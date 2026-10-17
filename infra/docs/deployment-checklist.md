@@ -57,6 +57,8 @@ TransuAI 附了前端的 image（`transuai/frontend`，`frontend/Dockerfile`，k
       RabbitMQ（含 15672 管理介面）、MinIO console（9001）都只在內部網路（Kubernetes 用 `ClusterIP` 加 NetworkPolicy：只有 gateway 能連 gRPC 服務）。
       ASVS 4.1.2、4.3.1
 - [ ] 不要用 `infra/k8s` 的 NodePort（30080）對外；那是本機開發用的。
+- [ ] ai-service 與 transcription-service 在程式裡已經只連允許的網域（`OUTBOUND_ALLOWED_HOSTS`，預設是用到的服務，見各自 README）；不用的廠商
+      可以從清單拿掉。網路層也建議同樣限制（多一層）。
 - [ ] 對外連線（egress）只開需要的網域（ASVS 12.6.1）：`api.deepgram.com`、`router.huggingface.co`（平台模型與 embedding；改用自架的
       OpenAI 相容端點時換成那個）、`mcp.tavily.com`（查網路、事實查核）、Google（`accounts.google.com`、`oauth2.googleapis.com`、`www.googleapis.com`、
       `gmail.googleapis.com`、`tasks.googleapis.com`）、`mcp.notion.com`；使用者可以存自己金鑰的廠商（`api.openai.com`、`api.anthropic.com`、
