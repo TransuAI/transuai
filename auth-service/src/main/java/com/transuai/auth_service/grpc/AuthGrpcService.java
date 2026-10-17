@@ -32,7 +32,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
 
-    private static final int MIN_PASSWORD_LENGTH = 8;
+    // ASVS 2.1.1、2.1.2：至少 12 字元，最多 128 字元（以字元算，中文與 emoji 一個算一個）；不限制要有哪些種類的字元。
+    private static final int MIN_PASSWORD_LENGTH = 12;
+    private static final int MAX_PASSWORD_LENGTH = 128;
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -51,10 +53,15 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
                     .withDescription("email must be a valid email address").asRuntimeException());
             return;
         }
-        if (request.getPassword().length() < MIN_PASSWORD_LENGTH) {
+        int passwordLength = request.getPassword().codePointCount(0, request.getPassword().length());
+        if (passwordLength < MIN_PASSWORD_LENGTH) {
             responseObserver.onError(Status.INVALID_ARGUMENT
-                    .withDescription("password must be at least " + MIN_PASSWORD_LENGTH + " characters")
-                    .asRuntimeException());
+                    .withDescription("密碼至少要 " + MIN_PASSWORD_LENGTH + " 個字元").asRuntimeException());
+            return;
+        }
+        if (passwordLength > MAX_PASSWORD_LENGTH) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("密碼最多 " + MAX_PASSWORD_LENGTH + " 個字元").asRuntimeException());
             return;
         }
         if (userRepository.existsByEmail(email)) {
@@ -84,6 +91,11 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
             responseObserver.onError(
                     Status.UNAUTHENTICATED.withDescription("invalid email or password").asRuntimeException());
             return;
+        }
+        // 舊的 bcrypt 雜湊：密碼對了，順便換成現在的雜湊方式。
+        if (passwordEncoder.upgradeEncoding(hash)) {
+            user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+            user = userRepository.save(user);
         }
 
         responseObserver.onNext(buildAuthResponse(user, refreshTokens.issue(user.getId())));

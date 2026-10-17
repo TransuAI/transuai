@@ -109,6 +109,23 @@ class RefreshTokenTest {
     }
 
     @Test
+    void aSignInLastsAtMostThirtyDaysHoweverOftenItIsRefreshed() {
+        AuthResponse signedUp = register();
+        String userId = signedUp.getUser().getId();
+        assertThat(jdbc.queryForObject(
+                "select family_expires_at between now() + interval '29 days 23 hours' and now() + interval '30 days 1 hour'"
+                        + " from refresh_tokens where user_id = ?::uuid", Boolean.class, userId)).isTrue();
+        // Near the end of the sign-in: the next token can't outlive it, so it has to sign in again then.
+        jdbc.update("update refresh_tokens set family_expires_at = now() + interval '1 hour' where user_id = ?::uuid", userId);
+
+        refresh(signedUp.getRefreshToken());
+
+        assertThat(jdbc.queryForObject(
+                "select bool_and(expires_at <= now() + interval '1 hour' and family_expires_at <= now() + interval '1 hour')"
+                        + " from refresh_tokens where user_id = ?::uuid and revoked_at is null", Boolean.class, userId)).isTrue();
+    }
+
+    @Test
     void onlyAHashOfTheTokenIsStored() {
         AuthResponse signedUp = register();
 

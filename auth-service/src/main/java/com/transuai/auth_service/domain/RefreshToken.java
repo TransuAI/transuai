@@ -54,6 +54,10 @@ public class RefreshToken {
     @Column(name = "expires_at", nullable = false)
     private OffsetDateTime expiresAt;
 
+    /** 這一串（這次登入）最晚到什麼時候：換發出來的 token 都不會超過，之後要重新登入。舊的列是 null（換發時從那時起算）。 */
+    @Column(name = "family_expires_at")
+    private OffsetDateTime familyExpiresAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;

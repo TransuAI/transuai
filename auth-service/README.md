@@ -9,7 +9,7 @@
 | 框架 | Spring Boot 4.1（Java 26） |
 | API | gRPC（`org.springframework.boot:spring-boot-starter-grpc-server`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/) |
 | 資料庫 | PostgreSQL（`auth_db`），Hibernate `ddl-auto=update` 自動建表（MVP 階段，尚未導入 Flyway） |
-| 密碼雜湊 | `spring-security-crypto` 的 `BCryptPasswordEncoder`（沒有拉整個 Spring Security starter，這個服務不需要 filter chain / session） |
+| 密碼雜湊 | `spring-security-crypto` 的 `DelegatingPasswordEncoder`：新的雜湊用 PBKDF2-HMAC-SHA256（310,000 次，帶 `{pbkdf2}` 前綴）；之前沒有前綴的是 bcrypt，照樣認得，登入成功時換成 PBKDF2（bcrypt 只看前 72 個位元組，長密碼會被截斷或拒絕）。沒有拉整個 Spring Security starter，這個服務不需要 filter chain / session |
 | JWT | [`jjwt`](https://github.com/jwtio/jjwt) 簽發，HS256 對稱簽章 |
 | 身分傳遞 | 這個服務**簽發** access token；Gateway 驗證前端傳來的 access token（用同一把 `app.jwt.secret` 本地驗章，不會每個請求都回頭呼叫這裡），驗證通過後透過 gRPC metadata `x-user-id` 轉發給下游服務——跟 upload-service 的模式完全一致，見下方「身分模型」 |
 
@@ -29,7 +29,8 @@ access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）�
 每個簽出去的 refresh token 在 `refresh_tokens` 有一列（只存 SHA-256 雜湊；JWT 的 `jti` 對到這一列）。同一次登入一路換發出來的屬於
 同一串（family）。換發時舊的作廢（輪替）、同一串簽新的；已經換發過的又被用一次，表示有兩個人拿著同一個 token——視為被盜，整串作廢
 （正主下次換發也會失敗、要重新登入）。例外：剛換發的 10 秒內（`JWT_REFRESH_REUSE_GRACE_SECONDS`）再用一次不算，前端多個分頁共用同一個
-refresh token，幾乎同時換發時第二個拿的是剛被換掉的舊 token。登出作廢那一串；登出所有裝置作廢這位使用者的全部。已簽出的 access token
+refresh token，幾乎同時換發時第二個拿的是剛被換掉的舊 token。一串最多維持 30 天（`JWT_SESSION_MAX_DAYS`，`family_expires_at`）：一路換發出來的 token
+也不會超過那一刻，之後要重新輸入密碼（ASVS 3.3.2）。登出作廢那一串；登出所有裝置作廢這位使用者的全部。已簽出的 access token
 不受影響，仍有效到過期（最多 15 分鐘，gateway 本地驗章）。這個機制上線之前簽的 refresh token 沒有 `jti`，換發會失敗，要重新登入一次。
 
 `AuthService` 這個 gRPC service 比較特別：`Register` / `Login` / `Refresh` / `Logout` 四支不需要 `x-user-id`（呼叫當下使用者還沒有 token，或 access token 已經過期；`Logout` 靠 refresh token 本身），`GetMe`、`LogoutAllDevices` 與 `DeleteAccount` 需要——所以 `UserIdServerInterceptor` 這裡是**依 method** 而不是整個 service 豁免，跟 upload-service 用整個 service 豁免 `InternalJobService` 不一樣，理由寫在 [`UserIdServerInterceptor`](src/main/java/com/transuai/auth_service/grpc/auth/UserIdServerInterceptor.java) 的註解。
@@ -68,12 +69,12 @@ grpcurl -plaintext localhost:9091 list
 
 # 註冊（不需要任何 metadata）
 grpcurl -plaintext \
-  -d '{"email":"alice@example.com","password":"hunter22","displayName":"Alice"}' \
+  -d '{"email":"alice@example.com","password":"correct horse battery","displayName":"Alice"}' \
   localhost:9091 transuai.auth.v1.AuthService/Register
 
 # 登入
 grpcurl -plaintext \
-  -d '{"email":"alice@example.com","password":"hunter22"}' \
+  -d '{"email":"alice@example.com","password":"correct horse battery"}' \
   localhost:9091 transuai.auth.v1.AuthService/Login
 
 # 查詢目前使用者（模擬 Gateway 驗證完 JWT 後轉發 x-user-id；user_id 從上面 Register/Login 回應的 user.id 拿）
@@ -95,8 +96,8 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 
 | RPC | 說明 |
 |---|---|
-| `Register` | 建立帳號，email 已存在回 `ALREADY_EXISTS`；成功直接簽發 token，不用再呼叫一次 `Login` |
-| `Login` | email/password 其中一項錯誤都回 `UNAUTHENTICATED`（不細分，避免帳號列舉）；帳號不存在時也比對一次 bcrypt 雜湊，回應時間跟密碼錯一樣長，不能用時間猜帳號。猜密碼的次數由 gateway 限流 |
+| `Register` | 建立帳號，email 已存在回 `ALREADY_EXISTS`；密碼 12 到 128 個字元（以字元算，任何字元都可以，不限制種類），不合回 `INVALID_ARGUMENT`（「密碼至少要 12 個字元」）；成功直接簽發 token，不用再呼叫一次 `Login` |
+| `Login` | email/password 其中一項錯誤都回 `UNAUTHENTICATED`（不細分，避免帳號列舉）；帳號不存在時也比對一次雜湊，回應時間跟密碼錯一樣長，不能用時間猜帳號。猜密碼的次數由 gateway 限流 |
 | `Refresh` | 用 refresh token 換發新的 access/refresh token 組合，舊的作廢（輪替）；token 無效、過期、型別不對（例如誤傳 access token）、查不到、已經作廢都回 `UNAUTHENTICATED`；已經換發過的又被用一次（超過 10 秒寬限）視為被盜，整串作廢 |
 | `Logout` | 作廢這個 refresh token 所在的那一串；token 無效或已經作廢也回成功 |
 | `LogoutAllDevices` | 依 `x-user-id` 作廢這位使用者所有的 refresh token |
@@ -121,6 +122,7 @@ fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（
 | `JWT_ACCESS_TOKEN_TTL_MINUTES` | `15` | access token 效期 |
 | `JWT_REFRESH_TOKEN_TTL_DAYS` | `7` | refresh token 效期 |
 | `JWT_REFRESH_REUSE_GRACE_SECONDS` | `10` | 已經換發過的 refresh token 在這幾秒內再用一次不算被盜（多個分頁同時換發） |
+| `JWT_SESSION_MAX_DAYS` | `30` | 一次登入最多維持幾天（一路換發也不超過），之後要重新登入 |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ（刪除帳號時發 `account.deleted`） |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `admin` / `0000` | RabbitMQ 帳密 |
 
@@ -131,7 +133,7 @@ src/main/java/com/transuai/auth_service/
   domain/           User entity、RefreshToken、OutboxEventEntity（outbox）
   repository/        Spring Data JPA repository
   security/           JwtProperties（@ConfigurationProperties）、JwtService（簽 access/refresh、驗證 refresh）、RefreshTokens（refresh token 的記錄、輪替、作廢）
-  config/             SecurityConfig（BCryptPasswordEncoder bean）、RabbitConfig（account.deleted fanout exchange）
+  config/             SecurityConfig（PasswordEncoder bean：PBKDF2，認得舊的 bcrypt）、RabbitConfig（account.deleted fanout exchange）
   service/            AccountDeletion（刪使用者與 refresh token，account.deleted 寫進 outbox）
   event/              OutboxPublisher（把 outbox 送到 RabbitMQ，publisher confirm）
   grpc/               AuthGrpcService（rpc 實作）、UserMapper（domain ↔ proto）
@@ -174,5 +176,5 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 
 - Schema 目前靠 Hibernate `ddl-auto=update` 自動建表，團隊變大或要上正式環境前應改用 Flyway 做版本化 migration
 - 過期、作廢的 `refresh_tokens` 不會自動清掉（每次登入、換發多一列），量大了要加定期清理
-- 沒有帳號刪除、密碼重設、email 驗證等功能
-- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出（`RefreshTokenTest`、`RefreshTokenGraceTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）
+- 沒有改密碼、密碼重設（忘記密碼）、email 驗證；不檢查密碼是否在外洩清單裡（見 `.scratch/pre-launch-hardening/asvs-l1.md`）
+- 測試：`./gradlew test`。refresh token 的輪替、被盜偵測、登出、30 天上限，與密碼規則（`RefreshTokenTest`、`RefreshTokenGraceTest`、`PasswordPolicyTest`：Spring Boot test、in-process gRPC、Postgres 用 Testcontainers 起臨時容器，要有 Docker）；`Login` 的單元測試（`AuthGrpcServiceLoginTest`）；正式環境的密鑰檢查。其餘靠手動 smoke test（grpcurl / 一次性 Python 腳本）

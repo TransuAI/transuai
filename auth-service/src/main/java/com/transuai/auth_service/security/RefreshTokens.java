@@ -24,7 +24,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * refresh token 的記錄、輪替與作廢（見 README「refresh token」）。每個簽出去的 token 在 refresh_tokens 有一列（只存雜湊）；每次換發
  * 就把舊的作廢、在同一串簽一個新的。已經換發過的又被用一次，表示有兩個人拿著同一個 token——視為被盜，整串作廢（正主下次換發
- * 也會失敗、要重新登入）；只有剛換發的幾秒內例外（{@code refreshReuseGraceSeconds}，前端多個分頁同時換發）。
+ * 也會失敗、要重新登入）；只有剛換發的幾秒內例外（{@code refreshReuseGraceSeconds}，前端多個分頁同時換發）。一串最多維持
+ * {@code sessionMaxDays}：換發出來的 token 不會超過那一刻，之後要重新登入。
  */
 @Service
 @RequiredArgsConstructor
@@ -41,7 +42,7 @@ public class RefreshTokens {
     /** 登入或註冊：新的一串。 */
     @Transactional
     public String issue(UUID userId) {
-        return issueInFamily(userId, UUID.randomUUID());
+        return issueInFamily(userId, UUID.randomUUID(), sessionEnd(Instant.now()));
     }
 
     /**
@@ -62,7 +63,10 @@ public class RefreshTokens {
             repository.revokeFamily(stored.getFamilyId(), RevokedReason.REUSED, now);
             throw invalid("refresh token was already used");
         }
-        return new Exchange(stored.getUserId(), issueInFamily(stored.getUserId(), stored.getFamilyId()));
+        Instant familyEnd = stored.getFamilyExpiresAt() != null
+                ? stored.getFamilyExpiresAt().toInstant()
+                : sessionEnd(Instant.now());
+        return new Exchange(stored.getUserId(), issueInFamily(stored.getUserId(), stored.getFamilyId(), familyEnd));
     }
 
     /** 登出：這個 token 所在的那一串作廢。token 無效或不認得就什麼都不做（本來就不能用了）。 */
@@ -91,15 +95,22 @@ public class RefreshTokens {
                 && token.getRevokedAt().isAfter(now.minusSeconds(properties.refreshReuseGraceSeconds()));
     }
 
-    private String issueInFamily(UUID userId, UUID familyId) {
+    // 跟這一串的盡頭比，取早的：最後一次換發出來的 token 在那一刻過期，換發不了、要重新登入。
+    private String issueInFamily(UUID userId, UUID familyId, Instant familyEnd) {
         UUID id = UUID.randomUUID();
-        Instant expiresAt = Instant.now().plus(properties.refreshTokenTtlDays(), ChronoUnit.DAYS);
+        Instant ttlEnd = Instant.now().plus(properties.refreshTokenTtlDays(), ChronoUnit.DAYS);
+        Instant expiresAt = ttlEnd.isBefore(familyEnd) ? ttlEnd : familyEnd;
         String token = jwtService.signRefreshToken(userId, id, expiresAt);
         repository.save(RefreshToken.builder()
                 .id(id).userId(userId).familyId(familyId).tokenHash(sha256(token))
                 .expiresAt(expiresAt.atOffset(ZoneOffset.UTC))
+                .familyExpiresAt(familyEnd.atOffset(ZoneOffset.UTC))
                 .build());
         return token;
+    }
+
+    private Instant sessionEnd(Instant signedInAt) {
+        return signedInAt.plus(properties.sessionMaxDays(), ChronoUnit.DAYS);
     }
 
     private static StatusRuntimeException invalid(String description) {
