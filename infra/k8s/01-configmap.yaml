@@ -75,3 +75,8 @@ data:
   # REDIS_PORT=tcp://<ip>:6379（跟 RABBITMQ_PORT 一樣），這裡的值蓋掉它。
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
+
+  # 轉錄的上限：gateway 在取得上傳網址與完成上傳時用前端量的長度先擋，transcription-service 在呼叫語音辨識之前用實際長度再檢查一次，
+  # 兩邊讀同一個值。每個檔案最長幾分鐘只有 transcription-service 用（前端也寫死 60 分鐘）。
+  USAGE_LIMIT_TRANSCRIPTION_MINUTES: "600"
+  MAX_RECORDING_MINUTES: "60"
