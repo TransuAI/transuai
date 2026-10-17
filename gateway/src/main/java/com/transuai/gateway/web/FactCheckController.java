@@ -21,6 +21,7 @@ import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.FactCheckDto;
 import com.transuai.gateway.web.dto.CheckClaimsRequestDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.Claim;
 import transuai.ai.v1.Ai.FactCheck;
@@ -62,7 +63,7 @@ public class FactCheckController {
     @PostMapping("/jobs/{jobId}/fact-check/verify")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public FactCheckDto check(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @RequestBody CheckClaimsRequestDto request) {
+            @Valid @RequestBody CheckClaimsRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
         if (request == null || request.claimIds() == null || request.claimIds().isEmpty()) {
             throw new IllegalArgumentException("claimIds are required"); // → 400 via GrpcExceptionAdvice

@@ -14,6 +14,7 @@ import com.transuai.gateway.grpc.JobOwnershipGuard;
 import com.transuai.gateway.web.dto.SpeakerSuggestionDto;
 import com.transuai.gateway.web.dto.SpeakerSuggestionStatusRequestDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.ListSpeakerSuggestionsRequest;
 import transuai.ai.v1.Ai.SetSpeakerSuggestionStatusRequest;
@@ -37,7 +38,7 @@ public class SpeakerSuggestionController {
     // status 不是 applied / dismissed 回 400、這位講者沒有建議回 404（ai-service 的 INVALID_ARGUMENT / NOT_FOUND）。
     @PutMapping("/jobs/{jobId}/speaker-suggestions/{label}")
     public SpeakerSuggestionDto setStatus(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @PathVariable String label, @RequestBody SpeakerSuggestionStatusRequestDto request) {
+            @PathVariable String label, @Valid @RequestBody SpeakerSuggestionStatusRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
         return SpeakerSuggestionDto.from(aiServiceStub.setSpeakerSuggestionStatus(SetSpeakerSuggestionStatusRequest
                 .newBuilder().setJobId(jobId).setSpeakerLabel(label)

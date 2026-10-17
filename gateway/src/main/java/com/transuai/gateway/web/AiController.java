@@ -28,6 +28,7 @@ import com.transuai.gateway.web.dto.QuestionRequestDto;
 import com.transuai.gateway.web.dto.SummaryDto;
 import com.transuai.gateway.web.dto.WebSourceDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import transuai.ai.v1.Ai.AskQuestionChunk;
@@ -122,7 +123,7 @@ public class AiController {
     @CostlyFeature("question")
     @PostMapping(value = "/qa/{jobId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter askQuestion(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @RequestBody QuestionRequestDto request) {
+            @Valid @RequestBody QuestionRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
         usageLimitGuard.requirePlatformTokensLeft(userId, request.model());
         if (request.searchesTheWeb()) {

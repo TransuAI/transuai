@@ -1,10 +1,14 @@
 package com.transuai.gateway.web.advice;
 
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -14,7 +18,9 @@ import com.transuai.gateway.web.dto.ErrorResponse;
 
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import jakarta.validation.ConstraintViolation;
 import lombok.extern.slf4j.Slf4j;
+import tools.jackson.databind.exc.UnrecognizedPropertyException;
 
 /**
  * 每個下游服務都是純 gRPC，controller 直接呼叫 blocking stub、讓 StatusRuntimeException
@@ -62,6 +68,36 @@ public class GrpcExceptionAdvice {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()))
                 .body(new ErrorResponse("USAGE_LIMIT_REACHED", e.getMessage()));
+    }
+
+    // 請求的欄位不合 DTO 上的限制（ASVS 5.1.3、5.1.4）：說是哪個欄位、哪裡不對（第一個）。
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidField(MethodArgumentNotValidException e) {
+        FieldError error = e.getBindingResult().getFieldError();
+        String message = error == null ? "請求的內容不正確" : describe(error);
+        return ResponseEntity.badRequest().body(new ErrorResponse("INVALID_ARGUMENT", message));
+    }
+
+    // JSON 壞掉、型別不對、或有不認得的欄位（ASVS 13.2.2）。不把 Jackson 的訊息（含類別名稱）給使用者。
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
+        String message = e.getMostSpecificCause() instanceof UnrecognizedPropertyException unknown
+                ? "不認得的欄位：" + unknown.getPropertyName()
+                : "請求的內容格式不正確";
+        return ResponseEntity.badRequest().body(new ErrorResponse("INVALID_ARGUMENT", message));
+    }
+
+    private static String describe(FieldError error) {
+        String field = error.getField();
+        Map<String, Object> limits = error.contains(ConstraintViolation.class)
+                ? error.unwrap(ConstraintViolation.class).getConstraintDescriptor().getAttributes()
+                : Map.of();
+        return switch (String.valueOf(error.getCode())) {
+            case "Size" -> field + " 最多 " + limits.get("max") + (error.getRejectedValue() instanceof String ? " 個字" : " 項");
+            case "Pattern" -> field + " 的值不正確";
+            case "NotNull", "NotBlank", "NotEmpty" -> field + " 是必填的";
+            default -> field + " 超出範圍";
+        };
     }
 
     // 例如 fileType 傳了 FileType enum 沒有的字串（FileType.valueOf 直接丟這個），

@@ -23,6 +23,7 @@ import com.transuai.gateway.web.dto.QuizQuestionDto;
 import com.transuai.gateway.web.dto.QuizQuestionResultDto;
 import com.transuai.gateway.web.dto.QuizRequestDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.GetQuizRequest;
 import transuai.ai.v1.Ai.ListQuizzesRequest;
@@ -47,7 +48,7 @@ public class QuizController {
     @PostMapping("/jobs/{jobId}/quizzes")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public QuizDto requestQuiz(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @RequestBody QuizRequestDto request) {
+            @Valid @RequestBody QuizRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
         if (request == null || request.questionCount() == null) {
             throw new IllegalArgumentException("questionCount is required"); // → 400 via GrpcExceptionAdvice
@@ -81,7 +82,7 @@ public class QuizController {
     // 後端計分並保存（同一份測驗可以重做，每次都保存）；每題要剛好一個有效選項，否則 400；還沒產生完成回 409。
     @PostMapping("/jobs/{jobId}/quizzes/{quizId}/attempts")
     public QuizAttemptResultDto submitAttempt(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @PathVariable String quizId, @RequestBody QuizAttemptRequestDto request) {
+            @PathVariable String quizId, @Valid @RequestBody QuizAttemptRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
         if (request == null || request.answers() == null || request.answers().contains(null)) {
             throw new IllegalArgumentException("answers are required"); // → 400 via GrpcExceptionAdvice

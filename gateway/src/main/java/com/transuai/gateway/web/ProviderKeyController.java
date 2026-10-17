@@ -16,6 +16,7 @@ import com.transuai.gateway.web.dto.DeleteProviderKeyResponseDto;
 import com.transuai.gateway.web.dto.ProviderKeyDto;
 import com.transuai.gateway.web.dto.SaveProviderKeyRequestDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.DeleteProviderKeyRequest;
 import transuai.ai.v1.Ai.DeleteProviderKeyResponse;
@@ -43,7 +44,7 @@ public class ProviderKeyController {
     @CostlyFeature("provider-key")
     @PutMapping("/me/provider-keys/{provider}")
     public ProviderKeyDto saveProviderKey(@CurrentUserId UUID userId, @PathVariable String provider,
-            @RequestBody SaveProviderKeyRequestDto request) {
+            @Valid @RequestBody SaveProviderKeyRequestDto request) {
         if (request == null || request.key() == null) {
             throw new IllegalArgumentException("key is required"); // → 400 via GrpcExceptionAdvice
         }

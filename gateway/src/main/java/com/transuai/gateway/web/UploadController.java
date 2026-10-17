@@ -41,6 +41,7 @@ import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UpdateJobRequest;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 // 對應 ../../architecture-design.md 3.2。upload-service 本身只講 gRPC，這裡轉出 REST。
@@ -54,7 +55,7 @@ public class UploadController {
 
         @CostlyFeature("upload-url")
         @PostMapping("/uploads/presign")
-        public PresignResponseDto presign(@CurrentUserId UUID userId, @RequestBody PresignRequestDto request) {
+        public PresignResponseDto presign(@CurrentUserId UUID userId, @Valid @RequestBody PresignRequestDto request) {
                 usageLimitGuard.requireTranscriptionLeft(userId, request.durationSeconds());
                 GetPresignedUploadUrlResponse response = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .getPresignedUploadUrl(GetPresignedUploadUrlRequest.newBuilder()
@@ -69,7 +70,7 @@ public class UploadController {
 
         @CostlyFeature("upload")
         @PostMapping("/uploads/complete")
-        public JobDto completeUpload(@CurrentUserId UUID userId, @RequestBody CompleteUploadRequestDto request) {
+        public JobDto completeUpload(@CurrentUserId UUID userId, @Valid @RequestBody CompleteUploadRequestDto request) {
                 usageLimitGuard.requireTranscriptionLeft(userId, request.durationSeconds());
                 Job job = GrpcMetadataSupport.withUserId(uploadServiceStub, userId)
                                 .completeUpload(CompleteUploadRequest.newBuilder()
@@ -94,7 +95,7 @@ public class UploadController {
         // 使用者改標題／類型（見 upload-service CONTEXT.md）：改過的欄位 AI 之後不會再寫。ownership 由 upload-service 依 x-user-id 檢查。
         @PatchMapping("/jobs/{jobId}")
         public JobDto updateJob(@CurrentUserId UUID userId, @PathVariable String jobId,
-                        @RequestBody UpdateJobRequestDto request) {
+                        @Valid @RequestBody UpdateJobRequestDto request) {
                 UpdateJobRequest.Builder update = UpdateJobRequest.newBuilder().setJobId(jobId);
                 if (request.title() != null) {
                         update.setTitle(request.title());

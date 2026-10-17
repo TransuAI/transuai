@@ -12,6 +12,7 @@ import com.transuai.gateway.web.dto.AvailableModelsDto;
 import com.transuai.gateway.web.dto.ModelChoiceDto;
 import com.transuai.gateway.web.dto.SetDefaultModelRequestDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.GetDefaultModelRequest;
 import transuai.ai.v1.Ai.ListAvailableModelsRequest;
@@ -44,7 +45,7 @@ public class ModelController {
     // 模型不在清單上（或 OpenRouter 上不存在）回 400、沒有那個廠商的自有金鑰回 409、OpenRouter 查不到回 503。
     @CostlyFeature("linked-service")
     @PutMapping("/me/default-model")
-    public ModelChoiceDto setDefaultModel(@CurrentUserId UUID userId, @RequestBody SetDefaultModelRequestDto request) {
+    public ModelChoiceDto setDefaultModel(@CurrentUserId UUID userId, @Valid @RequestBody SetDefaultModelRequestDto request) {
         if (request == null || request.provider() == null) {
             throw new IllegalArgumentException("provider is required"); // → 400 via GrpcExceptionAdvice
         }

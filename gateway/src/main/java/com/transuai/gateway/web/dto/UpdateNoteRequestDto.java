@@ -1,4 +1,6 @@
 package com.transuai.gateway.web.dto;
 
-public record UpdateNoteRequestDto(String text) {
+import jakarta.validation.constraints.Size;
+
+public record UpdateNoteRequestDto(@Size(max = 2000) String text) {
 }

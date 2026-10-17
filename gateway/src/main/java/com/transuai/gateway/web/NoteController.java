@@ -24,6 +24,7 @@ import com.transuai.upload.grpc.v1.ListNotesRequest;
 import com.transuai.upload.grpc.v1.NoteServiceGrpc;
 import com.transuai.upload.grpc.v1.UpdateNoteRequest;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 // 筆記（見 upload-service CONTEXT.md）：upload-service 依 x-user-id 檢查 Job 是登入者的（跟 GET /jobs/{jobId} 一樣），
@@ -42,7 +43,7 @@ public class NoteController {
 
     @PostMapping("/jobs/{jobId}/notes")
     public NoteDto createNote(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @RequestBody CreateNoteRequestDto request) {
+            @Valid @RequestBody CreateNoteRequestDto request) {
         CreateNoteRequest.Builder note = CreateNoteRequest.newBuilder().setJobId(jobId)
                 .setText(GrpcStrings.nullToEmpty(request.text())).setSource(GrpcStrings.nullToEmpty(request.source()));
         if (request.timeSeconds() != null) {
@@ -53,7 +54,7 @@ public class NoteController {
 
     @PatchMapping("/jobs/{jobId}/notes/{noteId}")
     public NoteDto updateNote(@CurrentUserId UUID userId, @PathVariable String jobId, @PathVariable String noteId,
-            @RequestBody UpdateNoteRequestDto request) {
+            @Valid @RequestBody UpdateNoteRequestDto request) {
         return NoteDto.from(notes(userId).updateNote(UpdateNoteRequest.newBuilder().setJobId(jobId).setNoteId(noteId)
                 .setText(GrpcStrings.nullToEmpty(request.text())).build()));
     }

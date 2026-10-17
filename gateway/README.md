@@ -296,6 +296,15 @@ access token 是 stateless 的，作廢的只有 refresh token——不另外處
 500 不把下游的描述給使用者（Python 服務沒接住的例外，描述裡是例外訊息）：回 `{ "error": "INTERNAL", "message": "伺服器發生錯誤，請稍後再試（錯誤代碼 1a2b3c4d）" }`，
 log 裡同一個代碼那一行有完整的 status（ASVS 7.4.1）。503 的描述照樣傳——那是各服務寫給使用者看的「暫時無法…，請稍後再試」。
 
+### 輸入驗證
+
+每個請求的 JSON 照它的 DTO 檢查（ASVS 5.1.3、5.1.4、13.2.2）：DTO 就是 schema——不認得的欄位回 `400`「不認得的欄位：x」
+（`spring.jackson.deserialization.fail-on-unknown-properties=true`），欄位的限制用 Bean Validation 寫在 DTO 上（`@Valid`），不合時回 `400`，
+訊息說是哪個欄位（「text 最多 2000 個字」「source 的值不正確」「timeSeconds 超出範圍」，`GrpcExceptionAdvice`）；JSON 壞掉或型別不對是
+「請求的內容格式不正確」，不帶 Jackson 的訊息。長度上限跟下游服務自己的一樣（筆記 2000、標題 100、決策 300／理由 1000／沒選的 10 個各 200、
+多格式輸出的要求 200／內容 20000、講者名稱 100）；下游沒有上限的取一個寬鬆的數字（問題、片段文字 2000，email 254，密碼 256，檔名 255）。
+時間點與長度最多一天（`InputLimits`）。必填與「恰好一個」之類的規則仍在 controller（訊息照舊）。
+
 ### 安全標頭
 
 每個回應（含被 JWT filter 擋下的 401／429）都有（`security/SecurityHeadersFilter`，ASVS 8.2.1、14.4）：`X-Content-Type-Options: nosniff`、

@@ -21,6 +21,7 @@ import com.transuai.gateway.web.dto.GeneratedOutputDto;
 import com.transuai.gateway.web.dto.OutputRequestDto;
 import com.transuai.gateway.web.dto.OutputUpdateDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.GeneratedOutput;
 import transuai.ai.v1.Ai.GetOutputRequest;
@@ -44,7 +45,7 @@ public class OutputController {
     @PostMapping("/jobs/{jobId}/outputs")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public GeneratedOutputDto request(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @RequestBody OutputRequestDto request) {
+            @Valid @RequestBody OutputRequestDto request) {
         String title = jobOwnershipGuard.fetch(userId, jobId).getTitle();
         if (request == null || request.format() == null) {
             throw new IllegalArgumentException("format is required"); // → 400 via GrpcExceptionAdvice
@@ -77,7 +78,7 @@ public class OutputController {
     // 使用者修改內容（只有完成的可以改）：沒帶 content 回 400，空白或太長也是 400，還沒產生完成回 409。
     @PatchMapping("/jobs/{jobId}/outputs/{outputId}")
     public GeneratedOutputDto update(@CurrentUserId UUID userId, @PathVariable String jobId, @PathVariable String outputId,
-            @RequestBody OutputUpdateDto request) {
+            @Valid @RequestBody OutputUpdateDto request) {
         jobOwnershipGuard.check(userId, jobId);
         if (request == null || request.content() == null) {
             throw new IllegalArgumentException("content is required"); // → 400 via GrpcExceptionAdvice

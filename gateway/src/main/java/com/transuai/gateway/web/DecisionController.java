@@ -38,6 +38,7 @@ import com.transuai.upload.grpc.v1.ListJobsRequest;
 import com.transuai.upload.grpc.v1.ListJobsResponse;
 import com.transuai.upload.grpc.v1.UploadServiceGrpc;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.json.JsonMapper;
@@ -100,7 +101,7 @@ public class DecisionController {
     @PostMapping("/jobs/{jobId}/decisions")
     @ResponseStatus(HttpStatus.CREATED)
     public DecisionsDto.Item create(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @RequestBody DecisionInputDto body) {
+            @Valid @RequestBody DecisionInputDto body) {
         Job job = jobOwnershipGuard.fetch(userId, jobId);
         CreateDecisionRequest.Builder request = CreateDecisionRequest.newBuilder().setJobId(jobId)
                 .setUserId(userId.toString()).setDecision(toInput(body));
@@ -116,7 +117,7 @@ public class DecisionController {
     // 修改內容（時間點與原話不變），之後重新抽也保留；不是這個 Job 的回 404。
     @PatchMapping("/jobs/{jobId}/decisions/{decisionId}")
     public DecisionsDto.Item update(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @PathVariable String decisionId, @RequestBody DecisionInputDto body) {
+            @PathVariable String decisionId, @Valid @RequestBody DecisionInputDto body) {
         jobOwnershipGuard.check(userId, jobId);
         return toDto(aiServiceStub.updateDecision(UpdateDecisionRequest.newBuilder().setJobId(jobId)
                 .setDecisionId(decisionId).setDecision(toInput(body)).build()));
@@ -192,7 +193,7 @@ public class DecisionController {
     // 先送 sources（依據的決策，帶它們的 Job；順序就是回答裡 [n] 的編號），再送 model 與 delta；失敗送 error。
     @CostlyFeature("decision-question")
     @PostMapping(value = "/decisions/ask", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter ask(@CurrentUserId UUID userId, @RequestBody DecisionQuestionDto body) {
+    public SseEmitter ask(@CurrentUserId UUID userId, @Valid @RequestBody DecisionQuestionDto body) {
         if (body == null || body.question() == null || body.question().isBlank()) {
             throw new IllegalArgumentException("question is required"); // → 400 via GrpcExceptionAdvice
         }

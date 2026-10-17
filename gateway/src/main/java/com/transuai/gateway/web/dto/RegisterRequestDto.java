@@ -1,4 +1,7 @@
 package com.transuai.gateway.web.dto;
 
-public record RegisterRequestDto(String email, String password, String displayName) {
+import jakarta.validation.constraints.Size;
+
+public record RegisterRequestDto(@Size(max = 254) String email, @Size(max = 256) String password,
+        @Size(max = 100) String displayName) {
 }

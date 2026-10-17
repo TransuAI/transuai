@@ -44,6 +44,7 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 
 import lombok.RequiredArgsConstructor;
 
@@ -62,7 +63,7 @@ public class AuthController {
     // 限流用的 IP 是 getRemoteAddr()，預設就是直接連進來的位址（不看使用者可以自己填的 X-Forwarded-For；在反向代理後面時
     // 怎麼設定見 gateway README「限流」）。
     @PostMapping("/register")
-    public AuthResponseDto register(@RequestBody RegisterRequestDto request, HttpServletRequest servletRequest,
+    public AuthResponseDto register(@Valid @RequestBody RegisterRequestDto request, HttpServletRequest servletRequest,
             HttpServletResponse servletResponse) {
         requireCredentials(request.email(), request.password());
         rateLimits.beforeRegister(servletRequest.getRemoteAddr());
@@ -75,7 +76,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public AuthResponseDto login(@RequestBody LoginRequestDto request, HttpServletRequest servletRequest,
+    public AuthResponseDto login(@Valid @RequestBody LoginRequestDto request, HttpServletRequest servletRequest,
             HttpServletResponse servletResponse) {
         requireCredentials(request.email(), request.password());
         AuthResponse response = rateLimits.login(servletRequest.getRemoteAddr(), request.email(),
@@ -134,7 +135,7 @@ public class AuthController {
     // 這裡記住「剛刪掉」讓還沒過期的 access token 不能再用，並清掉這個瀏覽器的 refresh token cookie。
     @PostMapping("/account/delete")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteAccount(@CurrentUserId UUID userId, @RequestBody DeleteAccountRequestDto request,
+    public void deleteAccount(@CurrentUserId UUID userId, @Valid @RequestBody DeleteAccountRequestDto request,
             HttpServletResponse servletResponse) {
         if (request.password() == null || request.password().isEmpty()) {
             throw new IllegalArgumentException("password is required");
@@ -148,7 +149,7 @@ public class AuthController {
     // 改密碼：要目前的密碼（錯了 403，跟刪除帳號合計連續錯太多次 429）。auth-service 作廢這位使用者所有的 refresh token，在這之前
     // 簽的 access token 也馬上不能用；這個瀏覽器拿到新的一組（cookie 換掉），其他裝置要重新登入。
     @PostMapping("/password")
-    public AuthResponseDto changePassword(@CurrentUserId UUID userId, @RequestBody ChangePasswordRequestDto request,
+    public AuthResponseDto changePassword(@CurrentUserId UUID userId, @Valid @RequestBody ChangePasswordRequestDto request,
             HttpServletResponse servletResponse) {
         if (request.currentPassword() == null || request.currentPassword().isEmpty() || request.newPassword() == null) {
             throw new IllegalArgumentException("currentPassword and newPassword are required");
@@ -164,7 +165,7 @@ public class AuthController {
     // 忘記密碼：email 有註冊就寄重設連結（auth-service），沒註冊也一樣回 202，不透露有沒有這個帳號。這個部署沒設定寄信時 503。
     @PostMapping("/password-reset")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public void requestPasswordReset(@RequestBody PasswordResetRequestDto request, HttpServletRequest servletRequest) {
+    public void requestPasswordReset(@Valid @RequestBody PasswordResetRequestDto request, HttpServletRequest servletRequest) {
         if (request.email() == null || request.email().isBlank()) {
             throw new IllegalArgumentException("email is required");
         }
@@ -176,7 +177,7 @@ public class AuthController {
     // 連結無效或過期 409、新密碼不合規則 400。
     @PostMapping("/password-reset/confirm")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void resetPassword(@RequestBody PasswordResetConfirmDto request, HttpServletRequest servletRequest) {
+    public void resetPassword(@Valid @RequestBody PasswordResetConfirmDto request, HttpServletRequest servletRequest) {
         if (request.token() == null || request.token().isBlank() || request.newPassword() == null) {
             throw new IllegalArgumentException("token and newPassword are required");
         }

@@ -1,4 +1,6 @@
 package com.transuai.gateway.web.dto;
 
-public record UpdateSegmentTextRequestDto(String text) {
+import jakarta.validation.constraints.Size;
+
+public record UpdateSegmentTextRequestDto(@Size(max = 2000) String text) {
 }

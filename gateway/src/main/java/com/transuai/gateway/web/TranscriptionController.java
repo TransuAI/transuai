@@ -22,6 +22,7 @@ import com.transuai.gateway.web.dto.SpeakerUpdateDto;
 import com.transuai.gateway.web.dto.TranscriptDto;
 import com.transuai.gateway.web.dto.UpdateSegmentTextRequestDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import transuai.transcription.v1.Transcription.AssignSegmentSpeakerRequest;
 import transuai.transcription.v1.Transcription.AssignSegmentSpeakerResponse;
@@ -62,7 +63,7 @@ public class TranscriptionController {
     @CostlyFeature("transcript-edit")
     @PatchMapping("/transcripts/{jobId}/segments/{segmentId}")
     public SegmentUpdateDto updateSegmentText(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @PathVariable String segmentId, @RequestBody UpdateSegmentTextRequestDto request) {
+            @PathVariable String segmentId, @Valid @RequestBody UpdateSegmentTextRequestDto request) {
         if (request == null || request.text() == null) {
             // Without this a body like {} or a misspelt key would silently clear the segment.
             throw new IllegalArgumentException("text is required"); // → 400 via GrpcExceptionAdvice
@@ -81,7 +82,7 @@ public class TranscriptionController {
     @CostlyFeature("transcript-edit")
     @PatchMapping("/transcripts/{jobId}/speakers/{label}")
     public SpeakerUpdateDto renameSpeaker(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @PathVariable String label, @RequestBody RenameSpeakerRequestDto request) {
+            @PathVariable String label, @Valid @RequestBody RenameSpeakerRequestDto request) {
         if (request == null || request.name() == null) {
             // Without this a body like {} would silently reset the name.
             throw new IllegalArgumentException("name is required"); // → 400 via GrpcExceptionAdvice
@@ -100,7 +101,7 @@ public class TranscriptionController {
     @CostlyFeature("transcript-edit")
     @PutMapping("/transcripts/{jobId}/segments/{segmentId}/speaker")
     public SegmentSpeakerUpdateDto assignSegmentSpeaker(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @PathVariable String segmentId, @RequestBody AssignSegmentSpeakerRequestDto request) {
+            @PathVariable String segmentId, @Valid @RequestBody AssignSegmentSpeakerRequestDto request) {
         if (request == null || (request.speakerLabel() == null) == (request.newSpeaker() == null)) {
             throw new IllegalArgumentException("exactly one of speakerLabel or newSpeaker is required"); // → 400
         }

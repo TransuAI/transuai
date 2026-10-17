@@ -25,6 +25,7 @@ import com.transuai.gateway.web.dto.PostMeetingSettingsDto;
 import com.transuai.gateway.web.dto.UpdatePostMeetingSettingsDto;
 import com.transuai.upload.grpc.v1.Job;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
@@ -68,7 +69,7 @@ public class PostMeetingController {
     @PostMapping("/jobs/{jobId}/post-meeting")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public PostMeetingDto requestPostMeeting(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @RequestBody PostMeetingRequestDto request) {
+            @Valid @RequestBody PostMeetingRequestDto request) {
         Job job = jobOwnershipGuard.fetch(userId, jobId);
         if (request == null || request.timezone() == null || request.timezone().isBlank()) {
             throw new IllegalArgumentException("timezone is required"); // → 400 via GrpcExceptionAdvice
@@ -87,7 +88,7 @@ public class PostMeetingController {
     @CostlyFeature("linked-service")
     @PostMapping("/jobs/{jobId}/post-meeting/{runId}/execute")
     public PostMeetingRunDto executeProposals(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @PathVariable String runId, @RequestBody ExecuteProposalsRequestDto request) {
+            @PathVariable String runId, @Valid @RequestBody ExecuteProposalsRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
         if (request == null || request.proposals() == null) {
             throw new IllegalArgumentException("proposals are required"); // → 400 via GrpcExceptionAdvice
@@ -124,7 +125,7 @@ public class PostMeetingController {
     @CostlyFeature("linked-service")
     @PutMapping("/me/post-meeting-settings")
     public PostMeetingSettingsDto updateSettings(@CurrentUserId UUID userId,
-            @RequestBody UpdatePostMeetingSettingsDto request) {
+            @Valid @RequestBody UpdatePostMeetingSettingsDto request) {
         UpdatePostMeetingSettingsDto body = request == null ? new UpdatePostMeetingSettingsDto(null, null) : request;
         return toDto(aiServiceStub.updatePostMeetingSettings(UpdatePostMeetingSettingsRequest.newBuilder()
                 .setUserId(userId.toString())

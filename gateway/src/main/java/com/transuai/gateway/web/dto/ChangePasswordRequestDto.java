@@ -1,4 +1,6 @@
 package com.transuai.gateway.web.dto;
 
-public record ChangePasswordRequestDto(String currentPassword, String newPassword) {
+import jakarta.validation.constraints.Size;
+
+public record ChangePasswordRequestDto(@Size(max = 256) String currentPassword, @Size(max = 256) String newPassword) {
 }

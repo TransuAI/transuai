@@ -20,6 +20,7 @@ import com.transuai.gateway.usage.UsageLimitGuard;
 import com.transuai.gateway.web.dto.TranslationDto;
 import com.transuai.gateway.web.dto.TranslationRequestDto;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import transuai.ai.v1.Ai.DeleteTranslationRequest;
 import transuai.ai.v1.Ai.GetTranslationRequest;
@@ -42,7 +43,7 @@ public class TranslationController {
     @PostMapping("/jobs/{jobId}/translations")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public TranslationDto request(@CurrentUserId UUID userId, @PathVariable String jobId,
-            @RequestBody TranslationRequestDto request) {
+            @Valid @RequestBody TranslationRequestDto request) {
         jobOwnershipGuard.check(userId, jobId);
         if (request == null || request.language() == null) {
             throw new IllegalArgumentException("language is required"); // → 400 via GrpcExceptionAdvice
