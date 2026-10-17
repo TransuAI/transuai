@@ -17,8 +17,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param costly 花錢的功能，名稱（{@link CostlyFeature#value()}）→ 每人的上限
  */
 @ConfigurationProperties(prefix = "app.rate-limit")
-public record RateLimitProperties(Rule loginFailures, Rule login, Rule register, Rule perUser, Rule perAddress,
-        Map<String, Rule> costly) {
+public record RateLimitProperties(Rule loginFailures, Rule login, Rule register, Rule passwordReset,
+        Rule passwordResetPerEmail, Rule perUser, Rule perAddress, Map<String, Rule> costly) {
 
     public record Rule(int limit, Duration window) {
     }

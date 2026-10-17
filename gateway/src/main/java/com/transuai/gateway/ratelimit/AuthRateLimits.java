@@ -24,6 +24,9 @@ public class AuthRateLimits {
 
     private static final String LOGIN_BY_ADDRESS = "login:ip:";
     private static final String REGISTER_BY_ADDRESS = "register:ip:";
+    private static final String PASSWORD_RESET_BY_ADDRESS = "password-reset:ip:";
+    private static final String PASSWORD_RESET_BY_EMAIL = "password-reset:email:";
+    private static final String PASSWORD_RESET_CONFIRM_BY_ADDRESS = "password-reset-confirm:ip:";
     private static final String LOGIN_FAILURES = "login-failures:";
     // 刪除帳號與改密碼共用：兩邊都在猜同一個密碼。
     private static final String PASSWORD_CHECK_FAILURES = "password-check-failures:";
@@ -74,6 +77,18 @@ public class AuthRateLimits {
 
     public void beforeRegister(String address) {
         limiter.hit(REGISTER_BY_ADDRESS + address, properties.register()).orThrow(RateLimitedException::tooManyTries);
+    }
+
+    /** 申請重設密碼：每個 IP 的次數，加上每個 email 的次數（不讓人一直寄信轟炸同一個信箱；email 只放雜湊）。 */
+    public void beforePasswordReset(String address, String email) {
+        limiter.hit(PASSWORD_RESET_BY_ADDRESS + address, properties.passwordReset()).orThrow(RateLimitedException::tooManyTries);
+        limiter.hit(PASSWORD_RESET_BY_EMAIL + sha256(email.trim().toLowerCase(Locale.ROOT)), properties.passwordResetPerEmail())
+                .orThrow(RateLimitedException::tooManyTries);
+    }
+
+    /** 用重設連結設新密碼：每個 IP 跟登入一樣的上限（token 有 256 bits，猜不到；這是多一層）。 */
+    public void beforePasswordResetConfirm(String address) {
+        limiter.hit(PASSWORD_RESET_CONFIRM_BY_ADDRESS + address, properties.login()).orThrow(RateLimitedException::tooManyTries);
     }
 
     private static String sha256(String text) {

@@ -84,6 +84,8 @@ docker compose up -d
 | `POST` | `/auth/logout-all` | 登出所有裝置：作廢登入者所有的 refresh token、清掉這個瀏覽器的 cookie，回 `204`，需要 `Authorization`；在這之前簽的 access token 馬上不能用（見下方「登出之後的 access token」） |
 | `POST` | `/auth/account/delete` | 刪除帳號：body `{ password }`（再輸入一次密碼），需要 `Authorization`。成功 `204` 並清掉 cookie；密碼錯 `403`（不是 401，前端不會去換發 token）；沒帶密碼 `400`；猜錯太多次 `429`（見「限流」）。auth-service 刪掉使用者並發 `account.deleted`，其他服務清掉他的資料（見 auth-service README「刪除帳號」）。刪除之後，還沒過期的 access token 也不能用（見下方） |
 | `POST` | `/auth/password` | 改密碼：body `{ currentPassword, newPassword }`，需要 `Authorization`。成功回 `{ accessToken, user }` 並換一個新的 refresh cookie，這位使用者其他的登入全部作廢（其他裝置要重新登入）；目前的密碼錯 `403`，新密碼不合規則 `400`，猜錯太多次 `429`（跟刪除帳號合計） |
+| `POST` | `/auth/password-reset` | 忘記密碼：body `{ email }`，不需要 token。一律回 `202`（不透露 email 有沒有註冊），有註冊就寄重設連結；這個部署沒有設定寄信時 `503`（訊息給使用者看）；超過上限 `429` |
+| `POST` | `/auth/password-reset/confirm` | 用重設連結設新密碼：body `{ token, newPassword }`，不需要 access token。成功 `204`，這位使用者所有的登入作廢、access token 馬上不能用；連結無效或過期 `409`、新密碼不合規則 `400` |
 | `POST` | `/auth/refresh` | 用 cookie 裡的 refresh token 換發：回 `{ accessToken, user }`，cookie 換成新的 refresh token；不需要 `Authorization`、沒有 body。沒有 cookie 或 token 不能用回 `401`（並清掉 cookie） |
 | `GET` | `/auth/me` | 取得目前使用者資訊，需要 `Authorization: Bearer <access_token>` |
 
@@ -199,6 +201,8 @@ docker compose up -d
 | 登入 | 同一個 IP，15 分鐘 20 次 | 不分 email，換 email 猜也擋得到 |
 | 刪除帳號、改密碼時的目前密碼 | 每位使用者，15 分鐘 5 次失敗（兩個功能合計） | 跟登入失敗同一組設定（`RATE_LIMIT_LOGIN_FAILURES`）。密碼錯（auth-service 的 `PERMISSION_DENIED`）才算，成功就清掉 |
 | 註冊 | 同一個 IP，每小時 5 次 | |
+| 忘記密碼（申請重設連結） | 同一個 IP 每小時 5 次（`RATE_LIMIT_PASSWORD_RESET`）、同一個 email 每小時 3 次（`RATE_LIMIT_PASSWORD_RESET_PER_EMAIL`，鍵只有雜湊） | 不讓人拿它一直寄信轟炸同一個信箱 |
+| 用重設連結設新密碼 | 同一個 IP，跟登入一樣的上限（15 分鐘 20 次） | token 有 256 bits 猜不到，這是多一層 |
 | **所有 API**（登入後） | 每位使用者，每分鐘 600 個請求 | `ratelimit/ApiRateLimits`（HandlerInterceptor，在 JWT 驗證之後、controller 之前）；一個 Job 頁面的輪詢最多約每分鐘 75 個請求，同時開幾個分頁也碰不到 |
 | **所有 API**（沒登入的：登入、註冊、換發、OAuth 回呼、API 文件，以及 token 缺少或無效被擋下的） | 每個 IP，每分鐘 60 個請求 | 跟上面登入／註冊的限制**同時**生效；token 無效的請求在 `JwtAuthenticationFilter` 裡計數，超過時回 429 而不是 401（拿假 token 亂打的腳本也擋得到） |
 | 取得上傳網址（`POST /uploads/presign`） | 每人每小時 30 次 | 以下是**花錢的功能**（controller 方法上標了 `@CostlyFeature("名稱")`），在「所有 API」之外另外算、比較嚴；同一個名稱的 API 共用一個計數。上傳網址：擋住塞滿物件儲存 |

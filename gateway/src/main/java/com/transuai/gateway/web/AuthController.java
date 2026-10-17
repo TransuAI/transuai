@@ -22,6 +22,9 @@ import com.transuai.auth.grpc.v1.LogoutAllDevicesRequest;
 import com.transuai.auth.grpc.v1.LogoutRequest;
 import com.transuai.auth.grpc.v1.RefreshRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
+import com.transuai.auth.grpc.v1.RequestPasswordResetRequest;
+import com.transuai.auth.grpc.v1.ResetPasswordRequest;
+import com.transuai.auth.grpc.v1.ResetPasswordResponse;
 import com.transuai.auth.grpc.v1.User;
 import com.transuai.gateway.grpc.GrpcMetadataSupport;
 import com.transuai.gateway.grpc.GrpcTimestamps;
@@ -32,6 +35,8 @@ import com.transuai.gateway.web.dto.AuthResponseDto;
 import com.transuai.gateway.web.dto.ChangePasswordRequestDto;
 import com.transuai.gateway.web.dto.DeleteAccountRequestDto;
 import com.transuai.gateway.web.dto.LoginRequestDto;
+import com.transuai.gateway.web.dto.PasswordResetConfirmDto;
+import com.transuai.gateway.web.dto.PasswordResetRequestDto;
 import com.transuai.gateway.web.dto.RegisterRequestDto;
 import com.transuai.gateway.web.dto.UserDto;
 
@@ -154,6 +159,32 @@ public class AuthController {
         response.getEndedSessionIdsList().forEach(revokedTokens::sessionEnded);
         revokedTokens.legacySessionsEndedBefore(userId, Instant.now());
         return signedIn(response.getSignedIn(), servletResponse);
+    }
+
+    // 忘記密碼：email 有註冊就寄重設連結（auth-service），沒註冊也一樣回 202，不透露有沒有這個帳號。這個部署沒設定寄信時 503。
+    @PostMapping("/password-reset")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void requestPasswordReset(@RequestBody PasswordResetRequestDto request, HttpServletRequest servletRequest) {
+        if (request.email() == null || request.email().isBlank()) {
+            throw new IllegalArgumentException("email is required");
+        }
+        rateLimits.beforePasswordReset(servletRequest.getRemoteAddr(), request.email());
+        authServiceStub.requestPasswordReset(RequestPasswordResetRequest.newBuilder().setEmail(request.email()).build());
+    }
+
+    // 用重設連結設新密碼：成功 204（前端請使用者用新密碼登入）；這位使用者其他的登入全部作廢，access token 也馬上不能用。
+    // 連結無效或過期 409、新密碼不合規則 400。
+    @PostMapping("/password-reset/confirm")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void resetPassword(@RequestBody PasswordResetConfirmDto request, HttpServletRequest servletRequest) {
+        if (request.token() == null || request.token().isBlank() || request.newPassword() == null) {
+            throw new IllegalArgumentException("token and newPassword are required");
+        }
+        rateLimits.beforePasswordResetConfirm(servletRequest.getRemoteAddr());
+        ResetPasswordResponse response = authServiceStub.resetPassword(ResetPasswordRequest.newBuilder()
+                .setToken(request.token()).setNewPassword(request.newPassword()).build());
+        response.getEndedSessionIdsList().forEach(revokedTokens::sessionEnded);
+        revokedTokens.legacySessionsEndedBefore(UUID.fromString(response.getUserId()), Instant.now());
     }
 
     @GetMapping("/me")
