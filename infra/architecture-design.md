@@ -962,11 +962,12 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 10. **刪除帳號與揭露**（個資法）：使用者可以在設定頁刪除帳號（再輸入密碼），所有資料刪除、已連結帳號撤銷授權、用量去識別化（見 3.1、5.）；
     前端 `/privacy` 列出每個第三方送什麼、什麼時候送（註冊頁與設定頁連過去）。系統由客戶部署在自己內部，蒐集者與聯絡窗口是部署的單位，所以這頁不寫營運方的聯絡方式與伺服器地區（2026-10-17 決定）
 11. **上線前驗證**（OWASP ASVS 4.0.3 Level 1，2026-10-17）：128 條逐項對照，附程式位置、測試與 kind 上的手動測試（暴力破解、限流、IDOR、
-    上傳上限、WebSocket、登出後的 token、Redis 停掉），見 `.scratch/pre-launch-hardening/asvs-l1.md` 與 `manual-tests.md`。通過 91、部分 6、
-    未通過 2、不適用 22、部署時要做 7。驗證時修掉的：密碼 12–128 字元與 PBKDF2（不截斷）、擋常見密碼、強度提示與顯示密碼、改密碼、一次登入
-    最多 30 天、登出（含登出所有裝置、改密碼、刪除帳號）後 access token 馬上失效、gateway 的安全標頭與一般化的 500 訊息、上傳綁 Content-Type、
-    轉錄前用實際長度檢查。還沒通過的 `__Host-` cookie 與防毒掃描，加上帳號異動通知、忘記密碼，等使用者決定（`pre-launch-hardening` 的票 19）；
-    部署時要做的見 `infra/docs/deployment-checklist.md`
+    上傳上限、WebSocket、登出後的 token、Redis 停掉、忘記密碼與通知信），見 `.scratch/pre-launch-hardening/asvs-l1.md` 與 `manual-tests.md`。
+    通過 96、部分 7、接受風險 1（上傳的檔案不掃毒，使用者決定）、不適用 17、部署時要做 7、未通過 0。驗證時補上的：密碼 12–128 字元與 PBKDF2
+    （不截斷）、擋常見密碼、強度提示與顯示密碼、改密碼、忘記密碼（email 重設連結）與帳號異動通知信、一次登入最多 30 天、`__Host-` 的 refresh
+    cookie、登出（含登出所有裝置、改密碼、重設、刪除帳號）後 access token 馬上失效、gateway 的安全標頭與一般化的 500 訊息、上傳綁 Content-Type、
+    轉錄前用實際長度檢查。部分通過的（自由文字沒有長度上限、沒有統一的 schema 驗證、一處 log 可能含內容、忘記密碼只有 email、前端頁面的 CSP
+    與對外連線限制要在部署時做）寫在對照表；部署時要做的見 `infra/docs/deployment-checklist.md`
 
 ---
 
