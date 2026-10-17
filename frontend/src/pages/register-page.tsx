@@ -76,11 +76,15 @@ export function RegisterPage() {
                 id="password"
                 type="password"
                 required
-                minLength={8}
+                minLength={12}
                 autoComplete="new-password"
+                aria-describedby="password-hint"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
+              <p id="password-hint" className="text-xs text-muted-foreground">
+                至少 12 個字元，最多 128 個；可以用空格、中文或任何字元，長一點的句子最好記也最安全
+              </p>
             </div>
             <Button type="submit" disabled={isSubmitting} className="mt-2 w-full">
               {isSubmitting ? '註冊中...' : '註冊'}

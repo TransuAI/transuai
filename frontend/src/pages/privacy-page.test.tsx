@@ -50,4 +50,18 @@ describe('RegisterPage', () => {
 
     expect(screen.getByRole('link', { name: '隱私權說明' })).toHaveAttribute('href', '/privacy')
   })
+
+  it('asks for a password of at least 12 characters', () => {
+    render(
+      <MemoryRouter initialEntries={['/register']}>
+        <Routes>
+          <Route path="/register" element={<RegisterPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const password = screen.getByLabelText('密碼')
+    expect(password).toHaveAttribute('minLength', '12')
+    expect(password).toHaveAccessibleDescription(/至少 12 個字元，最多 128 個/)
+  })
 })
