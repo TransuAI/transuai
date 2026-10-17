@@ -58,6 +58,8 @@ def serve() -> None:
         forwarded_allow_ips=settings.trusted_proxies or None,
         # client 只會送一則帶 access token 的訊息，不用收大訊息。
         ws_max_size=_WS_MAX_MESSAGE_BYTES,
+        # 回應不帶 `server: uvicorn`：不告訴外面用的是什麼伺服器（ASVS 14.3.3）。
+        server_header=False,
     )
 
 
