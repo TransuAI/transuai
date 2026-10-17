@@ -1,0 +1,46 @@
+[project]
+name = "transcription-service"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.0",
+    "boto3>=1.43.67",
+    "grpcio>=1.83.0",
+    "grpcio-health-checking>=1.83.0",
+    "grpcio-reflection>=1.83.0",
+    "httpx>=0.28.1",
+    "imageio-ffmpeg>=0.6",
+    "moviepy>=2.2.1",
+    "numpy>=2.3",
+    "opencc>=1.4.2",
+    "pika>=1.4.4",
+    "protobuf>=7.35.1",
+    "psycopg2-binary>=2.9.12",
+    "pydantic-settings>=2.15.0",
+    "redis>=8.1.0",
+    "sherpa-onnx>=1.13.8",
+    "sherpa-onnx-core>=1.13.8",
+    "sqlalchemy>=2.0.51",
+]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.83.0",
+    "pytest>=9.1.1",
+    "testcontainers[postgres,redis]>=4.15.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.pyright]
+# app/proto_gen 是 protoc 自動產生的程式碼（DO NOT EDIT），grpc 的 type stub
+# 沒宣告 grpc.experimental 等屬性會在這裡產生假警報，不用檢查、也不該手動修改。
+exclude = ["app/proto_gen"]
+
+[tool.uv]
+# moviepy 2.2.1（目前最新）把 pillow 限制在 <12，但 11.x 有已知弱點（見 README「依賴套件弱點掃描」）。這裡只用 VideoFileClip 抽音軌，
+# 影片由 ffmpeg 解碼、不經過 Pillow；pillow 12 下這條路照樣能跑（測試會實際抽一次音軌），所以覆蓋成修好的版本。moviepy 放寬限制後拿掉。
+override-dependencies = ["pillow>=12.3.0"]
