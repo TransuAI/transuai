@@ -11,6 +11,8 @@ TransuAI 由客戶部署在自己的環境（2026-10-17 決定）。這份清單
       （至少 12 字元），`JWT_SECRET`（至少 32 字元，隨機產生，auth-service、gateway、notification-service 用同一把），`REDIS_PASSWORD`，
       `KEY_ENCRYPTION_KEY`（自有金鑰與 OAuth 權杖的主金鑰，**遺失就解不開已存的金鑰**，要另外備份），外部服務的金鑰（`DEEPGRAM_API_KEY`、
       `HF_API_KEY`、`TAVILY_API_KEY`、`GOOGLE_OAUTH_*`）。
+- [ ] 寄信：`app-config` 的 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`MAIL_FROM`，app-secrets 的 `SMTP_PASSWORD`（單位的郵件伺服器，STARTTLS）。
+      沒設的話「忘記密碼」不能用（畫面說請洽管理員），改密碼的通知信也不寄。
 - [ ] 轉錄的上限（`app-config` 的 `USAGE_LIMIT_TRANSCRIPTION_MINUTES`、`MAX_RECORDING_MINUTES`）依單位的需要調；gateway 與 transcription-service 讀同一個值。
 - [ ] secret 建好之後用 `kubectl patch` 一個一個改，**不要重新 `kubectl apply` 整份 `02-secret.yaml`**（會把改過的值蓋回空字串）。
 - [ ] 密鑰不進版控、不放進 image；用客戶環境的 secret 管理（Kubernetes Secret、Vault 等）。
@@ -85,4 +87,6 @@ autoindex off;
 
 - [ ] `/privacy` 列出了資料會送到哪些外部服務；部署的單位要補上自己的個資政策與聯絡窗口（`/privacy` 寫「請洽你的單位管理這套系統的人員」）。
 - [ ] 確認要開的外部服務（Deepgram、HF、Tavily、Google、Notion）符合單位的規定；不用的功能就不設金鑰，對應的項目在 `/privacy` 也要跟著拿掉。
-- [ ] 沒有忘記密碼的功能：使用者忘記密碼時目前只能由管理員處理（`.scratch/pre-launch-hardening/issues/19` 決定要不要做）。
+- [ ] 上傳的檔案**沒有掃毒**（使用者決定，`.scratch/pre-launch-hardening/issues/19`）：檔案只會送去轉錄、給上傳者本人播放與下載。單位規定要掃的話，
+      在物件儲存那一層接（例如 bucket 的事件觸發 ClamAV）。
+- [ ] 忘記密碼靠 email：設好 SMTP（第 1 節）。註冊時不驗證 email，重設信寄到註冊時填的地址。

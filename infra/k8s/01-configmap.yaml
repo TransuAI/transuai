@@ -80,3 +80,12 @@ data:
   # 兩邊讀同一個值。每個檔案最長幾分鐘只有 transcription-service 用（前端也寫死 60 分鐘）。
   USAGE_LIMIT_TRANSCRIPTION_MINUTES: "600"
   MAX_RECORDING_MINUTES: "60"
+
+  # 寄信（auth-service：忘記密碼的連結、密碼改了的通知）。SMTP 由部署的單位提供；SMTP_HOST 空的時候忘記密碼不能用、通知不寄。
+  # 密碼放 app-secrets 的 SMTP_PASSWORD。
+  SMTP_HOST: ""
+  SMTP_PORT: "587"
+  SMTP_USERNAME: ""
+  SMTP_AUTH: "true"
+  SMTP_STARTTLS: "true"
+  MAIL_FROM: ""
