@@ -8,6 +8,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -92,10 +93,16 @@ public class RefreshTokens {
         return token.map(RefreshToken::getFamilyId);
     }
 
-    /** 登出所有裝置。 */
+    /**
+     * 登出所有裝置；回傳 access token 可能還沒過期的那幾串（最近一個 access token 效期內簽過 token 的），gateway 讓那些 access token 也
+     * 馬上不能用。
+     */
     @Transactional
-    public void logoutAll(UUID userId) {
-        repository.revokeAllOf(userId, RevokedReason.LOGGED_OUT, OffsetDateTime.now(ZoneOffset.UTC));
+    public List<UUID> logoutAll(UUID userId) {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        List<UUID> recent = repository.familiesIssuedSince(userId, now.minusMinutes(properties.accessTokenTtlMinutes()));
+        repository.revokeAllOf(userId, RevokedReason.LOGGED_OUT, now);
+        return recent;
     }
 
     private boolean justRotated(RefreshToken token, OffsetDateTime now) {

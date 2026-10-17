@@ -101,11 +101,11 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `Register` | 建立帳號，email 已存在回 `ALREADY_EXISTS`；密碼 12 到 128 個字元（以字元算，任何字元都可以，不限制種類），而且不能太常見（`security/CommonPasswords`），不合回 `INVALID_ARGUMENT`（「密碼至少要 12 個字元」「這個密碼太常見，很容易被猜到，請換一個」）；成功直接簽發 token，不用再呼叫一次 `Login` |
 | `Login` | email/password 其中一項錯誤都回 `UNAUTHENTICATED`（不細分，避免帳號列舉）；帳號不存在時也比對一次雜湊，回應時間跟密碼錯一樣長，不能用時間猜帳號。猜密碼的次數由 gateway 限流 |
 | `Refresh` | 用 refresh token 換發新的 access/refresh token 組合，舊的作廢（輪替）；token 無效、過期、型別不對（例如誤傳 access token）、查不到、已經作廢都回 `UNAUTHENTICATED`；已經換發過的又被用一次（超過 10 秒寬限）視為被盜，整串作廢 |
-| `Logout` | 作廢這個 refresh token 所在的那一串；token 無效或已經作廢也回成功 |
-| `LogoutAllDevices` | 依 `x-user-id` 作廢這位使用者所有的 refresh token |
+| `Logout` | 作廢這個 refresh token 所在的那一串並回傳它（`session_id`，＝access token 的 `sid`）；token 無效或已經作廢也回成功（`session_id` 空的） |
+| `LogoutAllDevices` | 依 `x-user-id` 作廢這位使用者所有的 refresh token，回傳 access token 可能還沒過期的那幾串（`ended_session_ids`） |
 | `GetMe` | 依 `x-user-id` 查目前使用者資訊，找不到（例如帳號已被刪除）回 `NOT_FOUND` |
 | `DeleteAccount` | 刪除帳號（`x-user-id`）：再確認一次密碼，錯了回 `PERMISSION_DENIED`（不是 `UNAUTHENTICATED`——前端會以為 token 過期去換發）；通過就在同一個交易裡刪掉使用者、他所有的 refresh token，並把 `account.deleted { userId }` 寫進 outbox（見下方「刪除帳號」）。找不到使用者回 `NOT_FOUND`。猜密碼的次數由 gateway 限流 |
-| `ChangePassword` | 改密碼（`x-user-id`）：目前的密碼錯回 `PERMISSION_DENIED`（理由同 `DeleteAccount`），新密碼照註冊的規則（`INVALID_ARGUMENT`）。通過就先作廢這位使用者所有的 refresh token（改密碼常是懷疑被盜用；中途失敗頂多被登出），再存新的雜湊，回一組新的 token |
+| `ChangePassword` | 改密碼（`x-user-id`）：目前的密碼錯回 `PERMISSION_DENIED`（理由同 `DeleteAccount`），新密碼照註冊的規則（`INVALID_ARGUMENT`）。通過就先作廢這位使用者所有的 refresh token（改密碼常是懷疑被盜用；中途失敗頂多被登出），再存新的雜湊，回一組新的 token 與作廢的那幾串（`ended_session_ids`：最近一個 access token 效期內簽過 token 的，gateway 讓那些 access token 也馬上不能用） |
 
 ## 刪除帳號
 

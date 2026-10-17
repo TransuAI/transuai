@@ -11,10 +11,12 @@ import org.springframework.boot.grpc.test.autoconfigure.AutoConfigureTestGrpcTra
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.grpc.client.GrpcChannelFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.auth.grpc.v1.ChangePasswordRequest;
+import com.transuai.auth.grpc.v1.ChangePasswordResponse;
 import com.transuai.auth.grpc.v1.LoginRequest;
 import com.transuai.auth.grpc.v1.RefreshRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
@@ -40,6 +42,9 @@ class ChangePasswordTest {
     @Autowired
     private GrpcChannelFactory channels;
 
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @Test
     void theNewPasswordWorksAndTheOldOneNoLonger() {
         AuthResponse signedUp = register();
@@ -62,6 +67,20 @@ class ChangePasswordTest {
         assertCode(Status.Code.UNAUTHENTICATED, () -> refresh(otherDevice.getRefreshToken()));
         assertCode(Status.Code.UNAUTHENTICATED, () -> refresh(signedUp.getRefreshToken()));
         assertThat(refresh(changed.getRefreshToken()).getAccessToken()).isNotEmpty();
+    }
+
+    @Test
+    void itSaysWhichSignInsEndedSoTheirAccessTokensCanBeStoppedToo() {
+        AuthResponse signedUp = register();
+        stub().login(LoginRequest.newBuilder().setEmail(signedUp.getUser().getEmail()).setPassword(PASSWORD).build());
+
+        ChangePasswordResponse changed = stubAs(UUID.fromString(signedUp.getUser().getId())).changePassword(
+                ChangePasswordRequest.newBuilder().setCurrentPassword(PASSWORD).setNewPassword(NEW_PASSWORD).build());
+
+        assertThat(changed.getEndedSessionIdsList()).containsExactlyInAnyOrder(
+                jdbc.queryForList("select distinct family_id::text from refresh_tokens where user_id = ?::uuid and revoked_at is not null",
+                        String.class, signedUp.getUser().getId()).toArray(String[]::new))
+                .hasSize(2);
     }
 
     @Test
@@ -98,7 +117,7 @@ class ChangePasswordTest {
 
     private AuthResponse change(AuthResponse signedIn, String current, String next) {
         return stubAs(UUID.fromString(signedIn.getUser().getId())).changePassword(ChangePasswordRequest.newBuilder()
-                .setCurrentPassword(current).setNewPassword(next).build());
+                .setCurrentPassword(current).setNewPassword(next).build()).getSignedIn();
     }
 
     private boolean login(AuthResponse signedIn, String password) {

@@ -128,10 +128,14 @@ class RefreshTokenTest {
         AuthResponse otherDevice = stub().login(LoginRequest.newBuilder()
                 .setEmail(signedUp.getUser().getEmail()).setPassword(PASSWORD).build());
 
-        stubAs(UUID.fromString(signedUp.getUser().getId())).logoutAllDevices(LogoutAllDevicesRequest.getDefaultInstance());
+        var response = stubAs(UUID.fromString(signedUp.getUser().getId()))
+                .logoutAllDevices(LogoutAllDevicesRequest.getDefaultInstance());
 
         assertUnauthenticated(() -> refresh(signedUp.getRefreshToken()));
         assertUnauthenticated(() -> refresh(otherDevice.getRefreshToken()));
+        // Both sign-ins' access tokens may still be valid: gateway is told to stop them.
+        assertThat(response.getEndedSessionIdsList())
+                .containsExactlyInAnyOrder(sessionOf(signedUp.getAccessToken()), sessionOf(otherDevice.getAccessToken()));
     }
 
     @Test

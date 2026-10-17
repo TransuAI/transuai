@@ -1,6 +1,7 @@
 package com.transuai.auth_service.repository;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,6 +27,10 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     @Query("update RefreshToken t set t.revokedAt = :now, t.revokedReason = :reason where t.familyId = :familyId")
     int revokeFamily(@Param("familyId") UUID familyId, @Param("reason") RefreshToken.RevokedReason reason,
             @Param("now") OffsetDateTime now);
+
+    /** 這段時間以來簽過 token 的那幾串：那時一起簽的 access token 可能還沒過期。 */
+    @Query("select distinct t.familyId from RefreshToken t where t.userId = :userId and t.createdAt > :since")
+    List<UUID> familiesIssuedSince(@Param("userId") UUID userId, @Param("since") OffsetDateTime since);
 
     /** 這位使用者的全部作廢（登出所有裝置）。 */
     @Modifying

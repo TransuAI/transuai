@@ -1,5 +1,6 @@
 package com.transuai.auth_service.grpc;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -9,6 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.auth.grpc.v1.ChangePasswordRequest;
+import com.transuai.auth.grpc.v1.ChangePasswordResponse;
 import com.transuai.auth.grpc.v1.DeleteAccountRequest;
 import com.transuai.auth.grpc.v1.DeleteAccountResponse;
 import com.transuai.auth.grpc.v1.GetMeRequest;
@@ -123,8 +125,9 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
 
     @Override
     public void logoutAllDevices(LogoutAllDevicesRequest request, StreamObserver<LogoutResponse> responseObserver) {
-        refreshTokens.logoutAll(GrpcAuthContext.currentUserId());
-        responseObserver.onNext(LogoutResponse.getDefaultInstance());
+        List<UUID> ended = refreshTokens.logoutAll(GrpcAuthContext.currentUserId());
+        responseObserver.onNext(LogoutResponse.newBuilder()
+                .addAllEndedSessionIds(ended.stream().map(UUID::toString).toList()).build());
         responseObserver.onCompleted();
     }
 
@@ -152,7 +155,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     // 改密碼：要目前的密碼（ASVS 2.1.6；錯了是 PERMISSION_DENIED，理由同 deleteAccount）。改好之後其他裝置的登入全部作廢——
     // 改密碼常常是因為懷疑被盜用——這次的請求拿到新的一串。
     @Override
-    public void changePassword(ChangePasswordRequest request, StreamObserver<AuthResponse> responseObserver) {
+    public void changePassword(ChangePasswordRequest request, StreamObserver<ChangePasswordResponse> responseObserver) {
         UUID userId = GrpcAuthContext.currentUserId();
         com.transuai.auth_service.domain.User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
@@ -171,10 +174,13 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
         }
 
         // 先作廢再改：中途失敗頂多是被登出，不會留下改了密碼、舊的登入卻還能用的情況。
-        refreshTokens.logoutAll(userId);
+        List<UUID> ended = refreshTokens.logoutAll(userId);
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user = userRepository.save(user);
-        responseObserver.onNext(buildAuthResponse(user, refreshTokens.issue(userId)));
+        responseObserver.onNext(ChangePasswordResponse.newBuilder()
+                .setSignedIn(buildAuthResponse(user, refreshTokens.issue(userId)))
+                .addAllEndedSessionIds(ended.stream().map(UUID::toString).toList())
+                .build());
         responseObserver.onCompleted();
     }
 
