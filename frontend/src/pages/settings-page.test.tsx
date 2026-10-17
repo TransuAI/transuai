@@ -3,12 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Toaster } from '@/components/ui/sonner'
-import { authApi, connectionsApi, modelsApi, postMeetingSettingsApi, providerKeysApi, usageApi } from '@/lib/api'
+import { authApi, connectionsApi, modelsApi, postMeetingSettingsApi, providerKeysApi, systemApi, usageApi } from '@/lib/api'
+import { forgetSystemStatus } from '@/hooks/use-system-status'
 import { ApiError } from '@/lib/api-client'
 import { leaveTo } from '@/lib/navigation'
 import { SettingsPage } from './settings-page'
 
 vi.mock('@/lib/api', () => ({
+  systemApi: { status: vi.fn().mockResolvedValue({ setupRequired: false, mailEnabled: true }) },
   authApi: { me: vi.fn(), resendEmailVerification: vi.fn(), generateRecoveryCodes: vi.fn() },
   providerKeysApi: { list: vi.fn(), save: vi.fn(), remove: vi.fn() },
   modelsApi: { available: vi.fn(), getDefault: vi.fn(), setDefault: vi.fn() },
@@ -34,7 +36,7 @@ const gpt5mini = { provider: 'openai', model: 'gpt-5-mini', supportsTools: true 
 beforeEach(() => {
   vi.mocked(authApi.me).mockResolvedValue({
     id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z', emailVerified: true,
-    recoveryCodesLeft: 0,
+    recoveryCodesLeft: 0, admin: false,
   })
   vi.mocked(providerKeysApi.list).mockResolvedValue([
     { provider: 'openai', last4: 'a3F9', createdAt: '2026-09-26T02:00:00Z' },
@@ -628,7 +630,7 @@ describe('SettingsPage email and recovery codes (確認 email、復原碼)', () 
   const me = { id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z' }
 
   it('says when the email is not confirmed yet and sends the link again', async () => {
-    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: false, recoveryCodesLeft: 0 })
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: false, recoveryCodesLeft: 0, admin: false })
     vi.mocked(authApi.resendEmailVerification).mockResolvedValue(undefined)
     const clicker = userEvent.setup()
     await renderSettings()
@@ -642,7 +644,7 @@ describe('SettingsPage email and recovery codes (確認 email、復原碼)', () 
   })
 
   it('shows a confirmed email without offering to send anything', async () => {
-    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 4 })
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 4, admin: false })
     await renderSettings()
 
     const email = await screen.findByRole('group', { name: 'Email' })
@@ -651,8 +653,21 @@ describe('SettingsPage email and recovery codes (確認 email、復原碼)', () 
     expect(screen.getByRole('group', { name: '復原碼' })).toHaveTextContent('還有 4 組沒用過')
   })
 
+  it('says nothing about confirming the email when this installation has no mail set up', async () => {
+    forgetSystemStatus()
+    vi.mocked(systemApi.status).mockResolvedValueOnce({ setupRequired: false, mailEnabled: false })
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: false, recoveryCodesLeft: 0, admin: false })
+    await renderSettings()
+
+    const email = await screen.findByRole('group', { name: 'Email' })
+    expect(email).toHaveTextContent('a@example.com')
+    expect(email).not.toHaveTextContent('還沒確認')
+    expect(within(email).queryByRole('button', { name: '重寄確認信' })).toBeNull()
+    forgetSystemStatus()
+  })
+
   it('makes recovery codes with the current password and shows them once', async () => {
-    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 0 })
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 0, admin: false })
     vi.mocked(authApi.generateRecoveryCodes).mockResolvedValue({ codes: ['AAAAA-BBBBB-CCCCC-DDDDD', 'EEEEE-FFFFF-GGGGG-HHHHH'] })
     const clicker = userEvent.setup()
     await renderSettings()

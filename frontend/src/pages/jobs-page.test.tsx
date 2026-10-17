@@ -7,6 +7,7 @@ import type { Job } from '@/types/api'
 import { JobsPage } from './jobs-page'
 
 vi.mock('@/lib/api', () => ({
+  systemApi: { status: vi.fn().mockResolvedValue({ setupRequired: false, mailEnabled: true }) },
   jobsApi: {
     list: vi.fn(),
     remove: vi.fn(),

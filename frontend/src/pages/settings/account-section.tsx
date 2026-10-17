@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/context/auth-context'
+import { useSystemStatus } from '@/hooks/use-system-status'
 import { authApi } from '@/lib/api'
 import { ApiError } from '@/lib/api-client'
 import { downloadTextFile } from '@/lib/download'
@@ -76,6 +77,7 @@ function useCurrentUser(): [User | null, (user: User) => void] {
 
 // 確認 email: 忘記密碼 mails only a confirmed address, so an unconfirmed one says so and offers the link again.
 function EmailStatus({ user }: { user: User }) {
+  const status = useSystemStatus()
   const [isSending, setIsSending] = useState(false)
 
   const resend = () => {
@@ -93,7 +95,8 @@ function EmailStatus({ user }: { user: User }) {
     <div role="group" aria-label="Email" className="flex flex-wrap items-center gap-2 text-sm">
       <span className="text-muted-foreground">Email：</span>
       <span>{user.email}</span>
-      {user.emailVerified ? (
+      {/* Without mail set up nothing is confirmed by email: just the address. */}
+      {!status?.mailEnabled ? null : user.emailVerified ? (
         <span className="text-muted-foreground">（已確認）</span>
       ) : (
         <>

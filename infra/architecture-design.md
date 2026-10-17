@@ -124,8 +124,16 @@ POST   /auth/password-reset/recovery-code  用 email＋一組復原碼設新密�
 POST   /auth/verify-email      確認 email（註冊時寄的連結）；忘記密碼的信只寄給確認過的 email
 POST   /auth/verify-email/resend  重寄確認信（要登入）
 POST   /auth/recovery-codes    產生 10 組復原碼（要登入、要目前的密碼，只回傳這一次）
-GET    /auth/me                取得目前使用者資訊（需帶 access token）
+GET    /auth/me                取得目前使用者資訊（需帶 access token；含 admin：是不是管理員）
+GET    /system/status          不用登入：還沒有任何帳號（下一個註冊的是管理員）、有沒有設定寄信
+GET/PUT /admin/settings/{mail,ai,speech}   系統設定（只給管理員）：寄信（auth-service）、模型（ai-service）、語音辨識（transcription-service）
+POST   /admin/settings/mail/test、/admin/settings/{ai,speech}/check   寄測試信、測試連線
 ```
+
+**管理員與系統設定**（`.scratch/system-settings/spec.md`）：還沒有任何帳號時註冊的那一個是管理員；已經有使用者的部署用 `infra/scripts/make-admin.sh` 指定。
+系統設定的每一部分存在負責它的服務（`mail_settings`、`ai_settings`、`speech_settings`，各一列；金鑰與密碼用 `KEY_ENCRYPTION_KEY` 加密、API 不回傳），
+**存過就用存的，沒存過就用環境變數**，存了馬上生效（讀資料庫的結果記幾秒）。gateway 的 `/admin/**` 每次先問 auth-service 這個人是不是管理員。
+沒有設定寄信時，前端不顯示 email 的忘記密碼與 email 確認（復原碼照常）。
 
 **JWT 機制**：HMAC（HS256/HS384，視 secret 長度而定）簽章，`JWT_SECRET` 由 auth-service 與
 gateway 共用同一把。access token 15 分鐘、refresh token 7 天過期（皆可透過
@@ -1009,5 +1017,4 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 以下是原本規劃、但目前程式碼裡完全沒有對應實作的功能，列出來避免跟「現況」搞混：
 
 - **雲端部署**（Render/Supabase/Upstash/R2/Vercel，見 6.5）：規劃內容保留，尚未真的部署上去
-- **系統設定頁（管理員）**：平台模型、embedding、語音辨識、網路搜尋的網址與金鑰目前是環境變數（k8s configmap／secret），還沒有管理員在介面上設定的地方
 - **`x-user-id` 下游驗證**：transcription-service/ai-service 本身仍不驗證這個 header，ownership 檢查目前只在 Gateway 這一層做（見 2.1）——刻意維持的設計決定，不是還沒做

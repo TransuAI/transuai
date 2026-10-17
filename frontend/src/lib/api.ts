@@ -1,7 +1,15 @@
 import { apiFetch, apiFetchVoid, requestSse } from '@/lib/api-client'
 import type { ModelRef } from '@/lib/providers'
 import type {
+  AiSettings,
+  AiSettingsCheck,
+  AiSettingsUpdate,
   AnswerStep,
+  MailSettings,
+  MailSettingsUpdate,
+  SpeechSettings,
+  SpeechSettingsUpdate,
+  SystemStatus,
   AuthResponse,
   AvailableModels,
   Chapter,
@@ -90,6 +98,27 @@ export const authApi = {
   // 忘記密碼 without the mailbox: the email and one unused 復原碼; no sign-in. 409 when either is wrong. Signs every device out.
   resetPasswordWithRecoveryCode: (params: { email: string; code: string; newPassword: string }) =>
     apiFetchVoid('/auth/password-reset/recovery-code', { method: 'POST', body: params, auth: false }),
+}
+
+// Before sign-in: whether this is a fresh install and whether mail is set up.
+export const systemApi = {
+  status: () => apiFetch<SystemStatus>('/system/status', { auth: false }),
+}
+
+// 系統設定 (administrators only; 403 otherwise). Saving takes effect at once.
+export const adminSettingsApi = {
+  mail: () => apiFetch<MailSettings>('/admin/settings/mail'),
+  updateMail: (update: MailSettingsUpdate) => apiFetch<MailSettings>('/admin/settings/mail', { method: 'PUT', body: update }),
+  // Sends a test mail with the current settings (to the administrator unless `to` is given); waits for it.
+  testMail: (to?: string) =>
+    apiFetch<{ sent: boolean; error: string }>('/admin/settings/mail/test', { method: 'POST', body: { to: to ?? '' } }),
+  ai: () => apiFetch<AiSettings>('/admin/settings/ai'),
+  updateAi: (update: AiSettingsUpdate) => apiFetch<AiSettings>('/admin/settings/ai', { method: 'PUT', body: update }),
+  checkAi: () => apiFetch<AiSettingsCheck>('/admin/settings/ai/check', { method: 'POST' }),
+  speech: () => apiFetch<SpeechSettings>('/admin/settings/speech'),
+  updateSpeech: (update: SpeechSettingsUpdate) =>
+    apiFetch<SpeechSettings>('/admin/settings/speech', { method: 'PUT', body: update }),
+  checkSpeech: () => apiFetch<{ ok: boolean; detail: string }>('/admin/settings/speech/check', { method: 'POST' }),
 }
 
 export const uploadApi = {

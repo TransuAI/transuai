@@ -6,8 +6,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -17,8 +15,9 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 寄給使用者的帳號信：重設密碼的連結（忘記密碼）、密碼改了或重設了的通知（ASVS 2.2.3、2.5.5）。SMTP 由部署的單位提供（{@code SMTP_HOST}
- * 等，見 README）；沒設定時 {@link #available()} 是 false，忘記密碼不能用、通知不寄（記 log）。
+ * 寄給使用者的帳號信：重設密碼的連結（忘記密碼）、密碼改了或重設了的通知（ASVS 2.2.3、2.5.5）。SMTP 由部署的單位提供：管理員在
+ * 系統設定頁存的，或環境變數（{@code SMTP_HOST} 等，見 README、{@link MailConfig}）；都沒有時 {@link #available()} 是 false，忘記密碼
+ * 不能用、email 不用確認、通知不寄（記 log）。
  * <p>
  * 在背景寄：呼叫端不等 SMTP，寄不出去只記 log——忘記密碼的回應時間也就不會因為「有這個帳號、要寄信」而變長（不能用時間猜帳號）。
  */
@@ -28,25 +27,42 @@ public class AccountMail {
 
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.of("Asia/Taipei"));
 
-    private final ObjectProvider<JavaMailSender> sender;
-    private final String host;
-    private final String from;
+    private final MailConfig config;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "account-mail");
         thread.setDaemon(true);
         return thread;
     });
 
-    public AccountMail(ObjectProvider<JavaMailSender> sender, @Value("${spring.mail.host:}") String host,
-            @Value("${app.mail.from}") String from) {
-        this.sender = sender;
-        this.host = host;
-        this.from = from;
+    public AccountMail(MailConfig config) {
+        this.config = config;
     }
 
-    /** 這個部署有沒有設定寄信（SMTP 主機與寄件人；SMTP_HOST 是空字串時 Spring 照樣會建出 sender，所以另外看）。 */
+    /** 這個部署有沒有設定寄信（SMTP 主機與寄件人）。 */
     public boolean available() {
-        return !host.isBlank() && !from.isBlank() && sender.getIfAvailable() != null;
+        return config.effective().enabled() && config.sender() != null;
+    }
+
+    /** 系統設定頁的「寄測試信」：用目前的設定寄一封、等它寄完。寄出去回 null，不然回原因。 */
+    public String sendTest(String to) {
+        MailConfig.Effective settings = config.effective();
+        JavaMailSender mailSender = config.sender();
+        if (!settings.enabled() || mailSender == null) {
+            return "還沒有設定 SMTP 主機與寄件人";
+        }
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(settings.from());
+        message.setTo(to);
+        message.setSubject("TransuAI 的測試信");
+        message.setText("這是系統設定頁寄的測試信。收得到就表示寄信設定正確，忘記密碼與 email 確認可以用了。");
+        try {
+            mailSender.send(message);
+            return null;
+        } catch (MailException e) {
+            log.warn("test mail to {} failed", to, e);
+            Throwable cause = e.getMostSpecificCause();
+            return cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+        }
     }
 
     public void passwordResetLink(String to, String link, long validMinutes) {
@@ -100,13 +116,14 @@ public class AccountMail {
     }
 
     private void send(String to, String subject, String body) {
-        JavaMailSender mailSender = sender.getIfAvailable();
-        if (!available()) {
-            log.warn("mail is not configured (SMTP_HOST, MAIL_FROM); not sending \"{}\"", subject);
+        MailConfig.Effective settings = config.effective();
+        JavaMailSender mailSender = config.sender();
+        if (!settings.enabled() || mailSender == null) {
+            log.warn("mail is not configured (system settings or SMTP_HOST, MAIL_FROM); not sending \"{}\"", subject);
             return;
         }
         SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(from);
+        message.setFrom(settings.from());
         message.setTo(to);
         message.setSubject(subject);
         message.setText(body);

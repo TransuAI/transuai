@@ -22,7 +22,9 @@ class OutboundBlocked(httpx.RequestError):
 def allowed_hosts() -> frozenset[str]:
     configured = [host.strip().lower() for host in settings.outbound_allowed_hosts.split(",") if host.strip()]
     hosts = set(configured or DEFAULT_ALLOWED_HOSTS)
-    if local := urlsplit(settings.stt_base_url).hostname:
+    from app.services import speech_settings  # 設定頁存的伺服器（用到資料庫，用到才載入）
+
+    if local := urlsplit(speech_settings.current().stt_base_url).hostname:
         hosts.add(local.lower())
     return frozenset(hosts)
 

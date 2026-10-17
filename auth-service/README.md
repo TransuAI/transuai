@@ -46,10 +46,18 @@ access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）�
   那一次回傳明文；一組只能用一次。用 email＋一組復原碼可以直接設新密碼（email 或復原碼不對是同一個錯誤），之後作廢所有登入。產生與使用都寄通知信。
   `GetMe` 與登入的回應帶 `email_verified`、`recovery_codes_left`。
 
+### 管理員
+
+`users.role`（`admin`／`member`，`User.is_admin`）：**還沒有任何帳號時註冊的那一個是管理員**（全新安裝的第一個人；用 advisory lock 鎖住判斷，同時註冊的兩個人只有
+一個是），之後的都是一般使用者。已經有使用者的部署用 `infra/scripts/make-admin.sh <email>` 指定。管理員能改系統設定（寄信在這裡；模型、語音辨識在各自的
+服務，見 `.scratch/system-settings/spec.md`）。`GetSystemStatus`（不需要 `x-user-id`）告訴登入前的頁面：還沒有任何帳號（`setup_required`，註冊頁寫「建立
+管理員帳號」）、有沒有設定寄信（`mail_enabled`，沒有的話前端不顯示忘記密碼的 email 方式與 email 確認）。
+
 ### 寄信（忘記密碼、帳號異動通知）
 
 `mail/AccountMail` 用 SMTP 寄純文字信（ASVS 2.2.3、2.5.5）：重設密碼的連結、密碼改了／重設了的通知（含時間，「如果不是你本人做的，請馬上用忘記密碼重設」）。
-SMTP 由部署的單位提供（`SMTP_*`、`MAIL_FROM`，見「環境變數」）；`SMTP_HOST` 或 `MAIL_FROM` 空的時候，忘記密碼回 `UNAVAILABLE`（「這個系統沒有設定寄信…」，
+SMTP 由部署的單位提供：管理員在系統設定頁存的（`mail_settings` 那一列，密碼用 `KEY_ENCRYPTION_KEY` AES-256-GCM 加密，`security/SecretBox`；存了馬上生效，
+有「寄測試信」），沒存過就用環境變數（`SMTP_*`、`MAIL_FROM`，見「環境變數」）——由 `mail/MailConfig` 決定每次用哪一組。都沒有的時候，忘記密碼回 `UNAVAILABLE`（「這個系統沒有設定寄信…」，
 跟 email 無關，不透露有沒有這個帳號），通知只記 log 不寄。信在背景的一條 thread 寄，呼叫端不等 SMTP：寄不出去只記 log，忘記密碼的回應時間也
 不會因為「有這個帳號、要寄信」而變長。
 
@@ -127,7 +135,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 
 | RPC | 說明 |
 |---|---|
-| `Register` | 建立帳號，email 已存在回 `ALREADY_EXISTS`；密碼 12 到 128 個字元（以字元算，任何字元都可以，不限制種類），而且不能太常見（`security/CommonPasswords`），不合回 `INVALID_ARGUMENT`（「密碼至少要 12 個字元」「這個密碼太常見，很容易被猜到，請換一個」）；成功直接簽發 token，不用再呼叫一次 `Login` |
+| `Register` | 建立帳號（還沒有任何帳號時，這個是管理員），email 已存在回 `ALREADY_EXISTS`；密碼 12 到 128 個字元（以字元算，任何字元都可以，不限制種類），而且不能太常見（`security/CommonPasswords`），不合回 `INVALID_ARGUMENT`（「密碼至少要 12 個字元」「這個密碼太常見，很容易被猜到，請換一個」）；成功直接簽發 token，不用再呼叫一次 `Login` |
 | `Login` | email/password 其中一項錯誤都回 `UNAUTHENTICATED`（不細分，避免帳號列舉）；帳號不存在時也比對一次雜湊，回應時間跟密碼錯一樣長，不能用時間猜帳號。猜密碼的次數由 gateway 限流 |
 | `Refresh` | 用 refresh token 換發新的 access/refresh token 組合，舊的作廢（輪替）；token 無效、過期、型別不對（例如誤傳 access token）、查不到、已經作廢都回 `UNAUTHENTICATED`；已經換發過的又被用一次（超過 10 秒寬限）視為被盜，整串作廢 |
 | `Logout` | 作廢這個 refresh token 所在的那一串並回傳它（`session_id`，＝access token 的 `sid`）；token 無效或已經作廢也回成功（`session_id` 空的） |
@@ -140,6 +148,9 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `ResetPasswordWithRecoveryCode` | 用 email＋一組復原碼設新密碼（不需要 `x-user-id`）：不對（不分是 email 還是復原碼）或用過了 `FAILED_PRECONDITION`；新密碼不合規則 `INVALID_ARGUMENT`（不用掉復原碼）；成功就作廢所有登入、寄通知信，回傳同 `ResetPassword` |
 | `RequestPasswordReset` | 忘記密碼（不需要 `x-user-id`）：email 有註冊、而且確認過就寄重設連結，不然也回成功；沒有設定寄信時 `UNAVAILABLE`（見「寄信」） |
 | `ResetPassword` | 用重設連結的 token 設新密碼（不需要 `x-user-id`）：token 無效、過期、用過了回 `FAILED_PRECONDITION`；新密碼照註冊的規則（`INVALID_ARGUMENT`，不合時 token 不用掉）；成功就作廢所有登入、寄通知信，回傳 `user_id` 與作廢的那幾串（`ended_session_ids`） |
+| `GetSystemStatus` | 不需要 `x-user-id`：`setup_required`（還沒有任何帳號）、`mail_enabled`（有沒有設定寄信） |
+| `GetMailSettings`／`UpdateMailSettings` | 系統設定的寄信（`x-user-id`，不是管理員 `PERMISSION_DENIED`）：目前用的設定（存的或環境變數），密碼只回有沒有設定；存了馬上生效，密碼空的是不改、`clear_password` 清掉、`use_environment` 回到環境變數；存密碼卻沒有 `KEY_ENCRYPTION_KEY` 是 `FAILED_PRECONDITION` |
+| `SendTestMail` | 用目前的設定寄一封測試信（管理員）：`to` 空的就寄給自己，等它寄完，寄不出去回 `sent=false` 與原因 |
 | `ChangePassword` | 改密碼（`x-user-id`）：目前的密碼錯回 `PERMISSION_DENIED`（理由同 `DeleteAccount`），新密碼照註冊的規則（`INVALID_ARGUMENT`）。通過就先作廢這位使用者所有的 refresh token（改密碼常是懷疑被盜用；中途失敗頂多被登出），再存新的雜湊，回一組新的 token 與作廢的那幾串（`ended_session_ids`：最近一個 access token 效期內簽過 token 的，gateway 讓那些 access token 也馬上不能用） |
 
 ## 刪除帳號
@@ -161,10 +172,11 @@ fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（
 | `JWT_REFRESH_TOKEN_TTL_DAYS` | `7` | refresh token 效期 |
 | `JWT_REFRESH_REUSE_GRACE_SECONDS` | `10` | 已經換發過的 refresh token 在這幾秒內再用一次不算被盜（多個分頁同時換發） |
 | `JWT_SESSION_MAX_DAYS` | `30` | 一次登入最多維持幾天（一路換發也不超過），之後要重新登入 |
-| `SMTP_HOST` / `SMTP_PORT` | 空 / `587` | 寄信的 SMTP 主機；空的時候忘記密碼不能用、通知不寄 |
+| `SMTP_HOST` / `SMTP_PORT` | 空 / `587` | 寄信的 SMTP 主機（系統設定頁存過就用存的）；都沒有的時候忘記密碼不能用、通知不寄 |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | 空 | SMTP 帳密（`SMTP_AUTH=true` 時用） |
 | `SMTP_AUTH` / `SMTP_STARTTLS` | `true` / `true` | 要不要登入 SMTP、要不要（而且一定要）STARTTLS；本機的測試用 SMTP 才設 `false` |
 | `MAIL_FROM` | 空 | 寄件人；空的時候同樣不寄 |
+| `KEY_ENCRYPTION_KEY` | 空 | 系統設定頁存的 SMTP 密碼用這把加密（base64 的 32 bytes，跟 ai-service、transcription-service 同一把）；空的時候不能在設定頁存密碼 |
 | `FRONTEND_URL` | `http://localhost:5173` | 信裡連結指向的前端（跟 gateway 同一個值） |
 | `PASSWORD_RESET_TTL` | `30m` | 重設連結多久內有效 |
 | `EMAIL_VERIFICATION_TTL` | `24h` | 確認 email 的連結多久內有效 |

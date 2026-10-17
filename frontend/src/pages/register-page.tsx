@@ -8,8 +8,10 @@ import { PasswordInput, PasswordStrengthHint } from '@/components/password-input
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { useSystemStatus } from '@/hooks/use-system-status'
 
 export function RegisterPage() {
+  const status = useSystemStatus()
   const { register } = useAuth()
   const navigate = useNavigate()
   const [displayName, setDisplayName] = useState('')
@@ -40,8 +42,13 @@ export function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>建立帳號</CardTitle>
-          <CardDescription>開始上傳並產出逐字稿與摘要</CardDescription>
+          {/* A fresh install: the first account becomes the administrator. */}
+          <CardTitle>{status?.setupRequired ? '建立管理員帳號' : '建立帳號'}</CardTitle>
+          <CardDescription>
+            {status?.setupRequired
+              ? '這是這套系統的第一個帳號，會成為管理員：可以在「系統設定」設定模型、語音辨識與寄信'
+              : '開始上傳並產出逐字稿與摘要'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">

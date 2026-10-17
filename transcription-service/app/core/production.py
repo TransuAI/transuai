@@ -14,16 +14,12 @@ def secret_problems(settings: Settings) -> list[str]:
     """正式環境下有問題的密鑰（空的就是沒問題；不是正式環境一律沒問題）。"""
     if not settings.is_production:
         return []
-    required = list(_REQUIRED)
-    # 語音辨識要有一個：本地的（不用金鑰）或 Deepgram 的金鑰。
-    if not (settings.stt_base_url and settings.stt_model):
-        required.append("deepgram_api_key")
+    # 語音辨識不在這裡檢查：管理員可以裝好之後才在系統設定頁設定（沒設定時轉錄會說「語音辨識尚未設定」）。
     problems = []
-    for field in required:
+    for field in _REQUIRED:
         value = getattr(settings, field)
         if value in _DEVELOPMENT_DEFAULTS:
-            hint = " (or set STT_BASE_URL and STT_MODEL for local speech recognition)" if field == "deepgram_api_key" else ""
-            problems.append(f"{field.upper()} is not set (or is the development default){hint}")
+            problems.append(f"{field.upper()} is not set (or is the development default)")
         elif len(value) < _MIN_LENGTH:
             problems.append(f"{field.upper()} must be at least {_MIN_LENGTH} characters")
     return problems

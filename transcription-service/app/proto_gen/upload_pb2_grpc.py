@@ -69,6 +69,11 @@ class UploadServiceStub:
                 request_serializer=upload__pb2.DeleteJobRequest.SerializeToString,
                 response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                 _registered_method=True)
+        self.UpdateJob = channel.unary_unary(
+                '/transuai.upload.v1.UploadService/UpdateJob',
+                request_serializer=upload__pb2.UpdateJobRequest.SerializeToString,
+                response_deserializer=upload__pb2.Job.FromString,
+                _registered_method=True)
 
 
 class UploadServiceServicer:
@@ -109,7 +114,8 @@ class UploadServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def ListJobs(self, request, context):
-        """查詢使用者所有 Job（分頁）。
+        """查詢使用者所有 Job（分頁，新的在前）。可以用 query 找標題或檔名包含它的（不分大小寫，% 與 _ 照字面比對），
+        用 category 只看某個類型（不在清單回 INVALID_ARGUMENT）；空字串＝不篩。total_count 跟著條件算。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -117,6 +123,15 @@ class UploadServiceServicer:
 
     def DeleteJob(self, request, context):
         """刪除 Job 與相關儲存物件。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateJob(self, request, context):
+        """使用者修改標題與類型（見 upload-service CONTEXT.md「標題」「類型」）。沒帶的欄位不動；帶了的欄位記為使用者設定過，
+        AI（SetSuggestedDetails）之後不會再寫。標題空字串＝沒有標題（顯示檔名），仍算使用者設定過。
+        標題超過 100 字、類型不在清單內回 INVALID_ARGUMENT；不是自己的 Job 回 NOT_FOUND。
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -154,6 +169,11 @@ def add_UploadServiceServicer_to_server(servicer, server):
                     servicer.DeleteJob,
                     request_deserializer=upload__pb2.DeleteJobRequest.FromString,
                     response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+            'UpdateJob': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateJob,
+                    request_deserializer=upload__pb2.UpdateJobRequest.FromString,
+                    response_serializer=upload__pb2.Job.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -331,6 +351,33 @@ class UploadService:
             metadata,
             _registered_method=True)
 
+    @staticmethod
+    def UpdateJob(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.upload.v1.UploadService/UpdateJob',
+            upload__pb2.UpdateJobRequest.SerializeToString,
+            upload__pb2.Job.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
 
 class InternalJobServiceStub:
     """InternalJobService 僅供內部服務（Transcription Service / AI Service 等 pipeline 下游）呼叫，
@@ -349,6 +396,11 @@ class InternalJobServiceStub:
                 request_serializer=upload__pb2.UpdateJobStatusRequest.SerializeToString,
                 response_deserializer=upload__pb2.Job.FromString,
                 _registered_method=True)
+        self.SetSuggestedDetails = channel.unary_unary(
+                '/transuai.upload.v1.InternalJobService/SetSuggestedDetails',
+                request_serializer=upload__pb2.SetSuggestedDetailsRequest.SerializeToString,
+                response_deserializer=upload__pb2.Job.FromString,
+                _registered_method=True)
 
 
 class InternalJobServiceServicer:
@@ -364,12 +416,25 @@ class InternalJobServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SetSuggestedDetails(self, request, context):
+        """AI 依內容建議的標題與類型（ai-service 的 pipeline 在摘要之後呼叫）。使用者改過的欄位不動；空字串的欄位不動；
+        類型不在清單裡回 INVALID_ARGUMENT。job_id 格式不對回 INVALID_ARGUMENT、找不到回 NOT_FOUND。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_InternalJobServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'UpdateJobStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.UpdateJobStatus,
                     request_deserializer=upload__pb2.UpdateJobStatusRequest.FromString,
+                    response_serializer=upload__pb2.Job.SerializeToString,
+            ),
+            'SetSuggestedDetails': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetSuggestedDetails,
+                    request_deserializer=upload__pb2.SetSuggestedDetailsRequest.FromString,
                     response_serializer=upload__pb2.Job.SerializeToString,
             ),
     }
@@ -403,6 +468,244 @@ class InternalJobService:
             '/transuai.upload.v1.InternalJobService/UpdateJobStatus',
             upload__pb2.UpdateJobStatusRequest.SerializeToString,
             upload__pb2.Job.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetSuggestedDetails(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.upload.v1.InternalJobService/SetSuggestedDetails',
+            upload__pb2.SetSuggestedDetailsRequest.SerializeToString,
+            upload__pb2.Job.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class NoteServiceStub:
+    """筆記（見 upload-service CONTEXT.md「筆記」）：使用者在 Job 裡記下的一段文字，可以釘在錄音的某個時間點（只有時間、沒有文字的是書籤）。
+    跟 UploadService 一樣需要 x-user-id：Job 不是這位使用者的、或筆記不屬於這個 Job，一律 NOT_FOUND。刪除 Job 時筆記一起刪。
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.ListNotes = channel.unary_unary(
+                '/transuai.upload.v1.NoteService/ListNotes',
+                request_serializer=upload__pb2.ListNotesRequest.SerializeToString,
+                response_deserializer=upload__pb2.ListNotesResponse.FromString,
+                _registered_method=True)
+        self.CreateNote = channel.unary_unary(
+                '/transuai.upload.v1.NoteService/CreateNote',
+                request_serializer=upload__pb2.CreateNoteRequest.SerializeToString,
+                response_deserializer=upload__pb2.Note.FromString,
+                _registered_method=True)
+        self.UpdateNote = channel.unary_unary(
+                '/transuai.upload.v1.NoteService/UpdateNote',
+                request_serializer=upload__pb2.UpdateNoteRequest.SerializeToString,
+                response_deserializer=upload__pb2.Note.FromString,
+                _registered_method=True)
+        self.DeleteNote = channel.unary_unary(
+                '/transuai.upload.v1.NoteService/DeleteNote',
+                request_serializer=upload__pb2.DeleteNoteRequest.SerializeToString,
+                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                _registered_method=True)
+
+
+class NoteServiceServicer:
+    """筆記（見 upload-service CONTEXT.md「筆記」）：使用者在 Job 裡記下的一段文字，可以釘在錄音的某個時間點（只有時間、沒有文字的是書籤）。
+    跟 UploadService 一樣需要 x-user-id：Job 不是這位使用者的、或筆記不屬於這個 Job，一律 NOT_FOUND。刪除 Job 時筆記一起刪。
+    """
+
+    def ListNotes(self, request, context):
+        """依時間排序（沒有時間的在最後），同一個時間依建立順序。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CreateNote(self, request, context):
+        """時間與文字不能都是空的；文字最多 2,000 字；時間不能是負的、不能超過錄音長度（知道長度時）；source 是 manual（預設）或 qa；
+        一個 Job 最多 500 則。不符合回 INVALID_ARGUMENT。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateNote(self, request, context):
+        """只改文字；清空文字只在筆記有時間時可以（變成書籤）。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteNote(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_NoteServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'ListNotes': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListNotes,
+                    request_deserializer=upload__pb2.ListNotesRequest.FromString,
+                    response_serializer=upload__pb2.ListNotesResponse.SerializeToString,
+            ),
+            'CreateNote': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateNote,
+                    request_deserializer=upload__pb2.CreateNoteRequest.FromString,
+                    response_serializer=upload__pb2.Note.SerializeToString,
+            ),
+            'UpdateNote': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateNote,
+                    request_deserializer=upload__pb2.UpdateNoteRequest.FromString,
+                    response_serializer=upload__pb2.Note.SerializeToString,
+            ),
+            'DeleteNote': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteNote,
+                    request_deserializer=upload__pb2.DeleteNoteRequest.FromString,
+                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'transuai.upload.v1.NoteService', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('transuai.upload.v1.NoteService', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class NoteService:
+    """筆記（見 upload-service CONTEXT.md「筆記」）：使用者在 Job 裡記下的一段文字，可以釘在錄音的某個時間點（只有時間、沒有文字的是書籤）。
+    跟 UploadService 一樣需要 x-user-id：Job 不是這位使用者的、或筆記不屬於這個 Job，一律 NOT_FOUND。刪除 Job 時筆記一起刪。
+    """
+
+    @staticmethod
+    def ListNotes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.upload.v1.NoteService/ListNotes',
+            upload__pb2.ListNotesRequest.SerializeToString,
+            upload__pb2.ListNotesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CreateNote(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.upload.v1.NoteService/CreateNote',
+            upload__pb2.CreateNoteRequest.SerializeToString,
+            upload__pb2.Note.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateNote(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.upload.v1.NoteService/UpdateNote',
+            upload__pb2.UpdateNoteRequest.SerializeToString,
+            upload__pb2.Note.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteNote(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.upload.v1.NoteService/DeleteNote',
+            upload__pb2.DeleteNoteRequest.SerializeToString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
             options,
             channel_credentials,
             insecure,

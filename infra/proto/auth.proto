@@ -12,7 +12,7 @@ import "google/protobuf/timestamp.proto";
 // 一樣需要 gRPC metadata "x-user-id"（由 Gateway 驗證 JWT 後轉發）—— AuthService 自己簽發
 // access token，但不重新驗證別人轉發過來的 token，這支查詢一律信任 x-user-id。
 service AuthService {
-  // 建立帳號，email 已存在回 ALREADY_EXISTS。成功直接簽發 token，不需要再額外呼叫一次 Login。
+  // 建立帳號，email 已存在回 ALREADY_EXISTS。成功直接簽發 token，不需要再額外呼叫一次 Login。還沒有任何帳號時，這個帳號是管理員。
   rpc Register(RegisterRequest) returns (AuthResponse);
 
   // email/password 其中一項錯誤都回 UNAUTHENTICATED（不細分，避免帳號列舉）。
@@ -60,6 +60,64 @@ service AuthService {
   // 忘記密碼的另一條路（不需要 x-user-id）：email＋一組還沒用的復原碼，設新密碼。email 或復原碼不對都回 FAILED_PRECONDITION（不分是哪個）；
   // 新密碼照註冊的規則（INVALID_ARGUMENT，不合時復原碼不用掉）。成功就用掉那組、作廢所有登入、寄通知信。
   rpc ResetPasswordWithRecoveryCode(ResetPasswordWithRecoveryCodeRequest) returns (ResetPasswordResponse);
+
+  // 這套系統的狀態（不需要 x-user-id，登入前的頁面用）：還沒有任何帳號（下一個註冊的就是管理員）、有沒有設定寄信（沒有的話忘記密碼與
+  // email 確認都不提供）。
+  rpc GetSystemStatus(GetSystemStatusRequest) returns (SystemStatus);
+
+  // 系統設定的「寄信」（需要 x-user-id，而且要是管理員，不然 PERMISSION_DENIED）：目前用的 SMTP 設定（設定頁存的，沒存過就是環境變數）。
+  // 密碼不回傳，只說有沒有設定。
+  rpc GetMailSettings(GetMailSettingsRequest) returns (MailSettings);
+  // 存寄信設定（管理員），馬上生效。密碼空的就是不改；use_environment 刪掉存的設定、回到環境變數。存密碼要有 KEY_ENCRYPTION_KEY
+  // （沒有就 FAILED_PRECONDITION）。
+  rpc UpdateMailSettings(UpdateMailSettingsRequest) returns (MailSettings);
+  // 用目前的設定寄一封測試信（管理員）：to 空的就寄給自己。等它寄完，寄不出去時 sent=false、error 是原因。
+  rpc SendTestMail(SendTestMailRequest) returns (SendTestMailResponse);
+}
+
+message GetMailSettingsRequest {}
+
+message MailSettings {
+  string host = 1;
+  int32 port = 2;
+  string username = 3;
+  bool password_set = 4;
+  string from = 5;
+  bool starttls = 6;
+  bool smtp_auth = 7;
+  // 目前用的是環境變數（設定頁沒存過）。
+  bool from_environment = 8;
+  // 這些設定夠不夠寄信（有主機與寄件人）。
+  bool enabled = 9;
+}
+
+message UpdateMailSettingsRequest {
+  string host = 1;
+  int32 port = 2;
+  string username = 3;
+  // 空的＝不改。
+  string password = 4;
+  bool clear_password = 5;
+  string from = 6;
+  bool starttls = 7;
+  bool smtp_auth = 8;
+  bool use_environment = 9;
+}
+
+message SendTestMailRequest {
+  string to = 1;
+}
+
+message SendTestMailResponse {
+  bool sent = 1;
+  string error = 2;
+}
+
+message GetSystemStatusRequest {}
+
+message SystemStatus {
+  bool setup_required = 1;
+  bool mail_enabled = 2;
 }
 
 message RegisterRequest {
@@ -95,6 +153,8 @@ message User {
   bool email_verified = 5;
   // 還沒用的復原碼有幾組（0：沒產生過或用完了）。
   int32 recovery_codes_left = 6;
+  // 管理員：第一個註冊的帳號，或用 infra/scripts/make-admin.sh 指定的。能改系統設定。
+  bool is_admin = 7;
 }
 
 message LogoutRequest {

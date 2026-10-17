@@ -17,6 +17,7 @@ public final class UserMapper {
                 .setCreatedAt(GrpcTimestamps.toProto(user.getCreatedAt()))
                 .setEmailVerified(user.getEmailVerifiedAt() != null)
                 .setRecoveryCodesLeft(recoveryCodesLeft)
+                .setIsAdmin(user.isAdmin())
                 .build();
     }
 }

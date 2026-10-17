@@ -32,19 +32,27 @@ class EmbeddingError(Exception):
     """一次 embedding 呼叫失敗。transient＝值得重試（429、5xx、逾時、連不上）。"""
 
     def __init__(self, message: str, *, transient: bool):
-        super().__init__(f"embedding（{settings.embedding_model}）{message}")
+        super().__init__(f"embedding（{_config().embedding_model}）{message}")
         self.transient = transient
 
 
+def _config():
+    from app.services import system_settings  # 設定頁存的優先（system_settings 用到資料庫，用到才載入）
+
+    return system_settings.current()
+
+
 def is_configured() -> bool:
-    return bool(settings.embedding_base_url and settings.embedding_model)
+    config = _config()
+    return bool(config.embedding_base_url and config.embedding_model)
 
 
 def embed_documents(texts: list[str]) -> list[list[float]]:
     """把逐字稿片段（或決策）轉成向量，寫進資料庫用。文件本身不加指示。"""
     if not texts:
         return []
-    logger.info("calling %s (%s) to embed %d texts", settings.embedding_base_url, settings.embedding_model, len(texts))
+    config = _config()
+    logger.info("calling %s (%s) to embed %d texts", config.embedding_base_url, config.embedding_model, len(texts))
     vectors: list[list[float]] = []
     for start in range(0, len(texts), _BATCH_SIZE):
         vectors.extend(_embed(texts[start:start + _BATCH_SIZE]))
@@ -54,19 +62,21 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
 def embed_query(text: str) -> list[float]:
     """把使用者的問題轉成向量，在資料庫裡找相似的片段。instruction-aware 的模型（Qwen3-Embedding）在問題前面加上指示
     （EMBEDDING_QUERY_INSTRUCTION，照它的格式「Instruct: …\\nQuery:…」），對稱的模型（bge-m3）不用設。"""
-    instruction = settings.embedding_query_instruction.strip()
+    config = _config()
+    instruction = config.embedding_query_instruction.strip()
     query = f"Instruct: {instruction}\nQuery:{text}" if instruction else text
-    logger.info("calling %s (%s) to embed a question", settings.embedding_base_url, settings.embedding_model)
+    logger.info("calling %s (%s) to embed a question", config.embedding_base_url, config.embedding_model)
     return _embed([query])[0]
 
 
 def _embed(texts: list[str]) -> list[list[float]]:
     if not is_configured():
         raise EmbeddingError("尚未設定（EMBEDDING_BASE_URL、EMBEDDING_MODEL）", transient=False)
-    client = OpenAI(base_url=settings.embedding_base_url, api_key=settings.embedding_api_key or _NO_KEY,
+    config = _config()
+    client = OpenAI(base_url=config.embedding_base_url, api_key=config.embedding_api_key or _NO_KEY,
                     http_client=_http_client, max_retries=0)
     try:
-        response = client.embeddings.create(model=settings.embedding_model, input=texts, encoding_format="float")
+        response = client.embeddings.create(model=config.embedding_model, input=texts, encoding_format="float")
     except openai.APIConnectionError as exc:  # 也涵蓋逾時
         raise EmbeddingError(f"連不上：{exc}", transient=True) from exc
     except openai.APIStatusError as exc:

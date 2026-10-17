@@ -5,7 +5,7 @@
 - 本地（STT_BASE_URL）：自架的 vLLM 跑 Breeze-ASR-25，講者分離在這個服務裡用 CPU 跑，見 local_speech.py。有設定就用它。
 - Deepgram Nova-3（DEEPGRAM_API_KEY）：一次呼叫同時完成轉錄和講者分離；為什麼不是 Groq Whisper 見
   docs/adr/0001-deepgram-replaces-groq-for-transcription-and-diarization.md。
-兩個都沒設時 raise RecognitionNotConfigured（不重試，Job 失敗並說明）。
+兩個都沒設時 raise RecognitionNotConfigured（不重試，Job 失敗並說明）。設定是系統設定頁存的或環境變數（services/speech_settings）。
 """
 
 import logging
@@ -50,7 +50,9 @@ _DETECTABLE_LANGUAGES = ("zh", "en")
 
 
 def _is_local() -> bool:
-    return bool(settings.stt_base_url and settings.stt_model)
+    from app.services import speech_settings  # 設定頁存的優先（用到資料庫，用到才載入）
+
+    return speech_settings.current().local
 
 
 def provider() -> str:
@@ -62,7 +64,9 @@ def provider() -> str:
 
 def model_name() -> str:
     """目前用的語音辨識模型（記轉錄用量用）。"""
-    return settings.stt_model if _is_local() else settings.deepgram_model
+    from app.services import speech_settings
+
+    return speech_settings.current().stt_model if _is_local() else settings.deepgram_model
 
 # 音檔直接以檔案內容上傳（不傳 URL：本機的 MinIO 從網際網路上連不到）。幾十分鐘的音檔上傳加處理要一點時間，
 # 讀取逾時放寬；連不上則很快放棄，交給訊息層級重試。
@@ -77,7 +81,10 @@ def recognize(audio_path: Path, language: str | None = None) -> Recognition:
         from app.services import local_speech  # local_speech 用到這裡的資料型別
 
         return local_speech.recognize(audio_path, chosen)
-    if not settings.deepgram_api_key:
+    from app.services import speech_settings
+
+    deepgram_key = speech_settings.current().deepgram_api_key
+    if not deepgram_key:
         raise RecognitionNotConfigured(
             "語音辨識尚未設定：請部署的人設定本地語音辨識（STT_BASE_URL、STT_MODEL）或 Deepgram（DEEPGRAM_API_KEY）")
     logger.info("calling Deepgram (%s, %s) for %s", settings.deepgram_model, chosen, audio_path)
@@ -94,7 +101,7 @@ def recognize(audio_path: Path, language: str | None = None) -> Recognition:
                 ("punctuate", "true"),
             ],
             headers={
-                "Authorization": f"Token {settings.deepgram_api_key}",
+                "Authorization": f"Token {deepgram_key}",
                 # Deepgram 自己從內容判斷音訊格式，AUDIO 上傳的原始檔跟 VIDEO 抽出來的音軌格式不一定相同。
                 "Content-Type": "application/octet-stream",
             },

@@ -39,15 +39,17 @@ def is_available() -> bool:
 
 def diarize(samples: np.ndarray) -> list[SpeakerTurn]:
     """誰在什麼時候說話，依開始時間排序；可能重疊（兩人同時說話）。samples 是 16kHz 單聲道、-1～1 的 float32。"""
-    result = _get_diarizer().process(samples).sort_by_start_time()
+    from app.services import speech_settings  # 門檻是系統設定頁存的或環境變數
+
+    result = _get_diarizer(speech_settings.current().diarization_threshold).process(samples).sort_by_start_time()
     return [SpeakerTurn(start=float(r.start), end=float(r.end), speaker=str(r.speaker)) for r in result]
 
 
-def _get_diarizer():
-    # 載入模型要一兩秒，第一次用到才載入；同時只處理一則訊息，但 gRPC 與 consumer 在不同 thread，載入時上鎖。
+def _get_diarizer(threshold: float):
+    # 載入模型要一兩秒，第一次用到（或門檻換了）才載入；同時只處理一則訊息，但 gRPC 與 consumer 在不同 thread，載入時上鎖。
     global _diarizer
     with _lock:
-        if _diarizer is None:
+        if _diarizer is None or _diarizer[0] != threshold:
             import sherpa_onnx  # 原生函式庫較大，用到才載入（測試與 Deepgram 路徑不需要）
 
             models = Path(settings.diarization_models_dir)
@@ -58,12 +60,12 @@ def _get_diarizer():
                 ),
                 embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
                     model=str(models / _EMBEDDING), num_threads=settings.diarization_threads),
-                clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=settings.diarization_threshold),
+                clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=threshold),
                 min_duration_on=_MIN_SPEECH_SECONDS,
                 min_duration_off=_MIN_SILENCE_SECONDS,
             )
             if not config.validate():
                 raise RuntimeError(f"講者分離的模型設定不正確（{models}）")
-            _diarizer = sherpa_onnx.OfflineSpeakerDiarization(config)
-            logger.info("loaded the diarization models from %s", models)
-        return _diarizer
+            _diarizer = (threshold, sherpa_onnx.OfflineSpeakerDiarization(config))
+            logger.info("loaded the diarization models from %s (threshold %s)", models, threshold)
+        return _diarizer[1]

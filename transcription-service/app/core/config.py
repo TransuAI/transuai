@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     diarization_threshold: float = 0.6
     diarization_threads: int = 4
 
+    # 系統設定頁存的金鑰（本地語音辨識、Deepgram）用這把加密（AES-256-GCM，base64 的 32 bytes，跟 ai-service 的同一把）；沒設定時不能
+    # 在設定頁存金鑰。
+    key_encryption_key: str = ""
+
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-3"
     # 固定指定語言而不是讓 Deepgram 自動偵測：自動偵測的中文走的是通用模型，輸出簡體、錯字也明顯較多（見 ADR 0001）。

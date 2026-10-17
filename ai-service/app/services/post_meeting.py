@@ -64,6 +64,7 @@ from app.services.scheduled_meetings import find_scheduled_meetings
 from app.services.speaker_context import speaker_names, spoken_segments
 from app.services.transcript_client import transcript_client
 from app.services.usage_meter import LlmFeature, UsageMeter
+from app.services import system_settings
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ class NotRetryable(Exception):
 def unavailable_reason(user_id: uuid.UUID) -> str | None:
     """不能跑的原因（給使用者看）；能跑就是 None。只看存下來的狀態，不打外部服務——前端每 3 秒就會問一次。"""
     choice = get_default_model(user_id)
-    if choice.provider == PLATFORM and not settings.ai_post_meeting_platform_model:
+    if choice.provider == PLATFORM and not system_settings.current().post_meeting_model:
         return "會後處理需要你自己的 AI 金鑰：請到設定頁存入自有金鑰，並把預設模型換成支援工具呼叫的模型"
     if choice.provider != PLATFORM and not choice.supports_tools:
         return f"你的預設模型（{choice.model}）不支援工具呼叫，請到設定頁換一個支援工具呼叫的模型"
@@ -288,7 +289,7 @@ def process_post_meeting_requested(body: bytes, retry_count: int = 0) -> None:
 def _post_meeting_model(user_id: uuid.UUID) -> ChatModel:
     """預設模型是平台模型時用會後處理的平台模型（unavailable_reason 已經確認有設定），否則用使用者的預設模型與自有金鑰。"""
     if get_default_model(user_id).provider == PLATFORM:
-        return platform_chat_model(settings.ai_post_meeting_platform_model)
+        return platform_chat_model(system_settings.current().post_meeting_model)
     return resolve_chat_model(user_id)
 
 

@@ -65,7 +65,7 @@ Vitest + React Testing Library + `jsdom`。頁面測試一律 mock `src/lib/api.
 src/
   components/
     ui/              shadcn/ui 元件(不手動改,要改用 npx shadcn add --overwrite)
-    layout/          AppShell、Sidebar(導覽:我的檔案、決策、上傳、設定;使用者選單;Job Detail 頁自動收成 icon rail)、深色模式切換
+    layout/          AppShell、Sidebar(導覽:我的檔案、決策、上傳、設定,管理員多一個「系統設定」;使用者選單;Job Detail 頁自動收成 icon rail)、深色模式切換
     decision-supersession.tsx 決策的取代:「取代了:日期「…」」「已被取代:日期「…」」,連到那個決策所在的 Job(`?decision=`);工作區的「決策」與決策頁共用
     job-status-badge.tsx
     model-credit.tsx       模型寫的東西下方的「由 AI 回答／產生」:模型名稱放在滑過的提示(與給螢幕閱讀器的文字)裡,問答、摘要、測驗、多格式輸出、問決策共用
@@ -81,6 +81,7 @@ src/
     use-media-query.ts matchMedia 的 hook(工作區用它判斷桌面 / 手機版面)
     use-playback-continuity.ts 版面切換重新掛載 media element 時,把播放位置跟「是否正在播放」帶到新元素
     use-post-meeting.ts     會後處理:Job 完成時載入(能不能跑、最新一份紀錄、之前的紀錄),執行與重試行動提案,開始時帶瀏覽器時區,執行中每 3 秒輪詢,結束時重新載入用量;只採用最新一次請求的回應(慢回來的舊輪詢不會蓋掉較新的狀態);放在頁面這層,手機的 Studio Sheet 關著也照樣輪詢
+    use-system-status.ts    登入前就要知道的系統狀態(GET /system/status:還沒有任何帳號、有沒有設定寄信),一次頁面載入只問一次、大家共用;還不知道時是 null(依賴它的東西先不顯示)
     use-notes.ts            筆記:Job 完成時載入,新增、改文字、刪除(失敗時 reject,由畫面提示並保留輸入);放在頁面這層,手機 Studio Sheet 關著也不會遺失
     use-translations.ts     譯文:Job 完成時載入各語言,要求翻譯(之後直接顯示那種語言的譯文),有翻譯中的就每 3 秒輪詢;逐字稿顯示什麼(原文 / 譯文 / 雙語)也在這裡,桌面的來源欄跟手機的 Source Sheet 一致;顯示中的語言每多翻好一批(或重翻完成,`completedAt` 變了)就重新取得片段的譯文,只用翻的時候的原文跟片段現在一樣的(`lib/current-translations.ts`);編輯逐字稿之後 ai-service 會在背景重翻改過的片段,前端看不到它開始,所以編輯後最多 60 秒也每 3 秒問一次,看到有變化就停;刪除一種語言(正在顯示它就回到原文);要求或刪除之前就送出的列表回來時丟掉(跟 use-quizzes 一樣),不會把刪掉的語言帶回來
     use-outputs.ts          多格式輸出:Job 完成時載入列表,要求產生(每次多一份),有「產生中」時每 3 秒輪詢,完成或失敗時重新載入用量;放在頁面這層(同測驗)
@@ -119,8 +120,9 @@ src/
     markdown.ts        模型回答與摘要用到的一小部分 Markdown(不依賴畫面):`parseMarkdown` 讀成段落 / 標題 / 引用 / 清單 / 分隔線,`parseInline` 讀粗體 / 斜體 / 行內程式碼(記號要貼著字,「3 * 4 * 5」不算;串流中還沒收尾的 ** 先照打的顯示),其餘(表格、連結、HTML)維持純文字,不會產生任何 HTML;`markdownToPlainText` 去掉記號給一行預覽用(Studio 的摘要磚)
     web-sources.ts     網頁連結(問答的網路來源、事實查核的來源):開新分頁的連結屬性、網址顯示成網站名稱(去掉 www.)
   pages/
-    login-page.tsx / register-page.tsx(登入頁有「忘記密碼？」;註冊按鈕下方連到隱私權說明;註冊的密碼欄有強度提示)
-    forgot-password-page.tsx `/forgot-password`(不用登入):輸入 email 申請重設連結;送出後一律說「如果 … 有註冊、而且確認過，幾分鐘內會收到」(伺服器不透露有沒有註冊);沒有設定寄信(503)、太頻繁(429)時顯示伺服器的訊息。「收不到信？用復原碼重設」:email、一組復原碼、新密碼(email 或復原碼不對時顯示伺服器的訊息)
+    login-page.tsx / register-page.tsx(登入頁有「忘記密碼？」,沒有設定寄信時是「忘記密碼？用復原碼重設」;全新安裝(還沒有任何帳號)時註冊頁是「建立管理員帳號」;註冊按鈕下方連到隱私權說明;註冊的密碼欄有強度提示)
+    system-settings-page.tsx `/admin/settings`(只有管理員,其他人轉回設定頁):AI 模型(平台模型、會後處理模型、embedding、網路搜尋)、語音辨識(本地或 Deepgram、講者分離門檻)、寄信(SMTP)三區,各自儲存、馬上生效;標示目前用環境變數還是這裡存的,可以「改回環境變數」;金鑰與密碼不顯示——留空不改、按「清除」才清掉;「測試連線」／「寄測試信給自己」顯示哪裡不對
+    forgot-password-page.tsx `/forgot-password`(不用登入):沒有設定寄信時只有用復原碼重設(說明這套系統沒有寄信);有的話輸入 email 申請重設連結;送出後一律說「如果 … 有註冊、而且確認過，幾分鐘內會收到」(伺服器不透露有沒有註冊);沒有設定寄信(503)、太頻繁(429)時顯示伺服器的訊息。「收不到信？用復原碼重設」:email、一組復原碼、新密碼(email 或復原碼不對時顯示伺服器的訊息)
     verify-email-page.tsx    `/verify-email#token=…`(註冊時寄的確認信,不用登入):token 讀出來後從網址拿掉;按「確認這個 email 是我的」才確認(信箱的連結掃描不會代為確認);無效或過期時說到設定頁重寄
     reset-password-page.tsx  `/reset-password#token=…`(信裡的連結,不用登入):token 從 `#` 後面讀出來後就從網址拿掉;設新密碼(強度提示)→「密碼已重設，請用新密碼登入」;連結無效或過期(409)時給「重新申請」;沒有 token 時說連結不完整
     privacy-page.tsx        隱私權說明 `/privacy`(不用登入;存了哪些資料、每個第三方送什麼與什麼時候送、怎麼刪除與匯出)。系統由客戶部署在自己內部,所以不寫營運方的聯絡方式與伺服器地區,其他請求請洽部署的單位;新增會把資料送出去的服務時要一起更新這頁

@@ -91,7 +91,22 @@ docker compose up -d
 | `POST` | `/auth/verify-email/resend` | 重寄確認信，需要 `Authorization`；`202`；同一位使用者每小時 3 次；沒有設定寄信 `503` |
 | `POST` | `/auth/recovery-codes` | 產生復原碼：body `{ currentPassword }`，需要 `Authorization`。回 `{ codes: [...] }`（10 組，只有這一次）；目前的密碼錯 `403`（跟刪除帳號、改密碼合計 15 分鐘 5 次） |
 | `POST` | `/auth/refresh` | 用 cookie 裡的 refresh token 換發：回 `{ accessToken, user }`，cookie 換成新的 refresh token；不需要 `Authorization`、沒有 body。沒有 cookie 或 token 不能用回 `401`（並清掉 cookie） |
-| `GET` | `/auth/me` | 取得目前使用者資訊，需要 `Authorization: Bearer <access_token>` |
+| `GET` | `/auth/me` | 取得目前使用者資訊（含 `admin`：管理員），需要 `Authorization: Bearer <access_token>` |
+
+### 系統設定（`SystemSettingsController`，見 `.scratch/system-settings/spec.md`）
+
+`/system/status` 不用登入；`/admin/**` 只給管理員——每次先問 auth-service 的 `GetMe` 是不是管理員，不是回 `403`（寄信的部分 auth-service 自己也再檢查一次）。
+金鑰與密碼只回「有沒有設定」（`…Set`）；送來的時候沒給（或 `null`）是不改、空字串是清掉；`useEnvironment: true` 刪掉存的設定、回到環境變數。
+
+| Method | Path | 說明 |
+|---|---|---|
+| `GET` | `/system/status` | `{ setupRequired, mailEnabled }`：還沒有任何帳號（下一個註冊的是管理員）、有沒有設定寄信 |
+| `GET`／`PUT` | `/admin/settings/mail` | 寄信（auth-service）：`host`、`port`、`username`、`password`、`clearPassword`、`from`、`starttls`、`smtpAuth`；回 `passwordSet`、`fromEnvironment`、`enabled` |
+| `POST` | `/admin/settings/mail/test` | 用目前的設定寄測試信（body `{ to }` 可省略，預設寄給自己）：`{ sent, error }` |
+| `GET`／`PUT` | `/admin/settings/ai` | 模型（ai-service）：平台模型的伺服器、金鑰、模型、會後處理模型、embedding 的伺服器、金鑰、模型、問題的指示、網路搜尋的金鑰 |
+| `POST` | `/admin/settings/ai/check` | 測試平台模型與 embedding：`{ platformOk, platformDetail, embeddingOk, embeddingDetail }` |
+| `GET`／`PUT` | `/admin/settings/speech` | 語音辨識（transcription-service）：本地伺服器、金鑰、模型、Deepgram 金鑰、講者分離的門檻；回 `active`（`local`／`deepgram`／`none`）與 `diarizationAvailable` |
+| `POST` | `/admin/settings/speech/check` | 測試語音辨識：`{ ok, detail }` |
 
 ### Upload（`UploadController` → `upload-service`）—— 以下全部需要 `Authorization`
 

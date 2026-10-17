@@ -8,8 +8,10 @@ import { PasswordInput } from '@/components/password-input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { useSystemStatus } from '@/hooks/use-system-status'
 
 export function LoginPage() {
+  const status = useSystemStatus()
   const { login } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -59,9 +61,12 @@ export function LoginPage() {
             <div className="flex flex-col gap-2">
               <div className="flex items-baseline justify-between">
                 <Label htmlFor="password">密碼</Label>
-                <Link to="/forgot-password" className="text-xs text-muted-foreground underline underline-offset-4">
-                  忘記密碼？
-                </Link>
+                {/* Without mail set up there is only the 復原碼 way back in; the page shows just that. */}
+                {status && (
+                  <Link to="/forgot-password" className="text-xs text-muted-foreground underline underline-offset-4">
+                    {status.mailEnabled ? '忘記密碼？' : '忘記密碼？用復原碼重設'}
+                  </Link>
+                )}
               </div>
               <PasswordInput
                 id="password"

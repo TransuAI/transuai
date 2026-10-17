@@ -10,6 +10,7 @@ import { ResetPasswordPage } from './reset-password-page'
 import { VerifyEmailPage } from './verify-email-page'
 
 vi.mock('@/lib/api', () => ({
+  systemApi: { status: vi.fn().mockResolvedValue({ setupRequired: false, mailEnabled: true }) },
   authApi: { requestPasswordReset: vi.fn(), resetPassword: vi.fn(), verifyEmail: vi.fn(), resetPasswordWithRecoveryCode: vi.fn() },
 }))
 vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ login: vi.fn() }) }))
@@ -21,10 +22,10 @@ afterEach(() => {
 
 // 忘記密碼（.scratch/pre-launch-hardening/issues/19）：寄重設連結、用連結設新密碼。
 describe('LoginPage', () => {
-  it('links to 忘記密碼', () => {
+  it('links to 忘記密碼', async () => {
     render(<MemoryRouter><LoginPage /></MemoryRouter>)
 
-    expect(screen.getByRole('link', { name: '忘記密碼？' })).toHaveAttribute('href', '/forgot-password')
+    expect(await screen.findByRole('link', { name: '忘記密碼？' })).toHaveAttribute('href', '/forgot-password')
   })
 })
 
@@ -34,7 +35,7 @@ describe('ForgotPasswordPage', () => {
     const user = userEvent.setup()
     render(<MemoryRouter><ForgotPasswordPage /></MemoryRouter>)
 
-    await user.type(screen.getByLabelText('Email'), 'a@example.com')
+    await user.type(await screen.findByLabelText('Email'), 'a@example.com')
     await user.click(screen.getByRole('button', { name: '寄重設密碼的信' }))
 
     expect(authApi.requestPasswordReset).toHaveBeenCalledWith('a@example.com')
@@ -48,7 +49,7 @@ describe('ForgotPasswordPage', () => {
     const user = userEvent.setup()
     render(<MemoryRouter><ForgotPasswordPage /></MemoryRouter>)
 
-    await user.type(screen.getByLabelText('Email'), 'a@example.com')
+    await user.type(await screen.findByLabelText('Email'), 'a@example.com')
     await user.click(screen.getByRole('button', { name: '寄重設密碼的信' }))
 
     expect(await screen.findByText(/沒有設定寄信/)).toBeInTheDocument()
@@ -103,7 +104,7 @@ describe('ForgotPasswordPage with a recovery code (用復原碼重設)', () => {
     const user = userEvent.setup()
     render(<MemoryRouter><ForgotPasswordPage /></MemoryRouter>)
 
-    await user.click(screen.getByRole('button', { name: '收不到信？用復原碼重設' }))
+    await user.click(await screen.findByRole('button', { name: '收不到信？用復原碼重設' }))
     await user.type(screen.getByLabelText('Email'), 'a@example.com')
     await user.type(screen.getByLabelText('復原碼'), 'aaaaa-bbbbb-ccccc-ddddd')
     await user.type(screen.getByLabelText('新密碼'), 'a brand new password')
@@ -122,7 +123,7 @@ describe('ForgotPasswordPage with a recovery code (用復原碼重設)', () => {
     const user = userEvent.setup()
     render(<MemoryRouter><ForgotPasswordPage /></MemoryRouter>)
 
-    await user.click(screen.getByRole('button', { name: '收不到信？用復原碼重設' }))
+    await user.click(await screen.findByRole('button', { name: '收不到信？用復原碼重設' }))
     await user.type(screen.getByLabelText('Email'), 'a@example.com')
     await user.type(screen.getByLabelText('復原碼'), 'wrong')
     await user.type(screen.getByLabelText('新密碼'), 'a brand new password')

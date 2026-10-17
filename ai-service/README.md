@@ -25,6 +25,14 @@
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級 |
 | 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務） |
 
+## 系統設定（管理員）
+
+平台模型（伺服器、金鑰、模型）、會後處理模型、embedding（伺服器、金鑰、模型、問題的指示）、網路搜尋（Tavily 金鑰）可以由管理員在前端的「系統設定」
+頁改，存在 `ai_settings`（一列；金鑰用 `KEY_ENCRYPTION_KEY` 加密、綁定欄位名稱）。**存過就用存的，沒存過就用環境變數**；第一次存、又沒填某把金鑰時沿用
+環境變數的。所有用到這些設定的地方都問 `services/system_settings.current()`（讀資料庫的結果記 5 秒，存檔時清掉），所以存了馬上生效、不用重啟；對外連線的
+允許清單也自動加入存的伺服器網域。換了 embedding 的伺服器或模型，在背景跑一次 `embedding_migration`（跟啟動時一樣）。`services/settings_check` 是頁面上的
+「測試連線」：平台模型的伺服器 `/models` 裡有沒有這個模型、embedding 能不能算出 1024 維。權限由 gateway 檢查（ai-service 不知道誰是管理員）。
+
 ## 前置需求
 
 - 先啟動基礎設施：`cd ../infra && docker compose up -d`
@@ -488,6 +496,7 @@ CheckClaims(jobId, userId, claimIds)（Gateway POST /jobs/{jobId}/fact-check/ver
 | `ListJobWebSearches` / `CountUserWebSearches` | 網路搜尋的用量：一個 Job 的每一次（搜尋服務、成功或失敗、時間，依時間升冪），與一位使用者在 `[start, end)` 之間成功 / 失敗各幾次。ID 不合法、或沒給 `start` / `end` 回 `INVALID_ARGUMENT` |
 | `SumUserLlmUsage` | 一位使用者在 `[start, end)` 之間的 LLM 用量，依廠商、模型、金鑰來源加總：輸入 / 輸出 token（已知數字的加總）、呼叫次數（失敗也算）、廠商沒回報 token 的次數；Gateway 把「某個月」換成時間範圍。`user_id` 不合法或沒給 `start` / `end` 回 `INVALID_ARGUMENT`，沒有用量回空列表 |
 | `SaveProviderKey` / `DeleteProviderKey` / `ListProviderKeys` | 自有金鑰（見上方「自有金鑰」）：存入或替換（先向廠商驗證，通過才加密存下，回傳末四碼；廠商不在清單、金鑰是空的或無效回 `INVALID_ARGUMENT` 附原因，廠商暫時連不上回 `UNAVAILABLE`，沒設定主金鑰回 `FAILED_PRECONDITION`）、刪除（沒有這把回 `deleted=false`；預設模型正在用它時一起改回平台模型，`default_model_reset=true`）、列出（只有末四碼） |
+| `GetAiSettings` / `UpdateAiSettings` / `CheckAiSettings` | 系統設定的模型（見上方「系統設定」）：目前用的設定（金鑰只回有沒有設定）、存設定（金鑰沒帶是不改、空字串是清掉、`use_environment` 回到環境變數；沒有 `KEY_ENCRYPTION_KEY` 卻要存金鑰回 `FAILED_PRECONDITION`）、測試連線 |
 | `ListAvailableModels` / `GetDefaultModel` / `SetDefaultModel` | 預設模型（見上方「預設模型」）：可以選的模型（附 `web_search`：這個部署的問答能不能查網路）、目前的預設模型、設定預設模型（沒有那個廠商的自有金鑰回 `FAILED_PRECONDITION`，清單外的模型或 OpenRouter 上不存在回 `INVALID_ARGUMENT`，OpenRouter 查不到回 `UNAVAILABLE`） |
 | `ListQaHistory` | 依 `job_id` 取得這個 job 的完整問答紀錄（依 `created_at` 升冪；每則帶回答的 `model_provider` / `model`，記錄模型之前的是空字串；`web_search` 與 `web_sources`），`job_id` 不合法回 `INVALID_ARGUMENT`；沒有紀錄回空列表，不算錯誤；不分頁（MVP 資料量小） |
 

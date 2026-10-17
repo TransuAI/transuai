@@ -191,6 +191,13 @@ service AiService {
   //
   // 這位使用者可以選的模型：平台模型，加上他有自有金鑰的每個廠商整理好的模型清單；有 OpenRouter 金鑰時
   // openrouter_custom 為 true，代表可以自己輸入 OpenRouter 模型 ID。
+  // 系統設定的「模型」（只給管理員，權限由 gateway 檢查）：平台模型、會後處理模型、embedding、網路搜尋。設定頁存過就是存的，沒存過就是
+  // 環境變數；金鑰不回傳，只說有沒有設定。存了馬上生效；換了 embedding 模型就在背景重算向量。存金鑰要有 KEY_ENCRYPTION_KEY
+  // （沒有就 FAILED_PRECONDITION）。
+  rpc GetAiSettings(GetAiSettingsRequest) returns (AiSettings);
+  rpc UpdateAiSettings(UpdateAiSettingsRequest) returns (AiSettings);
+  // 用目前的設定試一下：平台模型的伺服器有沒有這個模型、embedding 伺服器能不能算出 1024 維的向量。
+  rpc CheckAiSettings(CheckAiSettingsRequest) returns (AiSettingsCheck);
   rpc ListAvailableModels(ListAvailableModelsRequest) returns (ListAvailableModelsResponse);
   // 目前的預設模型；沒有設定過就是平台模型。
   rpc GetDefaultModel(GetDefaultModelRequest) returns (ModelChoice);
@@ -1140,4 +1147,44 @@ message ClaimSource {
   string title = 1;
   string url = 2;
   string excerpt = 3;
+}
+
+message GetAiSettingsRequest {}
+
+message AiSettings {
+  string platform_base_url = 1;
+  bool platform_api_key_set = 2;
+  string platform_model = 3;
+  string post_meeting_model = 4;
+  string embedding_base_url = 5;
+  bool embedding_api_key_set = 6;
+  string embedding_model = 7;
+  string embedding_query_instruction = 8;
+  bool web_search_api_key_set = 9;
+  // 用的是環境變數（設定頁沒存過）。
+  bool from_environment = 10;
+}
+
+message UpdateAiSettingsRequest {
+  string platform_base_url = 1;
+  string platform_model = 2;
+  string post_meeting_model = 3;
+  string embedding_base_url = 4;
+  string embedding_model = 5;
+  string embedding_query_instruction = 6;
+  // 金鑰：沒帶（不設 optional 欄位）就是不改，空字串就是清掉。
+  optional string platform_api_key = 7;
+  optional string embedding_api_key = 8;
+  optional string web_search_api_key = 9;
+  // 刪掉存的設定，回到環境變數（其他欄位不看）。
+  bool use_environment = 10;
+}
+
+message CheckAiSettingsRequest {}
+
+message AiSettingsCheck {
+  bool platform_ok = 1;
+  string platform_detail = 2;
+  bool embedding_ok = 3;
+  string embedding_detail = 4;
 }

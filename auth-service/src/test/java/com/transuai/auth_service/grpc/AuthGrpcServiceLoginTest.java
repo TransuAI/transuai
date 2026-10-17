@@ -40,7 +40,9 @@ class AuthGrpcServiceLoginTest {
                 mock(com.transuai.auth_service.mail.AccountMail.class),
                 mock(com.transuai.auth_service.security.AuthLinks.class),
                 mock(com.transuai.auth_service.security.EmailVerifications.class),
-                mock(com.transuai.auth_service.security.RecoveryCodes.class)).login(
+                mock(com.transuai.auth_service.security.RecoveryCodes.class),
+                mock(org.springframework.transaction.support.TransactionTemplate.class),
+                mock(com.transuai.auth_service.mail.MailSettingsAdmin.class)).login(
                 LoginRequest.newBuilder().setEmail("nobody@example.com").setPassword("guess").build(), observer);
 
         verify(encoder).matches(eq("guess"), argThat(hash -> hash != null && hash.startsWith("{pbkdf2}")));

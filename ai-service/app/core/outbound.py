@@ -2,7 +2,7 @@
 建（或掛上 check），送出前看網域，不在清單裡就不送、記 log、raise OutboundBlocked。
 
 清單預設是程式裡用到的服務（下面的 DEFAULT_ALLOWED_HOSTS）；部署者用 OUTBOUND_ALLOWED_HOSTS（逗號分隔）整份換掉，例如拿掉不用的廠商。
-平台模型與 embedding 的網址（PLATFORM_LLM_BASE_URL、EMBEDDING_BASE_URL，通常是自架的 vLLM）一律自動加進去。網路層的對外限制另外寫在部署清單。
+平台模型與 embedding 的網址（系統設定頁存的，或 PLATFORM_LLM_BASE_URL、EMBEDDING_BASE_URL，通常是自架的 vLLM）一律自動加進去。網路層的對外限制另外寫在部署清單。
 """
 
 import logging
@@ -32,7 +32,10 @@ class OutboundBlocked(httpx2.RequestError):
 def allowed_hosts() -> frozenset[str]:
     configured = [host.strip().lower() for host in settings.outbound_allowed_hosts.split(",") if host.strip()]
     hosts = set(configured or DEFAULT_ALLOWED_HOSTS)
-    for configured_server in (settings.platform_llm_base_url, settings.embedding_base_url):
+    from app.services import system_settings  # 設定頁存的伺服器（用到資料庫，用到才載入）
+
+    config = system_settings.current()
+    for configured_server in (config.platform_base_url, config.embedding_base_url):
         if host := urlsplit(configured_server).hostname:
             hosts.add(host.lower())
     return frozenset(hosts)

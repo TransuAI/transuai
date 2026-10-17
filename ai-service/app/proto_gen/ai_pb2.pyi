@@ -1330,3 +1330,71 @@ class ClaimSource(_message.Message):
     url: str
     excerpt: str
     def __init__(self, title: _Optional[str] = ..., url: _Optional[str] = ..., excerpt: _Optional[str] = ...) -> None: ...
+
+class GetAiSettingsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class AiSettings(_message.Message):
+    __slots__ = ("platform_base_url", "platform_api_key_set", "platform_model", "post_meeting_model", "embedding_base_url", "embedding_api_key_set", "embedding_model", "embedding_query_instruction", "web_search_api_key_set", "from_environment")
+    PLATFORM_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    PLATFORM_API_KEY_SET_FIELD_NUMBER: _ClassVar[int]
+    PLATFORM_MODEL_FIELD_NUMBER: _ClassVar[int]
+    POST_MEETING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_API_KEY_SET_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_QUERY_INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
+    WEB_SEARCH_API_KEY_SET_FIELD_NUMBER: _ClassVar[int]
+    FROM_ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    platform_base_url: str
+    platform_api_key_set: bool
+    platform_model: str
+    post_meeting_model: str
+    embedding_base_url: str
+    embedding_api_key_set: bool
+    embedding_model: str
+    embedding_query_instruction: str
+    web_search_api_key_set: bool
+    from_environment: bool
+    def __init__(self, platform_base_url: _Optional[str] = ..., platform_api_key_set: _Optional[bool] = ..., platform_model: _Optional[str] = ..., post_meeting_model: _Optional[str] = ..., embedding_base_url: _Optional[str] = ..., embedding_api_key_set: _Optional[bool] = ..., embedding_model: _Optional[str] = ..., embedding_query_instruction: _Optional[str] = ..., web_search_api_key_set: _Optional[bool] = ..., from_environment: _Optional[bool] = ...) -> None: ...
+
+class UpdateAiSettingsRequest(_message.Message):
+    __slots__ = ("platform_base_url", "platform_model", "post_meeting_model", "embedding_base_url", "embedding_model", "embedding_query_instruction", "platform_api_key", "embedding_api_key", "web_search_api_key", "use_environment")
+    PLATFORM_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    PLATFORM_MODEL_FIELD_NUMBER: _ClassVar[int]
+    POST_MEETING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_QUERY_INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
+    PLATFORM_API_KEY_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_API_KEY_FIELD_NUMBER: _ClassVar[int]
+    WEB_SEARCH_API_KEY_FIELD_NUMBER: _ClassVar[int]
+    USE_ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    platform_base_url: str
+    platform_model: str
+    post_meeting_model: str
+    embedding_base_url: str
+    embedding_model: str
+    embedding_query_instruction: str
+    platform_api_key: str
+    embedding_api_key: str
+    web_search_api_key: str
+    use_environment: bool
+    def __init__(self, platform_base_url: _Optional[str] = ..., platform_model: _Optional[str] = ..., post_meeting_model: _Optional[str] = ..., embedding_base_url: _Optional[str] = ..., embedding_model: _Optional[str] = ..., embedding_query_instruction: _Optional[str] = ..., platform_api_key: _Optional[str] = ..., embedding_api_key: _Optional[str] = ..., web_search_api_key: _Optional[str] = ..., use_environment: _Optional[bool] = ...) -> None: ...
+
+class CheckAiSettingsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class AiSettingsCheck(_message.Message):
+    __slots__ = ("platform_ok", "platform_detail", "embedding_ok", "embedding_detail")
+    PLATFORM_OK_FIELD_NUMBER: _ClassVar[int]
+    PLATFORM_DETAIL_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_OK_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_DETAIL_FIELD_NUMBER: _ClassVar[int]
+    platform_ok: bool
+    platform_detail: str
+    embedding_ok: bool
+    embedding_detail: str
+    def __init__(self, platform_ok: _Optional[bool] = ..., platform_detail: _Optional[str] = ..., embedding_ok: _Optional[bool] = ..., embedding_detail: _Optional[str] = ...) -> None: ...

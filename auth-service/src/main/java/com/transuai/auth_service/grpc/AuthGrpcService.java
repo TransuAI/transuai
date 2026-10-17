@@ -70,6 +70,8 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
     private final AuthLinks links;
     private final EmailVerifications emailVerifications;
     private final RecoveryCodes recoveryCodes;
+    private final org.springframework.transaction.support.TransactionTemplate transactions;
+    private final com.transuai.auth_service.mail.MailSettingsAdmin mailSettings;
     // 帳號不存在時也拿密碼比對這個雜湊，回應時間才跟「密碼錯」一樣長，不能用來猜哪些 email 註冊過。第一次用到才產生
     // （跟真的密碼用同一個 encoder、同樣的成本）。
     private volatile String unknownUserHash;
@@ -93,12 +95,18 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
             return;
         }
 
-        com.transuai.auth_service.domain.User user = com.transuai.auth_service.domain.User.builder()
-                .email(email)
-                .passwordHash(passwordEncoder.encode(request.getPassword()))
-                .displayName(request.getDisplayName().isBlank() ? null : request.getDisplayName())
-                .build();
-        user = userRepository.save(user);
+        String passwordHash = passwordEncoder.encode(request.getPassword());
+        // 還沒有任何帳號時，這個帳號是管理員（全新安裝的第一個人）。鎖住判斷，同時註冊的兩個人只有一個是。
+        com.transuai.auth_service.domain.User user = transactions.execute(status -> {
+            userRepository.lockForFirstAccount();
+            boolean first = userRepository.count() == 0;
+            return userRepository.save(com.transuai.auth_service.domain.User.builder()
+                    .email(email)
+                    .passwordHash(passwordHash)
+                    .displayName(request.getDisplayName().isBlank() ? null : request.getDisplayName())
+                    .role(first ? com.transuai.auth_service.domain.User.ADMIN : com.transuai.auth_service.domain.User.MEMBER)
+                    .build());
+        });
         sendEmailVerification(user);
 
         responseObserver.onNext(buildAuthResponse(user, refreshTokens.issue(user.getId())));
@@ -270,6 +278,73 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
             return "這個密碼太常見，很容易被猜到，請換一個";
         }
         return null;
+    }
+
+    @Override
+    public void getSystemStatus(com.transuai.auth.grpc.v1.GetSystemStatusRequest request,
+            StreamObserver<com.transuai.auth.grpc.v1.SystemStatus> responseObserver) {
+        responseObserver.onNext(com.transuai.auth.grpc.v1.SystemStatus.newBuilder()
+                .setSetupRequired(userRepository.count() == 0)
+                .setMailEnabled(accountMail.available())
+                .build());
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void getMailSettings(com.transuai.auth.grpc.v1.GetMailSettingsRequest request,
+            StreamObserver<com.transuai.auth.grpc.v1.MailSettings> responseObserver) {
+        if (!requireAdmin(responseObserver)) {
+            return;
+        }
+        responseObserver.onNext(mailSettings.current());
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void updateMailSettings(com.transuai.auth.grpc.v1.UpdateMailSettingsRequest request,
+            StreamObserver<com.transuai.auth.grpc.v1.MailSettings> responseObserver) {
+        if (!requireAdmin(responseObserver)) {
+            return;
+        }
+        if (!request.getUseEnvironment() && request.getPort() < 0) {
+            responseObserver.onError(Status.INVALID_ARGUMENT.withDescription("port must be positive").asRuntimeException());
+            return;
+        }
+        try {
+            responseObserver.onNext(mailSettings.update(request));
+            responseObserver.onCompleted();
+        } catch (com.transuai.auth_service.mail.MailSettingsAdmin.NoEncryptionKey e) {
+            responseObserver.onError(Status.FAILED_PRECONDITION.withDescription(e.getMessage()).asRuntimeException());
+        }
+    }
+
+    @Override
+    public void sendTestMail(com.transuai.auth.grpc.v1.SendTestMailRequest request,
+            StreamObserver<com.transuai.auth.grpc.v1.SendTestMailResponse> responseObserver) {
+        com.transuai.auth_service.domain.User admin = requireAdminUser(responseObserver);
+        if (admin == null) {
+            return;
+        }
+        String to = request.getTo().isBlank() ? admin.getEmail() : request.getTo().trim();
+        String error = accountMail.sendTest(to);
+        responseObserver.onNext(com.transuai.auth.grpc.v1.SendTestMailResponse.newBuilder()
+                .setSent(error == null).setError(error == null ? "" : error).build());
+        responseObserver.onCompleted();
+    }
+
+    /** 系統設定只給管理員：不是的話回 PERMISSION_DENIED，回傳 false。 */
+    private boolean requireAdmin(StreamObserver<?> responseObserver) {
+        return requireAdminUser(responseObserver) != null;
+    }
+
+    private com.transuai.auth_service.domain.User requireAdminUser(StreamObserver<?> responseObserver) {
+        com.transuai.auth_service.domain.User user = userRepository.findById(GrpcAuthContext.currentUserId()).orElse(null);
+        if (user == null || !user.isAdmin()) {
+            responseObserver.onError(Status.PERMISSION_DENIED.withDescription("only an administrator can change system settings")
+                    .asRuntimeException());
+            return null;
+        }
+        return user;
     }
 
     @Override

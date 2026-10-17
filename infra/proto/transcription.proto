@@ -38,6 +38,13 @@ service TranscriptionService {
   // 一位使用者在 [start, end) 之間的轉錄用量，依廠商、模型彙總（Gateway 把「某個月」換成這段時間）。
   // user_id 不合法、或沒給 start / end 回 INVALID_ARGUMENT；沒有用量回空列表。
   rpc SumUserTranscriptionUsage(SumUserTranscriptionUsageRequest) returns (SumUserTranscriptionUsageResponse);
+
+  // 系統設定的「語音辨識」（只給管理員，權限由 gateway 檢查）：本地的語音辨識伺服器、Deepgram 的金鑰、講者分離的門檻。設定頁存過
+  // 就是存的，沒存過就是環境變數；金鑰不回傳。存了馬上生效。存金鑰要有 KEY_ENCRYPTION_KEY（沒有就 FAILED_PRECONDITION）。
+  rpc GetSpeechSettings(GetSpeechSettingsRequest) returns (SpeechSettings);
+  rpc UpdateSpeechSettings(UpdateSpeechSettingsRequest) returns (SpeechSettings);
+  // 用目前的設定試一下：本地伺服器有沒有這個模型；只有 Deepgram 時試它的金鑰。
+  rpc CheckSpeechSettings(CheckSpeechSettingsRequest) returns (SpeechSettingsCheck);
 }
 
 message TranscriptSegment {
@@ -161,4 +168,38 @@ message TranscriptionUsage {
   optional double audio_seconds = 3;
   bool succeeded = 4;
   google.protobuf.Timestamp created_at = 5;
+}
+
+message GetSpeechSettingsRequest {}
+
+message SpeechSettings {
+  string stt_base_url = 1;
+  bool stt_api_key_set = 2;
+  string stt_model = 3;
+  bool deepgram_api_key_set = 4;
+  double diarization_threshold = 5;
+  // 用的是環境變數（設定頁沒存過）。
+  bool from_environment = 6;
+  // 這個服務裡有沒有講者分離的模型（本地辨識時用）。
+  bool diarization_available = 7;
+  // 目前轉錄用哪一個："local"、"deepgram" 或 "none"（都沒設定）。
+  string active = 8;
+}
+
+message UpdateSpeechSettingsRequest {
+  string stt_base_url = 1;
+  string stt_model = 2;
+  double diarization_threshold = 3;
+  // 金鑰：沒帶就是不改，空字串就是清掉。
+  optional string stt_api_key = 4;
+  optional string deepgram_api_key = 5;
+  // 刪掉存的設定，回到環境變數（其他欄位不看）。
+  bool use_environment = 6;
+}
+
+message CheckSpeechSettingsRequest {}
+
+message SpeechSettingsCheck {
+  bool ok = 1;
+  string detail = 2;
 }

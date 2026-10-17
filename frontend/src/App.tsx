@@ -14,6 +14,7 @@ import { SettingsPage } from '@/pages/settings-page'
 import { JobsPage } from '@/pages/jobs-page'
 import { JobDetailPage } from '@/pages/job-detail-page'
 import { DecisionsPage } from '@/pages/decisions-page'
+import { SystemSettingsPage } from '@/pages/system-settings-page'
 
 function App() {
   return (
@@ -37,6 +38,7 @@ function App() {
               <Route path="/decisions" element={<DecisionsPage />} />
               <Route path="/upload" element={<UploadPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/admin/settings" element={<SystemSettingsPage />} />
             </Route>
           </Route>
 

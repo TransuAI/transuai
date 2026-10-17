@@ -19,6 +19,98 @@ export interface User {
   emailVerified: boolean
   /** 復原碼 not used yet (0: never made, or all used). */
   recoveryCodesLeft: number
+  /** 管理員: the first account, or one made so with make-admin.sh; sees 系統設定. */
+  admin: boolean
+}
+
+/** Before sign-in: no account yet (the next to register becomes the administrator); whether mail is set up (without it
+ * there is no 忘記密碼 by email and no email confirmation). */
+export interface SystemStatus {
+  setupRequired: boolean
+  mailEnabled: boolean
+}
+
+/** 系統設定 → 寄信. Keys/passwords are never sent back, only whether they are set. */
+export interface MailSettings {
+  host: string
+  port: number
+  username: string
+  passwordSet: boolean
+  from: string
+  starttls: boolean
+  smtpAuth: boolean
+  /** Not saved on the settings page: the environment variables are in use. */
+  fromEnvironment: boolean
+  /** Enough to send (a host and a sender). */
+  enabled: boolean
+}
+
+/** A key in an update: omitted (undefined) keeps it, '' clears it. */
+export interface MailSettingsUpdate {
+  host: string
+  port: number
+  username: string
+  password?: string
+  clearPassword?: boolean
+  from: string
+  starttls: boolean
+  smtpAuth: boolean
+  useEnvironment?: boolean
+}
+
+/** 系統設定 → AI 模型. */
+export interface AiSettings {
+  platformBaseUrl: string
+  platformApiKeySet: boolean
+  platformModel: string
+  postMeetingModel: string
+  embeddingBaseUrl: string
+  embeddingApiKeySet: boolean
+  embeddingModel: string
+  embeddingQueryInstruction: string
+  webSearchApiKeySet: boolean
+  fromEnvironment: boolean
+}
+
+export interface AiSettingsUpdate {
+  platformBaseUrl: string
+  platformApiKey?: string
+  platformModel: string
+  postMeetingModel: string
+  embeddingBaseUrl: string
+  embeddingApiKey?: string
+  embeddingModel: string
+  embeddingQueryInstruction: string
+  webSearchApiKey?: string
+  useEnvironment?: boolean
+}
+
+export interface AiSettingsCheck {
+  platformOk: boolean
+  platformDetail: string
+  embeddingOk: boolean
+  embeddingDetail: string
+}
+
+/** 系統設定 → 語音辨識. `active`: which one transcribes now. */
+export interface SpeechSettings {
+  sttBaseUrl: string
+  sttApiKeySet: boolean
+  sttModel: string
+  deepgramApiKeySet: boolean
+  diarizationThreshold: number
+  fromEnvironment: boolean
+  diarizationAvailable: boolean
+  active: 'local' | 'deepgram' | 'none'
+}
+
+export interface SpeechSettingsUpdate {
+  sttBaseUrl: string
+  sttApiKey?: string
+  sttModel: string
+  deepgramApiKey?: string
+  diarizationThreshold: number
+  useEnvironment?: boolean
 }
 
 /** 登入、註冊、換發的回應。refresh token 不在這裡：gateway 把它放在 httpOnly cookie。 */

@@ -21,7 +21,7 @@ import numpy as np
 
 from app.core import outbound
 from app.core.config import settings
-from app.services import diarization
+from app.services import diarization, speech_settings
 from app.services.diarization import SAMPLE_RATE, SpeakerTurn
 from app.services.speech_recognition import AUTO, Recognition, RecognizedWord
 
@@ -55,12 +55,13 @@ def recognize(audio_path: Path, chosen: str) -> Recognition:
     if turns is None:
         logger.warning("no diarization models in %s: transcribing without speakers", settings.diarization_models_dir)
     chunks = _chunks(turns, duration)
+    config = speech_settings.current()
     logger.info("transcribing %s (%.0fs) in %d chunks with %s at %s", audio_path, duration, len(chunks),
-                settings.stt_model, settings.stt_base_url)
+                config.stt_model, config.stt_base_url)
 
     whisper_language = _WHISPER_LANGUAGE.get(chosen)
     with ThreadPoolExecutor(max_workers=_CONCURRENT_REQUESTS) as pool:
-        answers = list(pool.map(lambda chunk: _transcribe(samples, chunk, whisper_language), chunks))
+        answers = list(pool.map(lambda chunk: _transcribe(samples, chunk, whisper_language, config), chunks))
 
     words: list[RecognizedWord] = []
     detected: Counter[str] = Counter()
@@ -104,16 +105,17 @@ def _chunks(turns: list[SpeakerTurn] | None, duration: float) -> list[_Chunk]:
     return chunks
 
 
-def _transcribe(samples: np.ndarray, chunk: _Chunk, language: str | None) -> tuple[str | None, list[tuple[float, float, str]]]:
+def _transcribe(samples: np.ndarray, chunk: _Chunk, language: str | None,
+                config: "speech_settings.SpeechConfig") -> tuple[str | None, list[tuple[float, float, str]]]:
     """一段音訊送去轉錄，回傳偵測到的語言與片段（相對這段開頭的起訖時間、文字）。HTTP 錯誤一律 raise（暫時性與否由
     speech_recognition.is_transient_recognition_error 判斷）。"""
     piece = samples[int(chunk.start * SAMPLE_RATE):int(chunk.end * SAMPLE_RATE)]
-    data = {"model": settings.stt_model, "response_format": "verbose_json",
+    data = {"model": config.stt_model, "response_format": "verbose_json",
             "timestamp_granularities[]": "segment", "temperature": "0"}
     if language:
         data["language"] = language
-    headers = {"Authorization": f"Bearer {settings.stt_api_key}"} if settings.stt_api_key else {}
-    response = _client.post(f"{settings.stt_base_url.rstrip('/')}/audio/transcriptions", data=data, headers=headers,
+    headers = {"Authorization": f"Bearer {config.stt_api_key}"} if config.stt_api_key else {}
+    response = _client.post(f"{config.stt_base_url.rstrip('/')}/audio/transcriptions", data=data, headers=headers,
                             files={"file": ("chunk.wav", _wav(piece), "audio/wav")})
     response.raise_for_status()
     body = response.json()

@@ -1,6 +1,6 @@
 import { useState, type ComponentType } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { AudioLines, Folder, Gavel, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, Upload } from 'lucide-react'
+import { AudioLines, Folder, Gavel, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, SlidersHorizontal, Upload } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/auth-context'
 import { Button } from '@/components/ui/button'
@@ -19,11 +19,13 @@ import { DarkModeToggle } from '@/components/layout/dark-mode-toggle'
 
 const JOB_DETAIL_ROUTE_PATTERN = /^\/jobs\/[^/]+$/
 
-const NAV_ITEMS: { to: string; label: string; icon: ComponentType<{ className?: string }>; end?: boolean }[] = [
+const NAV_ITEMS: { to: string; label: string; icon: ComponentType<{ className?: string }>; end?: boolean; adminOnly?: boolean }[] = [
   { to: '/jobs', label: '我的檔案', icon: Folder, end: true },
   { to: '/decisions', label: '決策', icon: Gavel },
   { to: '/upload', label: '上傳', icon: Upload },
   { to: '/settings', label: '設定', icon: Settings },
+  // 系統設定: the models, speech recognition and mail of the whole installation — administrators only.
+  { to: '/admin/settings', label: '系統設定', icon: SlidersHorizontal, adminOnly: true },
 ]
 
 function initials(name: string | null, email: string) {
@@ -45,9 +47,10 @@ function SidebarBrand({ collapsed }: { collapsed: boolean }) {
 }
 
 function SidebarNavItems({ collapsed }: { collapsed: boolean }) {
+  const { user } = useAuth()
   return (
     <nav aria-label="Main navigation" className="flex flex-col gap-1 px-2">
-      {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => {
+      {NAV_ITEMS.filter((item) => !item.adminOnly || user?.admin).map(({ to, label, icon: Icon, end }) => {
         const link = (
           <NavLink
             to={to}

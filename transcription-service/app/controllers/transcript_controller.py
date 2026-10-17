@@ -19,7 +19,8 @@ from app.repositories.transcript_repository import (
     update_segment_text,
 )
 from app.repositories.transcription_usage_repository import list_job_transcription_usage, sum_user_transcription_usage
-from app.services import job_deletion, transcript_cache
+from app.services import diarization, job_deletion, speech_check, speech_settings, transcript_cache
+from app.services.key_encryption import EncryptionUnavailable
 from app.services.edit_events import publish_transcript_edited
 
 logger = logging.getLogger(__name__)
@@ -203,3 +204,32 @@ class TranscriptController(transcription_pb2_grpc.TranscriptionServiceServicer):
             transcription_pb2.TranscriptionUsageSum(provider=s.provider, model=s.model, audio_seconds=s.audio_seconds,
                                                     calls=s.calls, calls_with_unknown_usage=s.calls_with_unknown_usage)
             for s in sums])
+
+    def GetSpeechSettings(self, request, context):
+        return _speech_settings_to_proto(speech_settings.current())
+
+    def UpdateSpeechSettings(self, request, context):
+        try:
+            if request.use_environment:
+                return _speech_settings_to_proto(speech_settings.use_environment())
+            if not 0.0 < request.diarization_threshold < 2.0:
+                _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "diarization_threshold must be between 0 and 2")
+            return _speech_settings_to_proto(speech_settings.save(speech_settings.SpeechSettingsUpdate(
+                stt_base_url=request.stt_base_url, stt_model=request.stt_model,
+                diarization_threshold=request.diarization_threshold,
+                stt_api_key=request.stt_api_key if request.HasField("stt_api_key") else None,
+                deepgram_api_key=request.deepgram_api_key if request.HasField("deepgram_api_key") else None)))
+        except EncryptionUnavailable:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "要在設定頁存金鑰，伺服器要先設定 KEY_ENCRYPTION_KEY")
+
+    def CheckSpeechSettings(self, request, context):
+        ok, detail = speech_check.check()
+        return transcription_pb2.SpeechSettingsCheck(ok=ok, detail=detail)
+
+
+def _speech_settings_to_proto(config: speech_settings.SpeechConfig) -> transcription_pb2.SpeechSettings:
+    active = "local" if config.local else "deepgram" if config.deepgram_api_key else "none"
+    return transcription_pb2.SpeechSettings(
+        stt_base_url=config.stt_base_url, stt_api_key_set=bool(config.stt_api_key), stt_model=config.stt_model,
+        deepgram_api_key_set=bool(config.deepgram_api_key), diarization_threshold=config.diarization_threshold,
+        from_environment=config.from_environment, diarization_available=diarization.is_available(), active=active)

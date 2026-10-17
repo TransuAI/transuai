@@ -18,6 +18,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from app.core import outbound
 from app.core.config import settings
+from app.services import system_settings
 
 TAVILY_MCP_URL = "https://mcp.tavily.com/mcp/"
 # 用量紀錄上的搜尋服務名稱。
@@ -66,7 +67,7 @@ class WebSearchFailed(Exception):
 
 def is_available() -> bool:
     """這個部署能不能查網路：有設定搜尋服務的金鑰。"""
-    return bool(settings.tavily_api_key)
+    return bool(system_settings.current().web_search_api_key)
 
 
 def search(query: str) -> list[WebPage]:
@@ -85,7 +86,7 @@ async def _search(query: str) -> list[WebPage]:
         async with Client(server_override) as client:
             result = await client.call_tool("tavily_search", arguments)
     else:
-        async with outbound.async_client(headers={"Authorization": f"Bearer {settings.tavily_api_key}"},
+        async with outbound.async_client(headers={"Authorization": f"Bearer {system_settings.current().web_search_api_key}"},
                                       timeout=httpx2.Timeout(_TIMEOUT_SECONDS)) as http:
             async with Client(streamable_http_client(TAVILY_MCP_URL, http_client=http)) as client:
                 result = await client.call_tool("tavily_search", arguments)

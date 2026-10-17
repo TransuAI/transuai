@@ -144,14 +144,16 @@ class Job(_message.Message):
     def __init__(self, job_id: _Optional[str] = ..., user_id: _Optional[str] = ..., file_name: _Optional[str] = ..., file_type: _Optional[_Union[FileType, str]] = ..., file_size_bytes: _Optional[int] = ..., storage_path: _Optional[str] = ..., duration_seconds: _Optional[int] = ..., status: _Optional[_Union[JobStatus, str]] = ..., error_reason: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., transcription_language: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ...) -> None: ...
 
 class GetPresignedUploadUrlRequest(_message.Message):
-    __slots__ = ("file_name", "file_type", "file_size_bytes")
+    __slots__ = ("file_name", "file_type", "file_size_bytes", "content_type")
     FILE_NAME_FIELD_NUMBER: _ClassVar[int]
     FILE_TYPE_FIELD_NUMBER: _ClassVar[int]
     FILE_SIZE_BYTES_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_TYPE_FIELD_NUMBER: _ClassVar[int]
     file_name: str
     file_type: FileType
     file_size_bytes: int
-    def __init__(self, file_name: _Optional[str] = ..., file_type: _Optional[_Union[FileType, str]] = ..., file_size_bytes: _Optional[int] = ...) -> None: ...
+    content_type: str
+    def __init__(self, file_name: _Optional[str] = ..., file_type: _Optional[_Union[FileType, str]] = ..., file_size_bytes: _Optional[int] = ..., content_type: _Optional[str] = ...) -> None: ...
 
 class GetPresignedUploadUrlResponse(_message.Message):
     __slots__ = ("upload_url", "storage_path", "expires_at")

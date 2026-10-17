@@ -8,11 +8,16 @@ import { Label } from '@/components/ui/label'
 import { PasswordInput, PasswordStrengthHint } from '@/components/password-input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { useSystemStatus } from '@/hooks/use-system-status'
 
 // 忘記密碼: asks for a reset link by email. The answer is the same whether or not the email is registered (the server
 // never says), so the page says "if it's registered" either way.
 export function ForgotPasswordPage() {
+  const status = useSystemStatus()
   const [useCode, setUseCode] = useState(false)
+  if (!status) return null
+  // Without mail set up there is no reset link to send: only the 復原碼.
+  if (!status.mailEnabled) return <RecoveryCodeReset withoutMail />
   if (useCode) return <RecoveryCodeReset onBack={() => setUseCode(false)} />
   return <ResetByMail onUseCode={() => setUseCode(true)} />
 }
@@ -97,7 +102,7 @@ function ResetByMail({ onUseCode }: { onUseCode: () => void }) {
 
 // 用復原碼重設: the email and one unused 復原碼 (made in 設定 → 帳號) set a new password without the mailbox. A wrong email
 // or code gets one answer for both.
-function RecoveryCodeReset({ onBack }: { onBack: () => void }) {
+function RecoveryCodeReset({ onBack, withoutMail = false }: { onBack?: () => void; withoutMail?: boolean }) {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
@@ -124,7 +129,11 @@ function RecoveryCodeReset({ onBack }: { onBack: () => void }) {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>用復原碼重設密碼</CardTitle>
-          <CardDescription>輸入 email、一組還沒用過的復原碼與新密碼；所有裝置都會登出</CardDescription>
+          <CardDescription>
+            {withoutMail
+              ? '這套系統沒有設定寄信，忘記密碼時用復原碼重設（設定 → 帳號產生的）；沒有復原碼請洽管理員。'
+              : '輸入 email、一組還沒用過的復原碼與新密碼；所有裝置都會登出'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {done ? (
@@ -160,9 +169,11 @@ function RecoveryCodeReset({ onBack }: { onBack: () => void }) {
               <Button type="submit" disabled={isSubmitting} className="mt-2 w-full">
                 {isSubmitting ? '重設中…' : '重設密碼'}
               </Button>
+{onBack && (
               <Button type="button" variant="link" className="h-auto p-0 text-sm" onClick={onBack}>
                 改用 email 重設
               </Button>
+              )}
             </form>
           )}
         </CardContent>

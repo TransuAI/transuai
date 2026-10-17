@@ -12,6 +12,7 @@ from app.services.key_encryption import EncryptionUnavailable, decrypt, key_bind
 from app.services.llm_client import PLATFORM, ChatModel, LlmError, LlmErrorReason, platform_chat_model
 from app.services.model_catalog import CURATED_MODELS, OPENROUTER, ModelChoice, UnknownModel, curated_model, openrouter_model
 from app.services.providers import PROVIDERS
+from app.services import system_settings
 
 
 class NoProviderKey(Exception):
@@ -23,7 +24,7 @@ class ModelNotAvailable(Exception):
 
 
 def platform_choice() -> ModelChoice:
-    return ModelChoice(PLATFORM, settings.platform_llm_model, supports_tools=False)
+    return ModelChoice(PLATFORM, system_settings.current().platform_model, supports_tools=False)
 
 
 def available_models(user_id: uuid.UUID) -> tuple[list[ModelChoice], bool]:

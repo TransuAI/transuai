@@ -6,11 +6,12 @@ import { getAccessToken, setAccessToken } from '@/lib/access-token'
 import { AuthProvider, useAuth } from './auth-context'
 
 vi.mock('@/lib/api', () => ({
+  systemApi: { status: vi.fn().mockResolvedValue({ setupRequired: false, mailEnabled: true }) },
   authApi: { me: vi.fn(), login: vi.fn(), register: vi.fn(), logout: vi.fn(), logoutAll: vi.fn(), deleteAccount: vi.fn() },
 }))
 
 const user = {
-  id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z', emailVerified: true, recoveryCodesLeft: 0,
+  id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z', emailVerified: true, recoveryCodesLeft: 0, admin: false,
 }
 
 function Buttons() {

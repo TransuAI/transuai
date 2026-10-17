@@ -25,6 +25,7 @@ from app.services.decisions import embedding_text
 from app.services.embedder import embed_documents
 from app.services.retry import is_retryable_grpc_error
 from app.services.transcript_client import transcript_client
+from app.services import system_settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +50,11 @@ def sync_embeddings() -> None:
             finally:
                 lock.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _LOCK_KEY})
     except Exception:
-        logger.exception("could not bring the embeddings up to date with %s", settings.embedding_model)
+        logger.exception("could not bring the embeddings up to date with %s", system_settings.current().embedding_model)
 
 
 def _sync() -> None:
-    current = settings.embedding_model
+    current = system_settings.current().embedding_model
     with new_session() as session:
         stored = session.scalar(select(EmbeddingState.model).where(EmbeddingState.id == 1))
     if stored is not None and stored != current:

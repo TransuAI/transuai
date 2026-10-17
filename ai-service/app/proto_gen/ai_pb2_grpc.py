@@ -284,6 +284,21 @@ class AiServiceStub:
                 request_serializer=ai__pb2.ListProviderKeysRequest.SerializeToString,
                 response_deserializer=ai__pb2.ListProviderKeysResponse.FromString,
                 _registered_method=True)
+        self.GetAiSettings = channel.unary_unary(
+                '/transuai.ai.v1.AiService/GetAiSettings',
+                request_serializer=ai__pb2.GetAiSettingsRequest.SerializeToString,
+                response_deserializer=ai__pb2.AiSettings.FromString,
+                _registered_method=True)
+        self.UpdateAiSettings = channel.unary_unary(
+                '/transuai.ai.v1.AiService/UpdateAiSettings',
+                request_serializer=ai__pb2.UpdateAiSettingsRequest.SerializeToString,
+                response_deserializer=ai__pb2.AiSettings.FromString,
+                _registered_method=True)
+        self.CheckAiSettings = channel.unary_unary(
+                '/transuai.ai.v1.AiService/CheckAiSettings',
+                request_serializer=ai__pb2.CheckAiSettingsRequest.SerializeToString,
+                response_deserializer=ai__pb2.AiSettingsCheck.FromString,
+                _registered_method=True)
         self.ListAvailableModels = channel.unary_unary(
                 '/transuai.ai.v1.AiService/ListAvailableModels',
                 request_serializer=ai__pb2.ListAvailableModelsRequest.SerializeToString,
@@ -713,12 +728,34 @@ class AiServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ListAvailableModels(self, request, context):
+    def GetAiSettings(self, request, context):
         """預設模型（見 ai-service/CONTEXT.md）：背景工作（上傳後的摘要與章節、重新產生）與問答都用它。
 
         這位使用者可以選的模型：平台模型，加上他有自有金鑰的每個廠商整理好的模型清單；有 OpenRouter 金鑰時
         openrouter_custom 為 true，代表可以自己輸入 OpenRouter 模型 ID。
+        系統設定的「模型」（只給管理員，權限由 gateway 檢查）：平台模型、會後處理模型、embedding、網路搜尋。設定頁存過就是存的，沒存過就是
+        環境變數；金鑰不回傳，只說有沒有設定。存了馬上生效；換了 embedding 模型就在背景重算向量。存金鑰要有 KEY_ENCRYPTION_KEY
+        （沒有就 FAILED_PRECONDITION）。
         """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateAiSettings(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CheckAiSettings(self, request, context):
+        """用目前的設定試一下：平台模型的伺服器有沒有這個模型、embedding 伺服器能不能算出 1024 維的向量。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListAvailableModels(self, request, context):
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -986,6 +1023,21 @@ def add_AiServiceServicer_to_server(servicer, server):
                     servicer.ListProviderKeys,
                     request_deserializer=ai__pb2.ListProviderKeysRequest.FromString,
                     response_serializer=ai__pb2.ListProviderKeysResponse.SerializeToString,
+            ),
+            'GetAiSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAiSettings,
+                    request_deserializer=ai__pb2.GetAiSettingsRequest.FromString,
+                    response_serializer=ai__pb2.AiSettings.SerializeToString,
+            ),
+            'UpdateAiSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateAiSettings,
+                    request_deserializer=ai__pb2.UpdateAiSettingsRequest.FromString,
+                    response_serializer=ai__pb2.AiSettings.SerializeToString,
+            ),
+            'CheckAiSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.CheckAiSettings,
+                    request_deserializer=ai__pb2.CheckAiSettingsRequest.FromString,
+                    response_serializer=ai__pb2.AiSettingsCheck.SerializeToString,
             ),
             'ListAvailableModels': grpc.unary_unary_rpc_method_handler(
                     servicer.ListAvailableModels,
@@ -2330,6 +2382,87 @@ class AiService:
             '/transuai.ai.v1.AiService/ListProviderKeys',
             ai__pb2.ListProviderKeysRequest.SerializeToString,
             ai__pb2.ListProviderKeysResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAiSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/GetAiSettings',
+            ai__pb2.GetAiSettingsRequest.SerializeToString,
+            ai__pb2.AiSettings.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateAiSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/UpdateAiSettings',
+            ai__pb2.UpdateAiSettingsRequest.SerializeToString,
+            ai__pb2.AiSettings.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CheckAiSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.ai.v1.AiService/CheckAiSettings',
+            ai__pb2.CheckAiSettingsRequest.SerializeToString,
+            ai__pb2.AiSettingsCheck.FromString,
             options,
             channel_credentials,
             insecure,

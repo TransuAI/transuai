@@ -18,6 +18,14 @@
 | 回寫 Job 狀態 | gRPC 呼叫 Upload Service 的 `InternalJobService.UpdateJobStatus`（不需要 x-user-id，服務對服務）                                                 |
 | 快取          | Redis（`redis-py`）：`GetTranscript` 的 cache-aside，見下方「逐字稿快取」；連不上時照樣讀資料庫                                                    |
 
+## 系統設定（管理員）
+
+本地語音辨識（伺服器、金鑰、模型）、Deepgram 的金鑰、講者分離的門檻可以由管理員在前端的「系統設定」頁改，存在 `speech_settings`（一列；金鑰用
+`KEY_ENCRYPTION_KEY` 加密）。**存過就用存的，沒存過就用環境變數**；第一次存、又沒填某把金鑰時沿用環境變數的。用到的地方都問
+`services/speech_settings.current()`（讀資料庫的結果記 5 秒），存了馬上生效；門檻換了，講者分離下次用時重新載入。`services/speech_check` 是「測試連線」：
+本地伺服器的 `/models` 裡有沒有這個模型；只有 Deepgram 時用它免費的 `/v1/projects` 試金鑰。權限由 gateway 檢查。正式環境啟動時不再要求語音辨識——
+可以裝好之後才在設定頁設定（沒設定時轉錄會說「語音辨識尚未設定」）。
+
 ## 前置需求
 
 - 先啟動基礎設施：`cd ../infra && docker compose up -d`（Postgres、RabbitMQ、MinIO、Redis；Redis 沒開時逐字稿快取略過，照樣讀資料庫）
@@ -82,6 +90,7 @@ job.failed { jobId, stage: "TRANSCRIBING", errorReason }，訊息照樣 ack（�
 | `RenameSpeaker` | 替講者命名：去前後空白，空字串或等於預設名稱「講者 N」＝恢復預設名稱；顯示名稱沒變則不動作；否則更新、`revision` +1，並發送 `transcript.edited { jobId }`（同一把逐字稿列鎖）。`job_id` 格式錯誤 / 名稱超過 100 字回 `INVALID_ARGUMENT`，逐字稿或這個標籤的講者不存在回 `NOT_FOUND` |
 | `AssignSegmentSpeaker` | 改片段的講者：目標是現有講者的標籤，或「新增講者」（可附名稱，排在顯示順序最後）。逐字稿還沒有任何講者（講者分離之前的舊 Job）時，新增講者前先把沒有講者的片段一起歸給新的講者 1，這樣指定出來就是兩位。片段本來就是目標講者則不動作；否則更新、`revision` +1，並發送 `transcript.edited { jobId }`，回傳片段、所有講者、`revision`。id 格式錯誤、沒有指定目標、名稱超過 100 字回 `INVALID_ARGUMENT`，逐字稿 / 片段 / 標籤不存在或片段不屬於該 job 回 `NOT_FOUND` |
 | `ListJobTranscriptionUsage` | 列出一個 Job 的轉錄用量（依時間升冪）：廠商、模型、音檔秒數（沒回報就不設定，proto3 `optional`）、成功或失敗；`job_id` 不合法回 `INVALID_ARGUMENT`，沒有紀錄回空列表 |
+| `GetSpeechSettings` / `UpdateSpeechSettings` / `CheckSpeechSettings` | 系統設定的語音辨識（見上方「系統設定」）：目前用的設定（`active` 是 `local`／`deepgram`／`none`，`diarization_available` 是有沒有講者分離的模型）、存設定（金鑰沒帶是不改、空字串是清掉、`use_environment` 回到環境變數；門檻要在 0 到 2 之間）、測試連線 |
 | `SumUserTranscriptionUsage` | 一位使用者在 `[start, end)` 之間的轉錄用量，依廠商、模型加總：音檔秒數（已知秒數的加總）、呼叫次數（失敗也算）、沒回報秒數的次數；Gateway 把「某個月」換成時間範圍。`user_id` 不合法或沒給 `start` / `end` 回 `INVALID_ARGUMENT`，沒有用量回空列表 |
 
 不需要 `x-user-id`，跟 upload-service 的 `InternalJobService` 一樣只信任內部網路呼叫。
@@ -232,7 +241,7 @@ upload-service 刪掉一個 Job 後發 `job.deleted { jobId, userId }` 到 fanou
 
 `APP_ENV` 預設是 `development`；設成 `production`時：
 
-- 啟動前檢查密鑰（`app/core/production.py`）：`DB_PASSWORD`、`RABBITMQ_PASSWORD`、`STORAGE_SECRET_KEY`、`REDIS_PASSWORD`、`DEEPGRAM_API_KEY`（有設本地語音辨識 `STT_BASE_URL`＋`STT_MODEL` 時不需要）沒設、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
+- 啟動前檢查密鑰（`app/core/production.py`）：`DB_PASSWORD`、`RABBITMQ_PASSWORD`、`STORAGE_SECRET_KEY`、`REDIS_PASSWORD` 沒設（語音辨識不檢查：可以裝好之後在系統設定頁設定）、還是開發用的預設值（`0000`、`admin`、`dev-only-…` 這類，跟 `infra/k8s/02-secret.yaml` 一致）、
   或少於 12 字元，就不啟動，錯誤訊息列出是哪幾個環境變數。
 - gRPC reflection 關掉（`app/main.py` 的 `build_server`）。
 

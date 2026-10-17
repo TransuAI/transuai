@@ -38,6 +38,7 @@ from app.services.default_models import (
     remove_provider_key,
     set_default_model,
 )
+from app.services import settings_check, system_settings
 from app.services.key_encryption import EncryptionUnavailable
 from app.services.llm_client import LlmError
 from app.services.model_catalog import CatalogUnreachable, ModelChoice, UnknownModel
@@ -424,6 +425,28 @@ class AiController(ai_pb2_grpc.AiServiceServicer):
         user_id = _parse_user_id(request.user_id, context)
         deleted, reset = remove_provider_key(user_id, request.provider)
         return ai_pb2.DeleteProviderKeyResponse(deleted=deleted, default_model_reset=reset)
+
+    def GetAiSettings(self, request, context):
+        return _ai_settings_to_proto(system_settings.current())
+
+    def UpdateAiSettings(self, request, context):
+        try:
+            if request.use_environment:
+                return _ai_settings_to_proto(system_settings.use_environment())
+            return _ai_settings_to_proto(system_settings.save(system_settings.AiSettingsUpdate(
+                platform_base_url=request.platform_base_url, platform_model=request.platform_model,
+                post_meeting_model=request.post_meeting_model, embedding_base_url=request.embedding_base_url,
+                embedding_model=request.embedding_model, embedding_query_instruction=request.embedding_query_instruction,
+                platform_api_key=request.platform_api_key if request.HasField("platform_api_key") else None,
+                embedding_api_key=request.embedding_api_key if request.HasField("embedding_api_key") else None,
+                web_search_api_key=request.web_search_api_key if request.HasField("web_search_api_key") else None)))
+        except EncryptionUnavailable:
+            _abort(context, grpc.StatusCode.FAILED_PRECONDITION, "要在設定頁存金鑰，伺服器要先設定 KEY_ENCRYPTION_KEY")
+
+    def CheckAiSettings(self, request, context):
+        result = settings_check.check()
+        return ai_pb2.AiSettingsCheck(platform_ok=result.platform_ok, platform_detail=result.platform_detail,
+                                      embedding_ok=result.embedding_ok, embedding_detail=result.embedding_detail)
 
     def ListAvailableModels(self, request, context):
         user_id = _parse_user_id(request.user_id, context)
@@ -1113,3 +1136,11 @@ def _speaker_suggestion_to_proto(suggestion: SpeakerSuggestion) -> ai_pb2.Speake
         evidence_start_time=float(suggestion.evidence_start_time), evidence_text=suggestion.evidence_text,
         status=suggestion.status)
 
+
+def _ai_settings_to_proto(config: "system_settings.AiConfig") -> ai_pb2.AiSettings:
+    return ai_pb2.AiSettings(
+        platform_base_url=config.platform_base_url, platform_api_key_set=bool(config.platform_api_key),
+        platform_model=config.platform_model, post_meeting_model=config.post_meeting_model,
+        embedding_base_url=config.embedding_base_url, embedding_api_key_set=bool(config.embedding_api_key),
+        embedding_model=config.embedding_model, embedding_query_instruction=config.embedding_query_instruction,
+        web_search_api_key_set=bool(config.web_search_api_key), from_environment=config.from_environment)

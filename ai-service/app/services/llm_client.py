@@ -54,11 +54,14 @@ _NO_KEY = "not-needed"
 def platform_chat_model(model: str | None = None) -> ChatModel:
     """平台模型：設定的 OpenAI 相容伺服器（PLATFORM_LLM_BASE_URL，例如本地的 vLLM）上的聊天模型，關閉 thinking mode。model 是某個
     用途專屬的平台模型（例如會後處理的），沒給就是一般生成（摘要、章節、問答）用的。沒設定伺服器時照樣回傳，呼叫時才說尚未設定。"""
+    from app.services import system_settings  # 設定頁存的優先（system_settings 用到資料庫，用到才載入）
+
+    config = system_settings.current()
     return ChatModel(
         provider=PLATFORM,
-        model=model or settings.platform_llm_model,
-        base_url=settings.platform_llm_base_url,
-        api_key=settings.platform_llm_api_key or _NO_KEY,
+        model=model or config.platform_model,
+        base_url=config.platform_base_url,
+        api_key=config.platform_api_key or _NO_KEY,
         extra_body=json.loads(settings.platform_llm_extra_body) if settings.platform_llm_extra_body else None,
     )
 

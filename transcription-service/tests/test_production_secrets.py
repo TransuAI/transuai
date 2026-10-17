@@ -15,7 +15,7 @@ def test_the_development_defaults_are_refused_in_production():
     with pytest.raises(RuntimeError) as error:
         check_secrets(Settings(app_env="production", db_password="0000", rabbitmq_password="0000", storage_secret_key="00000000", redis_password="", deepgram_api_key=""))
 
-    for variable in ("DB_PASSWORD", "RABBITMQ_PASSWORD", "STORAGE_SECRET_KEY", "REDIS_PASSWORD", "DEEPGRAM_API_KEY"):
+    for variable in ("DB_PASSWORD", "RABBITMQ_PASSWORD", "STORAGE_SECRET_KEY", "REDIS_PASSWORD"):
         assert variable in str(error.value)
 
 
@@ -29,10 +29,10 @@ def test_real_secrets_pass_in_production():
     check_secrets(Settings(app_env="production", db_password=REAL, rabbitmq_password=REAL, storage_secret_key=REAL, redis_password=REAL, deepgram_api_key=REAL))
 
 
-def test_local_speech_recognition_needs_no_deepgram_key_in_production():
+def test_speech_recognition_is_not_needed_to_start_in_production():
+    # The administrator can set it up afterwards on the system settings page.
     assert secret_problems(Settings(app_env="production", db_password=REAL, rabbitmq_password=REAL, storage_secret_key=REAL,
-                                    redis_password=REAL, deepgram_api_key="", stt_base_url="http://vllm:8000/v1",
-                                    stt_model="MediaTek-Research/Breeze-ASR-25")) == []
+                                    redis_password=REAL, deepgram_api_key="", stt_base_url="")) == []
 
 
 def test_development_is_not_checked():

@@ -32,6 +32,8 @@ os.environ |= {
     "DB_NAME": TEST_DB_NAME,
     "REDIS_HOST": _redis.get_container_host_ip(),
     "REDIS_PORT": str(_redis.get_exposed_port(6379)),
+    # A fixed master key for keys saved on the system settings page: 32 bytes, base64.
+    "KEY_ENCRYPTION_KEY": "dGVzdC1tYXN0ZXIta2V5LWZvci1hZXMtZ2NtLTMyYiE=",
 }
 
 from app.controllers.transcript_controller import TranscriptController  # noqa: E402
@@ -140,6 +142,16 @@ def empty_schema(test_database):
     init_db()
 
 
+@pytest.fixture(autouse=True)
+def fresh_speech_settings():
+    """Settings saved on the system settings page are cached for a few seconds: no test sees another's."""
+    from app.services import speech_settings
+
+    speech_settings._forget()
+    yield
+    speech_settings._forget()
+
+
 @pytest.fixture
 def db_session(test_database):
     """A session on the test database; tables are emptied after each test."""
@@ -147,7 +159,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE transcripts, transcript_segments, speakers, transcription_usage, deleted_jobs CASCADE"))
+        conn.execute(text("TRUNCATE transcripts, transcript_segments, speakers, transcription_usage, deleted_jobs, speech_settings CASCADE"))
 
 
 @pytest.fixture(scope="session")

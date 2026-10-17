@@ -72,6 +72,16 @@ def empty_schema(test_database):
     init_db()
 
 
+@pytest.fixture(autouse=True)
+def fresh_system_settings():
+    """Settings saved on the system settings page are cached for a few seconds: no test sees another's."""
+    from app.services import system_settings
+
+    system_settings._forget()
+    yield
+    system_settings._forget()
+
+
 @pytest.fixture
 def db_session(test_database):
     """A session on the test database; tables are emptied after each test."""
@@ -79,7 +89,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE summaries, chapters, embeddings, embedding_state, qa_history, llm_usage, web_search_usage, speaker_name_suggestions, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals, post_meeting_settings, deleted_jobs, speaker_insights, speaker_insight_items, generated_outputs, translations, segment_translations, decisions, decision_extractions, fact_checks, claims"))
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, embedding_state, ai_settings, qa_history, llm_usage, web_search_usage, speaker_name_suggestions, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals, post_meeting_settings, deleted_jobs, speaker_insights, speaker_insight_items, generated_outputs, translations, segment_translations, decisions, decision_extractions, fact_checks, claims"))
 
 
 @pytest.fixture(scope="session")

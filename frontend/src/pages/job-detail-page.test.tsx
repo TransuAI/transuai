@@ -8,6 +8,7 @@ import { chapterApi, jobsApi, modelsApi, notesApi, postMeetingApi, qaApi, quizAp
 import type { Claim, Decision, DecisionExtraction, FactCheckExtraction, GeneratedOutput, SpeakerInsights, TranslationSummary, Chapter, Job, JobUsage, PostMeetingRun, QaTurn, Quiz, QuizAttemptResult, QuizQuestion, Summary, Transcript } from '@/types/api'
 
 vi.mock('@/lib/api', () => ({
+  systemApi: { status: vi.fn().mockResolvedValue({ setupRequired: false, mailEnabled: true }) },
   jobsApi: {
     get: vi.fn(),
     update: vi.fn(),

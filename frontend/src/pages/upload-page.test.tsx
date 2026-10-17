@@ -6,6 +6,7 @@ import { uploadApi } from '@/lib/api'
 import { UploadPage } from './upload-page'
 
 vi.mock('@/lib/api', () => ({
+  systemApi: { status: vi.fn().mockResolvedValue({ setupRequired: false, mailEnabled: true }) },
   uploadApi: { presign: vi.fn(), complete: vi.fn() },
 }))
 
