@@ -6,6 +6,8 @@ import { AppShell } from '@/components/layout/app-shell'
 import { LoginPage } from '@/pages/login-page'
 import { RegisterPage } from '@/pages/register-page'
 import { PrivacyPage } from '@/pages/privacy-page'
+import { ForgotPasswordPage } from '@/pages/forgot-password-page'
+import { ResetPasswordPage } from '@/pages/reset-password-page'
 import { UploadPage } from '@/pages/upload-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { JobsPage } from '@/pages/jobs-page'
@@ -21,6 +23,9 @@ function App() {
           <Route path="/register" element={<RegisterPage />} />
           {/* 隱私權說明：註冊前就要看得到，不用登入 */}
           <Route path="/privacy" element={<PrivacyPage />} />
+          {/* 忘記密碼：還沒登入 */}
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
 
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>

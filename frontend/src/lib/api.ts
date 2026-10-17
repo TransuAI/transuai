@@ -73,6 +73,13 @@ export const authApi = {
   // token here and a new refresh-token cookie.
   changePassword: (params: { currentPassword: string; newPassword: string }) =>
     apiFetch<AuthResponse>('/auth/password', { method: 'POST', body: params }),
+  // 忘記密碼: no sign-in. Always accepted when it can send mail (it never says whether the email is registered); 503 when
+  // this installation has no mail set up.
+  requestPasswordReset: (email: string) =>
+    apiFetchVoid('/auth/password-reset', { method: 'POST', body: { email }, auth: false }),
+  // The token from the link in the mail; 409 when the link is used up or expired. Signs every device out.
+  resetPassword: (params: { token: string; newPassword: string }) =>
+    apiFetchVoid('/auth/password-reset/confirm', { method: 'POST', body: params, auth: false }),
 }
 
 export const uploadApi = {

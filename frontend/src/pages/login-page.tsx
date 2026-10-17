@@ -57,7 +57,12 @@ export function LoginPage() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="password">密碼</Label>
+              <div className="flex items-baseline justify-between">
+                <Label htmlFor="password">密碼</Label>
+                <Link to="/forgot-password" className="text-xs text-muted-foreground underline underline-offset-4">
+                  忘記密碼？
+                </Link>
+              </div>
               <PasswordInput
                 id="password"
                 required
