@@ -28,6 +28,7 @@ public class JwtService {
     private static final String TYPE_ACCESS = "access";
     private static final String TYPE_REFRESH = "refresh";
     private static final String CLAIM_EMAIL = "email";
+    private static final String CLAIM_SESSION = "sid";
 
     private final SecretKey key;
     private final JwtProperties properties;
@@ -41,12 +42,14 @@ public class JwtService {
     public record RefreshClaims(UUID userId, UUID tokenId) {
     }
 
-    public String issueAccessToken(UUID userId, String email) {
+    /** sessionId：這次登入（refresh token 的那一串）；登出時 gateway 依它讓這串簽出的 access token 馬上失效。 */
+    public String issueAccessToken(UUID userId, String email, UUID sessionId) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(userId.toString())
                 .claim(CLAIM_TYPE, TYPE_ACCESS)
                 .claim(CLAIM_EMAIL, email)
+                .claim(CLAIM_SESSION, sessionId.toString())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(properties.accessTokenTtlMinutes(), ChronoUnit.MINUTES)))
                 .signWith(key)

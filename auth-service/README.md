@@ -32,8 +32,8 @@ access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）�
 同一串（family）。換發時舊的作廢（輪替）、同一串簽新的；已經換發過的又被用一次，表示有兩個人拿著同一個 token——視為被盜，整串作廢
 （正主下次換發也會失敗、要重新登入）。例外：剛換發的 10 秒內（`JWT_REFRESH_REUSE_GRACE_SECONDS`）再用一次不算，前端多個分頁共用同一個
 refresh token，幾乎同時換發時第二個拿的是剛被換掉的舊 token。一串最多維持 30 天（`JWT_SESSION_MAX_DAYS`，`family_expires_at`）：一路換發出來的 token
-也不會超過那一刻，之後要重新輸入密碼（ASVS 3.3.2）。登出作廢那一串；登出所有裝置作廢這位使用者的全部。已簽出的 access token
-不受影響，仍有效到過期（最多 15 分鐘，gateway 本地驗章）。這個機制上線之前簽的 refresh token 沒有 `jti`，換發會失敗，要重新登入一次。
+也不會超過那一刻，之後要重新輸入密碼（ASVS 3.3.2）。登出作廢那一串；登出所有裝置作廢這位使用者的全部。access token 帶 `sid`
+（＝那一串的 id，換發也一樣），`Logout` 回傳作廢的那一串，gateway 用它讓已簽出的 access token 也馬上不能用（見 gateway README「登出之後的 access token」）。這個機制上線之前簽的 refresh token 沒有 `jti`，換發會失敗，要重新登入一次。
 
 `AuthService` 這個 gRPC service 比較特別：`Register` / `Login` / `Refresh` / `Logout` 四支不需要 `x-user-id`（呼叫當下使用者還沒有 token，或 access token 已經過期；`Logout` 靠 refresh token 本身），`GetMe`、`LogoutAllDevices` 與 `DeleteAccount` 需要——所以 `UserIdServerInterceptor` 這裡是**依 method** 而不是整個 service 豁免，跟 upload-service 用整個 service 豁免 `InternalJobService` 不一樣，理由寫在 [`UserIdServerInterceptor`](src/main/java/com/transuai/auth_service/grpc/auth/UserIdServerInterceptor.java) 的註解。
 

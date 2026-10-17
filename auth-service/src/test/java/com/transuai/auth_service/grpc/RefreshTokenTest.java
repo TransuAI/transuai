@@ -3,6 +3,7 @@ package com.transuai.auth_service.grpc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -21,8 +22,11 @@ import com.transuai.auth.grpc.v1.LogoutRequest;
 import com.transuai.auth.grpc.v1.RefreshRequest;
 import com.transuai.auth.grpc.v1.RegisterRequest;
 import com.transuai.auth_service.PostgresContainerConfig;
+import com.transuai.auth_service.security.JwtProperties;
 
 import io.grpc.Metadata;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.MetadataUtils;
@@ -43,6 +47,9 @@ class RefreshTokenTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private JwtProperties jwt;
 
     @Test
     void refreshingGivesANewTokenAndTheOldOneStopsWorking() {
@@ -88,7 +95,31 @@ class RefreshTokenTest {
 
     @Test
     void loggingOutWithATokenThatIsNoLongerValidStillSucceeds() {
-        stub().logout(LogoutRequest.newBuilder().setRefreshToken("not-a-token").build());
+        assertThat(stub().logout(LogoutRequest.newBuilder().setRefreshToken("not-a-token").build()).getSessionId()).isEmpty();
+    }
+
+    // .scratch/pre-launch-hardening/issues/18：access token 帶這次登入的 id（sid），換發也一樣；登出時回傳它，gateway 才能讓那些
+    // access token 馬上失效。
+    @Test
+    void theAccessTokenCarriesTheSignInItCameFromAndLoggingOutSaysWhichOneEnded() {
+        AuthResponse signedUp = register();
+        String sessionId = sessionOf(signedUp.getAccessToken());
+        assertThat(jdbc.queryForObject("select family_id::text from refresh_tokens where user_id = ?::uuid",
+                String.class, signedUp.getUser().getId())).isEqualTo(sessionId);
+
+        AuthResponse refreshed = refresh(signedUp.getRefreshToken());
+        assertThat(sessionOf(refreshed.getAccessToken())).isEqualTo(sessionId);
+
+        assertThat(stub().logout(LogoutRequest.newBuilder().setRefreshToken(refreshed.getRefreshToken()).build())
+                .getSessionId()).isEqualTo(sessionId);
+        AuthResponse again = stub().login(LoginRequest.newBuilder()
+                .setEmail(signedUp.getUser().getEmail()).setPassword(PASSWORD).build());
+        assertThat(sessionOf(again.getAccessToken())).isNotEqualTo(sessionId);
+    }
+
+    private String sessionOf(String accessToken) {
+        return Jwts.parser().verifyWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).build()
+                .parseSignedClaims(accessToken).getPayload().get("sid", String.class);
     }
 
     @Test

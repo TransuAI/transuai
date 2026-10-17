@@ -109,14 +109,15 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
             return;
         }
 
-        responseObserver.onNext(buildAuthResponse(user, exchange.refreshToken()));
+        responseObserver.onNext(buildAuthResponse(user, exchange.issued()));
         responseObserver.onCompleted();
     }
 
     @Override
     public void logout(LogoutRequest request, StreamObserver<LogoutResponse> responseObserver) {
-        refreshTokens.logout(request.getRefreshToken());
-        responseObserver.onNext(LogoutResponse.getDefaultInstance());
+        LogoutResponse.Builder response = LogoutResponse.newBuilder();
+        refreshTokens.logout(request.getRefreshToken()).ifPresent(sessionId -> response.setSessionId(sessionId.toString()));
+        responseObserver.onNext(response.build());
         responseObserver.onCompleted();
     }
 
@@ -212,10 +213,10 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
         return unknownUserHash;
     }
 
-    private AuthResponse buildAuthResponse(com.transuai.auth_service.domain.User user, String refreshToken) {
+    private AuthResponse buildAuthResponse(com.transuai.auth_service.domain.User user, RefreshTokens.Issued issued) {
         return AuthResponse.newBuilder()
-                .setAccessToken(jwtService.issueAccessToken(user.getId(), user.getEmail()))
-                .setRefreshToken(refreshToken)
+                .setAccessToken(jwtService.issueAccessToken(user.getId(), user.getEmail(), issued.sessionId()))
+                .setRefreshToken(issued.refreshToken())
                 .setUser(UserMapper.toProto(user))
                 .build();
     }

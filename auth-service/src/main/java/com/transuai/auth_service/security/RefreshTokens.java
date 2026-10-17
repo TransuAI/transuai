@@ -8,6 +8,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -35,14 +36,19 @@ public class RefreshTokens {
     private final JwtService jwtService;
     private final JwtProperties properties;
 
+    /** 簽出的 refresh token 與它所在的那一串（這次登入，也是 access token 的 sid）。 */
+    public record Issued(String refreshToken, UUID sessionId) {
+    }
+
     /** 用 refresh token 換到的：誰的，與新的 refresh token。 */
-    public record Exchange(UUID userId, String refreshToken) {
+    public record Exchange(UUID userId, Issued issued) {
     }
 
     /** 登入或註冊：新的一串。 */
     @Transactional
-    public String issue(UUID userId) {
-        return issueInFamily(userId, UUID.randomUUID(), sessionEnd(Instant.now()));
+    public Issued issue(UUID userId) {
+        UUID familyId = UUID.randomUUID();
+        return new Issued(issueInFamily(userId, familyId, sessionEnd(Instant.now())), familyId);
     }
 
     /**
@@ -66,22 +72,24 @@ public class RefreshTokens {
         Instant familyEnd = stored.getFamilyExpiresAt() != null
                 ? stored.getFamilyExpiresAt().toInstant()
                 : sessionEnd(Instant.now());
-        return new Exchange(stored.getUserId(), issueInFamily(stored.getUserId(), stored.getFamilyId(), familyEnd));
+        return new Exchange(stored.getUserId(), new Issued(
+                issueInFamily(stored.getUserId(), stored.getFamilyId(), familyEnd), stored.getFamilyId()));
     }
 
-    /** 登出：這個 token 所在的那一串作廢。token 無效或不認得就什麼都不做（本來就不能用了）。 */
+    /** 登出：這個 token 所在的那一串作廢，回傳那一串的 id。token 無效或不認得就什麼都不做（本來就不能用了），回傳空的。 */
     @Transactional
-    public void logout(String refreshToken) {
+    public Optional<UUID> logout(String refreshToken) {
         JwtService.RefreshClaims claims;
         try {
             claims = jwtService.parseRefreshToken(refreshToken);
         } catch (StatusRuntimeException e) {
-            return;
+            return Optional.empty();
         }
-        repository.findById(claims.tokenId())
-                .filter(token -> token.getTokenHash().equals(sha256(refreshToken)))
-                .ifPresent(token -> repository.revokeFamily(token.getFamilyId(), RevokedReason.LOGGED_OUT,
-                        OffsetDateTime.now(ZoneOffset.UTC)));
+        Optional<RefreshToken> token = repository.findById(claims.tokenId())
+                .filter(stored -> stored.getTokenHash().equals(sha256(refreshToken)));
+        token.ifPresent(stored -> repository.revokeFamily(stored.getFamilyId(), RevokedReason.LOGGED_OUT,
+                OffsetDateTime.now(ZoneOffset.UTC)));
+        return token.map(RefreshToken::getFamilyId);
     }
 
     /** 登出所有裝置。 */
