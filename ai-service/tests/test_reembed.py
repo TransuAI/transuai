@@ -4,14 +4,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import grpc
-import httpx
 import pytest
-from huggingface_hub.errors import HfHubHTTPError
 from sqlalchemy import select
 
 from app.models import Embedding
 from app.repositories.embedding_repository import save_embeddings
 from app.services import reembed
+from app.services.embedder import EmbeddingError
 from app.services.job_status_client import job_status_client
 from app.services.retry import RetryableMessageError
 
@@ -77,14 +76,13 @@ def test_nothing_is_embedded_when_nothing_changed(db_session, job):
     assert len(stored(db_session, job)) == 3
 
 
-def _hf_error(status: int) -> HfHubHTTPError:
-    response = httpx.Response(status, request=httpx.Request("POST", "https://example.invalid"))
-    return HfHubHTTPError("hf", response=response)
+def _embedding_error(status: int) -> EmbeddingError:
+    return EmbeddingError(f"失敗：HTTP {status}", transient=status >= 500)
 
 
 def test_a_transient_embedding_failure_asks_for_a_retry(db_session, job):
     def overloaded(_texts):
-        raise _hf_error(503)
+        raise _embedding_error(503)
 
     with pytest.raises(RetryableMessageError):
         run(job, [segment(0.0, 1.5, "大家好改"), segment(1.5, 3.0, "強風好雨"), segment(3.0, 5.0, "請不吝點讚訂閱")], embed=overloaded)
@@ -94,7 +92,7 @@ def test_a_transient_embedding_failure_asks_for_a_retry(db_session, job):
 
 def test_once_the_retry_budget_is_spent_it_gives_up_with_a_log_instead_of_raising(db_session, job):
     def overloaded(_texts):
-        raise _hf_error(503)
+        raise _embedding_error(503)
 
     with (
         patch.object(reembed, "logger") as logger,

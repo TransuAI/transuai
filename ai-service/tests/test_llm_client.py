@@ -1,6 +1,8 @@
 """生成類呼叫走 OpenAI 相容介面：用假的 AI 廠商（HTTP 層，見 conftest.FakeLlmProvider）驗證實際送出的
 請求、回應的文字與 token 用量、錯誤分類。"""
 
+from unittest.mock import patch
+
 import httpx2
 import pytest
 
@@ -26,8 +28,8 @@ def test_summaries_go_to_the_platform_model_over_the_openai_compatible_router(fa
     assert summarize("今天開會討論預算", model=platform_chat_model(), meter=None) == "這是摘要"
 
     [request] = fake_llm.requests
-    assert str(request.url) == "https://router.huggingface.co/v1/chat/completions"
-    assert request.headers["Authorization"] == "Bearer hf-test-key"
+    assert str(request.url) == "https://vllm.test/v1/chat/completions"
+    assert request.headers["Authorization"] == "Bearer platform-test-key"
     [body] = fake_llm.bodies()
     assert body["model"] == "Qwen/Qwen3.5-9B"
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
@@ -38,7 +40,7 @@ def test_the_platform_model_can_run_on_any_openai_compatible_server(fake_llm, mo
     # e.g. Ollama on the developer's own GPU, or a self-hosted vLLM in the cloud: only settings change.
     monkeypatch.setattr(llm_client.settings, "platform_llm_base_url", "http://host.docker.internal:11434/v1")
     monkeypatch.setattr(llm_client.settings, "platform_llm_api_key", "ollama")
-    monkeypatch.setattr(llm_client.settings, "ai_hf_chat_model", "qwen3.5:9b")
+    monkeypatch.setattr(llm_client.settings, "platform_llm_model", "qwen3.5:9b")
     fake_llm.reply("這是摘要")
 
     summarize("今天開會討論預算", model=platform_chat_model(), meter=None)
@@ -257,3 +259,19 @@ def test_tool_arguments_the_provider_could_not_parse_are_their_own_kind_of_error
 
     assert raised.value.reason == LlmErrorReason.MALFORMED_TOOL_CALL
     assert raised.value.transient is False
+
+
+def test_out_of_the_box_the_platform_model_is_not_set_up_and_says_so(fake_llm):
+    with patch.object(llm_client.settings, "platform_llm_base_url", ""), pytest.raises(LlmError) as raised:
+        summarize("逐字稿", model=platform_chat_model(), meter=None)
+
+    assert raised.value.reason == LlmErrorReason.NOT_CONFIGURED and not raised.value.transient
+    assert "平台模型" in str(raised.value) and "尚未設定" in str(raised.value)
+    assert fake_llm.requests == []
+
+
+def test_a_self_hosted_server_without_a_key_still_gets_one_the_sdk_accepts(fake_llm):
+    with patch.object(llm_client.settings, "platform_llm_api_key", ""):
+        summarize("逐字稿", model=platform_chat_model(), meter=None)
+
+    assert fake_llm.requests[0].headers["Authorization"] == "Bearer not-needed"

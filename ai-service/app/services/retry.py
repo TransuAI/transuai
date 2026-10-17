@@ -3,8 +3,8 @@ import time
 from typing import Callable
 
 import grpc
-from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError, OverloadedError
 
+from app.services.embedder import EmbeddingError
 from app.services.llm_client import LlmError
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,6 @@ RETRY_COUNT_HEADER = "x-retry-count"
 _RETRY_DELAYS_MS = (2000, 4000)
 MAX_RETRIES = len(_RETRY_DELAYS_MS)  # 最多重試 2 次（1 次原始送達 + 2 次重試 = 3 次總嘗試）
 
-_RETRYABLE_HF_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
 _RETRYABLE_GRPC_STATUS_CODES = {
     grpc.StatusCode.UNAVAILABLE,
     grpc.StatusCode.DEADLINE_EXCEEDED,
@@ -74,16 +73,9 @@ def retry_queue_declarations(source_queue: str) -> list[tuple[str, dict[str, obj
     ]
 
 
-def is_retryable_hf_error(exc: BaseException) -> bool:
-    """Hugging Face 例外分類：專屬的 overload/timeout 型別直接算暫時性；其餘一律透過
-    通用的 HfHubHTTPError 檢查 HTTP status code 是否落在暫時性錯誤的集合裡，其他狀態碼
-    跟其他例外型別一律視為永久性失敗。
-    """
-    if isinstance(exc, (OverloadedError, InferenceTimeoutError)):
-        return True
-    if isinstance(exc, HfHubHTTPError):
-        return exc.response.status_code in _RETRYABLE_HF_HTTP_STATUS_CODES
-    return False
+def is_retryable_embedding_error(exc: BaseException) -> bool:
+    """embedding 呼叫的例外，由 embedder 分類好：429、5xx、逾時、連不上是暫時性。"""
+    return isinstance(exc, EmbeddingError) and exc.transient
 
 
 def is_retryable_grpc_error(exc: BaseException) -> bool:
@@ -102,9 +94,9 @@ def is_retryable_llm_error(exc: BaseException) -> bool:
 
 
 def is_retryable_error(exc: BaseException) -> bool:
-    """process_message() 的統一分類入口。生成類呼叫（llm_client）、embedding（HF）、內部 gRPC 三種例外來源
+    """process_message() 的統一分類入口。生成類呼叫（llm_client）、embedding（embedder）、內部 gRPC 三種例外來源
     的型別互不重疊，依序檢查即可。"""
-    return is_retryable_llm_error(exc) or is_retryable_hf_error(exc) or is_retryable_grpc_error(exc)
+    return is_retryable_llm_error(exc) or is_retryable_embedding_error(exc) or is_retryable_grpc_error(exc)
 
 
 def retry_terminal_report(report: Callable[[], None]) -> bool:
@@ -112,7 +104,7 @@ def retry_terminal_report(report: Callable[[], None]) -> bool:
 
     刻意跟訊息層級的 requeue 機制（RetryableMessageError）分開：這個回報動作要嘛徹底成功、
     要嘛徹底放棄，重跑整個 pipeline 對已經確定的失敗結果沒有任何幫助，只會浪費已經花掉的
-    HF 呼叫額度。只在失敗被分類為暫時性 gRPC 錯誤時才重試（3 次總嘗試，200ms 起跳、
+    模型呼叫。只在失敗被分類為暫時性 gRPC 錯誤時才重試（3 次總嘗試，200ms 起跳、
     每次 x2、封頂 800ms）；分類為永久性失敗（例如 job 在 upload-service 那邊已經不存在）
     時立即放棄，不浪費重試次數。
 

@@ -4,6 +4,7 @@ import uuid
 
 from app.db import new_session
 from app.repositories.embedding_repository import apply_embedding_changes, find_by_job_id
+from app.services import embedder
 from app.services.embedder import embed_documents
 from app.services.retry import RetryableMessageError, has_retry_budget, is_retryable_error
 from app.services.transcript_client import transcript_client
@@ -22,6 +23,8 @@ def process_transcript_edited(body: bytes, retry_count: int = 0) -> None:
     job.failed，問答的檢索資料就先維持舊的，等下一次編輯再更新。
     """
     job_id = json.loads(body)["jobId"]
+    if not embedder.is_configured():
+        return  # no embedding server: there are no vectors to keep up to date
     try:
         transcript = transcript_client.get_transcript(job_id)
         session = new_session()

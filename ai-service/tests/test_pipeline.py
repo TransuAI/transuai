@@ -175,3 +175,27 @@ def test_the_pipeline_asks_the_platform_model_for_the_summary_and_the_chapters(f
     assert "[5.0] 今天談預算" in fake_llm.bodies()[1]["messages"][0]["content"]
     assert mock_save_summary.call_args.args[2] == "這場會議討論預算"
     assert mock_save_chapters.call_args.args[2] == [("預算", 5.0)]
+
+
+def test_without_an_embedding_server_the_job_still_completes_without_vectors():
+    job_id = str(uuid.uuid4())
+    transcript = SimpleNamespace(full_text="大家好", revision=0, speakers=[], segments=[FakeSegment(0.0, 5.0, "", "大家好")])
+
+    with (
+        patch.object(pipeline.embedder.settings, "embedding_base_url", ""),
+        patch.object(pipeline, "job_status_client") as status_client,
+        patch.object(pipeline, "transcript_client") as mock_transcript_client,
+        patch.object(pipeline, "summarize", return_value="摘要"),
+        patch.object(pipeline, "generate_chapters", return_value=[]),
+        patch.object(pipeline, "embed_documents") as mock_embed_documents,
+        patch.object(pipeline, "new_session", return_value=MagicMock(name="session")),
+        patch.object(pipeline, "save_summary"),
+        patch.object(pipeline, "save_chapters"),
+        patch.object(pipeline, "save_embeddings") as mock_save_embeddings,
+    ):
+        mock_transcript_client.get_transcript.return_value = transcript
+        pipeline.process_message(json.dumps({"jobId": job_id}).encode(), MagicMock(), MagicMock())
+
+    mock_embed_documents.assert_not_called()
+    mock_save_embeddings.assert_not_called()
+    status_client.update_status.assert_any_call(job_id, "COMPLETED")

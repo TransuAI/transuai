@@ -14,6 +14,7 @@ from app.repositories.embedding_repository import find_similar, has_embeddings
 from app.repositories.qa_repository import find_by_job_id
 from app.repositories.summary_repository import find_by_job_id as find_summary
 from app.repositories.web_search_usage_repository import save_web_search
+from app.services import embedder
 from app.services.embedder import embed_query
 from app.services.default_models import resolve_chat_model, resolve_requested_chat_model
 from app.services.llm_client import ChatModel, LlmError, chat, stream_chat
@@ -238,8 +239,9 @@ def stream_answer(
     由呼叫端在成功收集完整答案之後才決定，半途失敗（例如 streaming 中斷）
     才不會留下不完整的紀錄。
 
-    這個 job 沒有 embedding 時 raise NoEmbeddingsError、臨時指定的模型用不到時 raise ModelNotAvailable，都一定發生在
-    任何 yield（包括步驟）之前。
+    這個 job 既沒有 embedding、也沒有摘要與章節（還沒處理完）時 raise NoEmbeddingsError、臨時指定的模型用不到時 raise
+    ModelNotAvailable，都一定發生在任何 yield（包括步驟）之前。沒有 embedding 但有摘要或章節（沒設定 embedding 伺服器）時照樣
+    回答，只根據摘要與章節。
     """
     # 這次用哪個模型：提問當下臨時指定的（用不到就在送出任何東西之前 raise ModelNotAvailable），否則是提問者的預設模型。
     if requested_model and user_id:
@@ -247,33 +249,38 @@ def stream_answer(
     else:
         model = resolve_chat_model(user_id)
     history = find_by_job_id(session, job_id)[-_MEMORY_TURNS:]
+    overview = _overview(session, job_id)
+    searchable = embedder.is_configured() and has_embeddings(session, job_id)
     # 送出第一個步驟之前就確定這個 job 有內容：呼叫端靠「還沒送出任何東西」回一般的 NOT_FOUND。
-    if not has_embeddings(session, job_id):
+    if not searchable and not overview:
         raise NoEmbeddingsError(f"no embeddings found for job {job_id}")
 
-    if history:
+    # 改寫問題只是為了找段落：找不了就不必多花一次模型呼叫。
+    if history and searchable:
         yield _understand("running")
-    condensed_question = _condense_question(question, history, model, UsageMeter(user_id, job_id, LlmFeature.QA_REWRITE))
-    if history:
+    condensed_question = (_condense_question(question, history, model, UsageMeter(user_id, job_id, LlmFeature.QA_REWRITE))
+                          if searchable else question)
+    if history and searchable:
         yield _understand("done")
     yield _retrieve("running")
-    overview = _overview(session, job_id)
-    try:
-        query_vector = embed_query(condensed_question)
-    except Exception:
-        # 找段落要先把問題轉成向量（外部服務，可能額度用完或連不上）。有摘要或章節時照樣回答——概括性的問題本來就靠它們，
-        # 細節只是少了原話；什麼都沒有時才讓這一題失敗。
-        if not overview:
-            raise
-        logger.warning("job %s: could not embed the question, answering from the summary and chapters", job_id,
-                       exc_info=True)
-        chunks = []
-        yield _retrieve("failed", "這次找不到相關的原話，只根據摘要與章節回答")
-    else:
-        chunks = find_similar(session, job_id, query_vector, limit=_TOP_K)
-        if not chunks:  # the embeddings went away in between (e.g. being rebuilt after an edit)
-            raise NoEmbeddingsError(f"no embeddings found for job {job_id}")
-        yield _retrieve("done", f"找到 {len(chunks)} 段")
+    chunks = []
+    if searchable:
+        try:
+            query_vector = embed_query(condensed_question)
+        except Exception:
+            # 找段落要先把問題轉成向量（外部服務，可能連不上）。有摘要或章節時照樣回答——概括性的問題本來就靠它們，細節只是
+            # 少了原話；什麼都沒有時才讓這一題失敗。
+            if not overview:
+                raise
+            logger.warning("job %s: could not embed the question, answering from the summary and chapters", job_id,
+                           exc_info=True)
+        else:
+            chunks = find_similar(session, job_id, query_vector, limit=_TOP_K)
+            if not chunks:  # the embeddings went away in between (e.g. being rebuilt after an edit)
+                raise NoEmbeddingsError(f"no embeddings found for job {job_id}")
+    # 沒有原話（沒設定 embedding 伺服器、或這次找不到）時只根據摘要與章節回答。
+    yield (_retrieve("done", f"找到 {len(chunks)} 段") if chunks
+           else _retrieve("failed", "這次找不到相關的原話，只根據摘要與章節回答"))
 
     speaker_by_time = _current_speaker_names_by_time(job_id) if chunks else {}
     context = "\n\n".join(

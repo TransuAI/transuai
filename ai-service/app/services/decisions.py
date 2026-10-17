@@ -25,6 +25,7 @@ from app.repositories.summary_repository import find_by_job_id as find_summary
 from app.services.decision_extractor import DecisionFormatError, ExtractedDecision, extract_decisions
 from app.services.decision_supersedes import Candidate, NewDecision, judge_supersedes
 from app.services.default_models import resolve_chat_model
+from app.services import embedder
 from app.services.embedder import embed_documents, embed_query
 from app.services.event_publisher import connection_params, publish_decisions_requested
 from app.services.llm_client import ChatModel, LlmError, stream_chat
@@ -134,11 +135,12 @@ def search_decisions(user_id: uuid.UUID, query: str, job_ids: list[uuid.UUID]) -
     pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     words = or_(*(column.ilike(pattern, escape="\\") for column in (
         Decision.statement, Decision.rationale, Decision.evidence_text, cast(Decision.alternatives, Text))))
-    try:
-        vector = embed_query(query)
-    except Exception:
-        logger.exception("could not embed a decision search, matching the words only")
-        vector = None
+    vector = None
+    if embedder.is_configured():  # without an embedding server, only the words are matched
+        try:
+            vector = embed_query(query)
+        except Exception:
+            logger.exception("could not embed a decision search, matching the words only")
     with new_session() as session:
         scores: dict[uuid.UUID, tuple[float, Decision]] = {}
         for decision in session.scalars(select(Decision).where(*_own(user_id, job_ids), words).limit(SEARCH_LIMIT)):
@@ -347,7 +349,9 @@ def follow_transcript_edit(body: bytes) -> None:
 
 
 def _embedding_or_none(fields: DecisionFields) -> list[float] | None:
-    """使用者改或新增時就算好 embedding；算不出來先存沒有的（決策本身比搜不搜得到重要）。"""
+    """使用者改或新增時就算好 embedding；算不出來（或沒設定 embedding 伺服器）先存沒有的（決策本身比搜不搜得到重要）。"""
+    if not embedder.is_configured():
+        return None
     try:
         return embed_documents([embedding_text(fields.statement, fields.rationale)])[0]
     except Exception:
@@ -425,6 +429,8 @@ def _embeddings(found: list[ExtractedDecision], retry_count: int) -> list[list[f
     比搜不搜得到重要。"""
     if not found:
         return []
+    if not embedder.is_configured():
+        return [None] * len(found)
     try:
         return embed_documents([embedding_text(d.statement, d.rationale) for d in found])
     except Exception as exc:

@@ -1,12 +1,12 @@
 # ai-service
 
-音訊/影片逐字稿 + AI 分析平台的 AI Service。消費 Transcription Service 發出的 `transcription.completed` 事件，取得逐字稿、呼叫 HF Inference Providers 產生摘要，存進自己的 `ai_db`，並回寫 Job 狀態、發送 `ai.completed` 事件。是純內部服務（MQ 驅動），只暴露 gRPC 給其他內部服務查詢——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service)、[`transcription-service`](../transcription-service) 一致）。
+音訊/影片逐字稿 + AI 分析平台的 AI Service。消費 Transcription Service 發出的 `transcription.completed` 事件，取得逐字稿、呼叫平台模型（自架的 vLLM 等 OpenAI 相容伺服器）產生摘要，存進自己的 `ai_db`，並回寫 Job 狀態、發送 `ai.completed` 事件。是純內部服務（MQ 驅動），只暴露 gRPC 給其他內部服務查詢——只有 Gateway 才對前端提供 REST，服務跟服務之間一律走 gRPC（跟 [`upload-service`](../upload-service)、[`transcription-service`](../transcription-service) 一致）。
 
 ## MVP 範圍
 
 對照 [`../architecture-design.md`](../architecture-design.md) 2 / 3.4 / 4.4，AI Service 完整職責包含 embedding、RAG 問答、章節分段、多格式輸出。目前除了「消費事件 → 取逐字稿 → 產生摘要 → 回寫狀態 → 發完成事件」這條最短路徑之外，也做了章節分段（同一趟 pipeline 內，依逐字稿分段的時間戳切章節）跟 embedding + RAG 問答（pipeline 內把逐字稿分段轉成向量存進 `embeddings`；`AskQuestion` rpc 用 cosine similarity 找最相關片段，連同最近幾輪對話歷史一起餵給 LLM，以 server-streaming 方式即時回傳答案，成功後才連同來源時間戳存進 `qa_history`；`ListQaHistory` rpc 讀回一個 job 的完整問答紀錄）。「對話」的範圍見 [`CONTEXT.md`](./CONTEXT.md) 跟 [`docs/adr/0002-single-conversation-per-job.md`](./docs/adr/0002-single-conversation-per-job.md)。多格式輸出存在 `generated_outputs`，`ai_db` 目前有 `summaries`、`chapters`、`embeddings`、`qa_history`、`llm_usage`、`provider_keys`、`default_models`、`quizzes`、`quiz_questions`、`quiz_attempts`、`oauth_connections`、`oauth_pending_authorizations`、`oauth_clients`、`post_meeting_runs`、`action_proposals`、`post_meeting_settings`、`web_search_usage`、`speaker_name_suggestions`、`speaker_insights`、`speaker_insight_items`、`deleted_jobs`、`generated_outputs`、`translations`、`segment_translations`、`decisions`、`decision_extractions`、`fact_checks`、`claims` 二十八張表。
 
-原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)；embedding 仍用 `hf_client.py`。
+原本摘要/章節分段/RAG 問答/embedding 全部用 Gemini API，開發時常撞到免費層的 429（額度）跟 503（過載）——尤其 embedding 免費層每天只有 100 次請求，測試幾個 job 就用完。第一次改版把生成類呼叫換成 Groq、embedding 換成 HF Inference API；後來 Groq 的 `qwen/qwen3.6-27b` 免費層 TPM 太小（8000 tokens/min），加上對話記憶之後很容易撞到 `413 Request too large`，第二次改版把生成類呼叫也一併換到 HF Inference Providers（`Qwen/Qwen3.5-9B`），現在摘要/章節分段/RAG 問答/embedding 全部用同一個 HF 帳號。取捨見 [`docs/adr/0003-hf-inference-providers-for-generation.md`](./docs/adr/0003-hf-inference-providers-for-generation.md)。之後生成類呼叫改走 OpenAI 相容介面（平台模型仍是同一個 HF 模型，走 HF 的 OpenAI 相容路由），為了之後支援使用者的自有金鑰，見 [ADR 0004](./docs/adr/0004-generation-calls-through-openai-compatible-interface.md)。現在平台模型與 embedding 都跑在自己架的 vLLM（`../infra/scripts/vllm.sh`），不再用 HF 的推論服務，出廠也不指向任何付費服務，見 [ADR 0015](./docs/adr/0015-self-hosted-vllm-for-platform-model-and-embeddings.md)。
 
 ## 技術棧
 
@@ -15,11 +15,11 @@
 | 框架 | Python（`uv` 管理依賴），原生 `grpcio` server，不用 web framework |
 | API | gRPC（`AiService`），開發階段開放 [reflection](https://grpc.io/docs/guides/reflection/)，標準 `grpc.health.v1.Health` 做 health check |
 | 消費 | RabbitMQ（`pika`），消費 `transcription.completed`，發送 `ai.completed` / `job.failed` |
-| 生成類呼叫 | 摘要、章節、問答都透過 OpenAI 相容介面（`openai` SDK，見 [ADR 0004](docs/adr/0004-generation-calls-through-openai-compatible-interface.md)）；平台模型走 `PLATFORM_LLM_BASE_URL` 指的 OpenAI 相容伺服器（預設是 HF Inference Providers 的路由 `https://router.huggingface.co/v1`，金鑰 `PLATFORM_LLM_API_KEY`，空的用 `HF_API_KEY`；關 thinking 要多帶的參數 `PLATFORM_LLM_EXTRA_BODY`，每種伺服器寫法不同；本機 k8s 指向 Docker 跑的 Ollama，見 [ADR 0010](docs/adr/0010-platform-model-on-any-openai-compatible-server.md) 與 `../infra/README.md`），回傳文字與 token 用量，錯誤分成暫時性與永久性 |
-| 摘要 | 平台模型（預設 `Qwen/Qwen3.5-9B`，可用 `AI_HF_CHAT_MODEL` 換模型），把逐字稿全文丟給模型產生摘要；兩位以上講者時改成每行「名稱：文字」（見下方「講者」） |
+| 生成類呼叫 | 摘要、章節、問答都透過 OpenAI 相容介面（`openai` SDK，見 [ADR 0004](docs/adr/0004-generation-calls-through-openai-compatible-interface.md)）；平台模型走 `PLATFORM_LLM_BASE_URL` 指的 OpenAI 相容伺服器（出廠不指向任何服務，沒設定時呼叫就說「平台模型尚未設定」；金鑰 `PLATFORM_LLM_API_KEY`，自架的 vLLM 沒開 `--api-key` 時留空；關 thinking 要多帶的參數 `PLATFORM_LLM_EXTRA_BODY`；本機 k8s 指向 Docker 跑的 vLLM，見 [ADR 0010](docs/adr/0010-platform-model-on-any-openai-compatible-server.md)、[ADR 0015](docs/adr/0015-self-hosted-vllm-for-platform-model-and-embeddings.md) 與 `../infra/README.md`），回傳文字與 token 用量，錯誤分成暫時性與永久性 |
+| 摘要 | 平台模型（`PLATFORM_LLM_MODEL`，本機是 vLLM 上的 `Qwen/Qwen3-8B-AWQ`；舊名 `AI_HF_CHAT_MODEL` 照樣認得），把逐字稿全文丟給模型產生摘要；兩位以上講者時改成每行「名稱：文字」（見下方「講者」） |
 | 章節分段 | 同一個平台模型，把逐字稿片段（含時間戳，兩位以上講者時每行 `[開始時間] 名稱：文字`）丟給模型，要求回傳 JSON 章節列表（title + start_time） |
-| Embedding | HF Inference Providers 的 `BAAI/bge-m3`（1024 維，query/document 對稱，不用加任何 instruction 前綴）：pipeline 內把逐字稿分段轉成向量存進 `embeddings` |
-| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個平台模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段；給模型的內容是**整段內容的摘要與章節**（概括性的問題靠它們回答）加上這 5 段原話（時間寫成「分:秒」），連同最近 5 輪對話歷史，用 `stream=True` 逐字串流生成回答（[ADR 0012](docs/adr/0012-qa-answers-from-summary-chapters-and-passages.md)）。問題轉不成向量時（embedding 服務失敗，例如 HF 額度用完回 402），有摘要或章節就只根據它們回答：「在內容裡找相關的段落」標成失敗、說明只根據摘要與章節回答，來源時間是空的；連摘要與章節都沒有才讓這一題失敗。提示要求的口吻：像剛看完這段內容的朋友在說明，先講結論、簡潔平實，不提「逐字稿」「片段」，稱呼跟著內容走（會議、影片、課程…）。回答整段是簡體時轉成繁體（`traditional_chinese.py`，已經是繁體的不動）。兩位以上講者時原話每行帶講者**目前的**名稱（回答當下呼叫 `GetTranscript` 取得）。提問時打開「查網路」的話，先把問題寫成一句搜尋查詢（參考摘要與對話紀錄把「他說的那個…」補成具體名詞；只有這句送出），用 Tavily 的遠端 MCP 查一次（`web_search.py`，最多 5 筆、每筆約 600 字、8 秒逾時），結果放在原話之後的「網路搜尋結果」，要求回答標 [n]、不把網路資料說成內容裡講的、問內容本身時不用網路結果、對不上的結果不用；寫查詢時附上今天的日期（台灣時間）；搜尋失敗照樣只根據內容回答（[ADR 0014](docs/adr/0014-qa-web-search-by-the-system.md)） |
+| Embedding | OpenAI 相容的 `/v1/embeddings`（`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`，本機是 vLLM 上的 `Qwen/Qwen3-Embedding-0.6B`，1024 維；問題前面加 `EMBEDDING_QUERY_INSTRUCTION`，文件不加）：pipeline 內把逐字稿分段轉成向量存進 `embeddings`，一次最多 64 段。沒設定時不算向量（問答只根據摘要與章節、決策搜尋只比字）。換了模型，啟動時在背景把所有 Job 的片段與決策重算一遍（`embedding_migration.py`，記在 `embedding_state`）；沒換模型就補算缺的（沒設定 embedding 那段時間處理完的 Job） |
+| RAG 問答 | `AskQuestion` 把問題（有對話歷史時先用同一個平台模型做語意判斷 + 條件式改寫，見 `CONTEXT.md`「改寫後的問題」）轉成向量、用 pgvector cosine distance 找最相似的前 5 段（沒有向量——沒設定 embedding——時不找，只根據摘要與章節回答；連摘要都沒有才算還沒準備好）；給模型的內容是**整段內容的摘要與章節**（概括性的問題靠它們回答）加上這 5 段原話（時間寫成「分:秒」），連同最近 5 輪對話歷史，用 `stream=True` 逐字串流生成回答（[ADR 0012](docs/adr/0012-qa-answers-from-summary-chapters-and-passages.md)）。問題轉不成向量時（embedding 服務失敗，例如 HF 額度用完回 402），有摘要或章節就只根據它們回答：「在內容裡找相關的段落」標成失敗、說明只根據摘要與章節回答，來源時間是空的；連摘要與章節都沒有才讓這一題失敗。提示要求的口吻：像剛看完這段內容的朋友在說明，先講結論、簡潔平實，不提「逐字稿」「片段」，稱呼跟著內容走（會議、影片、課程…）。回答整段是簡體時轉成繁體（`traditional_chinese.py`，已經是繁體的不動）。兩位以上講者時原話每行帶講者**目前的**名稱（回答當下呼叫 `GetTranscript` 取得）。提問時打開「查網路」的話，先把問題寫成一句搜尋查詢（參考摘要與對話紀錄把「他說的那個…」補成具體名詞；只有這句送出），用 Tavily 的遠端 MCP 查一次（`web_search.py`，最多 5 筆、每筆約 600 字、8 秒逾時），結果放在原話之後的「網路搜尋結果」，要求回答標 [n]、不把網路資料說成內容裡講的、問內容本身時不用網路結果、對不上的結果不用；寫查詢時附上今天的日期（台灣時間）；搜尋失敗照樣只根據內容回答（[ADR 0014](docs/adr/0014-qa-web-search-by-the-system.md)） |
 | 取得逐字稿 | gRPC 呼叫 Transcription Service 的 `TranscriptionService.GetTranscript` |
 | 向量儲存 | PostgreSQL + `pgvector` extension（`Vector(1024)` 欄位，cosine distance 查詢，沒有建 ivfflat 索引——見已知限制） |
 | 資料庫 | PostgreSQL（`ai_db`），SQLAlchemy；schema 用 Alembic 版本化 migration（`app/db/migrations`），服務啟動時自動升級 |
@@ -30,14 +30,14 @@
 - 先啟動基礎設施：`cd ../infra && docker compose up -d`
 - Upload Service 要跑在 `localhost:9090`（見 [`../upload-service`](../upload-service)），因為要呼叫它的 `InternalJobService.UpdateJobStatus`
 - Transcription Service 要跑在 `localhost:8083`（見 [`../transcription-service`](../transcription-service)），因為要呼叫它的 `TranscriptionService.GetTranscript`
-- 一組 HF Inference API Key（[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)，建立 fine-grained token 時勾選「Make calls to Inference Providers」），填進 `.env` 的 `HF_API_KEY`——embedding 跟摘要/章節分段/RAG 問答共用同一把
-- 沒填的話服務照樣能啟動（health check 正常），但實際消費到訊息、呼叫 HF 時會失敗，Job 會被標成 `FAILED`
+- 一台 OpenAI 相容的模型伺服器：本機用 `../infra/scripts/vllm.sh up`（Docker + NVIDIA GPU）起聊天模型（`localhost:8000`）與 embedding（`localhost:8001`），`.env.example` 已經指向它們
+- 沒設定平台模型的話服務照樣能啟動（health check 正常），但摘要等功能會說「平台模型尚未設定」，Job 會被標成 `FAILED`；沒設定 embedding 只是問答不找原話
 - 要讓問答能「查網路」才需要：`.env` 的 `TAVILY_API_KEY`（[tavily.com](https://tavily.com) 的 API key，平台付費；沒設定時這個功能關閉，前端不顯示開關）
 - 要連結 Google 帳號才需要：`.env` 的 `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`（Google Cloud Console 的「網頁應用程式」
   OAuth client，重新導向 URI 是 `http://localhost:5173/api/oauth/google/callback`，見 [`../infra/README.md`](../infra/README.md)）
 
 ```bash
-cp .env.example .env   # 第一次使用才需要，填入 HF_API_KEY
+cp .env.example .env   # 第一次使用才需要；預設指向 vllm.sh 起的本機 vLLM
 uv sync
 ```
 
@@ -60,9 +60,9 @@ uv run python -m app.main
   → UpdateJobStatus(SUMMARIZING)
   → gRPC 呼叫 transcription-service 的 GetTranscript(jobId) 取得逐字稿全文 + 分段
   → 已清空片段（空字串）不算內容，從下面每個 AI 輸入排除
-  → 呼叫 HF Inference Providers 產生摘要（兩位以上講者時輸入是每行「名稱：文字」，否則是逐字稿全文）
-  → 呼叫 HF Inference Providers 依片段時間戳切章節（兩位以上講者時每行 `[開始時間] 名稱：文字`）（逐字稿沒有片段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
-  → 呼叫 HF Inference Providers 把逐字稿分段轉成向量
+  → 呼叫平台模型產生摘要（兩位以上講者時輸入是每行「名稱：文字」，否則是逐字稿全文）
+  → 呼叫平台模型依片段時間戳切章節（兩位以上講者時每行 `[開始時間] 名稱：文字`）（逐字稿沒有片段或模型判斷只有單一主題 → 空章節列表，不算錯誤）
+  → 呼叫 embedding 伺服器把逐字稿分段轉成向量（沒設定就跳過）
   → 摘要（連同讀到的逐字稿 revision，記成 source_revision）存進 summaries，章節存進 chapters，向量存進 embeddings（都覆蓋該 job 舊的資料）
   → 依摘要與章節請模型取標題、判斷類型（`job_details.py`，用量功能 `job_title`；類型不在清單當 `other`、標題截到 40 字、簡體轉繁體），
     用 upload-service 的 `SetSuggestedDetails` 回寫（使用者改過的它不動）；這一步任何失敗只記 log，Job 照樣完成、顯示檔名
@@ -71,7 +71,7 @@ uv run python -m app.main
   → UpdateJobStatus(COMPLETED)
   → 發送 ai.completed { jobId, status }
 
-任一步失敗，先判斷是不是暫時性失敗（HF SDK 例外型別、gRPC status code，見
+任一步失敗，先判斷是不是暫時性失敗（模型與 embedding 的 429/5xx/逾時、gRPC status code，見
 app/services/retry.py）且訊息還有重試預算（最多重試 2 次，共 3 次嘗試）：
   - 是 → 把訊息送進對應 TTL 的 retry queue（`transcription.completed.retry.2s`／`.4s`），原始那份直接 ack，過一段時間後訊息
     透過 dead-letter-exchange 自動送回原 queue，被當成全新訊息重新處理一次完整的 pipeline
@@ -154,11 +154,10 @@ RequestPostMeeting(jobId, userId, timezone, uploadedAt)（Gateway POST /jobs/{jo
   時段（上午、中午、下午、傍晚、晚上）、什麼都沒有就上午九點，說明裡請使用者確認時間；說明附上那句話與它的錄音時間（對不到有人講話
   的地方就不附）。同一天已經有行事曆活動的提案（agent 這次提的、之前執行過的）就不再提，這次找到的同一天不同會議都提。回覆看不懂就
   當沒有，呼叫失敗也不影響 agent 的提案。自有金鑰的模型也一樣（agent 少一輪、多這一次呼叫）。這一次呼叫讀整份逐字稿，本身不另外
-  限時：1 小時的錄音約 2.5 萬 token，本機 Ollama 的 32k context 放得下（上傳上限約 1 小時）。
+  限時：1 小時的錄音約 2.5 萬 token，本機 vLLM 的 40960 context 放得下（上傳上限約 1 小時）。
 - 搜尋逐字稿先做正規化比對（全形半形、空白、標點），找不到再用雙字重疊的比例（至少 3/4）：語音辨識常把「3 月 24 日」寫成「3 月 24」。
 - **用哪個模型**：預設模型是自有金鑰的就用它；是平台模型的，用部署設定的會後處理平台模型 `AI_POST_MEETING_PLATFORM_MODEL`
-  （HF 路由的模型 ID，可以帶 `:供應商`——同一個模型不是每家供應商都支援工具呼叫，要指定；本機 k8s 設成
-  `Qwen/Qwen3.8-27B:deepinfra`，見 ADR 0008），沒設定就不能跑。費用算在平台的 `HF_API_KEY` 上，跟摘要、問答、embedding 共用。
+  （平台模型伺服器上能穩定呼叫工具的模型；本機 k8s 設成跟一般生成同一個 vLLM 模型，見 ADR 0008、0015），沒設定就不能跑。
 - 呼叫模型用 `llm_client.chat_with_tools`：assistant 訊息原封不動放回對話（Gemini 3 的 `thought_signature` 要帶回去）；工具參數
   不是合法 JSON（Groq 的 `tool_use_failed`）時重試那一輪，最多兩次、算進次數。系統提示寫明逐字稿是資料不是指令、寫入只會變成
   提案、上傳時間（依使用者的時區）、講者目前的名字、待辦去處與 Notion 位置（用不了的待辦去處、沒指定的 Notion 位置就不要提對應的動作）、這個 Job 之前已經建立過的事項（不要再提）、工具次數上限。
@@ -534,11 +533,11 @@ uv run pytest
 
 用 pytest，mocking 只用標準庫的 `unittest.mock`（沒有額外裝 `pytest-mock`）。
 
-碰資料庫的測試——migration（`tests/test_db_migrations.py`）、逐字稿編輯後重算 embedding（`tests/test_reembed.py`，只 mock gRPC client 跟 HF embedder）、in-process 的 gRPC 服務（`tests/test_ai_grpc.py`）——是對**真的 Postgres** 測：`tests/conftest.py` 用 Testcontainers 在測試開始時起一個用完即丟的 Postgres
+碰資料庫的測試——migration（`tests/test_db_migrations.py`）、逐字稿編輯後重算 embedding（`tests/test_reembed.py`，只 mock gRPC client 跟 embedder）、換 embedding 模型後的重算（`tests/test_embedding_migration.py`）、in-process 的 gRPC 服務（`tests/test_ai_grpc.py`）——是對**真的 Postgres** 測：`tests/conftest.py` 用 Testcontainers 在測試開始時起一個用完即丟的 Postgres
 （`pgvector/pgvector:pg16`，隨機 port），跑完自動刪掉，不用先開 `infra` 的 docker compose，也絕對不會碰到 `ai_db`。只要
 Docker 有在跑；每次多約幾秒啟動時間。
 
-其餘測試不需要 RabbitMQ 或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（HF、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
+其餘測試不需要 RabbitMQ 或填任何 API key——`tests/test_pipeline.py` 把 pipeline 會碰到的所有外部 I/O（模型與 embedding 伺服器、呼叫 upload-service/transcription-service 的 gRPC client、資料庫 session）都 mock 掉，直接驗證 `process_message()` 這個 seam 本身的邏輯（呼叫順序、傳入/存入的資料）。
 
 生成類呼叫（摘要、章節、問答）的廠商邊界用 `tests/conftest.py` 的 **假 AI 廠商**（`fake_llm` fixture）：在 HTTP 層用
 `httpx2.MockTransport` 假裝成 OpenAI 相容的廠商（`openai` SDK 3.x 底層是 `httpx2`），錄下送出的請求、回傳指定的內容／串流／
@@ -601,10 +600,11 @@ app/
     job_deletion.py                  刪掉一個 Job 的資料；deleted_jobs 標記；guard_writes（commit 之後丟掉寫給已刪 Job 的資料）
     pipeline.py                       單一訊息的處理流程（見上面 Pipeline 一節）
     transcript_client.py               gRPC client，呼叫 transcription-service 的 GetTranscript
-    llm_client.py                       生成類呼叫的 OpenAI 相容 client：chat()／stream_chat() 回傳文字與 token 用量，錯誤轉成 LlmError（廠商、模型、原因、是否暫時性）；平台模型設定（HF 路由 + DISABLE_THINKING）；strip_thinking()／stream_without_thinking() 防禦性濾掉 <think> 區塊
+    llm_client.py                       生成類呼叫的 OpenAI 相容 client：chat()／stream_chat() 回傳文字與 token 用量，錯誤轉成 LlmError（廠商、模型、原因、是否暫時性）；平台模型設定（PLATFORM_LLM_*，沒設定時 NOT_CONFIGURED）；strip_thinking()／stream_without_thinking() 防禦性濾掉 <think> 區塊
     summarizer.py                       摘要（呼叫 llm_client）
     chapter_generator.py                 章節分段（呼叫 llm_client）
-    embedder.py                          HF Inference Providers 呼叫（embed_documents / embed_query）
+    embedder.py                          OpenAI 相容的 /v1/embeddings（embed_documents 分批、embed_query 加指示），錯誤轉成 EmbeddingError（暫時性與否），輸出不是 1024 維就拒收
+    embedding_migration.py               啟動時讓向量跟設定的 embedding 模型一致：換了模型就重算所有 Job 的片段與決策、沒換就補算缺的（advisory lock，只有一個副本做）
     qa.py                                RAG 問答（含對話記憶）：條件式改寫問題 → 向量搜尋 → 組 context（摘要、章節、相關的原話，多位講者時帶講者目前的名稱；查網路時加上網路搜尋結果）+ 對話歷史 → streaming 生成回答（整段是簡體時轉繁體）
     web_search.py                        問答的網路搜尋：Tavily 遠端 MCP 的 client（金鑰放 Authorization header；解析結果、截短內容、逾時）
     traditional_chinese.py               模型輸出的繁體保險：整段是簡體才用 OpenCC s2tw 轉（已經是繁體的不動），串流時先看開頭一小段再決定
@@ -617,7 +617,6 @@ app/
     usage_meter.py                       用量記錄：UsageMeter（使用者、Job、功能）交給 llm_client，每次呼叫結束時記一筆；存檔失敗只記 log，不讓流程失敗
     speaker_context.py                   讓 AI 知道講者是誰：兩位以上講者時把片段組成「名稱：文字」（摘要）、`[時間] 名稱：文字`（章節），以及問答用的「片段起訖時間 → 講者目前的名字」；只有一位講者或舊逐字稿時維持原樣
     segment_times.py                     片段起訖時間的對應鍵（embedding 對回逐字稿片段用，重算 embedding 與問答共用）
-    hf_client.py                         HF InferenceClient（lazy init），只剩 embedding 在用
     job_status_client.py                 gRPC client，呼叫 upload-service 的 UpdateJobStatus
     event_publisher.py                    發送 ai.completed / job.failed / summary.regeneration.requested / quiz.requested；connection_params() 供 consumer 與 gRPC 請求內發訊息共用
   repositories/
@@ -658,8 +657,8 @@ log）；刪掉自有金鑰、預設模型、會後處理設定、還沒完成�
 ## 對外連線的允許清單
 
 ai-service 只連設定好的外部服務（`app/core/outbound.py`，ASVS 12.6.1）：每個對外的 HTTP client（OpenAI 相容的模型 client、自有金鑰的驗證、
-模型清單、Google、Notion 與 Tavily 的 MCP、huggingface_hub）送出前都看網域，不在清單裡就不送、記 log、raise `OutboundBlocked`（不是暫時性的錯誤，
-不重試）。預設清單是程式用到的服務（HF 的路由與 huggingface.co、Tavily、Notion、Google 的 OAuth／日曆／Gmail／Tasks、OpenAI、Anthropic、Gemini、
+模型清單、Google、Notion 與 Tavily 的 MCP、embedding）送出前都看網域，不在清單裡就不送、記 log、raise `OutboundBlocked`（不是暫時性的錯誤，
+不重試）。預設清單是程式用到的服務（Tavily、Notion、Google 的 OAuth／日曆／Gmail／Tasks、OpenAI、Anthropic、Gemini、
 OpenRouter）；部署者用 `OUTBOUND_ALLOWED_HOSTS`（逗號分隔）整份換掉，例如拿掉不用的廠商。`PLATFORM_LLM_BASE_URL` 的網域一律自動加進去。
 新增會連外的 client 時用 `outbound.client()`／`async_client()` 建，並加進 `tests/test_outbound.py` 的清單。網路層的限制另外寫在部署清單。
 
@@ -697,7 +696,7 @@ uvx pip-audit --no-deps --disable-pip -r /tmp/requirements.txt
   `metadata.type` 標明種類；`notion-create-pages` 的 `parent` 要帶 `type`；Notion 的網址是 `app.notion.com`。回應格式沒有正式文件，
   標題與建立好的網址仍是寬鬆地從回應文字裡找出來的（`app/services/notion.py`），測試的假 MCP server 照真實回應的形狀。
 
-- 訊息處理遇到暫時性失敗（HF 429/503、內部 gRPC 服務短暫不可用）會自動重試（訊息層級 requeue，
+- 訊息處理遇到暫時性失敗（模型或 embedding 伺服器 429/503、內部 gRPC 服務短暫不可用）會自動重試（訊息層級 requeue，
   最多 2 次、共 3 次嘗試，見上面 Pipeline 一節跟 `docs/adr/0001-...md`）；重試預算用盡、或失敗屬於永久性
   （格式錯誤、認證失敗、job 真的不存在）才會直接判定 `FAILED`，要重新上傳才能重跑
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗，會先做一次獨立、快速的 in-process 重試；只有連
@@ -708,9 +707,8 @@ uvx pip-audit --no-deps --disable-pip -r /tmp/requirements.txt
 - `embeddings` 沒有建 ivfflat 向量索引：MVP 資料量小、查詢一定先用 `job_id` 過濾縮小範圍，先不做這層優化；資料量大了之後要補
 - 章節分段的 prompt 沒有做輸出格式驗證，模型回傳非預期 JSON（缺欄位、型別不對）時整個 job 會直接標成 `FAILED`，不會重試或降級成「沒有章節」
 - 對話記憶只取最近 5 輪（`app/services/qa.py` 的 `_MEMORY_TURNS`），沒有依 token 數動態調整；長對話裡更早的內容不會被 LLM 看到
-- HF Inference Providers 免費層沒有像 Groq 那樣公開逐模型的 TPM 數字，實際額度未知；`qa.py` 對歷史答案長度（`_MAX_HISTORY_ANSWER_CHARS`）、`max_tokens` 都有固定上限，沒有做真正依 tokenizer 精算的動態預算控制。這個呼叫沒有套用 `retry.py` 的訊息層級重試（見上面另一條已知限制），撞到當下這輪問答會直接失敗
+- `qa.py` 對歷史答案長度（`_MAX_HISTORY_ANSWER_CHARS`）、`max_tokens` 都有固定上限，沒有做真正依 tokenizer 精算的動態預算控制。這個呼叫沒有套用 `retry.py` 的訊息層級重試（見上面另一條已知限制），撞到當下這輪問答會直接失敗
 - 問答的改寫/生成呼叫沒有套用 `app/services/retry.py` 的訊息層級 requeue 機制（那套是為 MQ 驅動的 pipeline 設計的）——`AskQuestion` 是同步查詢 RPC，中途失敗直接送一個 `error` chunk 讓這輪問答失敗，不會自動重試；使用者要自己重新送出問題
-- chat/embedding model 選擇都受 HF Inference Providers 當下有哪些 provider 實際托管該模型影響很大，會隨時間變動（例如原本想用的 embedding 模型 `Qwen/Qwen3-Embedding-0.6B` 開發當下就查無任何 provider 托管）；換 `AI_HF_CHAT_MODEL`／`HF_EMBEDDING_MODEL` 前建議先用 `GET https://huggingface.co/api/models/{model}?expand[]=inferenceProviderMapping` 確認狀態是 `live`
-- 換掉 Gemini 之後改用 `BAAI/bge-m3`（1024 維，原本 768 維），`embeddings` 欄位維度也跟著換了。還停在 768 維的舊表會讓服務拒絕啟動（baseline migration 檢查），要整張表 DROP 掉讓 migration 重建。已存在的 job 要重新跑過 pipeline 才能讓 RAG 問答恢復正常（新舊向量空間本來就不是同一套模型，就算維度沒變也不能直接混用）
+- 向量欄位固定 1024 維（`embeddings`、`decisions`）：換成輸出別的維度的 embedding 模型要寫 migration 改欄位。還停在 768 維（Gemini 時代）的舊表會讓服務拒絕啟動（baseline migration 檢查），要整張表 DROP 掉讓 migration 重建。換成同樣 1024 維的別的模型則會自動重算（見上面 Embedding）；重算期間還沒輪到的 Job，問答找段落會不準
 - `Qwen/Qwen3.5-9B` 屬於 Qwen3 系列，預設會開 thinking mode：完整思考過程另外算 completion tokens、放在 HF 回應的 `message.reasoning`（不是混進 `content` 的 `<think>` 標籤，這點實測跟原本 Groq `qwen3.6-27b` 的行為不同）。**已踩過的坑**：不設 `max_tokens` 時 provider 預設只給 2048，稍長的輸入光思考就把預算燒光，`content` 直接是空字串（`finish_reason="length"`）但整個呼叫不會報錯——摘要/章節分段因此曾經整段是空的，pipeline 卻顯示成功；而且單純拉高 `max_tokens` 治標不治本，實測 500+ 段的章節分段呼叫就算給到 32768 還是會在思考階段被 HF gateway 504 timeout 打斷。目前的做法是透過 `llm_client.DISABLE_THINKING`（chat template 的 `enable_thinking=False`）直接關掉 thinking mode，平台模型的每次呼叫都會帶上（`platform_chat_model()`），HF 的 OpenAI 相容路由會原樣轉給模型；`strip_thinking()`／`stream_without_thinking()` 保留作為防禦性 fallback（防之後換模型/provider 又變回把思考混進 `content` 的行為），正常情況下是 no-op。換其他 HF 聊天模型時要重新確認是否還會有類似的 thinking-mode 行為
 - 測試涵蓋 pipeline（`process_message()` 與重試分流，全部 mock 外部 I/O）、重試分類函式、consumer 的重試路由，以及資料庫 migration 跟 `transcript.edited` 的重算 embedding（對真的 Postgres）；摘要 / 章節 / 問答帶講者名稱（`tests/test_speaker_aware_pipeline.py`、`tests/test_qa.py`：`stream_answer()` mock 檢索與 transcript client，模型是假 AI 廠商）；gRPC controller 的 `GetSummary`、`RequestRegeneration`、`ListJobLlmUsage`、`SumUserLlmUsage`、測驗的四個 rpc 有 in-process 測試（測驗的背景產生也在 `tests/test_quizzes.py`，模型是假 AI 廠商），會後處理的四個 rpc 與 agent（`tests/test_post_meeting.py`：照劇本回應的假 AI 廠商、Google Calendar API 的假 HTTP）也是（真的 Postgres），問答 streaming 的 gRPC 層仍只靠手動 grpcurl smoke test

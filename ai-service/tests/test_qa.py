@@ -197,3 +197,34 @@ def test_when_passages_cannot_be_looked_up_it_still_answers_from_the_summary_and
 def test_when_passages_cannot_be_looked_up_and_there_is_no_summary_the_question_fails(fake_llm):
     with pytest.raises(RuntimeError, match="402"):
         _answer_without_embeddings(fake_llm, summary=None)
+
+
+def test_without_an_embedding_server_it_answers_from_the_summary_and_chapters_without_rewriting(fake_llm):
+    fake_llm.stream(["這場在談預算。"])
+    history = [SimpleNamespace(question="誰主持？", answer="主持人。")]
+    with (
+        patch.object(qa.embedder.settings, "embedding_base_url", ""),
+        patch.object(qa, "find_by_job_id", return_value=history),
+        patch.object(qa, "has_embeddings", return_value=False),
+        patch.object(qa, "find_summary", return_value=SimpleNamespace(summary_text="這場會議在討論明年的預算。")),
+        patch.object(qa, "find_chapters", return_value=[]),
+        patch.object(qa, "embed_query") as embed_query,
+        patch.object(qa, "transcript_client"),
+    ):
+        events = list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "這場在講什麼？", user_id=None))
+
+    embed_query.assert_not_called()
+    assert len(fake_llm.requests) == 1  # only the answer: no rewriting for a search that can't happen
+    assert ("sources", []) in events
+    assert "這場會議在討論明年的預算。" in fake_llm.bodies()[0]["messages"][0]["content"]
+
+
+def test_a_job_with_neither_vectors_nor_a_summary_is_not_ready_to_be_asked(fake_llm):
+    with (
+        patch.object(qa, "find_by_job_id", return_value=[]),
+        patch.object(qa, "has_embeddings", return_value=False),
+        patch.object(qa, "find_summary", return_value=None),
+        patch.object(qa, "find_chapters", return_value=[]),
+        pytest.raises(qa.NoEmbeddingsError),
+    ):
+        list(qa.stream_answer(MagicMock(name="session"), uuid.uuid4(), "這場在講什麼？", user_id=None))

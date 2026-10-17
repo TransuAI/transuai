@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import grpc
 import pytest
-from huggingface_hub.errors import OverloadedError
+from app.services.embedder import EmbeddingError
 
 from app.services import pipeline
 from app.services.llm_client import LlmError, LlmErrorReason
@@ -127,9 +127,9 @@ def test_transient_model_error_in_generate_chapters_raises_retryable(mocks):
     publish_failed.assert_not_called()
 
 
-def test_transient_hf_error_in_embed_documents_raises_retryable(mocks):
+def test_transient_embedding_error_in_embed_documents_raises_retryable(mocks):
     _, body = _job_body()
-    mocks.embed_documents.side_effect = OverloadedError("overloaded")
+    mocks.embed_documents.side_effect = EmbeddingError("失敗：HTTP 503", transient=True)
     publish_completed, publish_failed = MagicMock(), MagicMock()
 
     with pytest.raises(RetryableMessageError):

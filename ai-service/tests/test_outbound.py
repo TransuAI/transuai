@@ -42,10 +42,15 @@ def test_the_async_client_checks_too():
         asyncio.run(call())
 
 
-def test_the_platform_models_server_is_always_allowed_and_the_list_can_be_replaced():
+def test_the_platform_model_and_embedding_servers_are_always_allowed_and_the_list_can_be_replaced():
     with patch.object(outbound.settings, "platform_llm_base_url", "http://llm.internal:8000/v1"), \
+         patch.object(outbound.settings, "embedding_base_url", "http://embed.internal:8001/v1"), \
          patch.object(outbound.settings, "outbound_allowed_hosts", " mcp.tavily.com , API.Deepl.com"):
-        assert outbound.allowed_hosts() == {"mcp.tavily.com", "api.deepl.com", "llm.internal"}
+        assert outbound.allowed_hosts() == {"mcp.tavily.com", "api.deepl.com", "llm.internal", "embed.internal"}
+
+
+def test_nothing_of_hugging_face_is_allowed_by_default():
+    assert not any("huggingface" in host for host in outbound.DEFAULT_ALLOWED_HOSTS)
 
 
 def test_a_blocked_request_is_not_a_transient_failure():
@@ -53,16 +58,8 @@ def test_a_blocked_request_is_not_a_transient_failure():
     assert not issubclass(outbound.OutboundBlocked, httpx2.TransportError)
 
 
-@pytest.mark.parametrize("module", ["provider_keys", "llm_client", "google_calendar", "connections", "model_catalog",
-                                    "gmail", "google_tasks"])
+@pytest.mark.parametrize("module", ["provider_keys", "llm_client", "embedder", "google_calendar", "connections",
+                                    "model_catalog", "gmail", "google_tasks"])
 def test_every_outbound_client_goes_through_the_allowlist(module):
     client = importlib.import_module(f"app.services.{module}")._http_client
     assert outbound.check in client.event_hooks["request"]
-
-
-def test_the_hugging_face_client_goes_through_it_too():
-    from huggingface_hub.utils._http import get_session
-
-    import app.services.hf_client  # noqa: F401  (sets the factory)
-
-    assert outbound.check in get_session().event_hooks["request"]

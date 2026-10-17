@@ -13,6 +13,7 @@ from app.repositories.summary_repository import save_summary
 from app.services.chapter_generator import generate_chapters
 from app.services.decisions import extract_after_transcription
 from app.services.default_models import resolve_chat_model
+from app.services import embedder
 from app.services.embedder import embed_documents
 from app.services.job_details import suggest_details
 from app.services.job_status_client import job_status_client
@@ -71,17 +72,19 @@ def process_message(
             summary_input(transcript), model=model, meter=UsageMeter(user_id, job_uuid, LlmFeature.SUMMARY))
         chapters = generate_chapters(
             chapter_input(transcript), model=model, meter=UsageMeter(user_id, job_uuid, LlmFeature.CHAPTERS))
-        vectors = embed_documents([segment.text for segment in segments])
+        # 沒設定 embedding 伺服器時不算向量：問答只根據摘要與章節回答（見 qa.py），Job 照樣完成。
+        vectors = embed_documents([segment.text for segment in segments]) if embedder.is_configured() else []
 
         session = new_session()
         try:
             save_summary(session, uuid.UUID(job_id), summary_text, source_revision=transcript.revision,
                          model=(model.provider, model.model))
             save_chapters(session, uuid.UUID(job_id), chapters)
-            save_embeddings(session, uuid.UUID(job_id), [
-                (segment.text, segment.start_time, segment.end_time, vector)
-                for segment, vector in zip(segments, vectors)
-            ])
+            if vectors:
+                save_embeddings(session, uuid.UUID(job_id), [
+                    (segment.text, segment.start_time, segment.end_time, vector)
+                    for segment, vector in zip(segments, vectors)
+                ])
         finally:
             session.close()
 

@@ -189,7 +189,7 @@ def test_an_owner_without_a_choice_gets_the_platform_model(ai_stub, db_session, 
 
     _, save_summary = run_pipeline()
 
-    assert str(fake_llm.requests[0].url) == "https://router.huggingface.co/v1/chat/completions"
+    assert str(fake_llm.requests[0].url) == "https://vllm.test/v1/chat/completions"
     assert save_summary.call_args.kwargs["model"] == ("platform", "Qwen/Qwen3.5-9B")
 
 
@@ -275,7 +275,7 @@ def test_regenerating_without_a_choice_uses_the_platform_model(ai_stub, db_sessi
 
     replace, _ = regenerate()
 
-    assert str(fake_llm.requests[0].url) == "https://router.huggingface.co/v1/chat/completions"
+    assert str(fake_llm.requests[0].url) == "https://vllm.test/v1/chat/completions"
     assert replace.call_args.kwargs["model"] == ("platform", "Qwen/Qwen3.5-9B")
 
 

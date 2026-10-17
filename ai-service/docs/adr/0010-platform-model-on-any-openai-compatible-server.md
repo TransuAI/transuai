@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-09-28）
+Accepted（2026-09-28）；「本機開發用 Ollama」已被 [ADR 0015](./0015-self-hosted-vllm-for-platform-model-and-embeddings.md) 取代（本機改用 vLLM，出廠不指向任何服務）。
 
 ## Context
 

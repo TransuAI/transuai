@@ -14,6 +14,7 @@ from app.proto_gen import ai_pb2, ai_pb2_grpc
 from app.services import job_deletion
 from app.services.consumer import run_consumer
 from app.services.deletion_consumer import run_deletion_consumer
+from app.services.embedding_migration import sync_embeddings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -52,6 +53,8 @@ def serve() -> None:
     deletion_thread = threading.Thread(target=run_deletion_consumer, name="deletion-consumer", daemon=True)
     deletion_thread.start()
     logger.info("started RabbitMQ consumer threads")
+    # 向量跟設定的 embedding 模型一致：換了模型就重算、缺的補算（見 services/embedding_migration）。
+    threading.Thread(target=sync_embeddings, name="embedding-sync", daemon=True).start()
 
     server = build_server()
     server.add_insecure_port(f"[::]:{settings.grpc_port}")

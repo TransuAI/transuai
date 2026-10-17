@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,20 +45,25 @@ class Settings(BaseSettings):
     upload_service_grpc_target: str = "localhost:9090"
     transcription_service_grpc_target: str = "localhost:8083"
 
-    hf_api_key: str = ""
-    hf_embedding_model: str = "BAAI/bge-m3"
-    # 摘要/章節分段/RAG 問答共用同一個 HF Inference Providers 聊天模型，見
-    # docs/adr/0003-hf-inference-providers-for-generation.md。
-    ai_hf_chat_model: str = "Qwen/Qwen3.5-9B"
-    # 平台模型（摘要、章節、問答、會後處理）走哪個 OpenAI 相容的伺服器（見 app/services/llm_client.py）：預設是 HF 的路由；
-    # 本機可以指向 Ollama（例如 http://host.docker.internal:11434/v1），上雲可以指向自架的 vLLM 或其他託管 API。
-    platform_llm_base_url: str = "https://router.huggingface.co/v1"
-    # 那個伺服器的金鑰；空的就用 HF_API_KEY（預設的 HF 路由用它）。Ollama 不檢查金鑰，隨便填一個即可。
+    # 平台模型（摘要、章節、問答、會後處理……）：一台 OpenAI 相容的伺服器——本地自架的 vLLM，或任何相容的託管 API（見
+    # docs/adr/0010、0015）。出廠不指向任何服務：沒設定時用平台模型的功能會說「平台模型尚未設定」，使用者可以改用自有金鑰。
+    platform_llm_base_url: str = ""
+    # 那台伺服器的金鑰；自架的 vLLM 沒開 --api-key 時不用填。
     platform_llm_api_key: str = ""
-    # 平台模型每次呼叫多帶的參數（JSON），用來關掉 thinking mode——每種伺服器的寫法不同：HF 的路由與 vLLM 吃 chat template 的
-    # 開關（預設值）；Ollama 不吃，要改成 {"reasoning_effort": "none"}。空字串就是不帶。
+    # 一般生成用的模型（vLLM 的 served model name）。AI_HF_CHAT_MODEL 是以前的名字，照樣認得。
+    platform_llm_model: str = Field("", validation_alias=AliasChoices("PLATFORM_LLM_MODEL", "AI_HF_CHAT_MODEL"))
+    # 平台模型每次呼叫多帶的參數（JSON），用來關掉 thinking mode：vLLM 吃 chat template 的開關（預設值）；空字串就是不帶。
     platform_llm_extra_body: str = '{"chat_template_kwargs": {"enable_thinking": false}}'
-    # 會後處理的平台模型（見 docs/adr/0008）：HF 路由的模型 ID，可以帶「:供應商」後綴，例如 Qwen/Qwen3.8-27B:deepinfra。
+    # Embedding（問答找相關段落、決策的搜尋）：一台 OpenAI 相容、有 /v1/embeddings 的伺服器（本地 vLLM，見 docs/adr/0015）。
+    # 沒設定時不算向量：問答只根據摘要與章節回答，決策只比對字面。換模型之後，啟動時會在背景把既有的向量重算一遍
+    # （app/services/embedding_migration.py）。向量欄位是 1024 維：模型要輸出 1024 維（或能用 dimensions 截成 1024）。
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+    embedding_model: str = ""
+    # 問題（不是逐字稿片段）前面要加的指示：Qwen3-Embedding 這類 instruction-aware 的模型用（加了檢索比較準）；bge-m3 這類
+    # 對稱的模型留空。
+    embedding_query_instruction: str = ""
+    # 會後處理的平台模型（見 docs/adr/0008）：平台模型伺服器上的模型名稱，要能穩定呼叫工具。
     # 空的就是不提供：預設模型是平台模型的使用者不能跑會後處理，要用自有金鑰、支援工具呼叫的模型。
     ai_post_meeting_platform_model: str = ""
     # 每位使用者每個月平台模型的 token 上限（輸入＋輸出）；跟 gateway 的 app.usage-limits.platform-tokens 是同一個環境變數，要一致。

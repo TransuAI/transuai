@@ -219,7 +219,7 @@ def test_the_post_meeting_platform_model_runs_on_the_platforms_hf_key(ai_stub, d
         work(queued)
 
     first = fake_llm.requests[0]
-    assert (first.url.host, first.headers["Authorization"]) == ("router.huggingface.co", "Bearer hf-test-key")
+    assert (first.url.host, first.headers["Authorization"]) == ("vllm.test", "Bearer platform-test-key")
     body = fake_llm.bodies()[0]
     assert body["model"] == POST_MEETING_PLATFORM_MODEL
     assert body["chat_template_kwargs"] == {"enable_thinking": False}

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted；呼叫方式已被 [ADR 0004](./0004-generation-calls-through-openai-compatible-interface.md) 部分取代：平台模型仍是這裡選的 HF 模型，但生成類呼叫改走 HF 的 OpenAI 相容路由（`llm_client.py`），不再透過 `hf_client.py` 的 `InferenceClient`；下面提到的 `hf_client.py`、`is_retryable_hf_error` 現在只適用於 embedding。
+Accepted；呼叫方式已被 [ADR 0004](./0004-generation-calls-through-openai-compatible-interface.md) 部分取代：平台模型仍是這裡選的 HF 模型，但生成類呼叫改走 HF 的 OpenAI 相容路由（`llm_client.py`），不再透過 `hf_client.py` 的 `InferenceClient`；下面提到的 `hf_client.py`、`is_retryable_hf_error` 後來只剩 embedding 在用，[ADR 0015](./0015-self-hosted-vllm-for-platform-model-and-embeddings.md) 之後全部移除（embedding 也改走自架 vLLM 的 OpenAI 相容介面）。
 
 ## Context
 

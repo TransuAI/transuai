@@ -25,6 +25,15 @@ os.environ |= {
 }
 # A fixed master key for encrypting own API keys (自有金鑰) in tests: 32 bytes, base64.
 os.environ["KEY_ENCRYPTION_KEY"] = "dGVzdC1tYXN0ZXIta2V5LWZvci1hZXMtZ2NtLTMyYiE="
+# Out of the box nothing is configured (see app/core/config.py); tests run as a deployment with its own vLLM for the
+# platform model and the embeddings. Nothing is ever sent there: the fake_llm / fake_embedder fixtures answer instead.
+os.environ |= {
+    "PLATFORM_LLM_BASE_URL": "https://vllm.test/v1",
+    "PLATFORM_LLM_API_KEY": "platform-test-key",
+    "PLATFORM_LLM_MODEL": "Qwen/Qwen3.5-9B",
+    "EMBEDDING_BASE_URL": "https://embed.test/v1",
+    "EMBEDDING_MODEL": "Qwen/Qwen3-Embedding-0.6B",
+}
 
 from app.core.config import settings  # noqa: E402
 from app.db import engine, init_db, new_session  # noqa: E402
@@ -70,7 +79,7 @@ def db_session(test_database):
     yield session
     session.close()
     with test_database.begin() as conn:
-        conn.execute(text("TRUNCATE summaries, chapters, embeddings, qa_history, llm_usage, web_search_usage, speaker_name_suggestions, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals, post_meeting_settings, deleted_jobs, speaker_insights, speaker_insight_items, generated_outputs, translations, segment_translations, decisions, decision_extractions, fact_checks, claims"))
+        conn.execute(text("TRUNCATE summaries, chapters, embeddings, embedding_state, qa_history, llm_usage, web_search_usage, speaker_name_suggestions, provider_keys, default_models, quizzes, quiz_questions, quiz_attempts, oauth_connections, oauth_pending_authorizations, oauth_clients, post_meeting_runs, action_proposals, post_meeting_settings, deleted_jobs, speaker_insights, speaker_insight_items, generated_outputs, translations, segment_translations, decisions, decision_extractions, fact_checks, claims"))
 
 
 @pytest.fixture(scope="session")
@@ -174,8 +183,41 @@ def fake_llm(monkeypatch):
 
     provider = FakeLlmProvider()
     monkeypatch.setattr(llm_client, "_http_client", httpx2.Client(transport=httpx2.MockTransport(provider.handle)))
-    monkeypatch.setattr(llm_client.settings, "hf_api_key", "hf-test-key")
     return provider
+
+
+class FakeEmbeddingServer:
+    """Stands in for the OpenAI-compatible /v1/embeddings (the local vLLM): every text gets a 1024-dim vector whose first
+    number is the text's position in its request, unless `fail` queued an error status. Records every request."""
+
+    def __init__(self):
+        self.requests: list[httpx2.Request] = []
+        self._failures: list[int] = []
+
+    def fail(self, status: int) -> None:
+        self._failures.append(status)
+
+    def bodies(self) -> list[dict]:
+        return [json.loads(request.content) for request in self.requests]
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        request.read()
+        self.requests.append(request)
+        if self._failures:
+            return httpx2.Response(self._failures.pop(0), json={"error": {"message": "no"}})
+        texts = json.loads(request.content)["input"]
+        return httpx2.Response(200, json={"object": "list", "model": "test", "data": [
+            {"object": "embedding", "index": i, "embedding": [float(i)] + [0.0] * 1023} for i in range(len(texts))]})
+
+
+@pytest.fixture
+def fake_embedder(monkeypatch):
+    """Points the embedder at a FakeEmbeddingServer."""
+    from app.services import embedder
+
+    server = FakeEmbeddingServer()
+    monkeypatch.setattr(embedder, "_http_client", httpx2.Client(transport=httpx2.MockTransport(server.handle)))
+    return server
 
 
 @pytest.fixture

@@ -4,6 +4,7 @@
 
 Accepted（2026-09-28）。依據一次性的實測（程式在 `.scratch/local-platform-model/bakeoff/`，不進正式服務）。
 補充（同日）：一般生成（摘要、章節、問答）也改用 `qwen3:14b`，見文末。
+已被 [ADR 0015](./0015-self-hosted-vllm-for-platform-model-and-embeddings.md) 取代（2026-10-17）：本機改用 vLLM，模型換成 `Qwen/Qwen3-8B-AWQ`，用同一套實測重跑。
 
 ## Context
 

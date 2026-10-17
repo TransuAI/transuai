@@ -2,7 +2,7 @@
 建（或掛上 check），送出前看網域，不在清單裡就不送、記 log、raise OutboundBlocked。
 
 清單預設是程式裡用到的服務（下面的 DEFAULT_ALLOWED_HOSTS）；部署者用 OUTBOUND_ALLOWED_HOSTS（逗號分隔）整份換掉，例如拿掉不用的廠商。
-平台模型的網址（PLATFORM_LLM_BASE_URL，可能是自架的伺服器）一律自動加進去。網路層的對外限制另外寫在部署清單。
+平台模型與 embedding 的網址（PLATFORM_LLM_BASE_URL、EMBEDDING_BASE_URL，通常是自架的 vLLM）一律自動加進去。網路層的對外限制另外寫在部署清單。
 """
 
 import logging
@@ -15,8 +15,6 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 DEFAULT_ALLOWED_HOSTS = (
-    # 平台模型（HF 的路由）與 embedding（huggingface_hub 先到 huggingface.co 查模型由哪個供應商跑）
-    "router.huggingface.co", "huggingface.co",
     # 網路搜尋（問答「查網路」、事實查核）
     "mcp.tavily.com",
     # 已連結的帳號：Notion（MCP 與 OAuth）、Google（OAuth、日曆、Gmail、Tasks）
@@ -34,9 +32,9 @@ class OutboundBlocked(httpx2.RequestError):
 def allowed_hosts() -> frozenset[str]:
     configured = [host.strip().lower() for host in settings.outbound_allowed_hosts.split(",") if host.strip()]
     hosts = set(configured or DEFAULT_ALLOWED_HOSTS)
-    platform = urlsplit(settings.platform_llm_base_url).hostname
-    if platform:
-        hosts.add(platform.lower())
+    for configured_server in (settings.platform_llm_base_url, settings.embedding_base_url):
+        if host := urlsplit(configured_server).hostname:
+            hosts.add(host.lower())
     return frozenset(hosts)
 
 

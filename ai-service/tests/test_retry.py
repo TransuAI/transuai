@@ -1,12 +1,11 @@
 from unittest.mock import call, patch
 
 import grpc
-import httpx
 import pytest
-from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError, OverloadedError
 
 from app.core.config import settings
 from app.services import retry
+from app.services.embedder import EmbeddingError
 
 
 class _FakeRpcError(grpc.RpcError):
@@ -18,14 +17,6 @@ class _FakeRpcError(grpc.RpcError):
 
     def code(self) -> grpc.StatusCode:
         return self._code
-
-
-def _httpx_request() -> httpx.Request:
-    return httpx.Request("POST", "https://example.invalid")
-
-
-def _httpx_response(status_code: int) -> httpx.Response:
-    return httpx.Response(status_code=status_code, request=_httpx_request())
 
 
 # --- retry queue 路由與宣告：純函式，不碰真正的 RabbitMQ/pika ---
@@ -70,35 +61,17 @@ def test_transcription_completed_keeps_its_existing_retry_queue_names():
     ]
 
 
-# --- HF 例外分類 ---
+# --- embedding 例外分類（embedder 分好：429、5xx、逾時、連不上是暫時性）---
 
 
-@pytest.mark.parametrize(
-    "exc",
-    [
-        OverloadedError("overloaded"),
-        InferenceTimeoutError("timed out"),
-        HfHubHTTPError("rate limited", response=_httpx_response(429)),
-        HfHubHTTPError("internal error", response=_httpx_response(500)),
-        HfHubHTTPError("bad gateway", response=_httpx_response(502)),
-        HfHubHTTPError("service unavailable", response=_httpx_response(503)),
-        HfHubHTTPError("gateway timeout", response=_httpx_response(504)),
-    ],
-)
-def test_is_retryable_hf_error_true_for_transient_types(exc):
-    assert retry.is_retryable_hf_error(exc) is True
+def test_a_transient_embedding_failure_is_retryable():
+    assert retry.is_retryable_embedding_error(EmbeddingError("連不上", transient=True)) is True
+    assert retry.is_retryable_error(EmbeddingError("失敗：HTTP 503", transient=True)) is True
 
 
-@pytest.mark.parametrize(
-    "exc",
-    [
-        HfHubHTTPError("not found", response=_httpx_response(404)),
-        HfHubHTTPError("bad request", response=_httpx_response(400)),
-        ValueError("not an hf error"),
-    ],
-)
-def test_is_retryable_hf_error_false_for_permanent_types(exc):
-    assert retry.is_retryable_hf_error(exc) is False
+@pytest.mark.parametrize("exc", [EmbeddingError("尚未設定", transient=False), ValueError("not an embedding error")])
+def test_other_embedding_failures_are_not(exc):
+    assert retry.is_retryable_embedding_error(exc) is False
 
 
 # --- gRPC 例外分類 ---

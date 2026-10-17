@@ -23,7 +23,7 @@ class ModelNotAvailable(Exception):
 
 
 def platform_choice() -> ModelChoice:
-    return ModelChoice(PLATFORM, settings.ai_hf_chat_model, supports_tools=False)
+    return ModelChoice(PLATFORM, settings.platform_llm_model, supports_tools=False)
 
 
 def available_models(user_id: uuid.UUID) -> tuple[list[ModelChoice], bool]:

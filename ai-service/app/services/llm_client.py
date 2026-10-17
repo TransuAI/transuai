@@ -1,5 +1,5 @@
 """生成類 AI 呼叫（摘要、章節、問答、問題改寫）：所有廠商都走同一套 OpenAI 相容介面，一個 client、依廠商換
-網址與金鑰。平台模型走 HF Inference Providers 的 OpenAI 相容路由；embedding 不在這裡（見 hf_client.py）。
+網址與金鑰。平台模型走設定的 OpenAI 相容伺服器（本地 vLLM 等）；embedding 不在這裡（見 embedder.py）。
 
 回傳文字的同時回傳廠商回報的 token 用量（沒回報就是未知，不估算）。錯誤一律轉成 LlmError，標明廠商與原因，
 暫時性錯誤（429、5xx、逾時、連不上）交給既有的訊息層級重試（見 retry.py 與 docs/adr/0001），client 自己不重試。
@@ -47,14 +47,18 @@ class ChatModel:
     extra_body: dict[str, Any] | None = None
 
 
+# 自架的 vLLM 沒開 --api-key 時不檢查金鑰，但 openai SDK 不收空的金鑰。
+_NO_KEY = "not-needed"
+
+
 def platform_chat_model(model: str | None = None) -> ChatModel:
-    """平台模型：設定的 OpenAI 相容伺服器（PLATFORM_LLM_BASE_URL，預設是 HF Inference Providers）上的聊天模型，關閉 thinking
-    mode。model 是某個用途專屬的平台模型（例如會後處理的），沒給就是一般生成（摘要、章節、問答）用的。"""
+    """平台模型：設定的 OpenAI 相容伺服器（PLATFORM_LLM_BASE_URL，例如本地的 vLLM）上的聊天模型，關閉 thinking mode。model 是某個
+    用途專屬的平台模型（例如會後處理的），沒給就是一般生成（摘要、章節、問答）用的。沒設定伺服器時照樣回傳，呼叫時才說尚未設定。"""
     return ChatModel(
         provider=PLATFORM,
-        model=model or settings.ai_hf_chat_model,
+        model=model or settings.platform_llm_model,
         base_url=settings.platform_llm_base_url,
-        api_key=settings.platform_llm_api_key or settings.hf_api_key,
+        api_key=settings.platform_llm_api_key or _NO_KEY,
         extra_body=json.loads(settings.platform_llm_extra_body) if settings.platform_llm_extra_body else None,
     )
 
@@ -87,6 +91,7 @@ class LlmErrorReason(StrEnum):
     MODEL_NOT_FOUND = "model_not_found"
     MALFORMED_TOOL_CALL = "malformed_tool_call"  # 模型產生的工具參數不是合法 JSON（Groq 整輪拒絕）；再問一次通常就好
     OTHER = "other"  # 其他永久性錯誤（例如請求格式不被接受）
+    NOT_CONFIGURED = "not_configured"  # 部署的人還沒設定平台模型的伺服器或模型
 
 
 _REASON_TEXT = {
@@ -96,6 +101,7 @@ _REASON_TEXT = {
     LlmErrorReason.MODEL_NOT_FOUND: "找不到這個模型",
     LlmErrorReason.MALFORMED_TOOL_CALL: "產生了格式不正確的工具呼叫",
     LlmErrorReason.OTHER: "拒絕了這個請求",
+    LlmErrorReason.NOT_CONFIGURED: "尚未設定",
 }
 
 
@@ -120,6 +126,10 @@ _http_client = outbound.client(timeout=httpx2.Timeout(300.0, connect=10.0))
 
 
 def _client(model: ChatModel) -> OpenAI:
+    if not model.base_url or not model.model:
+        # 出廠不指向任何服務（見 config.py）：部署的人還沒設定平台模型。不是暫時性的錯誤，不重試。
+        raise LlmError(model.provider, model.model or "未指定", LlmErrorReason.NOT_CONFIGURED,
+                       "請部署的人設定 PLATFORM_LLM_BASE_URL 與 PLATFORM_LLM_MODEL，或在設定頁改用自有金鑰")
     return OpenAI(base_url=model.base_url, api_key=model.api_key, http_client=_http_client, max_retries=0)
 
 
