@@ -363,7 +363,7 @@ Spring Boot 管理的版本跟不上弱點修正時，在 `build.gradle` 用 `ex
 ## 已知限制 / 待辦
 
 - **Transcription / AI 這幾個端點的 ownership 檢查在 Gateway**：`transcription-service` 的 `GetTranscript`、`ai-service` 的 `GetSummary`/`ListChapters`/`AskQuestion`/`ListQaHistory` 本身還是不驗證 `x-user-id`（只驗 job_id 存不存在，見兩邊 proto 的註解；`AskQuestion` 的 `user_id` 只用來記錄 `qa_history`，不重新驗證），Gateway 在轉發前先確認 ownership（`JobOwnershipGuard`，別人的 job 回 404）：擁有者記在 Redis（見「快取」），沒記住時才呼叫 `upload-service` 的 `GetJob`
-- 每月用量上限用的是已記錄的用量加上這次檔案的長度（前端量的，可能不準）：排隊中、還沒轉錄完的檔案還沒算進去，可能超過上限一點（見「每月用量上限」）
+- 每月用量上限在這裡用的是已記錄的用量加上這次檔案的長度（前端量的，可能不準）：排隊中、還沒轉錄完的檔案還沒算進去。transcription-service 在呼叫語音辨識之前會用實際長度再檢查一次（放不進剩下的分鐘數就讓 Job 失敗），所以轉錄用量不會超過上限，最多是被擋下的檔案已經上傳了
 - access token 在 gateway 本地驗章，登出後仍有效到過期（最多 15 分鐘）；要立即失效得每個請求回頭問 auth-service，目前不做
 - `POST /qa/{jobId}` 的 `SseEmitter` 沒設 timeout（`new SseEmitter(0L)`），串流時間完全取決於 LLM 生成速度；如果下游 Groq 呼叫本身卡住不回應，這個連線會一直開著直到客戶端斷線，沒有額外的伺服器端逾時保護（見 [`../docs/adr/0001-sse-via-gateway-for-streaming-qa.md`](../docs/adr/0001-sse-via-gateway-for-streaming-qa.md)）
 - 測試只涵蓋限流、每月用量上限與快取（`./gradlew test`，Spring Boot test + MockMvc，下游 gRPC 用 `@MockitoBean` 換掉，Redis 用 Testcontainers 起臨時容器，
