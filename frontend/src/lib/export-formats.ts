@@ -1,0 +1,641 @@
+import { KIND_LABELS, VERDICT_LABELS } from '@/lib/claims'
+import { speakerNameLookup, speakerNameOrLabel } from '@/lib/speakers'
+import { computeSpeakerStats, insightsByKind } from '@/lib/speaker-stats'
+import { sortNotes } from '@/lib/notes'
+import { hasSpeakerInsightResults, isClaimStale, isFactCheckStale, isSpeakerInsightsStale, isSummaryStale } from '@/lib/staleness'
+import { siteOf } from '@/lib/web-sources'
+import type {
+  Chapter,
+  Decision,
+  Job,
+  JobFactCheck,
+  Note,
+  QuizQuestion,
+  SpeakerInsights,
+  Summary,
+  Transcript,
+  WebSource,
+} from '@/types/api'
+
+// 匯出（見 frontend CONTEXT.md）：把 Job 已經存在的內容轉成各種檔案格式的文字，不呼叫 LLM。
+// 這裡只負責「內容長什麼樣」，下載 / 複製由呼叫端處理。
+
+export interface ExportSegment {
+  startTime: number
+  endTime: number
+  text: string
+  /** The speaker's display name (講者), or null when the transcript has no speaker information. */
+  speakerName: string | null
+}
+
+// Everything a format may draw on: the job's own info plus the content already loaded in the
+// workspace. Each format picks what it needs.
+export interface ExportContent {
+  fileName: string
+  /** The job's title (標題), when it has one: the report's heading. */
+  title?: string | null
+  durationSeconds: number
+  createdAt: string
+  segments: ExportSegment[]
+  summary: { text: string; isStale: boolean } | null
+  chapters: { title: string; startTime: number }[]
+  qaHistory: ExportQaTurn[]
+  /** 筆記, by time with the unpinned ones last. */
+  notes: ExportNote[]
+  /** 講者數據; null (or absent) when speakers aren't shown. */
+  speakerStats?: ExportSpeakerStats | null
+  /** 決策紀錄, by time (those without one last). */
+  decisions?: ExportDecision[]
+}
+
+/** A decision in an export: who proposed it by name. */
+export interface ExportDecision {
+  statement: string
+  rationale: string
+  alternatives: string[]
+  /** The proposer's display name; null when it isn't clear. */
+  proposer: string | null
+  tentative: boolean
+  startTime: number | null
+  evidenceText: string | null
+}
+
+/** 講者數據 in an export (see lib/speaker-stats): one row per speaker, by display order. */
+export interface ExportSpeakerStats {
+  speakers: {
+    name: string
+    talkSeconds: number
+    share: number
+    turns: number
+    longestTurnSeconds: number
+    averageTurnSeconds: number
+    quiet: boolean
+  }[]
+  speakerChanges: number
+  silenceSeconds: number
+  /** The questions and possible interruptions judged by AI, when it has been analysed. */
+  insights?: {
+    isStale: boolean
+    questions: { startTime: number; speakerName: string; text: string }[]
+    interruptions: { startTime: number; speakerName: string; interruptedName: string; text: string }[]
+  } | null
+}
+
+/** A 筆記 in an export: its time (null when not pinned to one) and text (empty for a 書籤). */
+export interface ExportNote {
+  timeSeconds: number | null
+  text: string
+}
+
+/** One Q&A turn in an export: the answer, its recording timestamps and, when it searched the web (查網路), its web sources. */
+export interface ExportQaTurn {
+  question: string
+  answer: string
+  sourceTimestamps: number[]
+  webSearch?: boolean
+  webSources?: WebSource[]
+}
+
+export interface ExportSource {
+  job: Job
+  transcript: Transcript | null
+  summary: Summary | null
+  chapters: Chapter[]
+  /** Q&A turns as shown in the Chat pane; a turn with a status other than 'done' is left out. */
+  qaHistory: (ExportQaTurn & { status?: string })[]
+  notes: Note[]
+  /** 講者數據's AI part; left out of the report when it hasn't been analysed. */
+  speakerInsights?: SpeakerInsights | null
+  /** 決策紀錄 as listed in the Studio (already in order). */
+  decisions?: Decision[]
+}
+
+export function buildExportContent(source: ExportSource): ExportContent {
+  const { job, transcript, summary, chapters, qaHistory, notes } = source
+  const speakerName = speakerNameLookup(transcript?.speakers ?? [])
+  return {
+    fileName: job.fileName,
+    title: job.title ?? null,
+    durationSeconds: job.durationSeconds,
+    createdAt: job.createdAt,
+    segments:
+      transcript?.segments.map((segment) => ({
+        startTime: segment.startTime,
+        endTime: segment.endTime,
+        text: segment.text,
+        speakerName: speakerName(segment.speakerLabel),
+      })) ?? [],
+    summary: summary ? { text: summary.summaryText, isStale: isSummaryStale(summary, transcript) } : null,
+    chapters: chapters.map((chapter) => ({ title: chapter.title, startTime: chapter.startTime })),
+    // A half-streamed or failed answer isn't something to hand to other people.
+    qaHistory: qaHistory
+      .filter((turn) => turn.status === undefined || turn.status === 'done')
+      .map(({ question, answer, sourceTimestamps, webSearch, webSources }) => ({
+        question,
+        answer,
+        sourceTimestamps,
+        webSearch,
+        webSources,
+      })),
+    notes: sortNotes(notes).map(({ timeSeconds, text }) => ({ timeSeconds, text })),
+    speakerStats: exportSpeakerStats(transcript, source.speakerInsights ?? null),
+    decisions: (source.decisions ?? []).map((decision) => ({
+      statement: decision.statement,
+      rationale: decision.rationale,
+      alternatives: decision.alternatives,
+      proposer: decision.proposedBy ? speakerName(decision.proposedBy) ?? decision.proposedBy : null,
+      tentative: decision.tentative,
+      startTime: decision.startTime,
+      evidenceText: decision.evidenceText,
+    })),
+  }
+}
+
+function exportSpeakerStats(transcript: Transcript | null, insights: SpeakerInsights | null): ExportSpeakerStats | null {
+  const stats = transcript && computeSpeakerStats(transcript.segments, transcript.speakers)
+  if (!transcript || !stats) return null
+  const nameOf = speakerNameOrLabel(transcript.speakers)
+  const { questions, interruptions } = insightsByKind(insights?.items ?? [])
+  return {
+    insights: hasSpeakerInsightResults(insights)
+      ? {
+          isStale: isSpeakerInsightsStale(insights, transcript),
+          questions: questions.map((item) => ({ startTime: item.startTime, speakerName: nameOf(item.speakerLabel), text: item.text })),
+          interruptions: interruptions.map((item) => ({
+              startTime: item.startTime,
+              speakerName: nameOf(item.speakerLabel),
+              interruptedName: nameOf(item.interruptedLabel),
+              text: item.text,
+            })),
+        }
+      : null,
+    speakers: stats.speakers.map(({ speaker, talkSeconds, share, turns, longestTurnSeconds, averageTurnSeconds, quiet }) => ({
+      name: speaker.displayName, talkSeconds, share, turns, longestTurnSeconds, averageTurnSeconds, quiet,
+    })),
+    speakerChanges: stats.speakerChanges,
+    silenceSeconds: stats.silenceSeconds,
+  }
+}
+
+export interface ExportFormat {
+  label: string
+  /** Appended to the uploaded file's name without its extension, e.g. `.srt`. */
+  fileSuffix: string
+  mimeType: string
+  render: (content: ExportContent) => string
+}
+
+function pad(value: number, length = 2) {
+  return String(value).padStart(length, '0')
+}
+
+// 文字格式（TXT、Markdown）裡的時間戳：一小時內 mm:ss，一小時起 h:mm:ss。
+export function formatClock(seconds: number): string {
+  const total = Math.floor(seconds)
+  const hours = Math.floor(total / 3600)
+  const minutesAndSeconds = `${pad(Math.floor(total / 60) % 60)}:${pad(total % 60)}`
+  return hours > 0 ? `${hours}:${minutesAndSeconds}` : minutesAndSeconds
+}
+
+// 字幕時間碼：HH:MM:SS,mmm（SRT）或 HH:MM:SS.mmm（VTT）
+function subtitleTimecode(seconds: number, millisecondSeparator: ',' | '.') {
+  const totalMs = Math.round(seconds * 1000)
+  const ms = totalMs % 1000
+  const totalSeconds = Math.floor(totalMs / 1000)
+  return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)}${millisecondSeparator}${pad(ms, 3)}`
+}
+
+// 所有格式共用的規則：
+// - 文字為空的片段（已清空片段）一律不匯出。
+// - 只有在「有文字的片段」中出現兩位以上講者時才標示講者；單一講者的錄音不加「講者 1：」這種雜訊。
+function exportableSegments(segments: ExportSegment[]) {
+  return segments.filter((segment) => segment.text !== '')
+}
+
+function hasMultipleSpeakers(segments: ExportSegment[]) {
+  return new Set(segments.map((segment) => segment.speakerName).filter(Boolean)).size >= 2
+}
+
+export function toSrt(segments: ExportSegment[]): string {
+  const exportable = exportableSegments(segments)
+  const labelSpeakers = hasMultipleSpeakers(exportable)
+  const cues = exportable.map((segment, i) => {
+    // 字幕一條一條分開顯示，所以多位講者時每一條都要帶名稱。
+    const text = labelSpeakers && segment.speakerName ? `${segment.speakerName}：${segment.text}` : segment.text
+    return `${i + 1}\n${subtitleTimecode(segment.startTime, ',')} --> ${subtitleTimecode(segment.endTime, ',')}\n${text}\n\n`
+  })
+  // BOM：舊版 Windows 播放器 / 剪輯軟體沒有 BOM 會把 UTF-8 中文當成 ANSI 讀成亂碼。
+  return '﻿' + cues.join('')
+}
+
+// 譯文的匯出：translations 依片段在清單裡的位置（跟 buildExportContent 的 segments 一樣的順序）。translated 用譯文取代文字，bilingual
+// 把譯文放在下一行（字幕一條兩行：原文在上、譯文在下）；還沒翻到的片段維持原文。已清空片段照樣不匯出。
+export function withTranslation(
+  segments: ExportSegment[],
+  translations: Map<number, string>,
+  mode: 'translated' | 'bilingual',
+): ExportSegment[] {
+  return segments.map((segment, i) => {
+    const translation = translations.get(i)
+    if (!translation || segment.text === '') return segment
+    return { ...segment, text: mode === 'translated' ? translation : `${segment.text}\n${translation}` }
+  })
+}
+
+// WebVTT 的字幕文字是 markup：& < > 要跳脫，否則會變成壞掉的標籤。
+function escapeVtt(text: string) {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+export function toVtt(segments: ExportSegment[]): string {
+  const exportable = exportableSegments(segments)
+  const labelSpeakers = hasMultipleSpeakers(exportable)
+  const cues = exportable.map((segment) => {
+    // 多位講者時用 WebVTT 標準的 voice span（<v 名稱>）標示誰在說話。
+    const text =
+      labelSpeakers && segment.speakerName
+        ? `<v ${escapeVtt(segment.speakerName)}>${escapeVtt(segment.text)}`
+        : escapeVtt(segment.text)
+    return `${subtitleTimecode(segment.startTime, '.')} --> ${subtitleTimecode(segment.endTime, '.')}\n${text}\n\n`
+  })
+  return 'WEBVTT\n\n' + cues.join('')
+}
+
+// 文字格式的逐字稿行：一個片段一行；多位講者時只在換人的那一行加「名稱：」，同一人連續的片段不重複。
+function textFormatLines(segments: ExportSegment[], linePrefix: (segment: ExportSegment) => string): string[] {
+  const exportable = exportableSegments(segments)
+  const labelSpeakers = hasMultipleSpeakers(exportable)
+  let previousSpeaker: string | null = null
+  const lines = exportable.map((segment) => {
+    const speakerChanged = labelSpeakers && segment.speakerName !== null && segment.speakerName !== previousSpeaker
+    previousSpeaker = segment.speakerName
+    return linePrefix(segment) + (speakerChanged ? `${segment.speakerName}：` : '') + segment.text
+  })
+  return lines
+}
+
+const timestampPrefix = (segment: ExportSegment) => `[${formatClock(segment.startTime)}] `
+
+function asTextFile(lines: string[]) {
+  return lines.map((line) => line + '\n').join('')
+}
+
+export function toPlainText(segments: ExportSegment[]): string {
+  return asTextFile(textFormatLines(segments, () => ''))
+}
+
+export function toTimestampedText(segments: ExportSegment[]): string {
+  return asTextFile(textFormatLines(segments, timestampPrefix))
+}
+
+// 建立時間用閱讀者的本地時間，跟工作區畫面上顯示的一致。
+function localDateTime(isoTimestamp: string) {
+  const date = new Date(isoTimestamp)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+// A page title as a Markdown link's text: brackets would end the text early.
+function markdownLinkText(title: string) {
+  return title.replace(/[[\]]/g, (bracket) => `\\${bracket}`)
+}
+
+// 筆記的 Markdown 清單：一則一項，有時間的前面是 [時間]，書籤寫成（書籤）；多行的文字縮排留在同一項裡。
+function notesList(notes: ExportNote[]): string {
+  return notes
+    .map((note) => {
+      const text = note.text ? note.text.replace(/\n/g, '\n  ') : '（書籤）'
+      return note.timeSeconds !== null ? `- [${formatClock(note.timeSeconds)}] ${text}` : `- ${text}`
+    })
+    .join('\n')
+}
+
+// 單獨匯出的筆記：標題（沒有就檔名），有標題時列出檔名，然後是筆記清單。
+export function toNotesMarkdown(content: Pick<ExportContent, 'fileName' | 'title' | 'notes'>): string {
+  const blocks: string[] = [`# ${content.title || content.fileName}：筆記`]
+  if (content.title) blocks.push(`- 檔名：${content.fileName}`)
+  blocks.push(content.notes.length > 0 ? notesList(content.notes) : '尚無筆記')
+  return blocks.join('\n\n') + '\n'
+}
+
+export const NOTES_MARKDOWN_FORMAT: ExportFormat = {
+  label: '下載筆記（Markdown）',
+  fileSuffix: '-筆記.md',
+  mimeType: 'text/markdown',
+  render: toNotesMarkdown,
+}
+
+// 決策紀錄的 Markdown：大標「標題：決策」，有標題時多一行檔名；每個決策一節（編號、暫定的標註），下面是理由、沒選的、提出者、
+// 時間點與原話，沒有的就不寫。
+export function toDecisionsMarkdown(content: Pick<ExportContent, 'fileName' | 'title' | 'decisions'>): string {
+  const blocks: string[] = [`# ${content.title || content.fileName}：決策`]
+  if (content.title) blocks.push(`- 檔名：${content.fileName}`)
+  const decisions = content.decisions ?? []
+  if (decisions.length === 0) blocks.push('尚無決策')
+  decisions.forEach((decision, i) => blocks.push(...decisionBlocks(decision, `## ${i + 1}. `)))
+  return blocks.join('\n\n') + '\n'
+}
+
+// 決策頁的 Markdown：大標「決策」，有篩選或搜尋時列出來；每場會議一節（日期與名稱），下面每個決策一小節。
+export function toDecisionTimelineMarkdown(content: {
+  filters: string[]
+  meetings: { heading: string; decisions: ExportDecision[] }[]
+}): string {
+  const blocks: string[] = ['# 決策']
+  if (content.filters.length > 0) blocks.push(content.filters.map((filter) => `- ${filter}`).join('\n'))
+  if (content.meetings.length === 0) blocks.push('尚無決策')
+  for (const meeting of content.meetings) {
+    blocks.push(`## ${meeting.heading}`)
+    for (const decision of meeting.decisions) blocks.push(...decisionBlocks(decision, '### '))
+  }
+  return blocks.join('\n\n') + '\n'
+}
+
+// One decision: its heading (暫定 marked), then why, what else was considered, who proposed it and where — those it has.
+function decisionBlocks(decision: ExportDecision, heading: string): string[] {
+  const lines = [
+    decision.rationale && `- 理由：${decision.rationale}`,
+    decision.alternatives.length > 0 && `- 沒選：${decision.alternatives.join('、')}`,
+    decision.proposer && `- 提出：${decision.proposer}`,
+    decision.startTime !== null &&
+      `- 時間：[${formatClock(decision.startTime)}]${decision.evidenceText ? ` 「${decision.evidenceText}」` : ''}`,
+  ].filter(Boolean)
+  const title = `${heading}${decision.statement}${decision.tentative ? '（暫定）' : ''}`
+  return lines.length > 0 ? [title, lines.join('\n')] : [title]
+}
+
+export const DECISIONS_MARKDOWN_FORMAT: ExportFormat = {
+  label: '下載決策（Markdown）',
+  fileSuffix: '-決策.md',
+  mimeType: 'text/markdown',
+  render: toDecisionsMarkdown,
+}
+
+/** A 主張 in an export: who said it by name, and — once checked — the verdict, why, and the pages it rests on. */
+export interface ExportClaim {
+  claim: string
+  kind: keyof typeof KIND_LABELS
+  verdict: keyof typeof VERDICT_LABELS | null
+  explanation: string | null
+  /** In the order the explanation's [n] cites them. */
+  sources: { title: string; url: string }[]
+  /** The speaker's display name; null when the claim has no speaker. */
+  speaker: string | null
+  startTime: number
+  text: string
+  /** Found in an older transcript than the one there is now. */
+  isStale: boolean
+}
+
+export interface FactCheckExport {
+  fileName: string
+  title?: string | null
+  /** The claims were found before the transcript was last edited. */
+  isStale: boolean
+  /** By time, as listed in the Studio. */
+  claims: ExportClaim[]
+}
+
+export const FACT_CHECK_MARKDOWN = { fileSuffix: '-事實查核.md', mimeType: 'text/markdown' } as const
+
+export function buildFactCheckExport(
+  job: { fileName: string; title?: string | null },
+  factCheck: JobFactCheck,
+  transcript: Transcript | null,
+): FactCheckExport {
+  const nameOf = speakerNameOrLabel(transcript?.speakers ?? [])
+  return {
+    fileName: job.fileName,
+    title: job.title ?? null,
+    isStale: isFactCheckStale(factCheck.extraction, transcript),
+    claims: factCheck.claims.map((claim) => ({
+      claim: claim.claim,
+      kind: claim.kind,
+      verdict: claim.verdict,
+      // As in the Studio: what makes a claim 無法查核 isn't something checked, so it has no explanation to give.
+      explanation: claim.verdict === 'not_checkable' ? null : claim.explanation,
+      sources: claim.sources.map(({ title, url }) => ({ title, url })),
+      speaker: claim.speakerLabel ? nameOf(claim.speakerLabel) : null,
+      startTime: claim.startTime,
+      text: claim.text,
+      isStale: isClaimStale(claim, transcript),
+    })),
+  }
+}
+
+// 事實查核的 Markdown：大標「標題：事實查核」，有標題時多一行檔名，然後是提示：有查核結果時「AI 依網路搜尋整理」（跟畫面一樣），
+// 逐字稿改過時的過時提示。
+// 有結論的主張（含無法查核）依時間在前，還沒查的列在最後；編號整份連續。每條主張一節：結論、類型、時間點與講者的原話、
+// 說明，最後是來源（編號跟說明裡的 [n] 一樣）。
+export function toFactCheckMarkdown(content: FactCheckExport): string {
+  const blocks: string[] = [`# ${content.title || content.fileName}：事實查核`]
+  if (content.title) blocks.push(`- 檔名：${content.fileName}`)
+  if (content.claims.length === 0) {
+    blocks.push('尚無主張')
+    return blocks.join('\n\n') + '\n'
+  }
+  const anyChecked = content.claims.some((claim) => claim.verdict !== null && claim.verdict !== 'not_checkable')
+  const notices = [
+    ...(anyChecked ? ['AI 依網路搜尋整理，請自行確認來源'] : []),
+    ...(content.isStale ? ['逐字稿在找出主張後有修改，這些主張可能過時'] : []),
+  ]
+  if (notices.length > 0) blocks.push(notices.map((notice) => `> ${notice}`).join('\n>\n'))
+
+  const withVerdict = content.claims.filter((claim) => claim.verdict !== null)
+  const unchecked = content.claims.filter((claim) => claim.verdict === null)
+  let number = 0
+  if (withVerdict.length > 0) {
+    blocks.push('## 結論')
+    for (const claim of withVerdict) blocks.push(...claimBlocks(claim, ++number))
+  }
+  if (unchecked.length > 0) {
+    blocks.push('## 還沒查核')
+    for (const claim of unchecked) blocks.push(...claimBlocks(claim, ++number))
+  }
+  return blocks.join('\n\n') + '\n'
+}
+
+function claimBlocks(claim: ExportClaim, number: number): string[] {
+  const facts = [
+    claim.verdict && `- 結論：${VERDICT_LABELS[claim.verdict]}`,
+    `- 類型：${KIND_LABELS[claim.kind]}`,
+    `- 時間：[${formatClock(claim.startTime)}] ${claim.speaker ? `${claim.speaker}：` : ''}「${oneLine(claim.text)}」`,
+    claim.isStale && '- 依據舊版逐字稿',
+  ].filter(Boolean)
+  const blocks = [`### ${number}. ${oneLine(claim.claim)}`, facts.join('\n')]
+  if (claim.explanation) blocks.push(claim.explanation)
+  if (claim.sources.length > 0) {
+    blocks.push(
+      '來源：',
+      claim.sources.map((source, i) => `${i + 1}. [${markdownLinkText(source.title || siteOf(source.url))}](${source.url})`).join('\n'),
+    )
+  }
+  return blocks
+}
+
+// Markdown 報告：標題、長度與建立時間、摘要、章節、（有的話）筆記、逐字稿，最後是（有的話）問答紀錄。每一節都是一
+// 個個以空行分隔的段落——Markdown 會把連續的行併成一段，所以逐字稿每個片段之間也空一行（行的內容
+// 跟含時間戳 TXT 相同，只是多了空行）。
+export function toMarkdownReport(content: ExportContent): string {
+  // Headed by the title when the job has one; the file name then stays among the job's info.
+  const blocks: string[] = [`# ${content.title || content.fileName}`]
+  blocks.push(
+    [
+      ...(content.title ? [`- 檔名：${content.fileName}`] : []),
+      `- 長度：${formatClock(content.durationSeconds)}`,
+      `- 建立時間：${localDateTime(content.createdAt)}`,
+    ].join('\n'),
+  )
+
+  blocks.push('## 摘要')
+  if (content.summary?.isStale) blocks.push('> 逐字稿在摘要產生後有修改，摘要與章節可能過時')
+  blocks.push(content.summary?.text ?? '尚無摘要')
+
+  blocks.push('## 章節')
+  blocks.push(
+    content.chapters.length > 0
+      ? content.chapters.map((chapter) => `- [${formatClock(chapter.startTime)}] ${chapter.title}`).join('\n')
+      : '尚無章節',
+  )
+
+  if (content.speakerStats) {
+    blocks.push('## 講者數據', speakerStatsTable(content.speakerStats))
+  }
+
+  if (content.notes.length > 0) {
+    blocks.push('## 筆記', notesList(content.notes))
+  }
+
+  blocks.push('## 逐字稿')
+  const transcriptLines = textFormatLines(content.segments, timestampPrefix)
+  blocks.push(...(transcriptLines.length > 0 ? transcriptLines : ['尚無逐字稿']))
+
+  if (content.qaHistory.length > 0) {
+    blocks.push('## 問答紀錄')
+    for (const turn of content.qaHistory) {
+      // A Markdown heading is a single line.
+      blocks.push(`### ${turn.question.replace(/\s*\n\s*/g, ' ')}`, turn.answer)
+      if (turn.sourceTimestamps.length > 0) {
+        blocks.push(`引用：${turn.sourceTimestamps.map((seconds) => `[${formatClock(seconds)}]`).join('、')}`)
+      }
+      // Numbered like the answer's [n], so a reader of the file can follow them too.
+      if (turn.webSources && turn.webSources.length > 0) {
+        blocks.push('網路來源：', turn.webSources.map((source, i) => `${i + 1}. [${markdownLinkText(source.title)}](${source.url})`).join('\n'))
+      } else if (turn.webSearch) {
+        blocks.push('（這一題查了網路，但沒查到網路資料）')
+      }
+    }
+  }
+
+  return blocks.join('\n\n') + '\n'
+}
+
+function speakerStatsTable(stats: ExportSpeakerStats): string {
+  const rows = stats.speakers.map((row) =>
+    `| ${row.name}${row.quiet ? '（發言很少）' : ''} | ${formatClock(row.talkSeconds)} | ${Math.round(row.share * 100)}% | ${row.turns} | ${formatClock(row.longestTurnSeconds)} | ${formatClock(row.averageTurnSeconds)} |`)
+  return [
+    '| 講者 | 發言時間 | 佔比 | 發言次數 | 最長一次 | 平均 |',
+    '|---|---|---|---|---|---|',
+    ...rows,
+    '',
+    `換人 ${stats.speakerChanges} 次；無人說話共 ${formatClock(stats.silenceSeconds)}。`,
+    ...(stats.insights ? ['', insightsBlock(stats.insights)] : []),
+  ].join('\n')
+}
+
+function insightsBlock(insights: NonNullable<ExportSpeakerStats['insights']>): string {
+  const list = <T extends { startTime: number; text: string }>(items: T[], who: (item: T) => string) =>
+    items.length > 0 ? items.map((item) => `- [${formatClock(item.startTime)}] ${who(item)}：${oneLine(item.text)}`).join('\n') : '（沒有）'
+  return [
+    '### 問題與打斷（AI 估計）',
+    ...(insights.isStale ? ['', '> 逐字稿在分析後有修改，這份分析可能過時'] : []),
+    '',
+    '提出的問題：',
+    '',
+    list(insights.questions, (item) => item.speakerName),
+    '',
+    '可能的打斷：',
+    '',
+    list(insights.interruptions, (item) => `${item.speakerName} 打斷了 ${item.interruptedName}`),
+  ].join('\n')
+}
+
+// 測驗的 Markdown：題目與選項在前（可以印出來作答），最後一節是解答、解說與依據的時間戳。
+export interface QuizExport {
+  fileName: string
+  /** When the quiz was made. */
+  madeAt: string
+  isStale: boolean
+  questions: QuizQuestion[]
+}
+
+// 檔名結尾與 MIME（跟 ExportFormat 一樣），但輸入是整份測驗，所以 render 分開成 toQuizMarkdown。
+export const QUIZ_MARKDOWN = { fileSuffix: '-測驗.md', mimeType: 'text/markdown' } as const
+
+const optionLetter = (index: number) => String.fromCharCode(65 + index) // A, B, C, D
+
+// A Markdown heading or list item is a single line.
+const oneLine = (text: string) => text.replace(/\s*\n\s*/g, ' ')
+
+export function toQuizMarkdown(quiz: QuizExport): string {
+  const blocks: string[] = [`# ${quiz.fileName}：測驗`]
+  blocks.push(`- 題數：${quiz.questions.length}\n- 產生時間：${localDateTime(quiz.madeAt)}`)
+  if (quiz.isStale) blocks.push('> 逐字稿在測驗產生後有修改，這份測驗可能過時')
+
+  blocks.push('## 題目')
+  quiz.questions.forEach((question, i) => {
+    blocks.push(`### ${i + 1}. ${oneLine(question.prompt)}`)
+    blocks.push(question.options.map((option, j) => `- ${optionLetter(j)}. ${oneLine(option)}`).join('\n'))
+  })
+
+  blocks.push('## 解答')
+  quiz.questions.forEach((question, i) => {
+    blocks.push(`### ${i + 1}. ${optionLetter(question.correctOption)}. ${oneLine(question.options[question.correctOption])}`)
+    blocks.push(question.explanation)
+    if (question.sourceTimestamps.length > 0) {
+      blocks.push(`依據：${question.sourceTimestamps.map((seconds) => `[${formatClock(seconds)}]`).join('、')}`)
+    }
+  })
+
+  return blocks.join('\n\n') + '\n'
+}
+
+export const SRT_FORMAT: ExportFormat = {
+  label: '下載字幕（SRT）',
+  fileSuffix: '.srt',
+  mimeType: 'application/x-subrip',
+  render: (content) => toSrt(content.segments),
+}
+
+export const VTT_FORMAT: ExportFormat = {
+  label: '下載字幕（VTT）',
+  fileSuffix: '.vtt',
+  mimeType: 'text/vtt',
+  render: (content) => toVtt(content.segments),
+}
+
+export const PLAIN_TEXT_FORMAT: ExportFormat = {
+  label: '下載逐字稿（TXT，純文字）',
+  fileSuffix: '.txt',
+  mimeType: 'text/plain',
+  render: (content) => toPlainText(content.segments),
+}
+
+export const TIMESTAMPED_TEXT_FORMAT: ExportFormat = {
+  label: '下載逐字稿（TXT，含時間戳）',
+  fileSuffix: '-含時間戳.txt',
+  mimeType: 'text/plain',
+  render: (content) => toTimestampedText(content.segments),
+}
+
+// The Q&A history and the notes only go into the report when the user opts in (they may not be meant for sharing).
+export function markdownReportFormat({ includeQa, includeNotes }: { includeQa: boolean; includeNotes: boolean }): ExportFormat {
+  return {
+    label: '下載報告（Markdown）',
+    fileSuffix: '-報告.md',
+    mimeType: 'text/markdown',
+    render: (content) =>
+      toMarkdownReport({ ...content, qaHistory: includeQa ? content.qaHistory : [], notes: includeNotes ? content.notes : [] }),
+  }
+}
+
+// 匯出檔名：原始檔名去掉最後一個副檔名，再接上格式自己的結尾（例如 `.srt`、`-含時間戳.txt`）。

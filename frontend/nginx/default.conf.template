@@ -1,0 +1,78 @@
+# TransuAI 的前端與同一個網站的反向代理（客戶內部部署；ASVS 4.3.2、12.5.1、14.3.3、14.4）。nginx 的 image 啟動時用環境變數換掉
+# 這裡的 ${...}：GATEWAY_URL、NOTIFICATION_URL、STORAGE_ORIGIN（瀏覽器直接上傳與播放的物件儲存網址）、TRUSTED_PROXY_CIDR（前面那層
+# 終結 TLS 的反向代理；只信它帶的 X-Forwarded-For）。這裡只聽 HTTP 8080，TLS 在前面那層做（設定範本見 tls.conf.example）。
+
+server_tokens off;
+
+# 頁面的 CSP：script 只能是自己網站的檔案（build 出來沒有 inline script）；UI 元件用 inline style；連線只到自己網站（含 WebSocket）與
+# 物件儲存；播放器讀物件儲存。
+# WebSocket 的網址要含 port（$http_host），只寫 'self' 的話舊一點的瀏覽器不認 ws:。
+map $http_host $page_csp {
+    default "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' wss://$http_host ws://$http_host ${STORAGE_ORIGIN}; media-src 'self' blob: ${STORAGE_ORIGIN}; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+}
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    autoindex off;
+    # 文字類的回應標明 UTF-8（ASVS 14.4.1）。
+    charset utf-8;
+    charset_types text/html text/css application/javascript image/svg+xml;
+    # 上傳是瀏覽器直接 PUT 到物件儲存，經過這裡的只有 JSON。
+    client_max_body_size 1m;
+
+    # 來源 IP：只信前面那層代理帶的 X-Forwarded-For，再原樣交給 gateway 與 notification-service（它們的 TRUSTED_PROXIES 設成這個 pod）。
+    set_real_ip_from ${TRUSTED_PROXY_CIDR};
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+
+    # API：去掉 /api 轉給 gateway（cookie 的 Path=/ 不受影響）。gateway 自己帶 API 的安全標頭。問答與問決策是 SSE，不緩衝。
+    location /api/ {
+        proxy_pass ${GATEWAY_URL}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    }
+
+    # Job 狀態的 WebSocket。
+    location /ws/ {
+        proxy_pass ${NOTIFICATION_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 3600s;
+    }
+
+    # build 出來的檔案（檔名帶雜湊，可以長期快取）：只提供這幾種副檔名，其他 404（ASVS 12.5.1）。
+    location /assets/ {
+        location ~* \.(?:js|css|woff2|svg|png)$ {
+            include /etc/nginx/snippets/page-headers.conf;
+            add_header Cache-Control "public, max-age=31536000, immutable" always;
+            try_files $uri =404;
+        }
+        return 404;
+    }
+
+    location = /favicon.svg {
+        include /etc/nginx/snippets/page-headers.conf;
+        try_files $uri =404;
+    }
+
+    # 其他路徑都是前端的頁面（React Router）：一律給 index.html，不從磁碟提供別的檔案（.git、原始碼都不在這個 image 裡）。
+    location / {
+        include /etc/nginx/snippets/page-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        try_files /index.html =404;
+    }
+}

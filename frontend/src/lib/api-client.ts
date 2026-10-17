@@ -1,0 +1,197 @@
+import type { ApiErrorBody, AuthResponse } from '@/types/api'
+import { getAccessToken, setAccessToken } from '@/lib/access-token'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
+
+export const SESSION_EXPIRED_EVENT = 'transuai:session-expired'
+
+export class ApiError extends Error {
+  status: number
+  code: string
+
+  constructor(status: number, body: ApiErrorBody) {
+    super(body.message || body.error)
+    this.status = status
+    this.code = body.error
+  }
+}
+
+let refreshPromise: Promise<AuthResponse | null> | null = null
+
+// 用 httpOnly cookie 裡的 refresh token 換新的 access token（記在記憶體），cookie 由 gateway 換成輪替後的新 token。
+// 開啟或重新整理頁面時靠這個恢復登入；同時有好幾個請求要換只換一次。換不到（沒登入、過期、作廢）回 null。
+// cookie 只限同一個網站送：API 要跟前端同源（經 /api 轉過去），fetch 預設的 credentials: 'same-origin' 才會帶 cookie。
+export function refreshSession(): Promise<AuthResponse | null> {
+  refreshPromise ??= (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/refresh`, { method: 'POST' })
+      if (!res.ok) return null
+      const session = (await res.json()) as AuthResponse
+      setAccessToken(session.accessToken)
+      return session
+    } catch {
+      return null
+    } finally {
+      refreshPromise = null
+    }
+  })()
+  return refreshPromise
+}
+
+// access token 被拒絕之後：換發一次；換不到就是登入過期——忘掉 access token、通知 App 回登入頁，回傳 null。
+// 一般請求的 401 跟 WebSocket 的 4401（見 use-job-socket）都走這裡。
+export async function renewAccessToken(): Promise<string | null> {
+  const session = await refreshSession()
+  if (!session) {
+    setAccessToken(null)
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+  }
+  return session?.accessToken ?? null
+}
+
+interface RequestOptions {
+  method?: string
+  body?: unknown
+  auth?: boolean
+}
+
+function buildHeaders(auth: boolean): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (auth) {
+    const accessToken = getAccessToken()
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+  }
+  return headers
+}
+
+// 送出請求，401 時嘗試 refresh 一次再重打；不對 res.ok 做任何假設，交給呼叫端決定——
+// request() 跟 requestSse() 對「不 ok 怎麼辦」的處理不一樣（後者還要檢查 res.body）。
+async function fetchWithAuthRetry(
+  path: string,
+  options: RequestOptions,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const { method = 'GET', body, auth = true } = options
+
+  const doFetch = () =>
+    fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers: buildHeaders(auth),
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
+    })
+
+  let res = await doFetch()
+
+  if (res.status === 401 && auth) {
+    if (await renewAccessToken()) {
+      res = await doFetch()
+    }
+  }
+
+  return res
+}
+
+// 送出請求、處理 401 refresh 與錯誤 status，回傳「已確認 res.ok」的 raw Response。
+// 要不要 parse body 交給呼叫端決定，這裡不對 body 做任何假設。
+async function request(path: string, options: RequestOptions = {}): Promise<Response> {
+  const res = await fetchWithAuthRetry(path, options)
+  if (!res.ok) {
+    const errBody = await safeParseError(res)
+    throw new ApiError(res.status, errBody)
+  }
+  return res
+}
+
+// 讀 SSE（Server-Sent Events）串流，逐個 frame 呼叫 onEvent。刻意不用瀏覽器原生的
+// EventSource——它沒辦法附加 Authorization header，這個 API 全部端點都是 Bearer JWT 驗證，
+// 只能自己用 fetch + ReadableStream 手動解析。data 欄位預期一律是後端已經 JSON encode 過的
+// 單行字串（見 gateway AiController 的註解），呼叫端自己 JSON.parse。
+export async function requestSse(
+  path: string,
+  options: RequestOptions,
+  onEvent: (event: string, data: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetchWithAuthRetry(path, options, signal)
+  if (!res.ok || !res.body) {
+    const errBody = await safeParseError(res)
+    throw new ApiError(res.status, errBody)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    let frameEnd = buffer.indexOf('\n\n')
+    while (frameEnd !== -1) {
+      parseSseFrame(buffer.slice(0, frameEnd), onEvent)
+      buffer = buffer.slice(frameEnd + 2)
+      frameEnd = buffer.indexOf('\n\n')
+    }
+  }
+}
+
+function parseSseFrame(frame: string, onEvent: (event: string, data: string) => void) {
+  let eventName = 'message'
+  const dataLines: string[] = []
+  for (const line of frame.split('\n')) {
+    if (line.startsWith('event:')) eventName = line.slice(6).trim()
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+  }
+  if (dataLines.length > 0) onEvent(eventName, dataLines.join('\n'))
+}
+
+// 給「回應一定有 JSON body」的端點用。
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const res = await request(path, options)
+  return (await res.json()) as T
+}
+
+// 給「回應不會有 body」的端點用（例如 DELETE）。呼叫端明確宣告不期待 body，
+// 這裡就不會去嘗試 res.json()，不管後端實際回的 status 是 204 還是帶空 body 的 200。
+export async function apiFetchVoid(path: string, options: RequestOptions = {}): Promise<void> {
+  await request(path, options)
+}
+
+async function safeParseError(res: Response): Promise<ApiErrorBody> {
+  try {
+    return (await res.json()) as ApiErrorBody
+  } catch {
+    return { error: 'UNKNOWN', message: res.statusText || '發生未知錯誤' }
+  }
+}
+
+export function uploadToPresignedUrl(
+  uploadUrl: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', uploadUrl)
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(Math.round((event.loaded / event.total) * 100))
+      }
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve()
+      } else {
+        reject(new Error(`上傳檔案失敗（${xhr.status}）`))
+      }
+    }
+
+    xhr.onerror = () => reject(new Error('上傳檔案時發生網路錯誤'))
+    xhr.send(file)
+  })
+}
