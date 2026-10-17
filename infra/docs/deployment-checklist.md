@@ -11,6 +11,7 @@ TransuAI 由客戶部署在自己的環境（2026-10-17 決定）。這份清單
       （至少 12 字元），`JWT_SECRET`（至少 32 字元，隨機產生，auth-service、gateway、notification-service 用同一把），`REDIS_PASSWORD`，
       `KEY_ENCRYPTION_KEY`（自有金鑰與 OAuth 權杖的主金鑰，**遺失就解不開已存的金鑰**，要另外備份），外部服務的金鑰（`DEEPGRAM_API_KEY`、
       `HF_API_KEY`、`TAVILY_API_KEY`、`GOOGLE_OAUTH_*`）。
+- [ ] 轉錄的上限（`app-config` 的 `USAGE_LIMIT_TRANSCRIPTION_MINUTES`、`MAX_RECORDING_MINUTES`）依單位的需要調；gateway 與 transcription-service 讀同一個值。
 - [ ] secret 建好之後用 `kubectl patch` 一個一個改，**不要重新 `kubectl apply` 整份 `02-secret.yaml`**（會把改過的值蓋回空字串）。
 - [ ] 密鑰不進版控、不放進 image；用客戶環境的 secret 管理（Kubernetes Secret、Vault 等）。
 
@@ -75,7 +76,7 @@ autoindex off;
 
 ## 7. 監控與維運
 
-- [ ] Redis 要有監控與自動重啟：Redis 停掉時服務照常，但**登入限流與每人限流會失效**（fail-open，設計決定），而且每個請求多等約 0.5 秒。
+- [ ] Redis 要有監控與自動重啟：Redis 停掉時服務照常，但**登入限流與每人限流會失效**、登出後的 access token 在過期前（最多 15 分鐘）又能用（fail-open，設計決定），而且每個請求多等約 0.5 秒。
 - [ ] log 保留期限依客戶的政策；log 裡有 IP（限流）與 Job ID，不會有密碼或 token。
 - [ ] 備份 Postgres（四個資料庫）與物件儲存；`KEY_ENCRYPTION_KEY` 跟資料庫備份分開存。
 - [ ] DNS：不再使用的子網域記得刪掉 CNAME，避免被接管（ASVS 10.3.3）。
