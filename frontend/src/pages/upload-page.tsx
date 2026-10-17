@@ -79,6 +79,7 @@ export function UploadPage() {
       const presign = await uploadApi.presign({
         fileName: file.name,
         fileType,
+        contentType: file.type,
         fileSizeBytes: file.size,
         durationSeconds: duration,
       })

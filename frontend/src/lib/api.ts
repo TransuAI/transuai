@@ -77,7 +77,14 @@ export const authApi = {
 
 export const uploadApi = {
   // durationSeconds lets the gateway refuse a file that won't fit in this month's 用量上限 before it's sent.
-  presign: (params: { fileName: string; fileType: 'AUDIO' | 'VIDEO'; fileSizeBytes: number; durationSeconds: number }) =>
+  // contentType (the file's own type) is signed into the upload URL: the PUT must send exactly it (uploadToPresignedUrl does).
+  presign: (params: {
+    fileName: string
+    fileType: 'AUDIO' | 'VIDEO'
+    contentType: string
+    fileSizeBytes: number
+    durationSeconds: number
+  }) =>
     apiFetch<PresignResponse>('/uploads/presign', { method: 'POST', body: params }),
 
   complete: (params: {

@@ -71,5 +71,7 @@ describe('UploadPage usage limit (用量上限)', () => {
     await user.click(screen.getByRole('button', { name: '開始上傳' }))
 
     expect(uploadApi.presign).toHaveBeenCalledWith(expect.objectContaining({ durationSeconds: expect.any(Number) }))
+    // The upload URL is signed for the file's own type (.scratch/pre-launch-hardening/issues/16).
+    expect(uploadApi.presign).toHaveBeenCalledWith(expect.objectContaining({ contentType: expect.stringMatching(/^(audio|video)\//) }))
   })
 })
