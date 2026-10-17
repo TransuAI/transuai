@@ -46,6 +46,9 @@ uv run python -m app.main
 消費 transcription.requested { jobId, userId, storagePath, fileType, transcriptionLanguage }（語言：zh-TW / en / auto；舊訊息沒有，當成中文）
   → UpdateJobStatus(TRANSCRIBING)
   → 從物件儲存下載檔案
+  → 用 ffmpeg 讀檔案的實際長度（不解碼），超過每個檔案的上限（`MAX_RECORDING_MINUTES`，60）、超過擁有者這個月剩下的轉錄分鐘數
+    （`USAGE_LIMIT_TRANSCRIPTION_MINUTES`，600，跟 gateway 同一個值；台灣時間的月份）、或讀不出長度 → 不呼叫 Deepgram，直接走下面的 FAILED，
+    原因寫給使用者看（`services/recording_limits.py`；上傳時的長度是前端量的，可以亂填）。影片在抽音軌之前就量
   → file_type == VIDEO 才用 moviepy 抽音軌，AUDIO 直接用原始檔案
   → 呼叫 Deepgram（音檔內容直接上傳，不傳 URL），拿回每個字的起訖時間、文字與講者
   → 記一筆轉錄用量（音檔秒數取 Deepgram 回報的長度；呼叫失敗也記一筆沒有秒數的失敗紀錄，存不進去只記 log）
@@ -95,6 +98,8 @@ Redis 的 `transcript:v1:{job_id}` 是一個 hash，存序列化的 `Transcript`
 - Redis 連不上時照樣讀資料庫，只記 log，而且不重試（redis-py 預設重試 10 次，實測連不上時一次要 3.7 秒以上；逾時 0.5 秒）；編輯時
   連不上的話，舊內容最多留到有效時間結束。
 
+轉錄上限的環境變數：`MAX_RECORDING_MINUTES`（`60`）、`USAGE_LIMIT_TRANSCRIPTION_MINUTES`（`600`，要跟 gateway 一樣；k8s 都在 `app-config`）。
+
 環境變數：`REDIS_HOST`（`localhost`）、`REDIS_PORT`（`6379`）、`REDIS_PASSWORD`（空）、`REDIS_TIMEOUT_SECONDS`（`0.5`）、`TRANSCRIPT_CACHE_TTL_SECONDS`（`600`）。
 
 ### 測試方式
@@ -134,7 +139,7 @@ uv run pytest
 用 pytest，mocking 只用標準庫的 `unittest.mock`。
 
 gRPC 服務本身（`tests/test_transcript_grpc.py`：查詢與啟動 migration；`tests/test_segment_editing.py`：編輯片段；`tests/test_speaker_editing.py`：替講者命名、改片段的講者；
-`tests/test_transcript_cache.py`：逐字稿快取）是對**真的 Postgres 與 Redis** 測：`tests/conftest.py` 用 Testcontainers 在測試開始時起用完即丟的
+`tests/test_transcript_cache.py`：逐字稿快取；`tests/test_recording_limits.py` 的「這個月用了多少」）是對**真的 Postgres 與 Redis** 測：`tests/conftest.py` 用 Testcontainers 在測試開始時起用完即丟的
 Postgres（`transcription_test_db`）與 Redis（隨機 port），跑完自動刪掉，不用先開 `infra` 的 docker compose（只要 Docker 有在跑），絕對不會碰到
 `transcription_db`；用服務啟動時同一套 `init_db()` 跑 migration，再在 process 裡起一個真的 gRPC server 給測試呼叫（參考 upload-service 的 IT 做法）。
 

@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 from moviepy import VideoFileClip
+from moviepy.video.io.ffmpeg_reader import ffmpeg_parse_infos
 
 logger = logging.getLogger(__name__)
 
@@ -25,3 +26,13 @@ def extract_audio_track(video_path: Path) -> Path:
             raise RuntimeError(f"video has no audio track: {video_path}")
         clip.audio.write_audiofile(str(out), logger=None)
     return out
+
+
+def media_duration_seconds(path: Path) -> float | None:
+    """錄音或影片的長度（秒），由 ffmpeg 讀檔頭與串流資訊，不解碼；讀不出來（不是媒體檔、壞檔）回 None。"""
+    try:
+        duration = ffmpeg_parse_infos(str(path)).get("duration")
+    except (OSError, RuntimeError, ValueError):
+        logger.warning("could not read the duration of %s", path, exc_info=True)
+        return None
+    return float(duration) if duration else None

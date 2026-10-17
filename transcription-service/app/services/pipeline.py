@@ -7,8 +7,9 @@ from typing import Callable
 from app.db import new_session
 from app.repositories.transcript_repository import save_transcript
 from app.services import job_deletion, transcript_cache
-from app.services.audio import extract_audio_track
+from app.services.audio import extract_audio_track, media_duration_seconds
 from app.services.job_status_client import job_status_client
+from app.services.recording_limits import check_recording
 from app.services.retry import RetryableMessageError, retry_queue_for
 from app.services.segmentation import build_transcript
 from app.services.speech_recognition import is_transient_recognition_error, recognize
@@ -64,6 +65,8 @@ def process_message(
         job_status_client.update_status(job_id, "TRANSCRIBING")
 
         downloaded = download_object(storage_path)
+        # 實際長度超過上限就不轉錄（RecordingRefused 走下面的 FAILED，原因給使用者看）；影片在抽音軌之前就量，不白做。
+        check_recording(media_duration_seconds(downloaded), owner)
         audio_path = extract_audio_track(
             downloaded) if file_type == "VIDEO" else downloaded
 

@@ -39,7 +39,7 @@ from app.core.config import settings  # noqa: E402
 from app.db import engine, init_db, new_session  # noqa: E402
 from app.proto_gen import transcription_pb2_grpc  # noqa: E402
 
-from app.services import pipeline, transcription_usage
+from app.services import pipeline, recording_limits, transcription_usage
 from app.services.speech_recognition import Recognition
 from app.services.transcript_result import TranscriptResult
 
@@ -53,6 +53,8 @@ def mocks():
         patch.object(pipeline, "job_status_client") as job_status_client,
         patch.object(pipeline, "download_object", return_value=Path("/tmp/fake-download.mp3")) as download_object,
         patch.object(pipeline, "extract_audio_track") as extract_audio_track,
+        patch.object(pipeline, "media_duration_seconds", return_value=60.0) as media_duration_seconds,
+        patch.object(recording_limits, "_used_this_month", return_value=0.0) as used_this_month,
         patch.object(pipeline, "recognize") as recognize,
         patch.object(pipeline, "new_session", return_value=MagicMock(name="session")),
         patch.object(pipeline, "save_transcript") as save_transcript,
@@ -65,6 +67,8 @@ def mocks():
             job_status_client=job_status_client,
             download_object=download_object,
             extract_audio_track=extract_audio_track,
+            media_duration_seconds=media_duration_seconds,
+            used_this_month=used_this_month,
             recognize=recognize,
             save_transcript=save_transcript,
             discard_if_deleted=discard_if_deleted,

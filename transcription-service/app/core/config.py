@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     redis_timeout_seconds: float = 0.5
     transcript_cache_ttl_seconds: int = 600
 
+    # 送去語音辨識之前用實際長度檢查（見 services/recording_limits.py）。每月上限要跟 gateway 的 USAGE_LIMIT_TRANSCRIPTION_MINUTES 一樣。
+    max_recording_minutes: int = 60
+    usage_limit_transcription_minutes: int = 600
+
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-3"
     # 固定指定語言而不是讓 Deepgram 自動偵測：自動偵測的中文走的是通用模型，輸出簡體、錯字也明顯較多（見 ADR 0001）。
