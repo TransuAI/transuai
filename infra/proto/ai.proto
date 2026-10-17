@@ -1,0 +1,1143 @@
+syntax = "proto3";
+
+package transuai.ai.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// AiService 是純內部服務，供 Gateway 查詢摘要（對應 ../../architecture-design.md 3.4）。
+// MVP 階段做了摘要生成、章節分段、RAG 問答（含對話記憶、streaming），多格式輸出留待後續擴充。
+// 主要處理流程是 MQ 驅動（消費 transcription.completed，見 ../../ai-service/README.md），
+// 這幾支 RPC 只是查詢用，跟 transcription-service 的 TranscriptionService 是同一種模式。
+service AiService {
+  // 依 job_id 取得摘要，job_id 不合法回 INVALID_ARGUMENT，找不到回 NOT_FOUND。
+  rpc GetSummary(GetSummaryRequest) returns (Summary);
+
+  // 依 job_id 取得章節列表（依 sequence_no 排序），job_id 不合法回 INVALID_ARGUMENT。
+  // 找不到對應 job 的章節時回空列表，不算錯誤（章節分段可能還沒跑完或這個 job 沒有章節）。
+  rpc ListChapters(ListChaptersRequest) returns (ListChaptersResponse);
+
+  // 針對某個 job 的逐字稿內容做 RAG 問答，server-streaming。job_id/user_id 格式不合法回
+  // INVALID_ARGUMENT，這個 job 還沒有 embedding（pipeline 還沒跑完、或該 job 沒有逐字稿分段）回
+  // NOT_FOUND。user_id 是 Gateway 已經驗證過 ownership 之後轉過來的，用來記錄 qa_history、決定用誰的預設模型，
+  // 不重新驗證。model 不給就用這位使用者的預設模型；給了就只用在這一次提問，必須是他用得到的模型（平台模型、他有
+  // 自有金鑰的廠商整理好的清單，或他目前的預設模型），否則在送出任何 chunk 之前回 INVALID_ARGUMENT。
+  // 對話記憶的範圍是「這個 job 底下所有問答」，沒有獨立的 conversation/thread 概念
+  // （見 ai-service/docs/adr/ 對話範圍的 ADR）；一個 job 的問答串只要 job_id 就能定位。
+  //
+  // stream 保證的順序：最多一個 sources chunk（在檢索完成、生成答案文字之前送出），接著恰好一個 answered_by
+  // chunk（這次用哪個模型回答，只有 provider 與 model），再接著任意數量的 delta chunk（依生成順序），
+  // 最後如果中途失敗會有恰好一個 error chunk 並結束 stream（這輪不會有對應的 qa_history 紀錄）；成功的話 stream 在最後一個 delta 後直接結束，不送額外的
+  // 「done」訊號——gRPC stream 本身結束就是 done，這輪已經在結束前存進 qa_history。
+  rpc AskQuestion(AskQuestionRequest) returns (stream AskQuestionChunk);
+
+  // 依 job_id 取得這個 job 的完整問答紀錄（依 created_at 升冪），job_id 不合法回
+  // INVALID_ARGUMENT。沒有問答紀錄回空列表，不算錯誤。不分頁——跟 ListChapters 一樣，MVP
+  // 資料量小。user_id 驗證邏輯跟 AskQuestion 一致，Gateway 已經做過 ownership 檢查。
+  rpc ListQaHistory(ListQaHistoryRequest) returns (ListQaHistoryResponse);
+
+  // 逐字稿被編輯、摘要與章節過時之後，在背景依最新的逐字稿重新產生兩者（見 transcript-editing spec）。
+  // 把狀態設成 RUNNING 並排入 ai-service 自己的 queue 後立即回傳目前的摘要；完成後狀態回到 IDLE、
+  // source_revision 更新，失敗則是 FAILED 且舊內容保留。Job 狀態完全不變。已經 RUNNING 且請求在 5 分鐘
+  // 內時不重複排入（直接回傳目前狀態）；超過 5 分鐘視為上一次卡住，允許再排一次。這個 job 還沒有摘要
+  // 回 NOT_FOUND，job_id 不合法回 INVALID_ARGUMENT，排入 queue 失敗回 UNAVAILABLE（狀態不變）。
+  rpc RequestRegeneration(RequestRegenerationRequest) returns (Summary);
+
+  // 一個 Job 的 LLM 用量（見 ai-service/CONTEXT.md「用量」），依時間升冪。job_id 不合法回 INVALID_ARGUMENT；沒有紀錄回空列表。
+  // 不驗證使用者，Gateway 已經做過 ownership 檢查。
+  rpc ListJobLlmUsage(ListJobLlmUsageRequest) returns (ListJobLlmUsageResponse);
+
+  // 一位使用者在 [start, end) 之間的 LLM 用量，依廠商、模型、金鑰來源彙總（Gateway 把「某個月」換成這段時間）。
+  // user_id 不合法、或沒給 start / end 回 INVALID_ARGUMENT；沒有用量回空列表。
+  rpc SumUserLlmUsage(SumUserLlmUsageRequest) returns (SumUserLlmUsageResponse);
+
+  // 網路搜尋的用量（見 ai-service/CONTEXT.md「用量」）：問答每查一次網路記一筆（成功或失敗）。一個 Job 的每一筆，依時間升冪；
+  // job_id 不合法回 INVALID_ARGUMENT，沒有紀錄回空列表。不驗證使用者，Gateway 已經做過 ownership 檢查。
+  rpc ListJobWebSearches(ListJobWebSearchesRequest) returns (ListJobWebSearchesResponse);
+  // 一位使用者在 [start, end) 之間查了幾次網路（成功與失敗分開算；用量上限只算成功的）。user_id 不合法、或沒給 start / end
+  // 回 INVALID_ARGUMENT。
+  rpc CountUserWebSearches(CountUserWebSearchesRequest) returns (CountUserWebSearchesResponse);
+
+  // 講者名字建議（見 ai-service/CONTEXT.md）：pipeline 依錄音裡明確講出的話替還沒改名的講者提出的名字，附依據的原話與時間。
+  // 列出一個 Job 的全部建議（任何狀態；前端只顯示 pending）。job_id 不合法回 INVALID_ARGUMENT，沒有建議回空列表。
+  // 不驗證使用者，Gateway 已經做過 ownership 檢查。
+  rpc ListSpeakerSuggestions(ListSpeakerSuggestionsRequest) returns (ListSpeakerSuggestionsResponse);
+  // 把一個建議標成 applied（使用者套用了，改名本身走 transcription-service 的 RenameSpeaker）或 dismissed（忽略，不再顯示）。
+  // status 不是這兩個、job_id 不合法回 INVALID_ARGUMENT；這個 Job 沒有這位講者的建議回 NOT_FOUND。
+  rpc SetSpeakerSuggestionStatus(SetSpeakerSuggestionStatusRequest) returns (SpeakerSuggestion);
+
+  // 多格式輸出（見 ai-service CONTEXT.md「多格式輸出」）：依一個 Job 的摘要、章節與講者產生一份要發出去的文件（Markdown）。要求後
+  // 立刻回傳「產生中」，背景用要求者的預設模型產生；每次都是新的一份。format 不認得、instruction 太長、社群貼文沒有（或不認得）platform 回 INVALID_ARGUMENT；
+  // 排不進 queue 回 UNAVAILABLE（什麼都沒建立）。title 是 Job 的標題（Gateway 從 upload-service 取來），沒有就空字串。
+  rpc RequestOutput(RequestOutputRequest) returns (GeneratedOutput);
+  // 這個 Job 的輸出（新的在前，含內容）。
+  rpc ListOutputs(ListOutputsRequest) returns (ListOutputsResponse);
+  // 一份輸出；不屬於這個 Job 回 NOT_FOUND。
+  rpc GetOutput(GetOutputRequest) returns (GeneratedOutput);
+  // 使用者修改內容（只有完成的可以改）：跟原本一樣就不算修改；空白或超過 20000 字回 INVALID_ARGUMENT；還在產生或失敗的回
+  // FAILED_PRECONDITION；不屬於這個 Job 回 NOT_FOUND。
+  rpc UpdateOutput(UpdateOutputRequest) returns (GeneratedOutput);
+
+  // 譯文（見 ai-service CONTEXT.md「譯文」）：把一個 Job 的逐字稿翻成另一種語言，每個片段一句（保留時間與講者）。一個 Job 每種語言一份。
+  // 要求後立刻回傳「翻譯中」，背景用要求者的預設模型一批一批翻、每批存檔；已經翻好的再要求一次是補翻缺的、原文改過的。
+  // language 是 zh-TW / en / ja / ko，其他回 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒變）。
+  // 原文片段被編輯後（transcript.edited），翻好的語言自動只重翻改過的片段、清空的刪掉（不算使用者的限流）。
+  rpc RequestTranslation(RequestTranslationRequest) returns (Translation);
+  // 這個 Job 各種語言的譯文（狀態與進度，不含片段）。
+  rpc ListTranslations(ListTranslationsRequest) returns (ListTranslationsResponse);
+  // 一種語言的譯文含片段；沒有這種語言回 NOT_FOUND。
+  rpc GetTranslation(GetTranslationRequest) returns (Translation);
+  // 刪掉一種語言的譯文（翻譯中也可以，背景翻好的那批不會再存）；沒有這種語言回 NOT_FOUND。
+  rpc DeleteTranslation(DeleteTranslationRequest) returns (DeleteTranslationResponse);
+
+  // 講者數據的 AI 判斷（每位講者提出的問題、可能的打斷）：一個 Job 一份，再分析就取代。要求後立刻回傳「分析中」，背景用要求者的
+  // 預設模型分析（見 ai-service README「講者數據」）。少於兩位講者時分析會失敗並附原因。
+  rpc RequestSpeakerInsights(RequestSpeakerInsightsRequest) returns (SpeakerInsights);
+  // 還沒分析過時 status 是 UNSPECIFIED、沒有項目。
+  rpc GetSpeakerInsights(GetSpeakerInsightsRequest) returns (SpeakerInsights);
+
+  // 決策紀錄（見 ai-service CONTEXT.md「決策」「暫定」）：從一場會議或訪談抽出與會者做成的決定。一個 Job 一份抽取紀錄；要求後立刻回傳
+  // 「抽取中」，背景用要求者的預設模型抽（類型是會議、訪談的 Job 轉錄完也會自動抽）。重新抽只換掉 AI 抽的、使用者沒改過的決策。
+  rpc RequestDecisionExtraction(RequestDecisionExtractionRequest) returns (DecisionExtraction);
+  // 這個 Job 的抽取紀錄（沒抽過就沒有）與決策（依時間點排序，沒有時間點的在後）。
+  rpc GetJobDecisions(GetJobDecisionsRequest) returns (JobDecisions);
+  // 使用者自己新增一個決策（source = user；時間點可以沒有）。決定是空的、太長，或欄位超過上限回 INVALID_ARGUMENT（附給使用者看的原因）。
+  rpc CreateDecision(CreateDecisionRequest) returns (Decision);
+  // 修改決策的內容（時間點與原話不變）；改過的標記 edited，重新抽時保留。不是這個 Job 的回 NOT_FOUND；欄位不合規則同上。
+  rpc UpdateDecision(UpdateDecisionRequest) returns (Decision);
+  // 刪掉一個決策：AI 抽的只是隱藏（重新抽時不會再出現），使用者新增的直接刪掉。不是這個 Job 的回 NOT_FOUND。
+  rpc DeleteDecision(DeleteDecisionRequest) returns (DeleteDecisionResponse);
+  // 跨 Job 的決策（時間軸）：這位使用者在這些 Job 的決策（刪掉的不列），依時間點排序。job_ids 由 gateway 從使用者自己的 Job 帶來
+  // （類型、Job 的篩選在那裡）；ai-service 再依 user_id 過濾，只回這個人的。job_ids 是空的就是空的結果。
+  rpc ListUserDecisions(ListUserDecisionsRequest) returns (UserDecisions);
+  // 搜尋決策：決定、理由、沒選的選項、原話裡有這些字的在前，接著是意思相近的（embedding）；embedding 算不出來就只比字。範圍同上。
+  rpc SearchDecisions(SearchDecisionsRequest) returns (UserDecisions);
+  // 問決策（決策頁的問答框）：用自然語言問，只根據這位使用者在這些 Job 的決策回答（跟 SearchDecisions 一樣找相關的決策）。先送恰好一個
+  // sources（依據的決策，順序就是回答裡 [n] 的編號），接著 answered_by 與任意數量的 delta；找不到相關的決策時不呼叫模型，sources 是空的、
+  // 只有一個說「沒有」的 delta。中途失敗送恰好一個 error 並結束。不存紀錄。question 是空的回 INVALID_ARGUMENT。
+  rpc AskDecisions(AskDecisionsRequest) returns (stream AskDecisionsChunk);
+
+  // 事實查核（見 ai-service CONTEXT.md「主張」「查核」）：先標出一個 Job 可以查核的主張（不花搜尋次數），使用者再勾選要查的。一個 Job
+  // 一筆標出主張的紀錄；要求後立刻回傳「標出中」，背景用要求者的預設模型標。重新標出時查核過的主張保留，其他的換掉。
+  rpc RequestFactCheck(RequestFactCheckRequest) returns (FactCheck);
+  // 這個 Job 標出主張的紀錄（沒標過就沒有）與主張（依時間點排序）。
+  rpc GetFactCheck(GetFactCheckRequest) returns (JobFactCheck);
+  // 查核勾選的主張：每條查一次網路（整理過的那一句，逐字稿不送）、依搜到的網頁判斷結論。標成「查核中」並排入 claim_check.requested，回傳
+  // 這個 Job 的主張。剩餘的搜尋次數由 gateway 先檢查。不是這個 Job 的主張回 NOT_FOUND；無法查核的回 INVALID_ARGUMENT；這個部署沒有
+  // 設定網路搜尋回 FAILED_PRECONDITION；排不進 queue 回 UNAVAILABLE。
+  rpc CheckClaims(CheckClaimsRequest) returns (JobFactCheck);
+
+  // 測驗（見 ai-service/CONTEXT.md「測驗」）。要求產生：建立一份「產生中」的測驗、排入 ai-service 自己的
+  // quiz.requested queue，立即回傳（不含題目）。question_count 只能是 5、10、20，否則 INVALID_ARGUMENT；
+  // job_id / user_id 不合法也是 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE（什麼都沒建立）。
+  // user_id 是 Gateway 驗證過 ownership 的使用者，用他的預設模型產生、用量記在他名下。
+  rpc RequestQuiz(RequestQuizRequest) returns (Quiz);
+  // 一個 Job 的所有測驗（新的在前），不含題目。「產生中」超過 5 分鐘回報成 FAILED。
+  rpc ListQuizzes(ListQuizzesRequest) returns (ListQuizzesResponse);
+  // 一份測驗，含題目與正確答案（測驗屬於使用者自己，「作答時看不到答案」由前端處理）。
+  // 不存在或不屬於這個 job 回 NOT_FOUND。
+  rpc GetQuiz(GetQuizRequest) returns (Quiz);
+  // 送出一次作答：後端計分並保存，回傳分數與每題結果。answers 依題目順序、每題一個選項位置（從 0 開始），題數
+  // 不對或選項超出範圍回 INVALID_ARGUMENT；測驗還沒完成回 FAILED_PRECONDITION；不存在或不屬於這個 job 回 NOT_FOUND。
+  // 同一份測驗可以重做，每次作答都保存。
+  rpc SubmitQuizAttempt(SubmitQuizAttemptRequest) returns (QuizAttemptResult);
+
+  // 已連結的帳號（見 ai-service/CONTEXT.md）：Google、Notion 各一個，狀態是已連結、已失效或未連結。存取權杖過期時會先
+  // 用 refresh token 換新；對方拒絕（授權被撤銷、refresh token 失效）就標成已失效，暫時連不上則維持原狀。
+  // 權杖加密存在 ai-service，永遠不會出現在任何回應裡。
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  // 開始連結：記下這次授權（state；Notion 另外用 PKCE，第一次會先向 Notion 動態註冊 client），回傳要把使用者轉過去的
+  // 授權網址。redirect_uri 是 Gateway 的回呼網址，完成時用同一個。service 不認得回 INVALID_ARGUMENT；伺服器沒設定
+  // Google OAuth client 或加密主金鑰回 FAILED_PRECONDITION；連不上 Notion 註冊 client 回 UNAVAILABLE。
+  rpc StartConnection(StartConnectionRequest) returns (StartConnectionResponse);
+  // 完成連結（Gateway 的回呼）：用 state 找回開始連結的使用者，拿 code 換權杖並加密保存。state 不認得、過期、用過，
+  // 或 browser_binding 對不上回 INVALID_ARGUMENT；使用者在對方那邊拒絕（error 有值）或換權杖失敗回 FAILED_PRECONDITION。state 一律只能用一次。
+  rpc CompleteConnection(CompleteConnectionRequest) returns (CompleteConnectionResponse);
+  // 中斷連結：向對方撤銷授權並刪除權杖。撤銷失敗（例如連不上）時權杖仍然刪除，revoked 是 false；對方說權杖本來就已經
+  // 無效（授權早就不在了）算撤銷成功。
+  rpc DeleteConnection(DeleteConnectionRequest) returns (DeleteConnectionResponse);
+
+  // 會後處理（見 ai-service/CONTEXT.md）：這個 Job 能不能跑（不能的話附原因）與最新一份紀錄（狀態、進度文字、行動提案）。
+  // 「執行中」超過 5 分鐘回報成 FAILED。
+  rpc GetPostMeeting(GetPostMeetingRequest) returns (PostMeeting);
+  // 開始會後處理：建立一份「執行中」的紀錄、排入 ai-service 自己的 post_meeting.requested queue，立即回傳。
+  // 不能跑（預設模型是平台模型或不支援工具呼叫、沒有可用的已連結帳號）回 FAILED_PRECONDITION 並附原因；
+  // 已經有一份在跑（沒有卡住）就回傳那一份，不重複排入；timezone 不是 IANA 時區回 INVALID_ARGUMENT；排不進 queue 回 UNAVAILABLE。
+  rpc RequestPostMeeting(RequestPostMeetingRequest) returns (PostMeeting);
+  // 執行使用者勾選的行動提案（arguments_json 是使用者確認、可能改過的最終參數），逐項呼叫對應的外部服務，每項記錄成功（附
+  // 連結）或失敗（附原因）；沒勾選的不動，已經建立過的不再執行。參數不對或對方拒絕只讓那一項失敗。紀錄不屬於這個 job 回
+  // NOT_FOUND；還在跑回 FAILED_PRECONDITION；提案不屬於這份紀錄回 INVALID_ARGUMENT。
+  rpc ExecuteProposals(ExecuteProposalsRequest) returns (PostMeetingRun);
+  // 用上一次的最終參數重試一個失敗的提案；只有失敗的能重試（其他回 FAILED_PRECONDITION）。
+  rpc RetryProposal(RetryProposalRequest) returns (PostMeetingRun);
+  // 會後處理的設定：Notion 的會議紀錄位置（沒指定就不設定）與待辦去處。
+  rpc GetPostMeetingSettings(GetPostMeetingSettingsRequest) returns (PostMeetingSettings);
+  // 儲存設定（整份換掉）：網址是空字串就是不指定。網址改過時先用 Notion 確認是一個讀得到的頁面（不是資料庫），沒改的沿用；
+  // 沒連結 Notion 回 FAILED_PRECONDITION，找不到或不是頁面回 INVALID_ARGUMENT（附原因），連不上 Notion 回 UNAVAILABLE。
+  rpc UpdatePostMeetingSettings(UpdatePostMeetingSettingsRequest) returns (PostMeetingSettings);
+
+  // 自有金鑰（見 ai-service/CONTEXT.md）：provider 是 openai / anthropic / gemini / openrouter。user_id 是 Gateway 從 JWT
+  // 取得的使用者，不另外驗證。
+  //
+  // 存入或替換一把自有金鑰：先向廠商驗證（呼叫不收費的查詢 API），通過才加密存下，回傳末四碼。provider 不在清單、金鑰
+  // 是空的、或廠商說金鑰無效回 INVALID_ARGUMENT（訊息說明原因）；廠商暫時連不上回 UNAVAILABLE；伺服器沒有設定加密主金鑰
+  // 回 FAILED_PRECONDITION。驗證沒通過時什麼都不存。
+  rpc SaveProviderKey(SaveProviderKeyRequest) returns (ProviderKey);
+  // 刪除一把自有金鑰；沒有這把金鑰時 deleted 是 false，不算錯誤。
+  rpc DeleteProviderKey(DeleteProviderKeyRequest) returns (DeleteProviderKeyResponse);
+  // 這位使用者存了哪些自有金鑰（只有末四碼，永遠不回傳金鑰本身）。
+  rpc ListProviderKeys(ListProviderKeysRequest) returns (ListProviderKeysResponse);
+
+  // 預設模型（見 ai-service/CONTEXT.md）：背景工作（上傳後的摘要與章節、重新產生）與問答都用它。
+  //
+  // 這位使用者可以選的模型：平台模型，加上他有自有金鑰的每個廠商整理好的模型清單；有 OpenRouter 金鑰時
+  // openrouter_custom 為 true，代表可以自己輸入 OpenRouter 模型 ID。
+  rpc ListAvailableModels(ListAvailableModelsRequest) returns (ListAvailableModelsResponse);
+  // 目前的預設模型；沒有設定過就是平台模型。
+  rpc GetDefaultModel(GetDefaultModelRequest) returns (ModelChoice);
+  // 設定預設模型：provider 是 "platform" 或有自有金鑰的廠商。整理好的清單裡沒有的模型回 INVALID_ARGUMENT；
+  // OpenRouter 的模型 ID 用 OpenRouter 的模型清單確認存在（不存在回 INVALID_ARGUMENT，OpenRouter 連不上回 UNAVAILABLE）；
+  // 沒有那個廠商的自有金鑰回 FAILED_PRECONDITION。不會重新產生任何既有的內容。
+  rpc SetDefaultModel(SetDefaultModelRequest) returns (ModelChoice);
+}
+
+enum RegenerationStatus {
+  // 沒有正在進行的重新產生（包含從沒重新產生過）。
+  REGENERATION_STATUS_IDLE = 0;
+  REGENERATION_STATUS_RUNNING = 1;
+  // 上一次重新產生失敗了；摘要與章節仍是舊的。
+  REGENERATION_STATUS_FAILED = 2;
+}
+
+enum QuizStatus {
+  QUIZ_STATUS_UNSPECIFIED = 0;
+  QUIZ_STATUS_GENERATING = 1;
+  QUIZ_STATUS_COMPLETED = 2;
+  // 失敗原因見 failure_reason；使用者可以再產生一份。
+  QUIZ_STATUS_FAILED = 3;
+}
+
+message RequestQuizRequest {
+  string job_id = 1;
+  string user_id = 2;
+  int32 question_count = 3;
+}
+
+message ListQuizzesRequest {
+  string job_id = 1;
+}
+
+message ListQuizzesResponse {
+  repeated Quiz quizzes = 1;
+}
+
+message GetQuizRequest {
+  string job_id = 1;
+  string quiz_id = 2;
+}
+
+message Quiz {
+  string id = 1;
+  string job_id = 2;
+  int32 question_count = 3;
+  QuizStatus status = 4;
+  // FAILED 時給使用者看的原因（例如模型回傳的格式不對、自有金鑰無效）；其他狀態是空字串。
+  string failure_reason = 5;
+  // 依據的逐字稿 revision 與產生的模型；完成之前是 0 / 空字串。
+  int32 source_revision = 6;
+  string model_provider = 7;
+  string model = 8;
+  google.protobuf.Timestamp requested_at = 9;
+  // 完成時間；還沒完成（或失敗）時不設定。
+  google.protobuf.Timestamp completed_at = 10;
+  // 只有 GetQuiz 帶題目，依順序排列。
+  repeated QuizQuestion questions = 11;
+  // 所有作答裡答對最多的題數；還沒作答過不設定。
+  optional int32 best_correct_count = 12;
+}
+
+enum ConnectionStatus {
+  CONNECTION_STATUS_UNSPECIFIED = 0;
+  CONNECTION_STATUS_NOT_CONNECTED = 1;
+  CONNECTION_STATUS_CONNECTED = 2;
+  // 授權過期又換不到新的，或被使用者在對方那邊撤銷：要重新連結。
+  CONNECTION_STATUS_INVALID = 3;
+}
+
+message ListConnectionsRequest {
+  string user_id = 1;
+}
+
+message ListConnectionsResponse {
+  // 每個支援的服務一筆（google、notion），包含未連結的。
+  repeated Connection connections = 1;
+}
+
+message Connection {
+  // "google" 或 "notion"
+  string service = 1;
+  ConnectionStatus status = 2;
+  // 連結的時間；未連結時不設定。
+  google.protobuf.Timestamp connected_at = 3;
+}
+
+message StartConnectionRequest {
+  string user_id = 1;
+  string service = 2;
+  string redirect_uri = 3;
+  // Gateway 放進瀏覽器 cookie 的隨機值：只存它的雜湊，回呼時要帶同一個值，這次授權才算數——state 綁定開始連結的那個瀏覽器，
+  // 別人拿到授權網址誘騙使用者同意，也連不到自己的帳號上。不能是空的（否則 INVALID_ARGUMENT）。
+  string browser_binding = 4;
+}
+
+message StartConnectionResponse {
+  string authorize_url = 1;
+}
+
+message CompleteConnectionRequest {
+  string service = 1;
+  string state = 2;
+  string code = 3;
+  // 對方回呼帶的 error（例如使用者按了拒絕的 access_denied）；沒有就是空字串。
+  string error = 4;
+  // 回呼時瀏覽器帶回來的 cookie 值（見 StartConnectionRequest.browser_binding）；對不上就 INVALID_ARGUMENT。
+  string browser_binding = 5;
+}
+
+message CompleteConnectionResponse {
+  string user_id = 1;
+}
+
+message DeleteConnectionRequest {
+  string user_id = 1;
+  string service = 2;
+}
+
+message DeleteConnectionResponse {
+  bool revoked = 1;
+}
+
+message GetPostMeetingRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message RequestPostMeetingRequest {
+  string job_id = 1;
+  string user_id = 2;
+  // 瀏覽器的 IANA 時區（例如 Asia/Taipei），換算相對日期用。
+  string timezone = 3;
+  // Job 的上傳時間（Gateway 查 Job 時一起拿到），換算「明天」「下週三」用。
+  google.protobuf.Timestamp uploaded_at = 4;
+}
+
+message PostMeeting {
+  // 這位使用者現在能不能對這個 Job 跑會後處理；不能的話 unavailable_reason 是給使用者看的原因。
+  bool available = 1;
+  string unavailable_reason = 2;
+  // 最新一份紀錄；還沒跑過就不設定。
+  PostMeetingRun latest_run = 3;
+  // 給使用者的提示（能跑，但有些事做不到），例如 Notion 已連結但還沒指定會議紀錄頁面，或待辦要建在 Google Tasks 但還沒連結 Google。
+  repeated string hints = 4;
+  // 這個 Job 之前的紀錄（不含 latest_run），新的在前：提案、勾選執行了哪些（沒執行的仍是 PROPOSED）、結果與連結。
+  repeated PostMeetingRun earlier_runs = 5;
+}
+
+message GetPostMeetingSettingsRequest {
+  string user_id = 1;
+}
+
+message UpdatePostMeetingSettingsRequest {
+  string user_id = 1;
+  // Notion 頁面的網址（或 ID）：每場會議的會議紀錄（含待辦清單）會建成它底下的子頁面；空字串是不指定。
+  string notion_meetings_page_url = 2;
+  // 原本的待辦資料庫（已拿掉：待辦改放在每場會議的 Notion 子頁面裡）。
+  reserved 3;
+  reserved "notion_todo_database_url";
+  // 待辦要建在哪裡；UNSPECIFIED 是維持原本的設定。
+  TodoDestination todo_destination = 4;
+}
+
+message PostMeetingSettings {
+  // 每場會議的會議紀錄（含待辦清單）建成這個 Notion 頁面底下的子頁面；沒指定就不設定。
+  NotionLocation notion_meetings_page = 1;
+  reserved 2;
+  reserved "notion_todo_database";
+  // 待辦要建在哪裡（還沒選過是 Google Tasks）。
+  TodoDestination todo_destination = 3;
+}
+
+enum TodoDestination {
+  TODO_DESTINATION_UNSPECIFIED = 0;
+  TODO_DESTINATION_GOOGLE_TASKS = 1;
+  // 寫成 Notion 會議紀錄子頁面裡的打勾清單；沒指定 notion_meetings_page 就不提待辦。
+  TODO_DESTINATION_NOTION = 2;
+}
+
+message NotionLocation {
+  // 頁面 ID。
+  string id = 1;
+  string title = 2;
+  string url = 3;
+}
+
+enum PostMeetingStatus {
+  POST_MEETING_STATUS_UNSPECIFIED = 0;
+  POST_MEETING_STATUS_RUNNING = 1;
+  POST_MEETING_STATUS_COMPLETED = 2;
+  // 到了工具呼叫次數或時間的上限而停下；已經產生的提案保留。
+  POST_MEETING_STATUS_LIMIT_REACHED = 3;
+  POST_MEETING_STATUS_FAILED = 4;
+}
+
+message PostMeetingRun {
+  string id = 1;
+  PostMeetingStatus status = 2;
+  // 目前在做什麼（例如「正在查詢你的行事曆…」）。
+  string progress = 3;
+  // FAILED 時給使用者看的原因。
+  string failure_reason = 4;
+  // 用哪個模型跑的。
+  string model_provider = 5;
+  string model = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  // 結束的時間；還在跑就不設定。
+  google.protobuf.Timestamp finished_at = 8;
+  // 依產生的順序。
+  repeated ActionProposal proposals = 9;
+}
+
+message ExecuteProposalsRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string run_id = 3;
+  repeated ProposalToExecute proposals = 4;
+}
+
+message ProposalToExecute {
+  string proposal_id = 1;
+  // 使用者確認的最終參數（JSON 物件）。
+  string arguments_json = 2;
+}
+
+message RetryProposalRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string run_id = 3;
+  string proposal_id = 4;
+}
+
+enum ProposalStatus {
+  PROPOSAL_STATUS_UNSPECIFIED = 0;
+  // 還沒執行（等使用者確認）。
+  PROPOSAL_STATUS_PROPOSED = 1;
+  PROPOSAL_STATUS_DONE = 2;
+  PROPOSAL_STATUS_FAILED = 3;
+}
+
+// 行動提案（見 ai-service/CONTEXT.md）：agent 想做的一個寫入動作，等使用者確認才執行。
+message ActionProposal {
+  string id = 1;
+  // 哪個外部服務，例如 "google_calendar"。
+  string service = 2;
+  // 哪一種提案，決定前端用哪種表單，例如 "calendar_event"（arguments：summary、start、end、description）。
+  string kind = 3;
+  // 要送出的參數，JSON 物件。
+  string arguments_json = 4;
+  // 確認後要呼叫的工具，例如 "calendar_create_event"。
+  string tool = 5;
+  ProposalStatus status = 6;
+  // 執行成功時，建立好的項目的連結（例如 Google 日曆活動的網址）。
+  string result_url = 7;
+  // 執行失敗時給使用者看的原因。
+  string failure_reason = 8;
+  // 還沒執行，而且跟這個 Job 其他次會後處理已經建立過的事項相同（服務、種類、正規化後的標題與時間一樣）：前端標示「上次已建立」、
+  // 預設不勾選。
+  bool previously_created = 9;
+}
+
+message SubmitQuizAttemptRequest {
+  string job_id = 1;
+  string quiz_id = 2;
+  string user_id = 3;
+  repeated int32 answers = 4;
+}
+
+message QuizAttemptResult {
+  int32 correct_count = 1;
+  int32 question_count = 2;
+  // 依題目順序。
+  repeated QuizQuestionResult results = 3;
+}
+
+message QuizQuestionResult {
+  int32 chosen_option = 1;
+  int32 correct_option = 2;
+  bool correct = 3;
+  string explanation = 4;
+}
+
+message QuizQuestion {
+  // "multiple_choice"（4 個選項）或 "true_false"（選項固定是「是」「否」）。
+  string kind = 1;
+  string prompt = 2;
+  repeated string options = 3;
+  // 正確選項在 options 裡的位置（從 0 開始）。
+  int32 correct_option = 4;
+  string explanation = 5;
+  // 依據的片段開始時間（秒），可能沒有。
+  repeated double source_timestamps = 6;
+}
+
+message RequestRegenerationRequest {
+  string job_id = 1;
+  // 要求重新產生的使用者（Gateway 驗證過 ownership），用量記在他名下。
+  string user_id = 2;
+}
+
+message ListJobLlmUsageRequest {
+  string job_id = 1;
+}
+
+message ListJobLlmUsageResponse {
+  repeated LlmUsage records = 1;
+}
+
+message SumUserLlmUsageRequest {
+  string user_id = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
+}
+
+message SumUserLlmUsageResponse {
+  repeated LlmUsageSum sums = 1;
+}
+
+// 同一個廠商、模型、金鑰來源的 LLM 用量加總。
+message LlmUsageSum {
+  string provider = 1;
+  string model = 2;
+  string key_source = 3;
+  // 已知數字的加總；廠商沒回報的不算進去（有幾次見 calls_with_unknown_usage）。
+  int64 input_tokens = 4;
+  int64 output_tokens = 5;
+  // 呼叫次數，失敗的也算。
+  int32 calls = 6;
+  // 廠商沒有回報 token 數的呼叫次數。
+  int32 calls_with_unknown_usage = 7;
+}
+
+// 一次 LLM 呼叫的用量。
+message ListSpeakerSuggestionsRequest {
+  string job_id = 1;
+}
+
+message ListSpeakerSuggestionsResponse {
+  repeated SpeakerSuggestion suggestions = 1;
+}
+
+// 一位講者的名字建議：依據是錄音裡某一句明確講出身分的話（例如自我介紹）。
+message SpeakerSuggestion {
+  string speaker_label = 1;
+  string name = 2;
+  // 依據的片段開始時間（秒）與原文。
+  double evidence_start_time = 3;
+  string evidence_text = 4;
+  // pending / applied / dismissed
+  string status = 5;
+}
+
+message SetSpeakerSuggestionStatusRequest {
+  string job_id = 1;
+  string speaker_label = 2;
+  string status = 3;
+}
+
+message ListJobWebSearchesRequest {
+  string job_id = 1;
+}
+
+message ListJobWebSearchesResponse {
+  repeated WebSearchUsage records = 1;
+}
+
+// 一次網路搜尋（平台付費）。
+message WebSearchUsage {
+  // 搜尋服務，例如 "tavily"
+  string provider = 1;
+  bool succeeded = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message CountUserWebSearchesRequest {
+  string user_id = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
+}
+
+message CountUserWebSearchesResponse {
+  int64 succeeded = 1;
+  int64 failed = 2;
+}
+
+message LlmUsage {
+  // summary / chapters / qa_answer / qa_rewrite / regenerated_summary / regenerated_chapters / quiz / post_meeting
+  string feature = 1;
+  // "platform"（平台模型）或廠商名稱
+  string provider = 2;
+  string model = 3;
+  // "platform"（平台模型）或 "own_key"（自有金鑰）
+  string key_source = 4;
+  // 廠商沒有回報時不設定（未知），不是 0。
+  optional int32 input_tokens = 5;
+  optional int32 output_tokens = 6;
+  bool succeeded = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message Summary {
+  string job_id = 1;
+  string summary_text = 2;
+  // 這份摘要（跟同一次產生的章節）依據的逐字稿 revision；小於逐字稿目前的 revision 就是過時。
+  int32 source_revision = 3;
+  // RUNNING 超過 5 分鐘視為卡住，回報成 FAILED（可以再要求一次）。
+  RegenerationStatus regeneration_status = 4;
+  // 產生這份摘要（與同一次產生的章節）的模型；記錄模型之前產生的摘要是空字串。provider 是 "platform" 或廠商名稱。
+  string model_provider = 5;
+  string model = 6;
+}
+
+message GetSummaryRequest {
+  string job_id = 1;
+}
+
+message Chapter {
+  string id = 1;
+  string job_id = 2;
+  string title = 3;
+  double start_time = 4;
+  int32 sequence_no = 5;
+}
+
+message ListChaptersRequest {
+  string job_id = 1;
+}
+
+message ListChaptersResponse {
+  repeated Chapter chapters = 1;
+}
+
+message AskQuestionRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string question = 3;
+  // 這一次提問臨時用的模型（只看 provider 與 model）；不給就用預設模型。
+  ModelChoice model = 4;
+  // 這一題也查網路（見 ai-service CONTEXT.md「網路搜尋」）：回答前用搜尋查詢查一次網路，結果跟這段內容一起給模型。
+  // 沒設定搜尋服務時忽略（當成 false）。
+  bool web_search = 5;
+}
+
+message AskQuestionChunk {
+  oneof payload {
+    // 檢索完成後、生成答案文字之前送出恰好一次（前面可能有 step）。回答依據的逐字稿片段起始時間，
+    // 供前端做時間戳跳轉；沒有特定排序保證。
+    SourceTimestamps sources = 1;
+    // 答案文字的其中一段 token/片段，依生成順序送出，前端接到就直接 append 顯示。
+    string delta = 2;
+    // 這輪問答中途失敗（改寫、檢索、生成任一步出錯）時送出恰好一次，stream 隨即結束，
+    // 這輪不會寫進 qa_history。模型呼叫失敗時訊息會點出是哪個廠商、什麼原因。
+    string error = 3;
+    // 這次用哪個模型回答（sources 之後、第一個 delta 之前送出恰好一次；只設 provider 與 model）。
+    ModelChoice answered_by = 4;
+    // 只有這一題真的查了網路（web_search 且有設定搜尋服務）時送出恰好一次，在 sources 之後、answered_by 之前：放進回答依據的
+    // 網路來源，順序就是回答裡 [1]、[2] 的編號。搜尋失敗時 sources 是空的、failed 是 true，回答照樣只根據這段內容產生。
+    WebSources web_sources = 5;
+    // 回答過程中正在做的一步（見 AnswerStep），可以在任何其他 chunk 之前送出；同一個 id 會送好幾次（進行中 → 完成或失敗）。
+    // 「這個 Job 還沒有內容」（NOT_FOUND）與「用不到的模型」（INVALID_ARGUMENT）一定在送出任何 chunk（包括步驟）之前發生。
+    AnswerStep step = 6;
+  }
+}
+
+// 回答過程的一步，給使用者看現在做到哪（id：understand 理解問題、retrieve 在內容裡找段落、search 查網路、answer 撰寫回答）。
+// label 與 detail 是給人看的文字（例如「在內容裡找相關的段落」「找到 5 段」）。
+message AnswerStep {
+  string id = 1;
+  string label = 2;
+  // running / done / failed
+  string state = 3;
+  string detail = 4;
+}
+
+// 網路搜尋的一筆結果：回答依據的一個網頁。
+message WebSource {
+  string title = 1;
+  string url = 2;
+}
+
+message WebSources {
+  repeated WebSource sources = 1;
+  bool failed = 2;
+}
+
+message SourceTimestamps {
+  repeated double source_timestamps = 1;
+}
+
+message ListQaHistoryRequest {
+  string job_id = 1;
+}
+
+message QaTurn {
+  string question = 1;
+  string answer = 2;
+  // 回答依據的逐字稿片段起始時間，沒有特定排序保證（跟 AskQuestionChunk.sources 同義）。
+  repeated double source_timestamps = 3;
+  google.protobuf.Timestamp created_at = 4;
+  // 回答這一則的模型；記錄模型之前的問答是空字串。provider 是 "platform" 或廠商名稱。
+  string model_provider = 5;
+  string model = 6;
+  // 這一題有沒有查網路；查了但搜尋失敗時 web_sources 是空的。
+  bool web_search = 7;
+  // 回答依據的網路來源，順序就是回答裡 [n] 的編號（跟 AskQuestionChunk.web_sources 同義）。
+  repeated WebSource web_sources = 8;
+}
+
+message ListQaHistoryResponse {
+  // 依 created_at 升冪排序。
+  repeated QaTurn turns = 1;
+}
+
+message SaveProviderKeyRequest {
+  string user_id = 1;
+  string provider = 2;
+  string key = 3;
+}
+
+message ProviderKey {
+  string provider = 1;
+  // 金鑰的末四碼，給使用者辨認是哪一把。
+  string last4 = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message DeleteProviderKeyRequest {
+  string user_id = 1;
+  string provider = 2;
+}
+
+message DeleteProviderKeyResponse {
+  bool deleted = 1;
+  // 刪掉的金鑰正被預設模型使用時，預設模型改回平台模型，這裡是 true。
+  bool default_model_reset = 2;
+}
+
+message ListAvailableModelsRequest {
+  string user_id = 1;
+}
+
+message ListAvailableModelsResponse {
+  repeated ModelChoice models = 1;
+  bool openrouter_custom = 2;
+  // 問答可以查網路（部署有設定搜尋服務）；false 時前端不顯示「查網路」。
+  bool web_search = 3;
+}
+
+// 一個可以選的模型。provider 是 "platform"（平台模型）或廠商名稱。
+message ModelChoice {
+  string provider = 1;
+  string model = 2;
+  // 能不能呼叫工具（會後處理需要）。
+  bool supports_tools = 3;
+}
+
+message GetDefaultModelRequest {
+  string user_id = 1;
+}
+
+message SetDefaultModelRequest {
+  string user_id = 1;
+  string provider = 2;
+  string model = 3;
+}
+
+message ListProviderKeysRequest {
+  string user_id = 1;
+}
+
+message ListProviderKeysResponse {
+  repeated ProviderKey keys = 1;
+}
+
+enum SpeakerInsightsStatus {
+  // 還沒分析過。
+  SPEAKER_INSIGHTS_STATUS_UNSPECIFIED = 0;
+  SPEAKER_INSIGHTS_STATUS_GENERATING = 1;
+  SPEAKER_INSIGHTS_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；可以再分析。
+  SPEAKER_INSIGHTS_STATUS_FAILED = 3;
+}
+
+message RequestSpeakerInsightsRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message GetSpeakerInsightsRequest {
+  string job_id = 1;
+}
+
+message SpeakerInsights {
+  string job_id = 1;
+  SpeakerInsightsStatus status = 2;
+  string failure_reason = 3;
+  // 依據的逐字稿 revision 與分析的模型（上一次完成的；還沒完成過是 0 / 空字串）——跟逐字稿目前的 revision 不同就是過時。
+  int32 source_revision = 4;
+  string model_provider = 5;
+  string model = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+  // 上一次完成的結果（再分析時舊的照樣回傳，完成才換掉），依時間排序。
+  repeated SpeakerInsight items = 9;
+}
+
+message SpeakerInsight {
+  // "question" 或 "interruption"
+  string kind = 1;
+  string speaker_label = 2;
+  // 打斷時被打斷的講者；問題是空字串。
+  string interrupted_label = 3;
+  double start_time = 4;
+  // 那個片段的原話。
+  string text = 5;
+}
+
+enum OutputStatus {
+  OUTPUT_STATUS_UNSPECIFIED = 0;
+  OUTPUT_STATUS_GENERATING = 1;
+  OUTPUT_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；可以再產生一份。
+  OUTPUT_STATUS_FAILED = 3;
+}
+
+message RequestOutputRequest {
+  string job_id = 1;
+  string user_id = 2;
+  // podcast_description / youtube_description / blog_post / newsletter / social_post
+  string format = 3;
+  string title = 4;
+  // 使用者的一句要求（語氣、讀者…），最多 200 字；沒有就空字串。
+  string instruction = 5;
+  // 社群貼文的平台（threads / facebook / instagram / linkedin / x），社群貼文一定要有；其他格式忽略。
+  string platform = 6;
+}
+
+message ListOutputsRequest {
+  string job_id = 1;
+}
+
+message ListOutputsResponse {
+  repeated GeneratedOutput outputs = 1;
+}
+
+message GetOutputRequest {
+  string job_id = 1;
+  string output_id = 2;
+}
+
+message UpdateOutputRequest {
+  string job_id = 1;
+  string output_id = 2;
+  string content = 3;
+}
+
+message GeneratedOutput {
+  string id = 1;
+  string job_id = 2;
+  string format = 3;
+  string instruction = 4;
+  OutputStatus status = 5;
+  string failure_reason = 6;
+  // Markdown；完成之前是空字串。
+  string content = 7;
+  // 依據的逐字稿 revision 與產生的模型；完成之前是 0 / 空字串。
+  int32 source_revision = 8;
+  string model_provider = 9;
+  string model = 10;
+  google.protobuf.Timestamp requested_at = 11;
+  google.protobuf.Timestamp completed_at = 12;
+  // 使用者改過內容的時間；沒改過不設定。
+  google.protobuf.Timestamp edited_at = 13;
+  // 社群貼文的平台；其他格式是空字串。
+  string platform = 14;
+}
+
+enum TranslationStatus {
+  TRANSLATION_STATUS_UNSPECIFIED = 0;
+  TRANSLATION_STATUS_GENERATING = 1;
+  TRANSLATION_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；已經翻好的片段保留，再要求一次只翻剩下的。
+  TRANSLATION_STATUS_FAILED = 3;
+}
+
+message RequestTranslationRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string language = 3;
+}
+
+message ListTranslationsRequest {
+  string job_id = 1;
+}
+
+message ListTranslationsResponse {
+  repeated Translation translations = 1;
+}
+
+message GetTranslationRequest {
+  string job_id = 1;
+  string language = 2;
+}
+
+message DeleteTranslationRequest {
+  string job_id = 1;
+  string language = 2;
+}
+
+message DeleteTranslationResponse {}
+
+message Translation {
+  string job_id = 1;
+  string language = 2;
+  TranslationStatus status = 3;
+  string failure_reason = 4;
+  // 進度：這次要翻的片段數（有內容的片段）與已經有譯文的片段數。
+  int32 total_segments = 5;
+  int32 translated_segments = 6;
+  string model_provider = 7;
+  string model = 8;
+  google.protobuf.Timestamp requested_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  // 只有 GetTranslation 帶。
+  repeated SegmentTranslation segments = 11;
+}
+
+message SegmentTranslation {
+  // transcription-service 的片段 id
+  string segment_id = 1;
+  string text = 2;
+  // 翻的時候的原文：跟片段目前的文字不一樣，就是原文改過、這句還沒重翻（編輯後自動重翻，見 RequestTranslation）。
+  string source_text = 3;
+}
+
+enum DecisionExtractionStatus {
+  DECISION_EXTRACTION_STATUS_UNSPECIFIED = 0;
+  DECISION_EXTRACTION_STATUS_GENERATING = 1;
+  DECISION_EXTRACTION_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；之前抽好的決策照樣保留。
+  DECISION_EXTRACTION_STATUS_FAILED = 3;
+}
+
+message RequestDecisionExtractionRequest {
+  string job_id = 1;
+  string user_id = 2;
+  // 會議的日期（Job 的上傳時間）：找較早的會議裡可能被取代的決策；沒帶就不找。
+  google.protobuf.Timestamp meeting_at = 3;
+}
+
+message GetJobDecisionsRequest {
+  string job_id = 1;
+}
+
+message DecisionExtraction {
+  string job_id = 1;
+  DecisionExtractionStatus status = 2;
+  string failure_reason = 3;
+  // 依據的逐字稿 revision 與抽取的模型（上一次完成的；還沒完成過是 0 / 空字串）——跟逐字稿目前的 revision 不同就是過時。
+  int32 source_revision = 4;
+  string model_provider = 5;
+  string model = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+}
+
+message JobDecisions {
+  // 沒抽過就沒有。
+  optional DecisionExtraction extraction = 1;
+  repeated Decision decisions = 2;
+}
+
+// 決策可以改的內容。
+message DecisionInput {
+  string statement = 1;
+  string rationale = 2;
+  repeated string alternatives = 3;
+  // 講者標籤，要是這個 Job 的講者（不是的回 INVALID_ARGUMENT「不認得這位講者」）；空字串＝不知道是誰。
+  string proposed_by = 4;
+  bool tentative = 5;
+}
+
+message CreateDecisionRequest {
+  string job_id = 1;
+  // Job 擁有者（時間軸、搜尋都只查自己的）。
+  string user_id = 2;
+  DecisionInput decision = 3;
+  optional double start_time = 4;
+  // 會議的日期（Job 的上傳時間）。
+  google.protobuf.Timestamp meeting_at = 5;
+}
+
+message UpdateDecisionRequest {
+  string job_id = 1;
+  string decision_id = 2;
+  DecisionInput decision = 3;
+}
+
+message DeleteDecisionRequest {
+  string job_id = 1;
+  string decision_id = 2;
+}
+
+message DeleteDecisionResponse {}
+
+message ListUserDecisionsRequest {
+  string user_id = 1;
+  repeated string job_ids = 2;
+}
+
+message SearchDecisionsRequest {
+  string user_id = 1;
+  string query = 2;
+  repeated string job_ids = 3;
+}
+
+message UserDecisions {
+  repeated Decision decisions = 1;
+}
+
+message Decision {
+  string id = 1;
+  string job_id = 2;
+  // 決定了什麼。
+  string statement = 3;
+  // 為什麼（錄音裡講到的理由）；沒講是空字串。
+  string rationale = 4;
+  // 考慮過但沒選的選項。
+  repeated string alternatives = 5;
+  // 提出或拍板的講者標籤；不知道是空字串。
+  string proposed_by = 6;
+  // 暫定：明確說了之後還要再確認。
+  bool tentative = 7;
+  // 做成決定的時間點與那個片段的原話；使用者自己新增時可以沒有。
+  optional double start_time = 8;
+  string evidence_text = 9;
+  // "ai"（抽出來的）或 "user"（使用者自己新增的）。
+  string source = 10;
+  // 使用者改過（重新抽時保留）。
+  bool edited = 11;
+  // 這個決策取代了較早的哪一個；沒有是空字串。
+  string supersedes_id = 12;
+  google.protobuf.Timestamp created_at = 13;
+  // 取代了的那個（被刪掉的不算），與取代了這一個的後來的決策（被刪掉的不列）。
+  optional DecisionLink supersedes = 14;
+  repeated DecisionLink superseded_by = 15;
+  // 會議的日期（Job 的上傳時間）；舊的決策沒有。
+  google.protobuf.Timestamp meeting_at = 16;
+  // 提出者現在的名稱（跨 Job 的頁面用；講者改名時跟著改）；不知道是誰是空字串。
+  string proposed_by_name = 17;
+}
+
+// 另一個決策（通常在別的 Job）：顯示「取代了…」「已被…取代」並連過去用。
+message DecisionLink {
+  string id = 1;
+  string job_id = 2;
+  string statement = 3;
+  google.protobuf.Timestamp meeting_at = 4;
+}
+
+message AskDecisionsRequest {
+  string user_id = 1;
+  string question = 2;
+  repeated string job_ids = 3;
+}
+
+message AskDecisionsChunk {
+  oneof payload {
+    UserDecisions sources = 1;
+    string delta = 2;
+    string error = 3;
+    ModelChoice answered_by = 4;
+  }
+}
+
+enum FactCheckStatus {
+  FACT_CHECK_STATUS_UNSPECIFIED = 0;
+  FACT_CHECK_STATUS_GENERATING = 1;
+  FACT_CHECK_STATUS_COMPLETED = 2;
+  // 原因見 failure_reason；之前標出的主張照樣保留。
+  FACT_CHECK_STATUS_FAILED = 3;
+}
+
+message RequestFactCheckRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message GetFactCheckRequest {
+  string job_id = 1;
+}
+
+message CheckClaimsRequest {
+  string job_id = 1;
+  string user_id = 2;
+  repeated string claim_ids = 3;
+}
+
+message FactCheck {
+  string job_id = 1;
+  FactCheckStatus status = 2;
+  string failure_reason = 3;
+  // 依據的逐字稿 revision 與標出的模型（上一次完成的；還沒完成過是 0 / 空字串）。
+  int32 source_revision = 4;
+  string model_provider = 5;
+  string model = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+}
+
+message JobFactCheck {
+  // 沒標過就沒有。
+  optional FactCheck extraction = 1;
+  repeated Claim claims = 2;
+}
+
+message Claim {
+  string id = 1;
+  string job_id = 2;
+  // 說這句話的講者標籤與時間點、那個片段的原話。
+  string speaker_label = 3;
+  double start_time = 4;
+  string text = 5;
+  // 整理成一句完整、可以搜尋的陳述（查核時只送這一句）。
+  string claim = 6;
+  // "number" 或 "fact"。
+  string kind = 7;
+  // 查核的結論：supported / disputed / no_reliable_source / not_checkable；空字串是還沒查。
+  string verdict = 8;
+  string explanation = 9;
+  repeated ClaimSource sources = 10;
+  google.protobuf.Timestamp checked_at = 11;
+  string check_model = 12;
+  // 查核中。
+  bool checking = 13;
+  // 上一次查核失敗的原因（那一條保持還沒查）；沒有是空字串。
+  string check_error = 14;
+  // 標出這條主張時的逐字稿 revision：比目前的小就是依據舊版的。
+  int32 source_revision = 15;
+}
+
+// 查核依據的一個網頁；順序就是說明裡 [n] 的編號。
+message ClaimSource {
+  string title = 1;
+  string url = 2;
+  string excerpt = 3;
+}

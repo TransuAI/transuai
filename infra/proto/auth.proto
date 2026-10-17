@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package transuai.auth.v1;
+
+option java_multiple_files = true;
+option java_package = "com.transuai.auth.grpc.v1";
+
+import "google/protobuf/timestamp.proto";
+
+// AuthService 是純內部服務（僅供 API Gateway 呼叫），使用者註冊/登入/換發 token。
+// Register / Login / Refresh 三支不需要身分（呼叫時還沒有 token），GetMe 則跟其他內部服務
+// 一樣需要 gRPC metadata "x-user-id"（由 Gateway 驗證 JWT 後轉發）—— AuthService 自己簽發
+// access token，但不重新驗證別人轉發過來的 token，這支查詢一律信任 x-user-id。
+service AuthService {
+  // 建立帳號，email 已存在回 ALREADY_EXISTS。成功直接簽發 token，不需要再額外呼叫一次 Login。
+  rpc Register(RegisterRequest) returns (AuthResponse);
+
+  // email/password 其中一項錯誤都回 UNAUTHENTICATED（不細分，避免帳號列舉）。
+  rpc Login(LoginRequest) returns (AuthResponse);
+
+  // 用 refresh token 換發新的 access/refresh token 組合，舊的 refresh token 隨即作廢（輪替）。無效、過期、已經作廢回
+  // UNAUTHENTICATED；已經換發過的 token 再被用一次（超過短暫的寬限，給同時換發的多個分頁）視為被盜，整串作廢。
+  rpc Refresh(RefreshRequest) returns (AuthResponse);
+
+  // 依 x-user-id 查目前使用者資訊，找不到（例如帳號已被刪除）回 NOT_FOUND。
+  rpc GetMe(GetMeRequest) returns (User);
+
+  // 登出：作廢這個 refresh token 所在的那一串（同一次登入一路換發出來的）。不需要 x-user-id，refresh token 本身就是憑證；
+  // token 無效或已經作廢也回成功（登出本來就是要它不能用）。
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+
+  // 登出所有裝置：作廢這位使用者所有的 refresh token（需要 x-user-id）。已簽出的 access token 由 gateway 擋下（記下「這之前簽的不算」）。
+  rpc LogoutAllDevices(LogoutAllDevicesRequest) returns (LogoutResponse);
+
+  // 刪除帳號（需要 x-user-id）：再確認一次密碼，錯了回 PERMISSION_DENIED（不是 UNAUTHENTICATED——那表示 token 不能用）。
+  // 通過就刪掉使用者與他所有的 refresh token，並發 account.deleted 讓其他服務清掉他的資料；找不到使用者回 NOT_FOUND。
+  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
+
+  // 改密碼（需要 x-user-id）：目前的密碼錯回 PERMISSION_DENIED；新密碼不合規則回 INVALID_ARGUMENT。成功就作廢這位使用者所有的
+  // refresh token（其他裝置要重新登入），並為這次的請求簽一組新的 token。
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+
+  // 忘記密碼（不需要 x-user-id）：email 有註冊就寄一封重設連結的信（一次性、限時），沒註冊也一樣回成功（不透露有沒有這個帳號）。
+  // 這個部署沒有設定寄信（SMTP）時回 UNAVAILABLE，描述是給使用者看的。
+  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse);
+
+  // 用重設連結裡的 token 設新密碼（不需要 x-user-id）：token 無效、過期、用過了回 FAILED_PRECONDITION；新密碼照註冊的規則
+  // （INVALID_ARGUMENT）。成功就作廢這位使用者所有的登入、寄一封通知信。
+  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+
+  // 確認 email（不需要 x-user-id）：註冊時寄的確認連結裡的 token。無效、過期、用過了回 FAILED_PRECONDITION。
+  rpc VerifyEmail(VerifyEmailRequest) returns (VerifyEmailResponse);
+
+  // 重寄確認信（需要 x-user-id）：已經確認過就什麼都不做；這個部署沒有設定寄信時 UNAVAILABLE。
+  rpc ResendEmailVerification(ResendEmailVerificationRequest) returns (ResendEmailVerificationResponse);
+
+  // 產生復原碼（需要 x-user-id）：要目前的密碼（錯了 PERMISSION_DENIED）。舊的作廢，回傳新的 10 組（只有這一次看得到），寄通知信。
+  rpc GenerateRecoveryCodes(GenerateRecoveryCodesRequest) returns (GenerateRecoveryCodesResponse);
+
+  // 忘記密碼的另一條路（不需要 x-user-id）：email＋一組還沒用的復原碼，設新密碼。email 或復原碼不對都回 FAILED_PRECONDITION（不分是哪個）；
+  // 新密碼照註冊的規則（INVALID_ARGUMENT，不合時復原碼不用掉）。成功就用掉那組、作廢所有登入、寄通知信。
+  rpc ResetPasswordWithRecoveryCode(ResetPasswordWithRecoveryCodeRequest) returns (ResetPasswordResponse);
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string display_name = 3;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message RefreshRequest {
+  string refresh_token = 1;
+}
+
+message GetMeRequest {
+}
+
+message AuthResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  User user = 3;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string display_name = 3;
+  google.protobuf.Timestamp created_at = 4;
+  // email 確認過了沒（忘記密碼的信只寄給確認過的 email）。
+  bool email_verified = 5;
+  // 還沒用的復原碼有幾組（0：沒產生過或用完了）。
+  int32 recovery_codes_left = 6;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+message LogoutAllDevicesRequest {
+}
+
+message LogoutResponse {
+  // Logout：作廢的那一串（這次登入）的 id，跟 access token 的 sid 一樣，gateway 用它讓那一串簽出的 access token 也馬上失效；
+  // token 無效或不認得時是空的。LogoutAllDevices 不填。
+  string session_id = 1;
+  // LogoutAllDevices：作廢的、access token 可能還沒過期的那幾串（最近一個 access token 效期內簽過 token 的）。Logout 不填。
+  repeated string ended_session_ids = 2;
+}
+
+message DeleteAccountRequest {
+  string password = 1;
+}
+
+message DeleteAccountResponse {
+}
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
+}
+
+message RequestPasswordResetRequest {
+  string email = 1;
+}
+
+message RequestPasswordResetResponse {
+}
+
+message ResetPasswordRequest {
+  string token = 1;
+  string new_password = 2;
+}
+
+message ResetPasswordResponse {
+  string user_id = 1;
+  // 作廢的、access token 可能還沒過期的那幾串（同 LogoutResponse.ended_session_ids）。
+  repeated string ended_session_ids = 2;
+}
+
+message VerifyEmailRequest {
+  string token = 1;
+}
+
+message VerifyEmailResponse {
+}
+
+message ResendEmailVerificationRequest {
+}
+
+message ResendEmailVerificationResponse {
+}
+
+message GenerateRecoveryCodesRequest {
+  string current_password = 1;
+}
+
+message GenerateRecoveryCodesResponse {
+  repeated string codes = 1;
+}
+
+message ResetPasswordWithRecoveryCodeRequest {
+  string email = 1;
+  string code = 2;
+  string new_password = 3;
+}
+
+message ChangePasswordResponse {
+  // 這次請求的新登入。
+  AuthResponse signed_in = 1;
+  // 作廢的、access token 可能還沒過期的那幾串（同 LogoutResponse.ended_session_ids）。
+  repeated string ended_session_ids = 2;
+}

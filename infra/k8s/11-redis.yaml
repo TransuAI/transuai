@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: transuai
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: transuai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          # 記憶體上限：放的都是有效時間的東西（限流計數、快取），滿了就淘汰最久沒用的——快取回源、限流計數被淘汰時暫時放寬一點，
+          # 都不影響功能。一份長會議的逐字稿快取約 1～2MB。
+          # 有設 REDIS_PASSWORD（正式環境一定要，見 02-secret.yaml）就要求密碼；本機開發留空，不要求。
+          command: ["sh", "-c"]
+          args:
+            - exec redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: REDIS_PASSWORD
+                  optional: true
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", 'redis-cli ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD" --no-auth-warning} ping | grep -q PONG']
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}

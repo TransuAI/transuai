@@ -1,0 +1,94 @@
+# 各服務共用的非機敏設定，對應每個服務 application.properties / core/config.py 裡
+# 同名的環境變數。DB_NAME 因為每個服務不同（auth_db/upload_db/transcription_db/ai_db），
+# 留在各自的 Deployment 裡設定，不放這裡。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: transuai
+data:
+  # 執行環境：production 時每個服務啟動前檢查密鑰（見 02-secret.yaml），並關掉 Swagger、gRPC reflection 等開發用的東西。
+  APP_ENV: "development"
+
+  # Postgres
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+
+  # RabbitMQ
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+
+  # 物件儲存（MinIO，正式環境改指向 Cloudflare R2）
+  STORAGE_ENDPOINT: "http://minio:9000"
+  # presigned URL 簽給瀏覽器用；叢集內的 "minio" 這個 service DNS 瀏覽器解析不到，
+  # 要用本機能連到的位址（要搭配 kubectl port-forward svc/minio 9000:9000）
+  # localhost:9000 在這台機器上已被別的程序佔用（可能是 docker-compose 模式的 MinIO），
+  # 改用 19000 走 kubectl port-forward svc/minio 19000:9000，避免和它衝突/混用資料
+  STORAGE_PUBLIC_ENDPOINT: "http://localhost:19000"
+  STORAGE_REGION: "us-east-1"
+  STORAGE_BUCKET: "media-uploads"
+  STORAGE_PATH_STYLE_ACCESS: "true"
+  STORAGE_PRESIGN_EXPIRY_MINUTES: "15"
+  MINIO_BUCKET: "media-uploads"
+
+  # 服務間 gRPC 位址（k8s Service DNS，同 namespace 內用短名即可解析）
+  AUTH_SERVICE_GRPC_TARGET: "auth-service:9091"
+  UPLOAD_SERVICE_GRPC_TARGET: "upload-service:9090"
+  TRANSCRIPTION_SERVICE_GRPC_TARGET: "transcription-service:8083"
+  AI_SERVICE_GRPC_TARGET: "ai-service:8084"
+
+  # RabbitMQ 佇列名稱
+  TRANSCRIPTION_REQUESTED_QUEUE: "transcription.requested"
+  TRANSCRIPTION_COMPLETED_QUEUE: "transcription.completed"
+  AI_COMPLETED_QUEUE: "ai.completed"
+  JOB_FAILED_QUEUE: "job.failed"
+
+  # 外部 API 型號（key 本身是機敏資訊，放在 02-secret.yaml）
+  # 語音辨識（transcription-service，見 transcription-service/docs/adr/0003）：本機 vLLM 跑的 Breeze-ASR-25（infra/scripts/vllm.sh
+  # 的 :8002），講者分離在 transcription-service 裡用 CPU 跑（模型打包在 image 裡）。有設定 STT_BASE_URL 就不用 Deepgram。
+  STT_BASE_URL: "http://host.docker.internal:8002/v1"
+  STT_MODEL: "MediaTek-Research/Breeze-ASR-25"
+  # 改用 Deepgram（雲端，含講者分離，見 transcription-service/docs/adr/0001）：上面兩個設成空字串、secret 補 DEEPGRAM_API_KEY。
+  # DEEPGRAM_LANGUAGE 也是沒指定語言的舊訊息的預設語言（本地辨識一樣用它）。
+  DEEPGRAM_MODEL: "nova-3"
+  DEEPGRAM_LANGUAGE: "zh-TW"
+  # 平台模型與 embedding 都跑在自己電腦上用 Docker 跑的 vLLM（infra/scripts/vllm.sh，用 GPU，不用付 AI API 的錢；見
+  # ai-service/docs/adr/0015），pod 經由 Docker Desktop 的 host.docker.internal 連到它。沒開 --api-key，金鑰留空。
+  # 模型名稱是 vLLM 服務的（HF 上的模型 ID），要跟 vllm.sh 的 VLLM_CHAT_MODEL、VLLM_EMBED_MODEL 一致。
+  PLATFORM_LLM_BASE_URL: "http://host.docker.internal:8000/v1"
+  PLATFORM_LLM_API_KEY: ""
+  PLATFORM_LLM_EXTRA_BODY: '{"chat_template_kwargs": {"enable_thinking": false}}'
+  # 一般生成（摘要、章節、問答）：16GB 的卡要同時放 embedding 與之後的語音辨識，用 8B 的 AWQ（4-bit）版本（見 ADR 0015）。
+  PLATFORM_LLM_MODEL: "Qwen/Qwen3-8B-AWQ"
+  # 會後處理的平台模型（ai-service/docs/adr/0008）：有設定時，預設模型是平台模型的使用者也能跑會後處理；空字串就是不提供。
+  # 跟一般生成同一個（一張卡只放得下一個聊天模型）；工具呼叫的品質要用 ADR 0011 那套實測確認（見 ADR 0015）。
+  AI_POST_MEETING_PLATFORM_MODEL: "Qwen/Qwen3-8B-AWQ"
+  # Embedding：Qwen3-Embedding-0.6B，1024 維（資料庫的向量欄位）；問題前面加指示，檢索比較準。換模型後 ai-service 啟動時
+  # 會在背景重算既有的向量。
+  EMBEDDING_BASE_URL: "http://host.docker.internal:8001/v1"
+  EMBEDDING_MODEL: "Qwen/Qwen3-Embedding-0.6B"
+  EMBEDDING_QUERY_INSTRUCTION: "Given a question about a recording, retrieve the transcript passages that answer it"
+
+  # 已連結的帳號（Google / Notion OAuth，gateway）：對方回呼 {OAUTH_CALLBACK_BASE_URL}/oauth/{service}/callback，這個網址要
+  # 登記在 Google Cloud 的 OAuth client；完成後轉回 {FRONTEND_URL}/settings。前端目前在本機跑 Vite（/api proxy 到 gateway）。
+  OAUTH_CALLBACK_BASE_URL: "http://localhost:5173/api"
+  FRONTEND_URL: "http://localhost:5173"
+
+  # Redis：gateway 的限流與快取、transcription-service 的逐字稿快取（見各自 README）。REDIS_PORT 一定要寫：Service 叫 redis，k8s 會自動注入
+  # REDIS_PORT=tcp://<ip>:6379（跟 RABBITMQ_PORT 一樣），這裡的值蓋掉它。
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+
+  # 轉錄的上限：gateway 在取得上傳網址與完成上傳時用前端量的長度先擋，transcription-service 在呼叫語音辨識之前用實際長度再檢查一次，
+  # 兩邊讀同一個值。每個檔案最長幾分鐘只有 transcription-service 用（前端也寫死 60 分鐘）。
+  USAGE_LIMIT_TRANSCRIPTION_MINUTES: "600"
+  MAX_RECORDING_MINUTES: "60"
+
+  # 寄信（auth-service：忘記密碼的連結、密碼改了的通知）。SMTP 由部署的單位提供；SMTP_HOST 空的時候忘記密碼不能用、通知不寄。
+  # 密碼放 app-secrets 的 SMTP_PASSWORD。
+  SMTP_HOST: ""
+  SMTP_PORT: "587"
+  SMTP_USERNAME: ""
+  SMTP_AUTH: "true"
+  SMTP_STARTTLS: "true"
+  MAIL_FROM: ""

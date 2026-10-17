@@ -1,0 +1,216 @@
+syntax = "proto3";
+
+package transuai.upload.v1;
+
+option java_multiple_files = true;
+option java_package = "com.transuai.upload.grpc.v1";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// UploadService 是內部服務（僅供 API Gateway / 其他後端服務呼叫）。
+// 呼叫端需在 gRPC metadata 帶入 "x-user-id"（由 Gateway 驗證 JWT 後轉發），
+// UploadService 不重新驗證 JWT，只信任內部網路呼叫。
+service UploadService {
+  // 取得物件儲存的 presigned upload URL，此階段尚未建立 Job。
+  rpc GetPresignedUploadUrl(GetPresignedUploadUrlRequest) returns (GetPresignedUploadUrlResponse);
+
+  // 前端完成上傳後呼叫，建立 Job record 並發送 transcription.requested 事件。
+  rpc CompleteUpload(CompleteUploadRequest) returns (Job);
+
+  // 查詢單一 Job。
+  rpc GetJob(GetJobRequest) returns (Job);
+
+  // 取得該 Job 媒體檔案的 presigned download URL，供前端播放器直接讀取；ownership 檢查
+  // 方式跟 GetJob 一樣（找不到屬於呼叫端的 Job 就回 NOT_FOUND），不額外驗證。
+  // as_attachment=true 時，URL 會要求物件儲存回 Content-Disposition: attachment（檔名＝Job 的
+  // 原始檔名），供「匯出 → 下載原始檔」使用；預設 false 是給播放器 inline 讀取。
+  rpc GetPresignedDownloadUrl(GetPresignedDownloadUrlRequest) returns (GetPresignedDownloadUrlResponse);
+
+  // 查詢使用者所有 Job（分頁，新的在前）。可以用 query 找標題或檔名包含它的（不分大小寫，% 與 _ 照字面比對），
+  // 用 category 只看某個類型（不在清單回 INVALID_ARGUMENT）；空字串＝不篩。total_count 跟著條件算。
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+
+  // 刪除 Job 與相關儲存物件。
+  rpc DeleteJob(DeleteJobRequest) returns (google.protobuf.Empty);
+
+  // 使用者修改標題與類型（見 upload-service CONTEXT.md「標題」「類型」）。沒帶的欄位不動；帶了的欄位記為使用者設定過，
+  // AI（SetSuggestedDetails）之後不會再寫。標題空字串＝沒有標題（顯示檔名），仍算使用者設定過。
+  // 標題超過 100 字、類型不在清單內回 INVALID_ARGUMENT；不是自己的 Job 回 NOT_FOUND。
+  rpc UpdateJob(UpdateJobRequest) returns (Job);
+}
+
+// InternalJobService 僅供內部服務（Transcription Service / AI Service 等 pipeline 下游）呼叫，
+// 用來回寫 Job 狀態。不透過 API Gateway 對外開放，也不需要 "x-user-id"
+// （呼叫方只知道 job_id，沒有終端使用者身分），只信任內部網路呼叫。
+service InternalJobService {
+  // 更新 Job 狀態（例如 transcribing / transcribed / failed），失敗時可附上 error_reason。
+  rpc UpdateJobStatus(UpdateJobStatusRequest) returns (Job);
+  // AI 依內容建議的標題與類型（ai-service 的 pipeline 在摘要之後呼叫）。使用者改過的欄位不動；空字串的欄位不動；
+  // 類型不在清單裡回 INVALID_ARGUMENT。job_id 格式不對回 INVALID_ARGUMENT、找不到回 NOT_FOUND。
+  rpc SetSuggestedDetails(SetSuggestedDetailsRequest) returns (Job);
+}
+
+message SetSuggestedDetailsRequest {
+  string job_id = 1;
+  string title = 2;
+  string category = 3;
+}
+
+// 筆記（見 upload-service CONTEXT.md「筆記」）：使用者在 Job 裡記下的一段文字，可以釘在錄音的某個時間點（只有時間、沒有文字的是書籤）。
+// 跟 UploadService 一樣需要 x-user-id：Job 不是這位使用者的、或筆記不屬於這個 Job，一律 NOT_FOUND。刪除 Job 時筆記一起刪。
+service NoteService {
+  // 依時間排序（沒有時間的在最後），同一個時間依建立順序。
+  rpc ListNotes(ListNotesRequest) returns (ListNotesResponse);
+  // 時間與文字不能都是空的；文字最多 2,000 字；時間不能是負的、不能超過錄音長度（知道長度時）；source 是 manual（預設）或 qa；
+  // 一個 Job 最多 500 則。不符合回 INVALID_ARGUMENT。
+  rpc CreateNote(CreateNoteRequest) returns (Note);
+  // 只改文字；清空文字只在筆記有時間時可以（變成書籤）。
+  rpc UpdateNote(UpdateNoteRequest) returns (Note);
+  rpc DeleteNote(DeleteNoteRequest) returns (google.protobuf.Empty);
+}
+
+message Note {
+  string note_id = 1;
+  string job_id = 2;
+  // 釘在錄音的哪個時間（秒）；沒有就是沒釘。
+  optional double time_seconds = 3;
+  string text = 4;
+  // manual（使用者寫的）或 qa（從問答存的）
+  string source = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message ListNotesRequest {
+  string job_id = 1;
+}
+
+message ListNotesResponse {
+  repeated Note notes = 1;
+}
+
+message CreateNoteRequest {
+  string job_id = 1;
+  optional double time_seconds = 2;
+  string text = 3;
+  string source = 4;
+}
+
+message UpdateNoteRequest {
+  string job_id = 1;
+  string note_id = 2;
+  string text = 3;
+}
+
+message DeleteNoteRequest {
+  string job_id = 1;
+  string note_id = 2;
+}
+
+enum FileType {
+  FILE_TYPE_UNSPECIFIED = 0;
+  AUDIO = 1;
+  VIDEO = 2;
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  UPLOADING = 2;
+  UPLOADED = 3;
+  TRANSCRIBING = 4;
+  TRANSCRIBED = 5;
+  SUMMARIZING = 6;
+  COMPLETED = 7;
+  FAILED = 8;
+}
+
+message Job {
+  string job_id = 1;
+  string user_id = 2;
+  string file_name = 3;
+  FileType file_type = 4;
+  int64 file_size_bytes = 5;
+  string storage_path = 6;
+  int32 duration_seconds = 7;
+  JobStatus status = 8;
+  string error_reason = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  // 轉錄語言：zh-TW（中文）、en（英文）、auto（自動偵測中文或英文）。這個欄位之前建立的 Job 是空字串，當成中文。
+  string transcription_language = 12;
+  // 標題（見 upload-service CONTEXT.md）：AI 依內容取的，或使用者改的；空字串是沒有標題（顯示檔名）。
+  string title = 13;
+  // 類型：meeting、lecture、interview、podcast、video、other；空字串是還沒判斷。
+  string category = 14;
+}
+
+message GetPresignedUploadUrlRequest {
+  string file_name = 1;
+  FileType file_type = 2;
+  int64 file_size_bytes = 3;
+  // 檔案的 MIME 類型（瀏覽器的 File.type）：AUDIO 要 audio/*、VIDEO 要 video/*。簽進 presigned PUT，上傳時 Content-Type
+  // 必須一字不差，存不成 text/html 之類能在瀏覽器執行的類型。
+  string content_type = 4;
+}
+
+message GetPresignedUploadUrlResponse {
+  string upload_url = 1;
+  string storage_path = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message CompleteUploadRequest {
+  string storage_path = 1;
+  string file_name = 2;
+  FileType file_type = 3;
+  int64 file_size_bytes = 4;
+  int32 duration_seconds = 5;
+  // 轉錄語言：zh-TW（中文）、en（英文）、auto（自動偵測中文或英文）；空字串是中文。其他值回 INVALID_ARGUMENT。
+  string transcription_language = 6;
+}
+
+message GetJobRequest {
+  string job_id = 1;
+}
+
+message GetPresignedDownloadUrlRequest {
+  string job_id = 1;
+  bool as_attachment = 2;
+}
+
+message GetPresignedDownloadUrlResponse {
+  string download_url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message ListJobsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string query = 3;
+  string category = 4;
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message DeleteJobRequest {
+  string job_id = 1;
+}
+
+message UpdateJobRequest {
+  string job_id = 1;
+  optional string title = 2;
+  optional string category = 3;
+}
+
+message UpdateJobStatusRequest {
+  string job_id = 1;
+  JobStatus status = 2;
+  string error_reason = 3;
+}
