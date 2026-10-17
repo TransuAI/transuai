@@ -17,8 +17,8 @@ import com.transuai.gateway.redis.RedisFallback;
  * 登出所有裝置、改密碼、刪除帳號之後，舊的 access token 最多還能用 15 分鐘（ASVS 3.3.1）。記住的時間跟 access token 一樣長，
  * 之後舊 token 自己過期了。三種：
  * <ul>
- * <li>登出：那一次登入（access token 的 {@code sid}）簽出的</li>
- * <li>登出所有裝置、改密碼：這位使用者在那一刻以前簽的（看 {@code iat}，秒）</li>
+ * <li>登出、登出所有裝置、改密碼：作廢的那幾次登入（access token 的 {@code sid}；auth-service 回傳是哪幾次）簽出的</li>
+ * <li>登出所有裝置、改密碼：這個版本之前簽的、沒有 {@code sid} 的 token，看它在那一刻以前簽的（{@code iat}，秒）</li>
  * <li>刪除帳號：這位使用者的全部</li>
  * </ul>
  * 每個請求一次 Redis 呼叫（MGET）。Redis 連不上時當作沒記住（跟限流、快取一樣），這段空窗寫在 README。
@@ -44,8 +44,8 @@ public class RevokedAccessTokens {
                 () -> redis.opsForValue().set(SIGNED_OUT_SESSION + sessionId, "1", ttl));
     }
 
-    /** 這位使用者在 before 以前簽的都不算了（登出所有裝置、改密碼）。before 要取在呼叫 auth-service 之前，之後簽的新 token 才不會被擋。 */
-    public void sessionsEndedBefore(UUID userId, Instant before) {
+    /** 這位使用者沒有 sid 的舊 token，before 以前簽的都不算了（登出所有裝置、改密碼）。有 sid 的由 {@link #sessionEnded} 一次一次擋。 */
+    public void legacySessionsEndedBefore(UUID userId, Instant before) {
         RedisFallback.run(SIGNED_OUT_BEFORE + userId,
                 () -> redis.opsForValue().set(SIGNED_OUT_BEFORE + userId, String.valueOf(before.getEpochSecond()), ttl));
     }
@@ -68,7 +68,7 @@ public class RevokedAccessTokens {
             return true;
         }
         String before = values.get(1);
-        // 沒有 iat 的 token（自己簽的才會沒有）當作很早以前簽的。
-        return before != null && token.issuedAt().getEpochSecond() < Long.parseLong(before);
+        // 只看沒有 sid 的舊 token（有 sid 的已經依作廢的那幾次登入擋了；時間只到秒，同一秒內簽的新 token 會被誤擋）。沒有 iat 當作很早以前簽的。
+        return token.sessionId() == null && before != null && token.issuedAt().getEpochSecond() <= Long.parseLong(before);
     }
 }

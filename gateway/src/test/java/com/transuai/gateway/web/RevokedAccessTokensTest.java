@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.auth.grpc.v1.ChangePasswordResponse;
 import com.transuai.auth.grpc.v1.LogoutResponse;
 import com.transuai.auth.grpc.v1.User;
 import com.transuai.gateway.RedisContainerConfig;
@@ -56,8 +57,10 @@ class RevokedAccessTokensTest {
         when(authServiceStub.withInterceptors(any())).thenReturn(authServiceStub);
         when(authServiceStub.getMe(any())).thenReturn(User.newBuilder().setId(user.toString()).setEmail("a@example.com").build());
         when(authServiceStub.logout(any())).thenReturn(LogoutResponse.newBuilder().setSessionId(thisSignIn).build());
-        when(authServiceStub.logoutAllDevices(any())).thenReturn(LogoutResponse.getDefaultInstance());
-        when(authServiceStub.changePassword(any())).thenReturn(TestAuth.signedIn("a@example.com"));
+        when(authServiceStub.logoutAllDevices(any())).thenReturn(
+                LogoutResponse.newBuilder().addEndedSessionIds(thisSignIn).addEndedSessionIds(otherSignIn).build());
+        when(authServiceStub.changePassword(any())).thenReturn(ChangePasswordResponse.newBuilder()
+                .setSignedIn(TestAuth.signedIn("a@example.com")).addEndedSessionIds(thisSignIn).addEndedSessionIds(otherSignIn).build());
     }
 
     @Test
@@ -73,27 +76,28 @@ class RevokedAccessTokensTest {
     }
 
     @Test
-    void loggingOutOfEveryDeviceStopsEveryTokenIssuedBeforeIt() throws Exception {
-        String before = token(thisSignIn, Instant.now().minusSeconds(60));
-        String otherDevice = token(otherSignIn, Instant.now().minusSeconds(30));
+    void loggingOutOfEveryDeviceStopsTheAccessTokensOfEverySignInThatEnded() throws Exception {
+        // Issued in the same second as the logout: only the sign-in id tells them apart from what comes after.
+        String thisDevice = token(thisSignIn, Instant.now());
+        String otherDevice = token(otherSignIn, Instant.now());
 
-        mvc.perform(post("/auth/logout-all").header("Authorization", "Bearer " + before)).andExpect(status().isNoContent());
+        mvc.perform(post("/auth/logout-all").header("Authorization", "Bearer " + thisDevice)).andExpect(status().isNoContent());
 
-        me(before).andExpect(status().isUnauthorized());
+        me(thisDevice).andExpect(status().isUnauthorized());
         me(otherDevice).andExpect(status().isUnauthorized());
-        me(token(UUID.randomUUID().toString(), Instant.now().plusSeconds(1))).andExpect(status().isOk());  // signed in again
+        me(token(UUID.randomUUID().toString(), Instant.now())).andExpect(status().isOk());  // signed in again, same second
     }
 
     @Test
-    void changingThePasswordStopsTheTokensIssuedBeforeIt() throws Exception {
-        String before = token(thisSignIn, Instant.now().minusSeconds(60));
-        String otherDevice = token(otherSignIn, Instant.now().minusSeconds(30));
+    void changingThePasswordStopsTheOtherSignInsButNotTheOneItHandsOut() throws Exception {
+        String otherDevice = token(otherSignIn, Instant.now());
 
-        mvc.perform(post("/auth/password").header("Authorization", "Bearer " + before).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/auth/password").header("Authorization", "Bearer " + token(thisSignIn, Instant.now()))
+                .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"currentPassword\":\"old one\",\"newPassword\":\"a brand new password\"}")).andExpect(status().isOk());
 
         me(otherDevice).andExpect(status().isUnauthorized());
-        me(token(thisSignIn, Instant.now().plusSeconds(1))).andExpect(status().isOk());  // the one handed out just now
+        me(token(UUID.randomUUID().toString(), Instant.now())).andExpect(status().isOk());  // the new sign-in
     }
 
     @Test

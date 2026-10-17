@@ -271,7 +271,9 @@ access token 是 stateless 的，作廢的只有 refresh token——不另外處
 的有效時間 `app.auth.revoked-token-ttl`）：
 
 - 登出：`signed-out-session:{sid}`——auth-service 的 `Logout` 回傳作廢的那一串（＝access token 的 `sid` claim），那次登入簽出的都不能用；其他登入不受影響
-- 登出所有裝置、改密碼：`signed-out-before:{userId}` = 呼叫 auth-service **之前**的時間（秒），`iat` 比它早的都不能用；改密碼時這次拿到的新 token 在它之後
+- 登出所有裝置、改密碼：auth-service 回傳作廢的、access token 可能還沒過期的那幾串（`ended_session_ids`），每一串一個 `signed-out-session:{sid}`；
+  改密碼時這次拿到的新 token 是新的一串，不受影響。另外記 `signed-out-before:{userId}`＝現在（秒），只用來擋這個版本之前簽的、沒有 `sid` 的 token
+  （`iat` 不晚於它的）——時間只到秒，不拿它擋有 `sid` 的，免得同一秒簽的新 token 被誤擋
 - 刪除帳號：`deleted-user:{userId}`，全部不能用
 
 `JwtAuthenticationFilter` 驗完簽章後用一次 MGET 查這三個鍵，擋下的回 `401`（前端會去換發，refresh token 也已作廢，所以回登入頁）。

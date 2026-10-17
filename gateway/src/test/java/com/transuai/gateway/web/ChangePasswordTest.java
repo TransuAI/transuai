@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
+import com.transuai.auth.grpc.v1.ChangePasswordResponse;
 import com.transuai.gateway.RedisContainerConfig;
 import com.transuai.gateway.TestAuth;
 import com.transuai.gateway.security.JwtProperties;
@@ -55,7 +56,8 @@ class ChangePasswordTest {
     void setUp() {
         token = TestAuth.accessToken(jwt, user);
         when(authServiceStub.withInterceptors(any())).thenReturn(authServiceStub);
-        when(authServiceStub.changePassword(any())).thenReturn(TestAuth.signedIn("a@example.com"));
+        when(authServiceStub.changePassword(any())).thenReturn(
+                ChangePasswordResponse.newBuilder().setSignedIn(TestAuth.signedIn("a@example.com")).build());
     }
 
     @Test

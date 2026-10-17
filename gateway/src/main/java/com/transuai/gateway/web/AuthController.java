@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.transuai.auth.grpc.v1.AuthResponse;
 import com.transuai.auth.grpc.v1.AuthServiceGrpc;
 import com.transuai.auth.grpc.v1.ChangePasswordRequest;
+import com.transuai.auth.grpc.v1.ChangePasswordResponse;
 import com.transuai.auth.grpc.v1.DeleteAccountRequest;
 import com.transuai.auth.grpc.v1.GetMeRequest;
 import com.transuai.auth.grpc.v1.LoginRequest;
@@ -117,10 +118,10 @@ public class AuthController {
     @PostMapping("/logout-all")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logoutAllDevices(@CurrentUserId UUID userId, HttpServletResponse servletResponse) {
-        Instant now = Instant.now();
         GrpcMetadataSupport.withUserId(authServiceStub, userId)
-                .logoutAllDevices(LogoutAllDevicesRequest.getDefaultInstance());
-        revokedTokens.sessionsEndedBefore(userId, now);
+                .logoutAllDevices(LogoutAllDevicesRequest.getDefaultInstance())
+                .getEndedSessionIdsList().forEach(revokedTokens::sessionEnded);
+        revokedTokens.legacySessionsEndedBefore(userId, Instant.now());
         refreshTokenCookie.clear(servletResponse);
     }
 
@@ -147,13 +148,12 @@ public class AuthController {
         if (request.currentPassword() == null || request.currentPassword().isEmpty() || request.newPassword() == null) {
             throw new IllegalArgumentException("currentPassword and newPassword are required");
         }
-        // 取在呼叫之前：新簽的 token 在這之後，不會被擋。
-        Instant now = Instant.now();
-        AuthResponse response = rateLimits.withPasswordCheck(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
+        ChangePasswordResponse response = rateLimits.withPasswordCheck(userId, () -> GrpcMetadataSupport.withUserId(authServiceStub, userId)
                 .changePassword(ChangePasswordRequest.newBuilder()
                         .setCurrentPassword(request.currentPassword()).setNewPassword(request.newPassword()).build()));
-        revokedTokens.sessionsEndedBefore(userId, now);
-        return signedIn(response, servletResponse);
+        response.getEndedSessionIdsList().forEach(revokedTokens::sessionEnded);
+        revokedTokens.legacySessionsEndedBefore(userId, Instant.now());
+        return signedIn(response.getSignedIn(), servletResponse);
     }
 
     @GetMapping("/me")
