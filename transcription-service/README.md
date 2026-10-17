@@ -98,6 +98,9 @@ Redis 的 `transcript:v1:{job_id}` 是一個 hash，存序列化的 `Transcript`
 - Redis 連不上時照樣讀資料庫，只記 log，而且不重試（redis-py 預設重試 10 次，實測連不上時一次要 3.7 秒以上；逾時 0.5 秒）；編輯時
   連不上的話，舊內容最多留到有效時間結束。
 
+對外連線只准連 `OUTBOUND_ALLOWED_HOSTS`（逗號分隔；空的就只有 `api.deepgram.com`，`app/core/outbound.py`，ASVS 12.6.1）：語音辨識的 client
+送出前看網域，不在清單裡就不送、記 log（不算暫時性失敗、不重試）。物件儲存（boto3）是內部服務，不經過它。
+
 轉錄上限的環境變數：`MAX_RECORDING_MINUTES`（`60`）、`USAGE_LIMIT_TRANSCRIPTION_MINUTES`（`600`，要跟 gateway 一樣；k8s 都在 `app-config`）。
 
 環境變數：`REDIS_HOST`（`localhost`）、`REDIS_PORT`（`6379`）、`REDIS_PASSWORD`（空）、`REDIS_TIMEOUT_SECONDS`（`0.5`）、`TRANSCRIPT_CACHE_TTL_SECONDS`（`600`）。

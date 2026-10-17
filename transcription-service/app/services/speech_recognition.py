@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from app.core import outbound
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def model_name() -> str:
 
 # 音檔直接以檔案內容上傳（不傳 URL：本機的 MinIO 從網際網路上連不到）。幾十分鐘的音檔上傳加處理要一點時間，
 # 讀取逾時放寬；連不上則很快放棄，交給訊息層級重試。
-_client = httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0))
+_client = outbound.client(timeout=httpx.Timeout(600.0, connect=10.0))
 
 
 def recognize(audio_path: Path, language: str | None = None) -> Recognition:

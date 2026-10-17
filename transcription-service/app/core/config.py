@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     max_recording_minutes: int = 60
     usage_limit_transcription_minutes: int = 600
 
+    # 對外連線的允許清單（逗號分隔的網域，見 app/core/outbound.py）；空的就只有 Deepgram。
+    outbound_allowed_hosts: str = ""
+
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-3"
     # 固定指定語言而不是讓 Deepgram 自動偵測：自動偵測的中文走的是通用模型，輸出簡體、錯字也明顯較多（見 ADR 0001）。
