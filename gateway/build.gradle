@@ -1,0 +1,84 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '4.1.1'
+	id 'io.spring.dependency-management' version '1.1.7'
+	id 'com.google.protobuf' version '0.9.6'
+}
+
+group = 'com.transuai'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(26)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+// 依賴套件弱點掃描（見 README）：Spring Boot 4.1.1 管理的這幾個版本還有已知弱點，先覆蓋成修好的版本；升級 Spring Boot 後
+// 它管理的版本追上（或更新）就拿掉對應的那一行。
+ext['jackson-2-bom.version'] = '2.21.7'
+ext['jackson-bom.version'] = '3.1.7'
+ext['tomcat.version'] = '11.0.25'
+ext['rabbit-amqp-client.version'] = '5.34.0'
+
+ext {
+	jjwtVersion = '0.12.6'
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.springframework.boot:spring-boot-starter-json'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-grpc-client'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation "io.jsonwebtoken:jjwt-api:${jjwtVersion}"
+	runtimeOnly "io.jsonwebtoken:jjwt-impl:${jjwtVersion}"
+	runtimeOnly "io.jsonwebtoken:jjwt-jackson:${jjwtVersion}"
+	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5'
+	compileOnly 'org.projectlombok:lombok'
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	annotationProcessor 'org.projectlombok:lombok'
+	annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+	testCompileOnly 'org.projectlombok:lombok'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+// Gateway 是 auth/upload/transcription/ai 四個服務的 client，proto 定義集中放在 ../infra/proto
+// （跟其他服務一樣），這裡要全部編（其他服務的 build.gradle 只挑自己實作的那一份）。
+sourceSets {
+	main {
+		proto {
+			srcDir '../infra/proto'
+		}
+	}
+}
+
+protobuf {
+	protoc {
+		artifact = 'com.google.protobuf:protoc:4.34.2'
+	}
+	plugins {
+		grpc {
+			artifact = 'io.grpc:protoc-gen-grpc-java:1.80.0'
+		}
+	}
+	generateProtoTasks {
+		all().configureEach {
+			plugins {
+				grpc {}
+			}
+		}
+	}
+}
