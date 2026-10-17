@@ -2,6 +2,9 @@
 
 本機開發環境的基礎設施：PostgreSQL、Redis、RabbitMQ、MinIO，以及完整服務的 Kubernetes 部署。
 
+這裡的設定都是**本機開發用**的（預設密碼、NodePort、`emptyDir`）。客戶在自己的環境部署時，照 [`docs/deployment-checklist.md`](docs/deployment-checklist.md)
+（密鑰、TLS 與同一個網站、前端的安全標頭、網路隔離、物件儲存、image 掃描、監控）。
+
 ## 目錄結構假設
 
 所有 repo clone 在同一層：

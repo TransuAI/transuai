@@ -908,8 +908,8 @@ Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登
 
 ## 6.5 雲端免費部署方案（MVP 上雲用，規劃中，尚未執行）
 
-> 這節整節都是**還沒做**的規劃，目前實際只有本機部署（docker-compose 或本機 k8s/kind，見上表與
-> `infra/README.md`），沒有任何服務真的跑在下面列的雲端平台上。保留內容作為之後要上雲時的參考。
+> **2026-10-17 起不採用**：服務改成由客戶部署在自己內部，不由我們上雲營運。客戶部署照 `infra/docs/deployment-checklist.md`。
+> 這節保留當作各外部服務免費額度的參考；目前實際只有本機部署（docker-compose 或本機 k8s/kind，見上表與 `infra/README.md`）。
 
 MVP 階段先用免費額度上雲驗證，不用信用卡。以下是各服務對應的免費雲端選項與限制備註，正式流量成長後需個別評估升級。
 
@@ -951,13 +951,18 @@ WebSocket 不靠 cookie（連上後送 access token，見 3.5），可以照樣�
 3. **講者分離**：轉錄時自動做（Deepgram，講者依第一次開口的順序編號為「講者 N」），來源欄有講者區塊（每位講者一個顏色，可以就地改名），逐字稿在換人的地方顯示講者，片段可以改成別的講者或新增講者（修正分離錯誤），迷你播放器與匯出帶講者名稱，AI 的摘要 / 章節 / 問答知道誰說了什麼（問答在回答當下才用講者目前的名字，改名不用重算 embedding）；只有一位講者時全部隱藏、AI 輸入也不帶名字；舊 Job 不回填
 4. **多格式輸出**：Studio「多格式輸出」產生 Podcast 介紹、YouTube 描述、部落格文章、電子報、社群貼文（依平台），依摘要、章節與使用者取過名字的講者寫成 Markdown，可以複製、下載。「會議紀錄」不另外做——會後處理寫進 Notion 的會議紀錄就是它。
    不要跟已經做好的「匯出」（前端把既有內容轉成 TXT/SRT/VTT/Markdown（報告、筆記、決策、測驗、事實查核），含譯文與雙語字幕、複製、下載原始檔）混為一談
-5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow
+5. **Auth**：JWT（HS256，access 15 分鐘/refresh 7 天，一次登入最多 30 天），refresh token 存雜湊、可輪替與作廢（登出、被盜偵測），不做完整 OAuth2 flow；密碼 12 到 128 字元，PBKDF2 雜湊（舊的 bcrypt 登入時換掉）
 6. **可觀測性**：只有基本 log（Python 用標準 `logging`，Java 用 Spring 預設），沒有 tracing（Sleuth/Zipkin 等待流量成長後再導入）
 7. **免費 API 額度管理**：AI Service 呼叫 HF Inference Providers（摘要/章節分段/RAG 問答/embedding）、Transcription Service 呼叫 Deepgram 時遇到 429/5xx/逾時，**已解決**——兩邊都用同一套訊息層級 requeue 機制自動重試（TTL + dead-letter-exchange，最多 2 次、共 3 次嘗試，見 `ai-service/docs/adr/0001-message-level-retry-for-transient-external-failures.md`，`ai-service`/`transcription-service` 的 `app/services/retry.py` 是實際實作）；這跟上面第 2 點的 MQ **連線**重試是不同層級，兩層現在都做了。AI Service 額外把同一套機制套用到內部 gRPC 呼叫（transcript-fetch、mid-pipeline 狀態回報），也補上了終端失敗回報（`UpdateJobStatus(FAILED, ...)`）本身失敗時的獨立重試；Transcription Service 目前只做了語音辨識呼叫這一段，gRPC 呼叫韌性跟終端失敗回報重試還沒跟進（見 `transcription-service/README.md` 已知限制）。用量已記錄（每一次 LLM 呼叫與轉錄都記在使用者與 Job 名下，Job 工作區逐筆列出、設定頁看得到每月依模型加總）；每位使用者每月有用量上限（轉錄分鐘數、平台模型 token，見 `gateway/README.md`「每月用量上限」），用量告警仍是缺口
 8. **正式環境的設定**：每個服務讀 `APP_ENV`（預設 `development`）；`production` 時啟動前檢查自己的密鑰（沒設、還是開發用預設值、或太短就不啟動，並說出是哪幾個環境變數），並關掉開發用的東西（gRPC reflection、gateway 與 notification-service 的 API 文件）。要換掉哪些值見 `infra/k8s/02-secret.yaml`，Redis 在正式環境要設密碼（`REDIS_PASSWORD`）。
 9. **依賴套件弱點掃描**：每個服務的 README 有「依賴套件弱點掃描」一節寫怎麼掃（Python：pip-audit；Java：用 Grype 掃 build 出來的 jar；前端：`npm audit`），上線前與之後每個月跑一次。2026-10-03 掃過一輪，高風險／嚴重的都升級或覆蓋版本修掉了（Spring Boot 4.1.0 → 4.1.1 加上 Jackson、Tomcat、amqp-client 的版本覆蓋；transcription-service 的 pillow、urllib3；前端 `npm audit fix`），只剩前端開發工具（shadcn CLI）裡一個還沒有修好版本、也不會進到瀏覽器的 `braces`（見 `frontend/README.md`）。只掃了語言套件，container image 的作業系統套件還沒掃
 10. **刪除帳號與揭露**（個資法）：使用者可以在設定頁刪除帳號（再輸入密碼），所有資料刪除、已連結帳號撤銷授權、用量去識別化（見 3.1、5.）；
     前端 `/privacy` 列出每個第三方送什麼、什麼時候送（註冊頁與設定頁連過去）。系統由客戶部署在自己內部，蒐集者與聯絡窗口是部署的單位，所以這頁不寫營運方的聯絡方式與伺服器地區（2026-10-17 決定）
+11. **上線前驗證**（OWASP ASVS 4.0.3 Level 1，2026-10-17）：128 條逐項對照，附程式位置、測試與 kind 上的手動測試（暴力破解、限流、IDOR、
+    上傳上限、WebSocket、登出後的 token、Redis 停掉），見 `.scratch/pre-launch-hardening/asvs-l1.md` 與 `manual-tests.md`。通過 83、部分 8、
+    未通過 8、不適用 22、部署時要做 7。當場修掉：密碼 12–128 字元與 PBKDF2（不截斷）、一次登入最多 30 天、gateway 的安全標頭與一般化的 500
+    訊息。還沒做的（改密碼、密碼外洩清單與強度提示、上傳的 Content-Type、後端檢查錄音長度、登出時 access token 立即失效，與要決定的防毒、
+    `__Host-` cookie、異動通知、忘記密碼）是 `pre-launch-hardening` 的票 14–19；部署時要做的見 `infra/docs/deployment-checklist.md`
 
 ---
 
