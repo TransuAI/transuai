@@ -7,6 +7,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Actions 頁面上的「Run workflow」：手動跑一次（例如設好 SONAR_TOKEN 之後掃全部的服務）。
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,8 +44,9 @@ jobs:
         env:
           CHANGED: ${{ steps.filter.outputs.changes }}
           WORKFLOWS: ${{ steps.filter.outputs.workflows }}
+          EVENT: ${{ github.event_name }}
         run: |
-          if [ "$WORKFLOWS" = true ]; then
+          if [ "$WORKFLOWS" = true ] || [ "$EVENT" = workflow_dispatch ]; then
             CHANGED='["auth-service","gateway","upload-service","ai-service","transcription-service","notification-service","frontend","deploy"]'
           fi
           echo "java=$(jq -c '[.[] | select(IN("auth-service","gateway","upload-service"))]' <<<"$CHANGED")" >> "$GITHUB_OUTPUT"

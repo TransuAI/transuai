@@ -44,7 +44,7 @@ cd transuai/infra/deploy
 ### CI
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)：每個 PR 與推到 `main` 時，只跑這次改到的服務——Java 服務 `./gradlew test`、Python 服務先確認
-`app/proto_gen` 跟 `infra/proto` 一致再 `pytest`、前端 lint／build／測試、安裝包的 shell 與 compose 檢查。改了 `infra/proto` 的話用到它的服務都跑。
+`app/proto_gen` 跟 `infra/proto` 一致再 `pytest`、前端 lint／build／測試、安裝包的 shell 與 compose 檢查。改了 `infra/proto` 的話用到它的服務都跑；Actions 頁面的「Run workflow」手動跑全部。
 測試用 Testcontainers（GitHub 的 runner 有 Docker）。分支保護把 `ci-ok` 設成必要的檢查。
 
 **程式碼掃描（SonarQube Cloud）**：monorepo，每個服務一個專案（`TransuAI_transuai-<服務>`，設定在各服務的 `sonar-project.properties`）。
