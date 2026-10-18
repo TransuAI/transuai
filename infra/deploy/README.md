@@ -28,20 +28,25 @@ git clone <這個 repo> transuai && cd transuai/infra/deploy
 `install.sh` 會：
 
 1. 檢查 Docker 與 Compose。
-2. 問網址，產生 `.env`：所有密鑰（資料庫、RabbitMQ、物件儲存、Redis、JWT、`KEY_ENCRYPTION_KEY`）都是隨機產生的，檔案權限 600。
+2. 問網址與管理員的 email，產生 `.env`：所有密鑰（資料庫、RabbitMQ、物件儲存、Redis、JWT、`KEY_ENCRYPTION_KEY`）與管理員的初始密碼都是
+   隨機產生的，檔案權限 600。
 3. 產生自簽憑證到 `tls/`。
-4. 有 NVIDIA GPU 時問要不要一起跑本地模型（`COMPOSE_PROFILES=gpu`，模型網址自動填好）。
+4. 有 NVIDIA GPU 時問要不要一起跑本地模型（`COMPOSE_PROFILES=gpu`，模型網址自動填好）。Docker 還不能用 GPU（沒裝 NVIDIA Container
+   Toolkit）或顯示記憶體不到 16GB 時會說，改用外部的模型伺服器。
 5. 從原始碼 build image（或 `--images pull` 用發行的 image、`--images load:<檔案>` 用離線包）。
-6. 啟動，等到網頁可以開，印出網址。
+6. 啟動，等到網頁可以開；有本地模型時再一個一個啟動、等它們下載與載入好（每個最多等 60 分鐘，會顯示進度）。
+7. 印出網址與**管理員的帳號、初始密碼**。
 
-不想被問的話：`./install.sh --url https://transuai.corp.internal --gpu --yes`（`--help` 看所有選項）。
+不想被問的話：`./install.sh --url https://transuai.corp.internal --admin-email it@corp.internal --gpu --yes`（`--help` 看所有選項）。
 從 GitHub Release 下載的安裝包（`transuai-deploy-<版本>.tar.gz`）不含原始碼，預設就用發行的 image。
 
 再跑一次 `install.sh` 不會覆蓋已經有的 `.env` 與憑證。
 
 ## 裝好之後
 
-1. 打開網址，**第一個註冊的帳號就是管理員**（註冊頁寫「建立管理員帳號」）。之後要多指定管理員：
+1. 打開網址，用安裝時印出來的管理員帳號與初始密碼登入，**先設定自己的密碼**（換好之前什麼都不能做；初始密碼也記在 `.env` 的
+   `INITIAL_ADMIN_PASSWORD`，只在還沒有任何帳號時用來建立管理員，換過之後就沒用了，可以從 `.env` 刪掉）。其他人自己到網頁註冊（一般使用者）。
+   之後要多指定管理員：
    `docker compose exec -T postgres psql -U transuai -d auth_db -c "UPDATE users SET role='admin' WHERE email='someone@corp'"`
 2. 管理員到「系統設定」：
    - **模型**：OpenAI 相容的伺服器（本地 vLLM、Claude、OpenAI、Gemini、OpenRouter）與模型，embedding 的伺服器與模型。
@@ -50,8 +55,8 @@ git clone <這個 repo> transuai && cd transuai/infra/deploy
    - **語音辨識**：本地（OpenAI 相容的 `/v1/audio/transcriptions`，講者分離在 transcription-service 裡用 CPU 跑）或 Deepgram。
    - **寄信**：SMTP（可以寄測試信）。沒設定的話，忘記密碼改用復原碼、不做 email 確認。
    - 每一區都有「檢查」，確認連得上。存了馬上生效，不用重啟。
-3. 本地模型第一次啟動要下載與載入（幾分鐘到幾十分鐘）：`docker compose logs -f vllm-chat`。三個模型依序啟動（每個要看到自己那份
-   顯示記憶體是空的），在 RTX 5080 上模型已經下載好時約 10 分鐘。已經有下載好模型的 Docker volume 時，`.env` 設 `VLLM_MODELS_VOLUME`
+3. 本地模型：`install.sh` 會一個一個啟動、等它們好（每個 vLLM 啟動時要看到自己那份顯示記憶體是空的，同時啟動會算錯而失敗——失敗的會
+   自動重啟，最後都會起來）。在 RTX 5080 上模型已經下載好時約 10 分鐘；沒等到的話之後再跑一次 `install.sh`，或 `docker compose logs -f vllm-chat`。已經有下載好模型的 Docker volume 時，`.env` 設 `VLLM_MODELS_VOLUME`
    沿用它。
 4. 從使用者的電腦跑一次 `../scripts/verify-deployment.sh <網址>`（TLS、轉址、安全標頭、內部的 port 連不到），要全部 PASS。
 

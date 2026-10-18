@@ -249,7 +249,8 @@ services:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/models')"]
       interval: 10s
       timeout: 5s
-      start_period: 15m
+      # 第一次要從 Hugging Face 下載模型（聊天模型約 6GB），慢的網路要很久。
+      start_period: 60m
       retries: 6
 
   vllm-stt:
