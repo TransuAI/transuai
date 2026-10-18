@@ -112,6 +112,16 @@ def test_someone_elses_or_a_missing_job_is_refused(client, user_id, job_id):
         assert closed_with(ws) == ws_controller.CLOSE_JOB_NOT_FOUND
 
 
+@pytest.mark.parametrize("job_id", ["not-a-job", "x%0A2026-10-18 INFO forged log line"])
+def test_a_job_id_that_is_not_a_uuid_is_refused_without_asking_anyone(client, access, job_id):
+    # A newline in the address (%0A) would otherwise reach the logs as a forged line.
+    with client.websocket_connect(f"/ws/jobs/{job_id}") as ws:
+        subscribe(ws, token())
+
+        assert closed_with(ws) == ws_controller.CLOSE_JOB_NOT_FOUND
+    assert access.asked == []
+
+
 def test_when_upload_service_cannot_be_reached_the_client_is_told_to_try_again(client, access):
     access.unavailable = True
 

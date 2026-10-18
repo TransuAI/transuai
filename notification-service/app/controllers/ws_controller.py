@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -63,6 +64,10 @@ async def _subscribe(websocket: WebSocket, job_id: str, access: JobAccess, limit
         await websocket.close(code=CLOSE_TOO_MANY_CONNECTIONS, reason="too many connections")
         return
     try:
+        job_id = _normalized_job_id(job_id)
+        if job_id is None:
+            await websocket.close(code=CLOSE_JOB_NOT_FOUND, reason="job not found")
+            return
         try:
             owns = await access.owns(user_id, job_id)
         except JobAccessUnavailable:
@@ -74,6 +79,15 @@ async def _subscribe(websocket: WebSocket, job_id: str, access: JobAccess, limit
         await _push_until_disconnected(websocket, job_id)
     finally:
         limits.release_user(user_id)
+
+
+def _normalized_job_id(job_id: str) -> str | None:
+    """Job 的 id 是 UUID；不是的話一定不是這位使用者的 Job。不拿去問 upload-service、也不寫進 log——網址裡的 %0A 解出來是換行，
+    寫進 log 就能偽造一行紀錄（log injection）。"""
+    try:
+        return str(uuid.UUID(job_id))
+    except ValueError:
+        return None
 
 
 async def _authenticate(websocket: WebSocket) -> str | None:
