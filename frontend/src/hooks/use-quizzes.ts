@@ -77,7 +77,8 @@ export function useQuizzes(jobId: string | undefined, isCompleted: boolean, onSe
         .request(jobId, questionCount)
         .then((quiz) => {
           localChanges.current += 1
-          setQuizzes((prev) => [quiz, ...prev])
+          // A list that answered while this request was on its way may already have it: replace, don't add it twice.
+          setQuizzes((prev) => [quiz, ...prev.filter((other) => other.id !== quiz.id)])
         })
         .catch((err) => toast.error(err instanceof ApiError ? err.message : '無法產生測驗'))
         .finally(() => setIsRequesting(false))

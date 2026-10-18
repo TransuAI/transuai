@@ -67,7 +67,8 @@ export function useOutputs(jobId: string | undefined, isCompleted: boolean, onSe
         .request(jobId, params)
         .then((output) => {
           localChanges.current += 1
-          setOutputs((prev) => [output, ...prev])
+          // A list that answered while this request was on its way may already have it: replace, don't add it twice.
+          setOutputs((prev) => [output, ...prev.filter((other) => other.id !== output.id)])
         })
         .catch((err) => toast.error(err instanceof ApiError ? err.message : '無法產生，請稍後再試'))
         .finally(() => setIsRequesting(false))
