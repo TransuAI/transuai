@@ -92,7 +92,7 @@ def _question(item: object, position: int, segment_starts: dict[str, float]) -> 
             if isinstance(answer, bool) or not isinstance(answer, int) or not 0 <= answer < len(options):
                 raise QuizFormatError(f"第 {position} 題的正確答案不在選項裡")
             # 本機模型的正確答案多半放在第一、二個（實測），自己洗牌讓位置分散。
-            order = random.sample(range(len(options)), len(options))
+            order = random.sample(range(len(options)), len(options))  # NOSONAR: only shuffles answer options, no security use
             options, correct_option = [options[i] for i in order], order.index(answer)
             kind = QuestionKind.MULTIPLE_CHOICE
         case QuestionKind.TRUE_FALSE:

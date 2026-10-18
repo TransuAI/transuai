@@ -24,7 +24,8 @@ import org.springframework.stereotype.Component;
 public class CommonPasswords {
 
     private static final int MIN_BASE_LENGTH = 4;
-    private static final Pattern PADDING = Pattern.compile("^[\\p{N}\\p{P}\\p{S}\\s]+|[\\p{N}\\p{P}\\p{S}\\s]+$");
+    // 開頭或結尾的數字、符號、空白（兩邊各自一個分支）。
+    private static final Pattern PADDING = Pattern.compile("(?:^[\\p{N}\\p{P}\\p{S}\\s]+)|(?:[\\p{N}\\p{P}\\p{S}\\s]+$)");
     private static final Pattern REPEATED = Pattern.compile("^(.{1,6}?)\\1+$", Pattern.DOTALL);
 
     private final Set<String> passwords;

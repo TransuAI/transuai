@@ -29,5 +29,6 @@ def download_object(storage_path: str) -> Path:
 
     logger.info("downloading %s from bucket %s",
                 storage_path, settings.storage_bucket)
-    _s3_client.download_file(settings.storage_bucket, storage_path, str(tmp))
+    # ExpectedBucketOwner 是 AWS 帳號的檢查；物件儲存是部署單位自己的 MinIO（沒有 AWS 帳號），用不到。
+    _s3_client.download_file(settings.storage_bucket, storage_path, str(tmp))  # NOSONAR
     return tmp
