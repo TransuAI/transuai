@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeSpeakerStats } from '@/lib/speaker-stats'
+import { computeSpeakerStats, speakerStatsStatus } from '@/lib/speaker-stats'
 import type { Speaker, TranscriptSegment } from '@/types/api'
 
 const speakers: Speaker[] = [
@@ -114,5 +114,17 @@ describe('computeSpeakerStats', () => {
     ], speakers)
 
     expect(stats!.totalTalkSeconds).toBe(20)
+  })
+})
+
+describe('speakerStatsStatus', () => {
+  it('names who talked most', () => {
+    const stats = computeSpeakerStats([segment('S1', 0, 4), segment('S2', 4, 5), segment('S1', 5, 9)], speakers)!
+
+    expect(speakerStatsStatus(stats)).toBe('2 位講者 · 講最多：主持人')
+  })
+
+  it('says so instead of failing when there are no speakers', () => {
+    expect(speakerStatsStatus({ speakers: [], totalTalkSeconds: 0, speakerChanges: 0, silenceSeconds: 0 })).toBe('沒有講者')
   })
 })

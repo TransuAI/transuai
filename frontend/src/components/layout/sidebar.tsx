@@ -92,7 +92,7 @@ function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
 
   const handleLogout = () => {
     logout()
-    navigate('/login')
+    void navigate('/login')
   }
 
   const trigger = (

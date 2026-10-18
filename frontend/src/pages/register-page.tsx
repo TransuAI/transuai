@@ -26,7 +26,7 @@ export function RegisterPage() {
     setIsSubmitting(true)
     try {
       await register(email, password, displayName)
-      navigate('/jobs')
+      void navigate('/jobs')
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError('這個 email 已經被註冊過了')

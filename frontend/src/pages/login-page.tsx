@@ -25,7 +25,7 @@ export function LoginPage() {
     setIsSubmitting(true)
     try {
       await login(email, password)
-      navigate('/jobs')
+      void navigate('/jobs')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '登入失敗,請稍後再試')
     } finally {

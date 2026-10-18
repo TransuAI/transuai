@@ -102,6 +102,8 @@ export function insightsByKind(items: SpeakerInsight[]): { questions: SpeakerIns
 
 /** The tile's one line: how many speakers and who talked most. */
 export function speakerStatsStatus(stats: MeetingStats): string {
-  const most = stats.speakers.reduce((top, row) => (row.talkSeconds > top.talkSeconds ? row : top))
+  const [first, ...rest] = stats.speakers
+  if (!first) return '沒有講者'
+  const most = rest.reduce((top, row) => (row.talkSeconds > top.talkSeconds ? row : top), first)
   return `${stats.speakers.length} 位講者 · 講最多：${most.speaker.displayName}`
 }

@@ -99,7 +99,7 @@ export function UploadPage() {
       })
 
       toast.success('上傳完成,開始處理中')
-      navigate(`/jobs/${job.jobId}`)
+      void navigate(`/jobs/${job.jobId}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '上傳失敗,請再試一次')
       setStage('idle')

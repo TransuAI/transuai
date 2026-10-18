@@ -28,7 +28,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     forgetLegacyStoredSession()
     let cancelled = false
-    refreshSession()
+    // refreshSession() never rejects: a failed refresh is a null session.
+    void refreshSession()
       .then((session) => {
         if (!cancelled) setUser(session?.user ?? null)
       })

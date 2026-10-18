@@ -246,13 +246,13 @@ function AiSection() {
         <form onSubmit={(event) => void save(event)} className="flex flex-col gap-4 rounded-lg border p-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField label="平台模型的伺服器" value={form.platformBaseUrl} onChange={set('platformBaseUrl')}
-                       placeholder="http://gpu-server:8000/v1" />
+                       placeholder="http://gpu-server:8000/v1" /* NOSONAR: an example of an on-prem model server, which serves plain http inside the network */ />
             <TextField label="平台模型" value={form.platformModel} onChange={set('platformModel')} placeholder="Qwen/Qwen3-8B-AWQ" />
             <SecretField label="平台模型的金鑰（沒有就留空）" isSet={saved.platformApiKeySet} state={platformKey} onChange={setPlatformKey} />
             <TextField label="會後處理的模型" value={form.postMeetingModel} onChange={set('postMeetingModel')}
                        hint="同一台伺服器上、能呼叫工具的模型；留空就不提供會後處理" />
             <TextField label="Embedding 的伺服器" value={form.embeddingBaseUrl} onChange={set('embeddingBaseUrl')}
-                       placeholder="http://gpu-server:8001/v1" hint="留空：問答只根據摘要與章節回答" />
+                       placeholder="http://gpu-server:8001/v1" /* NOSONAR: an example of an on-prem model server, which serves plain http inside the network */ hint="留空：問答只根據摘要與章節回答" />
             <TextField label="Embedding 模型" value={form.embeddingModel} onChange={set('embeddingModel')}
                        placeholder="Qwen/Qwen3-Embedding-0.6B" hint="要輸出 1024 維；換了之後既有的向量會在背景重算" />
             <SecretField label="Embedding 的金鑰（沒有就留空）" isSet={saved.embeddingApiKeySet} state={embeddingKey} onChange={setEmbeddingKey} />
@@ -351,7 +351,7 @@ function SpeechSection() {
           <p className="text-sm font-medium">{ACTIVE_LABEL[saved.active]}</p>
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField label="本地語音辨識的伺服器" value={form.sttBaseUrl} onChange={set('sttBaseUrl')}
-                       placeholder="http://gpu-server:8002/v1" />
+                       placeholder="http://gpu-server:8002/v1" /* NOSONAR: an example of an on-prem model server, which serves plain http inside the network */ />
             <TextField label="語音辨識模型" value={form.sttModel} onChange={set('sttModel')} placeholder="MediaTek-Research/Breeze-ASR-25" />
             <SecretField label="本地伺服器的金鑰（沒有就留空）" isSet={saved.sttApiKeySet} state={sttKey} onChange={setSttKey} />
             <TextField label="講者分離的門檻" type="number" value={form.diarizationThreshold} onChange={set('diarizationThreshold')}
