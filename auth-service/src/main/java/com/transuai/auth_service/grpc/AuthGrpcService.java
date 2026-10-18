@@ -205,10 +205,16 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
             responseObserver.onError(Status.INVALID_ARGUMENT.withDescription(passwordProblem).asRuntimeException());
             return;
         }
+        // 安裝時產生的密碼一定要換掉（要改密碼的帳號），一般改密碼也一樣：換成同一個等於沒換。
+        if (request.getNewPassword().equals(request.getCurrentPassword())) {
+            responseObserver.onError(Status.INVALID_ARGUMENT.withDescription("新密碼不能跟目前的密碼一樣").asRuntimeException());
+            return;
+        }
 
         // 先作廢再改：中途失敗頂多是被登出，不會留下改了密碼、舊的登入卻還能用的情況。
         List<UUID> ended = refreshTokens.logoutAll(userId);
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setMustChangePassword(false);
         user = userRepository.save(user);
         accountMail.passwordChanged(user.getEmail(), Instant.now());
         responseObserver.onNext(ChangePasswordResponse.newBuilder()
@@ -256,6 +262,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
 
         List<UUID> ended = refreshTokens.logoutAll(user.getId());
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setMustChangePassword(false);
         user = userRepository.save(user);
         accountMail.passwordWasReset(user.getEmail(), Instant.now());
         responseObserver.onNext(ResetPasswordResponse.newBuilder()
@@ -434,6 +441,7 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
 
         List<UUID> ended = refreshTokens.logoutAll(user.getId());
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setMustChangePassword(false);
         user = userRepository.save(user);
         accountMail.passwordResetWithRecoveryCode(user.getEmail(), Instant.now());
         responseObserver.onNext(ResetPasswordResponse.newBuilder()
@@ -460,7 +468,8 @@ public class AuthGrpcService extends AuthServiceGrpc.AuthServiceImplBase {
 
     private AuthResponse buildAuthResponse(com.transuai.auth_service.domain.User user, RefreshTokens.Issued issued) {
         return AuthResponse.newBuilder()
-                .setAccessToken(jwtService.issueAccessToken(user.getId(), user.getEmail(), issued.sessionId()))
+                .setAccessToken(jwtService.issueAccessToken(user.getId(), user.getEmail(), issued.sessionId(),
+                        user.isMustChangePassword()))
                 .setRefreshToken(issued.refreshToken())
                 .setUser(UserMapper.toProto(user, recoveryCodes.left(user.getId())))
                 .build();

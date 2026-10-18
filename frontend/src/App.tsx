@@ -15,6 +15,7 @@ import { JobsPage } from '@/pages/jobs-page'
 import { JobDetailPage } from '@/pages/job-detail-page'
 import { DecisionsPage } from '@/pages/decisions-page'
 import { SystemSettingsPage } from '@/pages/system-settings-page'
+import { SetNewPasswordPage } from '@/pages/set-new-password-page'
 
 function App() {
   return (
@@ -31,6 +32,8 @@ function App() {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           <Route element={<ProtectedRoute />}>
+            {/* 安裝時建立的管理員第一次登入：先換掉產生的密碼 */}
+            <Route path="/set-password" element={<SetNewPasswordPage />} />
             <Route element={<AppShell />}>
               <Route path="/" element={<Navigate to="/jobs" replace />} />
               <Route path="/jobs" element={<JobsPage />} />

@@ -83,7 +83,7 @@ docker compose up -d
 | `POST` | `/auth/logout` | 登出：作廢 cookie 裡這個 refresh token 所在的那一串、清掉 cookie，回 `204`；不需要 `Authorization`（access token 可能已經過期），沒有 cookie 或 token 無效也回 `204` |
 | `POST` | `/auth/logout-all` | 登出所有裝置：作廢登入者所有的 refresh token、清掉這個瀏覽器的 cookie，回 `204`，需要 `Authorization`；在這之前簽的 access token 馬上不能用（見下方「登出之後的 access token」） |
 | `POST` | `/auth/account/delete` | 刪除帳號：body `{ password }`（再輸入一次密碼），需要 `Authorization`。成功 `204` 並清掉 cookie；密碼錯 `403`（不是 401，前端不會去換發 token）；沒帶密碼 `400`；猜錯太多次 `429`（見「限流」）。auth-service 刪掉使用者並發 `account.deleted`，其他服務清掉他的資料（見 auth-service README「刪除帳號」）。刪除之後，還沒過期的 access token 也不能用（見下方） |
-| `POST` | `/auth/password` | 改密碼：body `{ currentPassword, newPassword }`，需要 `Authorization`。成功回 `{ accessToken, user }` 並換一個新的 refresh cookie，這位使用者其他的登入全部作廢（其他裝置要重新登入）；目前的密碼錯 `403`，新密碼不合規則 `400`，猜錯太多次 `429`（跟刪除帳號合計） |
+| `POST` | `/auth/password` | 改密碼：body `{ currentPassword, newPassword }`，需要 `Authorization`。成功回 `{ accessToken, user }` 並換一個新的 refresh cookie，這位使用者其他的登入全部作廢（其他裝置要重新登入）；目前的密碼錯 `403`，新密碼不合規則或跟目前的一樣 `400`，猜錯太多次 `429`（跟刪除帳號合計） |
 | `POST` | `/auth/password-reset` | 忘記密碼：body `{ email }`，不需要 token。一律回 `202`（不透露 email 有沒有註冊），有註冊就寄重設連結；這個部署沒有設定寄信時 `503`（訊息給使用者看）；超過上限 `429` |
 | `POST` | `/auth/password-reset/confirm` | 用重設連結設新密碼：body `{ token, newPassword }`，不需要 access token。成功 `204`，這位使用者所有的登入作廢、access token 馬上不能用；連結無效或過期 `409`、新密碼不合規則 `400` |
 | `POST` | `/auth/password-reset/recovery-code` | 用 email＋一組復原碼設新密碼：body `{ email, code, newPassword }`，不需要 token。成功 `204`，所有登入作廢、access token 馬上不能用；不對或用過了 `409`（猜錯的上限跟登入失敗一樣，同一個 IP 對同一個 email 15 分鐘 5 次） |
@@ -94,6 +94,10 @@ docker compose up -d
 | `GET` | `/auth/me` | 取得目前使用者資訊（含 `admin`：管理員），需要 `Authorization: Bearer <access_token>` |
 
 ### 系統設定（`SystemSettingsController`，見 `.scratch/system-settings/spec.md`）
+
+**要先改密碼**（安裝時建立的管理員，見 auth-service README「管理員」）：access token 帶 `pwc` 時，`JwtAuthenticationFilter` 只放行
+`/auth/me`、`/auth/password`、`/auth/logout-all`，其他一律 `403 {"error":"PASSWORD_CHANGE_REQUIRED"}`；改好之後拿到的新 token 沒有 `pwc`。
+回應的 `user` 有 `mustChangePassword`。
 
 `/system/status` 不用登入；`/admin/**` 只給管理員——每次先問 auth-service 的 `GetMe` 是不是管理員，不是回 `403`（寄信的部分 auth-service 自己也再檢查一次）。
 金鑰與密碼只回「有沒有設定」（`…Set`）；送來的時候沒給（或 `null`）是不改、空字串是清掉；`useEnvironment: true` 刪掉存的設定、回到環境變數。

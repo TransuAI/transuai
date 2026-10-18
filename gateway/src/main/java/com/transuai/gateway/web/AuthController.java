@@ -267,6 +267,6 @@ public class AuthController {
     private static UserDto toDto(User user) {
         return new UserDto(user.getId(), user.getEmail(), user.getDisplayName(),
                 GrpcTimestamps.toInstant(user.getCreatedAt()), user.getEmailVerified(), user.getRecoveryCodesLeft(),
-                user.getIsAdmin());
+                user.getIsAdmin(), user.getMustChangePassword());
     }
 }

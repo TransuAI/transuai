@@ -21,6 +21,8 @@ export interface User {
   recoveryCodesLeft: number
   /** 管理員: the first account, or one made so with make-admin.sh; sees 系統設定. */
   admin: boolean
+  /** The administrator made at install, still on the generated password: must set a new one before anything else. */
+  mustChangePassword: boolean
 }
 
 /** Before sign-in: no account yet (the next to register becomes the administrator); whether mail is set up (without it

@@ -117,7 +117,7 @@ POST   /auth/logout            登出：作廢 cookie 裡的 refresh token 所�
 POST   /auth/logout-all        登出所有裝置：作廢登入者所有的 refresh token、清掉 cookie
 POST   /auth/account/delete    刪除帳號：body { password }（密碼錯 403、猜太多次 429）；刪掉使用者、發 account.deleted，其他服務清掉他的資料（用量去識別化）；
                                 刪除後還沒過期的 access token 也被擋下（gateway 在 Redis 記 15 分鐘；登出、登出所有裝置、改密碼也一樣）
-POST   /auth/password          改密碼：body { currentPassword, newPassword }（目前的密碼錯 403、猜太多次 429）；其他裝置的登入全部作廢，這次拿到新的 token 與 cookie
+POST   /auth/password          改密碼：body { currentPassword, newPassword }（目前的密碼錯 403、新密碼跟目前的一樣 400、猜太多次 429）；其他裝置的登入全部作廢，這次拿到新的 token 與 cookie
 POST   /auth/password-reset    忘記密碼：body { email }，不用登入；一律 202（不透露有沒有註冊），有註冊就寄重設連結（auth-service 用部署單位的 SMTP）
 POST   /auth/password-reset/confirm  用重設連結設新密碼：body { token, newPassword }；連結一次性、30 分鐘；成功後所有登入作廢、寄通知信
 POST   /auth/password-reset/recovery-code  用 email＋一組復原碼設新密碼（收不到信時）；成功後所有登入作廢、寄通知信
@@ -130,7 +130,10 @@ GET/PUT /admin/settings/{mail,ai,speech}   系統設定（只給管理員）：�
 POST   /admin/settings/mail/test、/admin/settings/{ai,speech}/check   寄測試信、測試連線
 ```
 
-**管理員與系統設定**（`.scratch/system-settings/spec.md`）：還沒有任何帳號時註冊的那一個是管理員；已經有使用者的部署用 `infra/scripts/make-admin.sh` 指定。
+**管理員與系統設定**（`.scratch/system-settings/spec.md`、`.scratch/initial-admin/spec.md`）：安裝包（`infra/deploy/install.sh`）產生管理員的 email 與隨機的
+初始密碼（`INITIAL_ADMIN_*`），auth-service 在還沒有任何帳號時建立它並標記「要先改密碼」——access token 帶 `pwc`，gateway 在改好之前只放行看自己、
+改密碼、登出所有裝置，前端只顯示「設定新密碼」。沒設定時（開發環境）還沒有任何帳號時註冊的那一個是管理員；已經有使用者的部署用
+`infra/scripts/make-admin.sh` 指定。
 系統設定的每一部分存在負責它的服務（`mail_settings`、`ai_settings`、`speech_settings`，各一列；金鑰與密碼用 `KEY_ENCRYPTION_KEY` 加密、API 不回傳），
 **存過就用存的，沒存過就用環境變數**，存了馬上生效（讀資料庫的結果記幾秒）。gateway 的 `/admin/**` 每次先問 auth-service 這個人是不是管理員。
 沒有設定寄信時，前端不顯示 email 的忘記密碼與 email 確認（復原碼照常）。

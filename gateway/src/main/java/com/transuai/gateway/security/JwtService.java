@@ -25,9 +25,14 @@ public class JwtService {
     private static final String CLAIM_TYPE = "type";
     private static final String TYPE_ACCESS = "access";
     private static final String CLAIM_SESSION = "sid";
+    // 要先改密碼（auth-service 只在要改時帶，見它的 JwtService）。
+    private static final String CLAIM_PASSWORD_CHANGE = "pwc";
 
-    /** 驗過的 access token：誰的、哪一次登入（sid；這個版本之前簽的沒有）、什麼時候簽的（沒有 iat 時是 EPOCH）。 */
-    public record AccessToken(UUID userId, String sessionId, Instant issuedAt) {
+    /**
+     * 驗過的 access token：誰的、哪一次登入（sid；這個版本之前簽的沒有）、什麼時候簽的（沒有 iat 時是 EPOCH）、是不是要先改密碼
+     *（安裝時建立的管理員）。
+     */
+    public record AccessToken(UUID userId, String sessionId, Instant issuedAt, boolean passwordChangeRequired) {
     }
 
     private final SecretKey key;
@@ -54,6 +59,7 @@ public class JwtService {
             throw new InvalidTokenException("invalid access token subject");
         }
         Instant issuedAt = claims.getIssuedAt() == null ? Instant.EPOCH : claims.getIssuedAt().toInstant();
-        return new AccessToken(userId, claims.get(CLAIM_SESSION, String.class), issuedAt);
+        return new AccessToken(userId, claims.get(CLAIM_SESSION, String.class), issuedAt,
+                Boolean.TRUE.equals(claims.get(CLAIM_PASSWORD_CHANGE, Boolean.class)));
     }
 }

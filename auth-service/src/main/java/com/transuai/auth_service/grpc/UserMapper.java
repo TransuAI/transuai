@@ -18,6 +18,7 @@ public final class UserMapper {
                 .setEmailVerified(user.getEmailVerifiedAt() != null)
                 .setRecoveryCodesLeft(recoveryCodesLeft)
                 .setIsAdmin(user.isAdmin())
+                .setMustChangePassword(user.isMustChangePassword())
                 .build();
     }
 }

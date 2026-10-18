@@ -36,7 +36,7 @@ const gpt5mini = { provider: 'openai', model: 'gpt-5-mini', supportsTools: true 
 beforeEach(() => {
   vi.mocked(authApi.me).mockResolvedValue({
     id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z', emailVerified: true,
-    recoveryCodesLeft: 0, admin: false,
+    recoveryCodesLeft: 0, admin: false, mustChangePassword: false,
   })
   vi.mocked(providerKeysApi.list).mockResolvedValue([
     { provider: 'openai', last4: 'a3F9', createdAt: '2026-09-26T02:00:00Z' },
@@ -630,7 +630,7 @@ describe('SettingsPage email and recovery codes (確認 email、復原碼)', () 
   const me = { id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z' }
 
   it('says when the email is not confirmed yet and sends the link again', async () => {
-    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: false, recoveryCodesLeft: 0, admin: false })
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: false, recoveryCodesLeft: 0, admin: false, mustChangePassword: false })
     vi.mocked(authApi.resendEmailVerification).mockResolvedValue(undefined)
     const clicker = userEvent.setup()
     await renderSettings()
@@ -644,7 +644,7 @@ describe('SettingsPage email and recovery codes (確認 email、復原碼)', () 
   })
 
   it('shows a confirmed email without offering to send anything', async () => {
-    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 4, admin: false })
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 4, admin: false, mustChangePassword: false })
     await renderSettings()
 
     const email = await screen.findByRole('group', { name: 'Email' })
@@ -656,7 +656,7 @@ describe('SettingsPage email and recovery codes (確認 email、復原碼)', () 
   it('says nothing about confirming the email when this installation has no mail set up', async () => {
     forgetSystemStatus()
     vi.mocked(systemApi.status).mockResolvedValueOnce({ setupRequired: false, mailEnabled: false })
-    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: false, recoveryCodesLeft: 0, admin: false })
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: false, recoveryCodesLeft: 0, admin: false, mustChangePassword: false })
     await renderSettings()
 
     const email = await screen.findByRole('group', { name: 'Email' })
@@ -667,7 +667,7 @@ describe('SettingsPage email and recovery codes (確認 email、復原碼)', () 
   })
 
   it('makes recovery codes with the current password and shows them once', async () => {
-    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 0, admin: false })
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, emailVerified: true, recoveryCodesLeft: 0, admin: false, mustChangePassword: false })
     vi.mocked(authApi.generateRecoveryCodes).mockResolvedValue({ codes: ['AAAAA-BBBBB-CCCCC-DDDDD', 'EEEEE-FFFFF-GGGGG-HHHHH'] })
     const clicker = userEvent.setup()
     await renderSettings()

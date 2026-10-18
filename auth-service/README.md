@@ -48,8 +48,11 @@ access token 過期 → 前端呼叫 POST /auth/refresh（帶 refresh_token）�
 
 ### 管理員
 
-`users.role`（`admin`／`member`，`User.is_admin`）：**還沒有任何帳號時註冊的那一個是管理員**（全新安裝的第一個人；用 advisory lock 鎖住判斷，同時註冊的兩個人只有
-一個是），之後的都是一般使用者。已經有使用者的部署用 `infra/scripts/make-admin.sh <email>` 指定。管理員能改系統設定（寄信在這裡；模型、語音辨識在各自的
+`users.role`（`admin`／`member`，`User.is_admin`）。安裝包（`infra/deploy/install.sh`）產生 `INITIAL_ADMIN_EMAIL`、`INITIAL_ADMIN_PASSWORD`：
+啟動時（gRPC 開始接受請求之前，`service/InitialAdmin`）還沒有任何帳號就用它建立管理員，標記 `must_change_password`——登入後 access token 帶
+`pwc` claim，gateway 只放行看自己、改密碼、登出所有裝置，直到改了密碼（或用忘記密碼／復原碼重設）。已經有帳號時不做任何事；兩個值只設一個、
+或密碼不合規則（12 字元以上、不是常見密碼）時不啟動。沒設定時（開發環境）**還沒有任何帳號時註冊的那一個是管理員**（用 advisory lock 鎖住判斷，
+同時註冊的兩個人只有一個是），之後的都是一般使用者。已經有使用者的部署用 `infra/scripts/make-admin.sh <email>` 指定。管理員能改系統設定（寄信在這裡；模型、語音辨識在各自的
 服務，見 `.scratch/system-settings/spec.md`）。`GetSystemStatus`（不需要 `x-user-id`）告訴登入前的頁面：還沒有任何帳號（`setup_required`，註冊頁寫「建立
 管理員帳號」）、有沒有設定寄信（`mail_enabled`，沒有的話前端不顯示忘記密碼的 email 方式與 email 確認）。
 
@@ -151,7 +154,7 @@ Proto 定義（等同於這個服務的 API 規格書）在 [`../infra/proto/aut
 | `GetSystemStatus` | 不需要 `x-user-id`：`setup_required`（還沒有任何帳號）、`mail_enabled`（有沒有設定寄信） |
 | `GetMailSettings`／`UpdateMailSettings` | 系統設定的寄信（`x-user-id`，不是管理員 `PERMISSION_DENIED`）：目前用的設定（存的或環境變數），密碼只回有沒有設定；存了馬上生效，密碼空的是不改、`clear_password` 清掉、`use_environment` 回到環境變數；存密碼卻沒有 `KEY_ENCRYPTION_KEY` 是 `FAILED_PRECONDITION` |
 | `SendTestMail` | 用目前的設定寄一封測試信（管理員）：`to` 空的就寄給自己，等它寄完，寄不出去回 `sent=false` 與原因 |
-| `ChangePassword` | 改密碼（`x-user-id`）：目前的密碼錯回 `PERMISSION_DENIED`（理由同 `DeleteAccount`），新密碼照註冊的規則（`INVALID_ARGUMENT`）。通過就先作廢這位使用者所有的 refresh token（改密碼常是懷疑被盜用；中途失敗頂多被登出），再存新的雜湊，回一組新的 token 與作廢的那幾串（`ended_session_ids`：最近一個 access token 效期內簽過 token 的，gateway 讓那些 access token 也馬上不能用） |
+| `ChangePassword` | 改密碼（`x-user-id`）：目前的密碼錯回 `PERMISSION_DENIED`（理由同 `DeleteAccount`），新密碼照註冊的規則、而且不能跟目前的一樣（`INVALID_ARGUMENT`）；清掉「要先改密碼」。通過就先作廢這位使用者所有的 refresh token（改密碼常是懷疑被盜用；中途失敗頂多被登出），再存新的雜湊，回一組新的 token 與作廢的那幾串（`ended_session_ids`：最近一個 access token 效期內簽過 token 的，gateway 讓那些 access token 也馬上不能用） |
 
 ## 刪除帳號
 
@@ -176,6 +179,7 @@ fanout exchange `account.deleted`，等 broker 確認收到才刪掉那一筆（
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | 空 | SMTP 帳密（`SMTP_AUTH=true` 時用） |
 | `SMTP_AUTH` / `SMTP_STARTTLS` | `true` / `true` | 要不要登入 SMTP、要不要（而且一定要）STARTTLS；本機的測試用 SMTP 才設 `false` |
 | `MAIL_FROM` | 空 | 寄件人；空的時候同樣不寄 |
+| `INITIAL_ADMIN_EMAIL`、`INITIAL_ADMIN_PASSWORD` | 空 | 安裝時建立的管理員（見「管理員」）：還沒有任何帳號時用它建立、第一次登入要改密碼；空的時候第一個註冊的帳號是管理員 |
 | `KEY_ENCRYPTION_KEY` | 空 | 系統設定頁存的 SMTP 密碼用這把加密（base64 的 32 bytes，跟 ai-service、transcription-service 同一把）；空的時候不能在設定頁存密碼 |
 | `FRONTEND_URL` | `http://localhost:5173` | 信裡連結指向的前端（跟 gateway 同一個值） |
 | `PASSWORD_RESET_TTL` | `30m` | 重設連結多久內有效 |

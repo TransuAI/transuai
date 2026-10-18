@@ -121,6 +121,7 @@ src/
     web-sources.ts     網頁連結(問答的網路來源、事實查核的來源):開新分頁的連結屬性、網址顯示成網站名稱(去掉 www.)
   pages/
     login-page.tsx / register-page.tsx(登入頁有「忘記密碼？」,沒有設定寄信時是「忘記密碼？用復原碼重設」;全新安裝(還沒有任何帳號)時註冊頁是「建立管理員帳號」;註冊按鈕下方連到隱私權說明;註冊的密碼欄有強度提示)
+    set-new-password-page.tsx `/set-password`:安裝時建立的管理員(`user.mustChangePassword`)用初始密碼登入後只能到這頁(`ProtectedRoute` 把其他路徑都轉來),輸入安裝時產生的密碼與新密碼;改好到檔案列表。gateway 在改好之前也擋其他 API
     system-settings-page.tsx `/admin/settings`(只有管理員,其他人轉回設定頁):AI 模型(平台模型、會後處理模型、embedding、網路搜尋)、語音辨識(本地或 Deepgram、講者分離門檻)、寄信(SMTP)三區,各自儲存、馬上生效;標示目前用環境變數還是這裡存的,可以「改回環境變數」;金鑰與密碼不顯示——留空不改、按「清除」才清掉;「測試連線」／「寄測試信給自己」顯示哪裡不對
     forgot-password-page.tsx `/forgot-password`(不用登入):沒有設定寄信時只有用復原碼重設(說明這套系統沒有寄信);有的話輸入 email 申請重設連結;送出後一律說「如果 … 有註冊、而且確認過，幾分鐘內會收到」(伺服器不透露有沒有註冊);沒有設定寄信(503)、太頻繁(429)時顯示伺服器的訊息。「收不到信？用復原碼重設」:email、一組復原碼、新密碼(email 或復原碼不對時顯示伺服器的訊息)
     verify-email-page.tsx    `/verify-email#token=…`(註冊時寄的確認信,不用登入):token 讀出來後從網址拿掉;按「確認這個 email 是我的」才確認(信箱的連結掃描不會代為確認);無效或過期時說到設定頁重寄

@@ -201,7 +201,7 @@ kubectl -n transuai rollout restart deployment/auth-service
 | `rebuild.sh <service>...` / `--all` | 改了程式碼後用：build image -> `kind load` -> `rollout restart` |
 | `restart.sh <service>...` / `--all` | 改了 `k8s/01-configmap.yaml`（或用 `kubectl patch` 改了 secret）後用：重新 apply configmap 並重啟，讓 pod 重新讀環境變數。**不會**重新 apply `02-secret.yaml`（只在 secret 還不存在時建立）——裡面真的金鑰是空的，重新 apply 會把 patch 進去的蓋掉 |
 | `status.sh` | 快速看目前 context / nodes / pods / 正在跑的 port-forward |
-| `make-admin.sh <email>` | 把已經註冊的帳號設成管理員（能改系統設定）。全新安裝不用：第一個註冊的帳號自動是管理員；這支給升級前就有使用者、或要多一位管理員的部署 |
+| `make-admin.sh <email>` | 把已經註冊的帳號設成管理員（能改系統設定）。全新安裝不用：本機開發時第一個註冊的帳號自動是管理員，安裝包（`deploy/`）安裝時就建立好管理員；這支給升級前就有使用者、或要多一位管理員的部署 |
 | `vllm.sh up` / `status` / `logs` / `down` | 本機（地端）的模型伺服器：用 Docker 跑三個 vLLM（用 GPU）——聊天模型、embedding、語音辨識；見下面「模型跑在本機（vLLM）」 |
 
 `_env.sh` 是共用變數，被其他腳本 `.` source，不要直接執行。

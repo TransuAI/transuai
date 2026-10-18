@@ -52,6 +52,14 @@ public class User {
         return ADMIN.equals(role);
     }
 
+    /**
+     * 登入後要先改密碼才能做別的事：安裝時建立的管理員（密碼是 install.sh 產生、印在畫面上的）。改密碼或重設密碼後清掉。
+     * gateway 從 access token 的 claim 知道（見 JwtService）。
+     */
+    @Builder.Default
+    @Column(name = "must_change_password", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean mustChangePassword = false;
+
     /** 點了確認信的時間；null 是還沒確認（忘記密碼的信只寄給確認過的 email）。 */
     @Column(name = "email_verified_at")
     private OffsetDateTime emailVerifiedAt;

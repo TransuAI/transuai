@@ -18,7 +18,7 @@ let signedIn: User
 vi.mock('@/context/auth-context', () => ({ useAuth: () => ({ user: signedIn, logout: vi.fn() }) }))
 
 const admin: User = { id: 'u1', email: 'admin@example.com', displayName: null, createdAt: '2026-10-18T00:00:00Z',
-  emailVerified: true, recoveryCodesLeft: 0, admin: true }
+  emailVerified: true, recoveryCodesLeft: 0, admin: true, mustChangePassword: false }
 
 const ai: AiSettings = {
   platformBaseUrl: 'http://gpu:8000/v1', platformApiKeySet: true, platformModel: 'Qwen/Qwen3-8B-AWQ', postMeetingModel: '',

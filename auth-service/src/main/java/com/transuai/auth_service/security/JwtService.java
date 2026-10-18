@@ -29,6 +29,8 @@ public class JwtService {
     private static final String TYPE_REFRESH = "refresh";
     private static final String CLAIM_EMAIL = "email";
     private static final String CLAIM_SESSION = "sid";
+    // 要先改密碼：只在要改時帶（true），gateway 看到就只放行改密碼（見 domain.User#mustChangePassword）。
+    private static final String CLAIM_PASSWORD_CHANGE = "pwc";
 
     private final SecretKey key;
     private final JwtProperties properties;
@@ -44,12 +46,21 @@ public class JwtService {
 
     /** sessionId：這次登入（refresh token 的那一串）；登出時 gateway 依它讓這串簽出的 access token 馬上失效。 */
     public String issueAccessToken(UUID userId, String email, UUID sessionId) {
+        return issueAccessToken(userId, email, sessionId, false);
+    }
+
+    /** passwordChangeRequired：這個人要先改密碼（token 帶 pwc claim）。 */
+    public String issueAccessToken(UUID userId, String email, UUID sessionId, boolean passwordChangeRequired) {
         Instant now = Instant.now();
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(userId.toString())
                 .claim(CLAIM_TYPE, TYPE_ACCESS)
                 .claim(CLAIM_EMAIL, email)
-                .claim(CLAIM_SESSION, sessionId.toString())
+                .claim(CLAIM_SESSION, sessionId.toString());
+        if (passwordChangeRequired) {
+            builder.claim(CLAIM_PASSWORD_CHANGE, true);
+        }
+        return builder
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(properties.accessTokenTtlMinutes(), ChronoUnit.MINUTES)))
                 .signWith(key)

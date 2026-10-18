@@ -32,6 +32,13 @@ public final class TestAuth {
                 .signWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).compact();
     }
 
+    /** 要先改密碼的人的 token（帶 pwc，跟 auth-service 簽的一樣）。 */
+    public static String accessTokenThatMustChangePassword(JwtProperties jwt, UUID user) {
+        return Jwts.builder().subject(user.toString()).claim("type", "access").claim("pwc", true)
+                .expiration(Date.from(Instant.now().plusSeconds(600)))
+                .signWith(Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8))).compact();
+    }
+
     /** auth-service 登入（或註冊、換發）成功的回應。 */
     public static AuthResponse signedIn(String email) {
         return AuthResponse.newBuilder().setAccessToken("access").setRefreshToken("refresh")

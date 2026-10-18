@@ -155,6 +155,8 @@ message User {
   int32 recovery_codes_left = 6;
   // 管理員：第一個註冊的帳號，或用 infra/scripts/make-admin.sh 指定的。能改系統設定。
   bool is_admin = 7;
+  // 要先改密碼才能做別的事（安裝時建立、密碼是隨機產生的管理員）；改好之前 gateway 只放行看自己、改密碼、登出所有裝置。
+  bool must_change_password = 8;
 }
 
 message LogoutRequest {

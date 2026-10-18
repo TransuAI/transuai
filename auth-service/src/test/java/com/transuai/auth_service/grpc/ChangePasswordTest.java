@@ -105,6 +105,16 @@ class ChangePasswordTest {
     }
 
     @Test
+    void theNewPasswordMustDifferFromTheCurrentOne() {
+        AuthResponse signedUp = register();
+
+        assertThatThrownBy(() -> change(signedUp, PASSWORD, PASSWORD)).isInstanceOfSatisfying(StatusRuntimeException.class, e -> {
+            assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT);
+            assertThat(e.getStatus().getDescription()).isEqualTo("新密碼不能跟目前的密碼一樣");
+        });
+    }
+
+    @Test
     void itNeedsToKnowWhoIsAsking() {
         assertCode(Status.Code.UNAUTHENTICATED, () -> stub().changePassword(ChangePasswordRequest.newBuilder()
                 .setCurrentPassword(PASSWORD).setNewPassword(NEW_PASSWORD).build()));

@@ -11,7 +11,7 @@ vi.mock('@/lib/api', () => ({
 }))
 
 const user = {
-  id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z', emailVerified: true, recoveryCodesLeft: 0, admin: false,
+  id: 'u1', email: 'a@example.com', displayName: null, createdAt: '2026-09-01T00:00:00Z', emailVerified: true, recoveryCodesLeft: 0, admin: false, mustChangePassword: false,
 }
 
 function Buttons() {

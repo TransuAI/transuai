@@ -44,6 +44,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Set<String> PUBLIC_PATHS = Set.of("/auth/register", "/auth/login", "/auth/refresh", "/auth/logout",
             "/auth/password-reset", "/auth/password-reset/confirm", "/auth/password-reset/recovery-code", "/auth/verify-email",
             "/system/status");
+    // 要先改密碼的人（安裝時建立、密碼是隨機產生的管理員）只能看自己、改密碼、登出所有裝置；其他一律 403，前端帶他去設定新密碼。
+    private static final Set<String> ALLOWED_BEFORE_PASSWORD_CHANGE = Set.of("/auth/me", "/auth/password", "/auth/logout-all");
     // Google / Notion 把瀏覽器轉回來時不會帶我們的 token；使用者由 state 與綁定瀏覽器的 cookie 認出來（見 ConnectionController）。
     private static final Pattern OAUTH_CALLBACK = Pattern.compile("/oauth/[^/]+/callback");
 
@@ -84,6 +86,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 登出、登出所有裝置、改密碼、刪除帳號之後：token 還沒過期也不能用（見 RevokedAccessTokens）。
         if (revokedTokens.isRevoked(token)) {
             reject(request, response, "signed out");
+            return;
+        }
+
+        if (token.passwordChangeRequired() && !ALLOWED_BEFORE_PASSWORD_CHANGE.contains(request.getRequestURI())) {
+            write(response, HttpServletResponse.SC_FORBIDDEN,
+                    new ErrorBody("PASSWORD_CHANGE_REQUIRED", "請先設定新密碼"));
             return;
         }
 
