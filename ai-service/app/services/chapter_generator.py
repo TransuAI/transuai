@@ -56,7 +56,29 @@ def generate_chapters(lines: list[TimedLine], *, model: ChatModel, meter: UsageS
     logger.info("calling %s (%s) for chapters, segment count=%d", model.provider, model.model, len(lines))
     result = chat(model, [{"role": "user", "content": _PROMPT_TEMPLATE.format(segments=format_timed_lines(lines))}],
                   max_tokens=_MAX_TOKENS, meter=meter)
-    raw_chapters = parse_json_reply(result.text or "[]")
-    chapters = [(str(item["title"]), float(item["start_time"])) for item in raw_chapters]
+    raw_chapters = _chapters_in_reply(result.text or "[]")
+    chapters = [(str(item["title"]), float(item["start_time"])) for item in raw_chapters
+                if isinstance(item, dict) and "title" in item and "start_time" in item]
     chapters.sort(key=lambda chapter: chapter[1])
     return chapters
+
+
+def _chapters_in_reply(text: str) -> list:
+    """模型回的章節陣列。回覆被截斷時（一小時的會議、本地的小模型：章節多到超過輸出上限，JSON 斷在一半），留下完整的那幾個章節；
+    完全讀不出來就當作沒有章節——章節是附帶的，不能因為它讓整個 Job（包括已經做好的逐字稿與摘要）失敗。"""
+    try:
+        data = parse_json_reply(text)
+        return data if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        pass
+    cleaned = text.strip().strip("`").removeprefix("json").strip()
+    last = cleaned.rfind("}")
+    if cleaned.startswith("[") and last != -1:
+        try:
+            salvaged = json.loads(cleaned[:last + 1] + "]")
+            logger.warning("the chapters reply was cut off; keeping the %d complete chapters", len(salvaged))
+            return salvaged if isinstance(salvaged, list) else []
+        except json.JSONDecodeError:
+            pass
+    logger.warning("could not read the chapters reply (%d characters); saving no chapters", len(text))
+    return []

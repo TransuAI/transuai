@@ -603,7 +603,7 @@ app/
     proposal_identity.py             行動提案建立的是哪一件事：標題與時間、指紋（避免重複）、給模型看的一行
     post_meeting_settings.py         會後處理的設定：Notion 的會議紀錄位置（改過的網址儲存前用 Notion 確認是頁面）、待辦去處
     quiz_generator.py                出題：組 prompt、呼叫 llm_client、驗證模型回的 JSON（格式不對 raise QuizFormatError）、過濾時間戳
-    consumer.py                      RabbitMQ consumer loop（pika）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
+    consumer.py                      RabbitMQ consumer loop（pika；這條連線不用心跳，長逐字稿的摘要、會後處理一則可能要好幾分鐘，見 transcription-service 的 consumer）：「queue → 處理函式」對照表，每個被消費的 queue 各自宣告一組 `<queue>.retry.2s`／`.4s`，重試回到同一個處理函式
     deletion_consumer.py             刪除事件（job.deleted、account.deleted）：各自的佇列、retry 佇列，另一條 thread
     account_deletion.py              刪除帳號：用量去識別化、撤銷已連結的帳號、刪個人設定
     job_deletion.py                  刪掉一個 Job 的資料；deleted_jobs 標記；guard_writes（commit 之後丟掉寫給已刪 Job 的資料）

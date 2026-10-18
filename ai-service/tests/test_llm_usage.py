@@ -73,9 +73,12 @@ def test_the_pipeline_records_the_summary_and_the_chapters_under_the_jobs_owner(
 
 
 def test_a_message_from_before_owners_were_sent_records_usage_without_a_user(fake_llm, saved_usage):
+    fake_llm.reply("摘要")
+    fake_llm.reply("[]")
+
     run_pipeline(uuid.uuid4(), None)
 
-    assert [r.user_id for r in saved_usage] == [None, None]
+    assert [(r.feature, r.user_id) for r in saved_usage] == [("summary", None), ("chapters", None), ("job_title", None)]
 
 
 def test_a_failed_call_is_recorded_as_failed_without_numbers(fake_llm, saved_usage):

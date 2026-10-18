@@ -72,6 +72,18 @@ def test_chapters_are_parsed_from_the_models_reply(fake_llm):
     assert generate_chapters([TimedLine(0.0, "大家好"), TimedLine(12.0, "來談預算")], model=platform_chat_model(), meter=None) == [("開場", 0.0), ("預算", 12.0)]
 
 
+def test_a_chapters_reply_cut_off_at_the_token_limit_keeps_its_complete_chapters(fake_llm):
+    fake_llm.reply('[{"title": "開場", "start_time": 0}, {"title": "預算", "start_time": 12.0}, {"title": "人')
+
+    assert generate_chapters([TimedLine(0.0, "大家好"), TimedLine(12.0, "來談預算")], model=platform_chat_model(), meter=None) == [("開場", 0.0), ("預算", 12.0)]
+
+
+def test_a_chapters_reply_that_cannot_be_read_means_no_chapters(fake_llm):
+    fake_llm.reply("抱歉，我無法分段")
+
+    assert generate_chapters([TimedLine(0.0, "大家好")], model=platform_chat_model(), meter=None) == []
+
+
 def test_a_reply_reports_the_tokens_it_used(fake_llm):
     fake_llm.reply("答案", usage=(120, 30))
 
