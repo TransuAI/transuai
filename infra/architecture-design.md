@@ -872,6 +872,10 @@ CREATE INDEX ix_generated_outputs_job_id ON generated_outputs (job_id);
 
 ## 5. 訊息佇列設計（MQ Topics/Queues）
 
+一則訊息可能要處理幾十分鐘（一小時的錄音在 CPU 上分講者、逐段語音辨識；長逐字稿的摘要），處理時 consumer 的 thread 不回應心跳：
+transcription-service 與 ai-service 的 consumer 連線不用心跳（斷線靠 TCP 發現），RabbitMQ 的 `consumer_timeout`（沒 ack 多久算卡住）調成 4 小時
+（`infra/deploy/compose.yaml`、`infra/k8s/12-rabbitmq.yaml`、`infra/docker-compose.yaml`）。之前開著心跳時，超過幾分鐘的錄音會被斷線、重新投遞、從頭再做。
+
 | Queue/Topic | Producer | Consumer | Payload |
 |---|---|---|---|
 | `transcription.requested` | Upload Service | Transcription Service | `{ jobId, userId, storagePath, fileType, transcriptionLanguage }`——`userId` 是 Job 擁有者，一路帶到 ai-service，用量記在他名下；`transcriptionLanguage` 是上傳時選的轉錄語言（`zh-TW` / `en` / `auto`，舊訊息沒有當成中文，見 `transcription-service/docs/adr/0002-transcription-language-chosen-at-upload.md`） |
@@ -921,7 +925,7 @@ Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登
 | Embedding | OpenAI 相容的 `/v1/embeddings`（`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`；本機是 vLLM 上的 `Qwen/Qwen3-Embedding-0.6B`，1024 維）；換模型後 ai-service 啟動時自動重算既有向量 |
 | 網路搜尋（問答「查網路」、事實查核） | Tavily 官方遠端 MCP（`tavily_search`，平台付費的 `TAVILY_API_KEY`；由系統查，不給模型工具；問答在回答前查一次，只送出一句搜尋查詢，見 `ai-service/docs/adr/0014-qa-web-search-by-the-system.md`；事實查核每條主張查一次，只送整理過的那一句主張） |
 | 已連結的帳號（會後處理用） | Google OAuth（平台自己的 OAuth client，只要 Calendar 活動、Gmail 建立草稿、Tasks 的權限）與 Notion 官方遠端 MCP 的 OAuth（PKCE + 動態註冊 client）；權杖用自有金鑰那套 AES-GCM 加密存在 ai-service，state 綁定開始連結的瀏覽器（見 `ai-service/README.md`「已連結的帳號」） |
-| 容器化 | Docker；本機開發有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md`。客戶安裝用 `infra/deploy/`：一台伺服器的 Docker Compose（`install.sh` 產生密鑰與自簽憑證；`edge` 的 nginx 終結 TLS，物件儲存的 bucket 路徑轉給 MinIO，跟網頁同一個網站；模型伺服器不在安裝包裡，另外部署、在系統設定頁填，見 `infra/deploy/docs/models.md`），發行的 image 在 GHCR（`.github/workflows/release-images.yml`，tag `v*`）。MinIO 官方的 image 已經下架，安裝包用 `pgsty/minio` |
+| 容器化 | Docker；本機開發有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md`。客戶安裝用 `infra/deploy/`：一台伺服器的 Docker Compose（`install.sh` 產生密鑰與自簽憑證；`edge` 的 nginx 終結 TLS，物件儲存的 bucket 路徑轉給 MinIO，跟網頁同一個網站；模型伺服器不在安裝包裡，另外部署、在系統設定頁填，見 `infra/deploy/docs/models.md`），發行的 image 在 GHCR（`.github/workflows/release-images.yml`，tag `v*`）。MinIO 官方的 image 已經下架，安裝包用 `pgsty/minio`。每個服務有記憶體上限（Java 的 heap 照上限比例、SerialGC），8GB 的伺服器能穩定跑：一小時錄音實測各服務最高加起來約 4.2GB（`infra/deploy/docs/hardware.md`） |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
 
 ---

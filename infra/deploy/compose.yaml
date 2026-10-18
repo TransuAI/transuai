@@ -9,6 +9,12 @@
 
 name: transuai
 
+# 記憶體：設計成 8GB RAM 的伺服器也能穩定跑（模型在別台）。每個服務一個上限（mem_limit）：超過上限的只有那個容器（或講者分離的
+# 子 process）被砍，不會拖垮整台。上限加起來約 7GB，但不會同時用滿——2026-10-18 用 59 分鐘的錄音實測，每個容器的最高用量加起來約 4.2GB（見 docs/hardware.md）。
+# transcription-service 最大：一小時錄音的講者分離約 1.8GB（跟錄音長度的平方成正比，MAX_RECORDING_MINUTES 調高時要跟著調）。
+# Java 服務：heap 照容器上限的比例（不然 JVM 預設拿整台記憶體的 1/4），用 SerialGC（流量小，比 G1 省記憶體），記憶體不夠就結束重啟。
+x-java-options: &java-options "-XX:+UseSerialGC -XX:MaxRAMPercentage=60 -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError"
+
 x-app: &app
   restart: unless-stopped
   env_file: .env
@@ -57,6 +63,7 @@ configs:
 services:
   # ---------------------------------------------------------------- 基礎設施
   postgres:
+    mem_limit: 512m
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
@@ -75,6 +82,7 @@ services:
       retries: 20
 
   redis:
+    mem_limit: 320m
     image: redis:7-alpine
     restart: unless-stopped
     environment:
@@ -91,11 +99,16 @@ services:
       retries: 20
 
   rabbitmq:
-    image: rabbitmq:3-management-alpine
+    mem_limit: 512m
+    # 沒有管理介面的版本（管理介面的統計很佔記憶體，這裡也不對外開）。
+    image: rabbitmq:3-alpine
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      # 一則訊息沒 ack 多久算卡住（預設 30 分鐘）：一小時的錄音可能處理更久，調成 4 小時（見 transcription-service 的 consumer）。
+      # 記憶體警戒線用容器上限的 70%（預設 40%，512MB 的上限下太低，一開就會擋住發訊息）。
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit consumer_timeout 14400000 -rabbit vm_memory_high_watermark 0.7"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     networks: [internal]
@@ -108,12 +121,15 @@ services:
   # MinIO 官方的 image 已經從 Docker Hub 下架（2025 年起社群版不再發行 image）：用 Pigsty 維護的同一套程式（pgsty/minio，AGPL，
   # 設定、mc 都一樣），固定版本。
   minio:
+    mem_limit: 512m
     image: &minio-image pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     restart: unless-stopped
     command: ["server", "/data"]
     environment:
       MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
+      # Go 的 GC 在接近上限前就回收（不設的話它不看容器上限）。
+      GOMEMLIMIT: 400MiB
       MC_HOST_local: http://${STORAGE_ACCESS_KEY}:${STORAGE_SECRET_KEY}@localhost:9000
     volumes:
       - minio-data:/data
@@ -139,30 +155,37 @@ services:
 
   # ---------------------------------------------------------------- 服務
   auth-service:
+    mem_limit: 512m
     <<: *app
     image: ${TRANSUAI_REGISTRY:-transuai}/auth-service:${TRANSUAI_VERSION:-local}
     environment:
       DB_NAME: auth_db
+      JAVA_TOOL_OPTIONS: *java-options
 
   upload-service:
+    mem_limit: 640m
     <<: *app
     image: ${TRANSUAI_REGISTRY:-transuai}/upload-service:${TRANSUAI_VERSION:-local}
     environment:
       DB_NAME: upload_db
+      JAVA_TOOL_OPTIONS: *java-options
 
   transcription-service:
+    mem_limit: 2560m
     <<: *app
     image: ${TRANSUAI_REGISTRY:-transuai}/transcription-service:${TRANSUAI_VERSION:-local}
     environment:
       DB_NAME: transcription_db
 
   ai-service:
+    mem_limit: 640m
     <<: *app
     image: ${TRANSUAI_REGISTRY:-transuai}/ai-service:${TRANSUAI_VERSION:-local}
     environment:
       DB_NAME: ai_db
 
   notification-service:
+    mem_limit: 256m
     <<: *app
     image: ${TRANSUAI_REGISTRY:-transuai}/notification-service:${TRANSUAI_VERSION:-local}
     environment:
@@ -173,9 +196,11 @@ services:
         ipv4_address: ${TRANSUAI_NET:-172.29.0}.13
 
   gateway:
+    mem_limit: 512m
     <<: *app
     image: ${TRANSUAI_REGISTRY:-transuai}/gateway:${TRANSUAI_VERSION:-local}
     environment:
+      JAVA_TOOL_OPTIONS: *java-options
       FORWARD_HEADERS_STRATEGY: native
       # Tomcat 的 internal-proxies 是正規表示式：只信 frontend。
       TRUSTED_PROXIES: ${TRANSUAI_NET:-172.29.0}.10
@@ -184,6 +209,7 @@ services:
         ipv4_address: ${TRANSUAI_NET:-172.29.0}.12
 
   frontend:
+    mem_limit: 64m
     image: ${TRANSUAI_REGISTRY:-transuai}/frontend:${TRANSUAI_VERSION:-local}
     restart: unless-stopped
     environment:
@@ -199,6 +225,7 @@ services:
 
   # 對外的唯一入口：HTTPS（憑證在 ./tls），HTTP 只轉址。
   edge:
+    mem_limit: 64m
     image: nginxinc/nginx-unprivileged:1.29-alpine
     restart: unless-stopped
     environment:

@@ -16,6 +16,7 @@
 ## 需要
 
 - Linux（x86-64），Docker Engine 與 Docker Compose 2.23 以上、`openssl`、`curl`。
+- 記憶體 8 GB 以上（建議另外開 2–4 GB swap）、4 核心以上；每個服務都有記憶體上限，實測見 [docs/hardware.md](docs/hardware.md)。
 - 一個使用者連得到的網址：主機名（建議，例如 `transuai.corp.internal`）或 IP。**一定要 HTTPS**——登入用的 cookie 只能在 HTTPS 上。
   安裝時會產生自簽憑證，之後可以換成單位自己的。
 - 模型伺服器：OpenAI 相容的聊天、embedding、語音辨識（見 [docs/models.md](docs/models.md)）；可以裝好 TransuAI 之後再準備。
