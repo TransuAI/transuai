@@ -1,5 +1,6 @@
 import logging
 import uuid
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -332,9 +333,11 @@ def stream_answer(
     yield _answer("running")
     # 回答整段是簡體時轉成繁體（小模型偶爾會這樣）；已經是繁體的不動。先暫存開頭一小段才決定。
     traditional = TraditionalStream()
-    for delta in stream_chat(model, messages, max_tokens=_ANSWER_MAX_TOKENS, meter=meter):
-        if text := traditional.feed(delta):
-            yield ("delta", text)
+    # 使用者中途離開（gRPC 不再讀）時這裡被 close：用 closing 馬上關掉模型的串流，用量記成失敗，不等垃圾回收。
+    with closing(iter(stream_chat(model, messages, max_tokens=_ANSWER_MAX_TOKENS, meter=meter))) as deltas:
+        for delta in deltas:
+            if text := traditional.feed(delta):
+                yield ("delta", text)
     if text := traditional.flush():
         yield ("delta", text)
     yield _answer("done")

@@ -13,7 +13,7 @@ import pytest
 
 from app.proto_gen import ai_pb2
 from app.repositories.llm_usage_repository import LlmUsageRecord, save_llm_usage
-from app.services import pipeline, qa, regeneration, usage_meter
+from app.services import llm_client, pipeline, qa, regeneration, usage_meter
 
 OWNER = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
 
@@ -197,6 +197,28 @@ def test_an_answer_abandoned_part_way_is_recorded_as_failed(fake_llm, saved_usag
 
     with answering(uuid.uuid4()) as events:
         for kind, _ in events:  # steps, sources, answered_by… up to the first text
+            if kind == "delta":
+                break
+        events.close()
+
+    assert [(r.feature, r.succeeded) for r in saved_usage] == [("qa_answer", False)]
+
+
+def test_an_abandoned_answer_is_recorded_at_once_even_while_something_still_holds_the_stream(fake_llm, saved_usage, monkeypatch):
+    # Garbage collection can't be what records it: on CI a reference cycle kept the model's stream alive past the assertion.
+    held = []
+    original = llm_client.ChatStream._deltas
+
+    def deltas_that_are_held(self):
+        stream = original(self)
+        held.append(stream)
+        return stream
+
+    monkeypatch.setattr(llm_client.ChatStream, "_deltas", deltas_that_are_held)
+    fake_llm.stream(["這場會議主要在談工程團隊的關鍵指標，決定把月會拆成四個部門各自的檢討，", "並且改用新的指標。", "後面還有。"])
+
+    with answering(uuid.uuid4()) as events:
+        for kind, _ in events:
             if kind == "delta":
                 break
         events.close()

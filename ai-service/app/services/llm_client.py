@@ -289,32 +289,38 @@ def stream_without_thinking(chunks: Iterable[str]) -> Iterator[str]:
     """
     buffer = ""
     in_think: bool | None = None  # None = 還沒判斷開頭；True/False = 已經判斷
-    for delta in chunks:
-        if not delta:
-            continue
-        if in_think is False:
-            yield delta
-            continue
-
-        buffer += delta
-        if in_think is None:
-            if len(buffer) < len(_THINK_OPEN):
+    try:
+        for delta in chunks:
+            if not delta:
                 continue
-            if not buffer.startswith(_THINK_OPEN):
-                in_think = False
-                yield buffer
-                buffer = ""
+            if in_think is False:
+                yield delta
                 continue
-            in_think = True
 
-        close_idx = buffer.find(_THINK_CLOSE)
-        if close_idx == -1:
-            continue
-        remainder = buffer[close_idx + len(_THINK_CLOSE):]
-        in_think = False
-        buffer = ""
-        if remainder:
-            yield remainder
+            buffer += delta
+            if in_think is None:
+                if len(buffer) < len(_THINK_OPEN):
+                    continue
+                if not buffer.startswith(_THINK_OPEN):
+                    in_think = False
+                    yield buffer
+                    buffer = ""
+                    continue
+                in_think = True
+
+            close_idx = buffer.find(_THINK_CLOSE)
+            if close_idx == -1:
+                continue
+            remainder = buffer[close_idx + len(_THINK_CLOSE):]
+            in_think = False
+            buffer = ""
+            if remainder:
+                yield remainder
+    finally:
+        # 被中途放棄時馬上關掉裡面那層（ChatStream 在它的 finally 記用量），不要等垃圾回收：有參照循環時不知道什麼時候才收。
+        close = getattr(chunks, "close", None)
+        if close:
+            close()
     # 整個回答比 `<think>` 還短時，串流結束前一直都還在判斷開頭，剩下的就是答案本身。
     if in_think is None and buffer:
         yield buffer
