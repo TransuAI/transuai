@@ -59,19 +59,30 @@ jobs:
       fail-fast: false
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.java) }}
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     defaults:
       run:
         working-directory: ${{ matrix.service }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # SonarQube Cloud 用 git 的歷史判斷哪些是新程式碼
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "26"
           cache: gradle
           cache-dependency-path: ${{ matrix.service }}/build.gradle
-      # build.gradle 從 ../infra/proto 產生 gRPC 的程式碼。
+      # build.gradle 從 ../infra/proto 產生 gRPC 的程式碼；測試完產生 JaCoCo 的覆蓋率報告。
       - run: ./gradlew test --no-daemon
+      # SonarQube Cloud（每個服務一個專案，設定在 ${{ matrix.service }}/sonar-project.properties）。還沒設 SONAR_TOKEN、或是從 fork 發的 PR
+      #（拿不到 secret）時跳過，不讓 CI 失敗。
+      - name: SonarQube Cloud
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v8
+        with:
+          projectBaseDir: ${{ matrix.service }}
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -86,11 +97,15 @@ jobs:
       fail-fast: false
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.python) }}
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     defaults:
       run:
         working-directory: ${{ matrix.service }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # SonarQube Cloud 用 git 的歷史判斷哪些是新程式碼
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -105,17 +120,28 @@ jobs:
             exit 1
           }
       # 失敗的測試另外寫成 GitHub 的 annotation（PR 的檔案上、run 的摘要裡直接看得到是哪一個）。
-      - run: uv run --with pytest-github-actions-annotate-failures pytest -q -rf
+      - run: uv run --with pytest-github-actions-annotate-failures --with pytest-cov pytest -q -rf --cov=app --cov-report=xml
+      # SonarQube Cloud（每個服務一個專案，設定在 ${{ matrix.service }}/sonar-project.properties）。還沒設 SONAR_TOKEN、或是從 fork 發的 PR
+      #（拿不到 secret）時跳過，不讓 CI 失敗。
+      - name: SonarQube Cloud
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v8
+        with:
+          projectBaseDir: ${{ matrix.service }}
 
   frontend:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # SonarQube Cloud 用 git 的歷史判斷哪些是新程式碼
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -124,7 +150,14 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
-      - run: npm test
+      - run: npm test -- --coverage
+      # SonarQube Cloud（每個服務一個專案，設定在 frontend/sonar-project.properties）。還沒設 SONAR_TOKEN、或是從 fork 發的 PR
+      #（拿不到 secret）時跳過，不讓 CI 失敗。
+      - name: SonarQube Cloud
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v8
+        with:
+          projectBaseDir: frontend
 
   deploy:
     needs: changes

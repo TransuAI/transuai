@@ -3,3 +3,10 @@
 # 個人編輯器設定、根目錄沒有 package.json 的空 node_modules
 .vscode/
 node_modules/
+
+# 測試覆蓋率報告（CI 產生，交給 SonarQube Cloud）
+coverage/
+coverage.xml
+.coverage
+.coverage.*
+.scannerwork/

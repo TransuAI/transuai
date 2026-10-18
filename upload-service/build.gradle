@@ -3,6 +3,7 @@ plugins {
 	id 'org.springframework.boot' version '4.1.1'
 	id 'io.spring.dependency-management' version '1.1.7'
 	id 'com.google.protobuf' version '0.9.6'
+	id 'jacoco'
 }
 
 group = 'com.transuai'
@@ -57,6 +58,18 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	finalizedBy 'jacocoTestReport'
+}
+
+// 測試覆蓋率（CI 交給 SonarQube Cloud，見 sonar-project.properties）。0.8.15 起正式支援 Java 26。
+jacoco {
+	toolVersion = '0.8.15'
+}
+
+tasks.named('jacocoTestReport') {
+	reports {
+		xml.required = true
+	}
 }
 
 // proto 定義集中放在 ../infra/proto（供 transcription-service 共用），不再放在 src/main/proto。

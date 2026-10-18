@@ -29,6 +29,13 @@ export default defineConfig({
     environment: 'jsdom',
     // 測試資料的時間是台灣時間（+08:00），畫面上的時間跟表單驗證都依瀏覽器的時區：固定成台灣，不管在哪裡跑（CI 的機器是 UTC）都一樣。
     env: { TZ: 'Asia/Taipei' },
+    // 測試覆蓋率（npm test -- --coverage；CI 交給 SonarQube Cloud，讀 coverage/lcov.info）。
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'lcov'],
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**'],
+    },
     setupFiles: ['./src/test/setup.ts'],
   },
 })
