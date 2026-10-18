@@ -374,7 +374,7 @@ def completed(ai_stub, requested, fake_llm):
     """The requested quiz, generated: correct options are 1, 0, 1, 1, 1 (see five_questions; options kept in the model's order
     rather than shuffled)."""
     fake_llm.reply(five_questions())
-    with patch.object(quiz_generator.random, "sample", lambda population, k: list(population)):
+    with patch.object(quiz_generator._shuffler, "sample", lambda population, k: list(population)):
         generate(requested.message)
     return requested
 

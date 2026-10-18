@@ -10,6 +10,9 @@ from app.services.traditional_chinese import to_traditional
 
 logger = logging.getLogger(__name__)
 
+# 洗選項順序用作業系統的亂數來源（不能被預測）：位置本身不是秘密，但這樣不用另外判斷「這裡用可預測的亂數安不安全」。
+_shuffler = random.SystemRandom()
+
 TRUE_FALSE_OPTIONS = ["是", "否"]
 _MULTIPLE_CHOICE_OPTION_COUNT = 4
 _MAX_TOKENS = 8192
@@ -92,7 +95,7 @@ def _question(item: object, position: int, segment_starts: dict[str, float]) -> 
             if isinstance(answer, bool) or not isinstance(answer, int) or not 0 <= answer < len(options):
                 raise QuizFormatError(f"第 {position} 題的正確答案不在選項裡")
             # 本機模型的正確答案多半放在第一、二個（實測），自己洗牌讓位置分散。
-            order = random.sample(range(len(options)), len(options))  # NOSONAR: only shuffles answer options, no security use
+            order = _shuffler.sample(range(len(options)), len(options))
             options, correct_option = [options[i] for i in order], order.index(answer)
             kind = QuestionKind.MULTIPLE_CHOICE
         case QuestionKind.TRUE_FALSE:
