@@ -52,12 +52,10 @@ command -v openssl >/dev/null || die "找不到 openssl（產生密鑰與憑證�
 command -v curl >/dev/null || die "找不到 curl（檢查網頁有沒有起來用）"
 
 # ---------------------------------------------------------------- 2. .env
-new_env=0
 if [ -f .env ]; then
     say "已經有 .env，沿用（不改密鑰與網址）"
 else
     say "產生 .env"
-    new_env=1
     [ -n "$url" ] || url=$(ask "使用者在瀏覽器打的網址（https://主機名或 IP[:port]）" "https://$(hostname -f 2>/dev/null || hostname)")
     url="${url%/}"
     case "$url" in https://*) ;; *) die "網址要用 https://（登入用的 cookie 只能在 HTTPS 上）：$url" ;; esac
