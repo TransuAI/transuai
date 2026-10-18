@@ -1,5 +1,7 @@
 package com.transuai.upload_service.grpc;
 
+import org.springframework.context.annotation.Import;
+import com.transuai.upload_service.InfraContainersConfig;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -45,6 +47,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 才能在測試裡真的觸發「超過上限」而不用真的傳輸幾百 MB/幾十 MB 的資料。
  * 見 docs/adr/0001-upload-size-limit-is-file-type-aware.md。
  */
+@Import(InfraContainersConfig.class)
 @SpringBootTest(properties = {
         "app.upload.max-file-size-bytes=200",
         "app.upload.max-audio-file-size-bytes=100",

@@ -1,5 +1,7 @@
 package com.transuai.upload_service.grpc;
 
+import org.springframework.context.annotation.Import;
+import com.transuai.upload_service.InfraContainersConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -47,8 +49,9 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
 /**
- * 筆記（見 .scratch/job-notes）。需要本機 infra（postgres / rabbitmq / minio，見 infra/docker-compose.yaml）先啟動。
+ * 筆記（見 .scratch/job-notes）。Postgres、RabbitMQ、MinIO 由 Testcontainers 起（{@link InfraContainersConfig}，要有 Docker）。
  */
+@Import(InfraContainersConfig.class)
 @SpringBootTest
 @AutoConfigureTestGrpcTransport
 class NoteGrpcServiceIT {

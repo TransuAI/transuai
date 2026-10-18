@@ -1,5 +1,7 @@
 package com.transuai.upload_service.grpc;
 
+import org.springframework.context.annotation.Import;
+import com.transuai.upload_service.InfraContainersConfig;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -42,9 +44,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 需要本機 infra（postgres / rabbitmq / minio，見 infra/docker-compose.yaml）先啟動。
+ * Postgres、RabbitMQ、MinIO 由 Testcontainers 起（{@link InfraContainersConfig}，要有 Docker）。
  * InternalJobService 不需要 x-user-id，這裡的 stub 都刻意不帶該 header，驗證它真的對 pipeline 下游開放。
  */
+@Import(InfraContainersConfig.class)
 @SpringBootTest
 @AutoConfigureTestGrpcTransport
 class InternalJobGrpcServiceIT {

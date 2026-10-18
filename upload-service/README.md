@@ -128,7 +128,8 @@ Job 狀態機：`PENDING → UPLOADING → UPLOADED → TRANSCRIBING → TRANSCR
 ./gradlew test
 ```
 
-`UploadGrpcServiceIT` 是涵蓋全部 5 支 rpc 的整合測試（筆記另有 `NoteGrpcServiceIT`、AI 回寫另有 `InternalJobGrpcServiceIT`）（`@SpringBootTest` + in-process gRPC transport），會**直接連本機真實的 Postgres / RabbitMQ / MinIO**（沒有 mock），所以跑測試前一樣要先 `docker compose up -d` 把 infra 開著。
+`UploadGrpcServiceIT` 是涵蓋全部 5 支 rpc 的整合測試（筆記另有 `NoteGrpcServiceIT`、AI 回寫另有 `InternalJobGrpcServiceIT`）（`@SpringBootTest` + in-process gRPC transport），用**真的 Postgres / RabbitMQ / MinIO**（沒有 mock）：由 Testcontainers 在測試開始時起、用完即丟（`src/test/.../InfraContainersConfig`，
+要有 Docker；MinIO 用 `pgsty/minio`，bucket 測試自己建），不用先開本機的 infra。CI（`.github/workflows/ci.yml`）也是這樣跑。
 
 ## 刪除 Job
 
