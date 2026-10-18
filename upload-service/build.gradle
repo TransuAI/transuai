@@ -72,6 +72,19 @@ tasks.named('jacocoTestReport') {
 	}
 }
 
+// SonarQube 分析 Java 時要的相依套件（sonar.java.libraries、sonar.java.test.libraries；沒有的話型別解析不完整）。CI 跑完測試後
+// 執行這個 task，把清單交給掃描（.github/workflows/ci.yml）。
+tasks.register('sonarLibraries') {
+	def mainClasspath = configurations.compileClasspath
+	def testClasspath = configurations.testCompileClasspath
+	def out = layout.buildDirectory
+	outputs.upToDateWhen { false }
+	doLast {
+		out.file('sonar-libraries.txt').get().asFile.text = mainClasspath.files.findAll { it.name.endsWith('.jar') }.join(',')
+		out.file('sonar-test-libraries.txt').get().asFile.text = testClasspath.files.findAll { it.name.endsWith('.jar') }.join(',')
+	}
+}
+
 // proto 定義集中放在 ../infra/proto（供 transcription-service 共用），不再放在 src/main/proto。
 sourceSets {
 	main {

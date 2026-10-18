@@ -77,8 +77,12 @@ jobs:
           java-version: "26"
           cache: gradle
           cache-dependency-path: ${{ matrix.service }}/build.gradle
-      # build.gradle 從 ../infra/proto 產生 gRPC 的程式碼；測試完產生 JaCoCo 的覆蓋率報告。
-      - run: ./gradlew test --no-daemon
+      # build.gradle 從 ../infra/proto 產生 gRPC 的程式碼；測試完產生 JaCoCo 的覆蓋率報告，sonarLibraries 列出相依套件給掃描用。
+      - run: ./gradlew test sonarLibraries --no-daemon
+      - id: libraries
+        run: |
+          echo "main=$(cat build/sonar-libraries.txt)" >> "$GITHUB_OUTPUT"
+          echo "test=$(cat build/sonar-test-libraries.txt)" >> "$GITHUB_OUTPUT"
       # SonarQube Cloud（每個服務一個專案，設定在 ${{ matrix.service }}/sonar-project.properties）。還沒設 SONAR_TOKEN、或是從 fork 發的 PR
       #（拿不到 secret）時跳過，不讓 CI 失敗。
       - name: SonarQube Cloud
@@ -86,6 +90,9 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v8
         with:
           projectBaseDir: ${{ matrix.service }}
+          args: >
+            -Dsonar.java.libraries=${{ steps.libraries.outputs.main }}
+            -Dsonar.java.test.libraries=${{ steps.libraries.outputs.test }}
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

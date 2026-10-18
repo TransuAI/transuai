@@ -48,7 +48,8 @@ cd transuai/infra/deploy
 測試用 Testcontainers（GitHub 的 runner 有 Docker）。分支保護把 `ci-ok` 設成必要的檢查。
 
 **程式碼掃描（SonarQube Cloud）**：monorepo，每個服務一個專案（`TransuAI_transuai-<服務>`，設定在各服務的 `sonar-project.properties`）。
-CI 的測試同時產生覆蓋率報告（Java：JaCoCo；Python：pytest-cov；前端：vitest 的 v8 coverage），測完就掃那個服務。repo 的
+CI 的測試同時產生覆蓋率報告（Java：JaCoCo；Python：pytest-cov；前端：vitest 的 v8 coverage），測完就掃那個服務；Java 另外用
+`./gradlew sonarLibraries` 列出相依套件（`sonar.java.libraries`、`sonar.java.test.libraries`），型別解析才完整。repo 的
 Actions secret `SONAR_TOKEN` 沒設、或是從 fork 發的 PR（拿不到 secret）時跳過掃描，不讓 CI 失敗。SonarQube Cloud 那邊要關掉
 Automatic Analysis（跟 CI 掃描只能擇一）。發行：推 `v*` 的 tag
 （[`release-images.yml`](.github/workflows/release-images.yml)）。
