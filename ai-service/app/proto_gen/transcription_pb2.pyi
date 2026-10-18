@@ -176,3 +176,55 @@ class TranscriptionUsage(_message.Message):
     succeeded: bool
     created_at: _timestamp_pb2.Timestamp
     def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., audio_seconds: _Optional[float] = ..., succeeded: _Optional[bool] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class GetSpeechSettingsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class SpeechSettings(_message.Message):
+    __slots__ = ("stt_base_url", "stt_api_key_set", "stt_model", "deepgram_api_key_set", "diarization_threshold", "from_environment", "diarization_available", "active")
+    STT_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    STT_API_KEY_SET_FIELD_NUMBER: _ClassVar[int]
+    STT_MODEL_FIELD_NUMBER: _ClassVar[int]
+    DEEPGRAM_API_KEY_SET_FIELD_NUMBER: _ClassVar[int]
+    DIARIZATION_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    FROM_ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    DIARIZATION_AVAILABLE_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_FIELD_NUMBER: _ClassVar[int]
+    stt_base_url: str
+    stt_api_key_set: bool
+    stt_model: str
+    deepgram_api_key_set: bool
+    diarization_threshold: float
+    from_environment: bool
+    diarization_available: bool
+    active: str
+    def __init__(self, stt_base_url: _Optional[str] = ..., stt_api_key_set: _Optional[bool] = ..., stt_model: _Optional[str] = ..., deepgram_api_key_set: _Optional[bool] = ..., diarization_threshold: _Optional[float] = ..., from_environment: _Optional[bool] = ..., diarization_available: _Optional[bool] = ..., active: _Optional[str] = ...) -> None: ...
+
+class UpdateSpeechSettingsRequest(_message.Message):
+    __slots__ = ("stt_base_url", "stt_model", "diarization_threshold", "stt_api_key", "deepgram_api_key", "use_environment")
+    STT_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    STT_MODEL_FIELD_NUMBER: _ClassVar[int]
+    DIARIZATION_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    STT_API_KEY_FIELD_NUMBER: _ClassVar[int]
+    DEEPGRAM_API_KEY_FIELD_NUMBER: _ClassVar[int]
+    USE_ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    stt_base_url: str
+    stt_model: str
+    diarization_threshold: float
+    stt_api_key: str
+    deepgram_api_key: str
+    use_environment: bool
+    def __init__(self, stt_base_url: _Optional[str] = ..., stt_model: _Optional[str] = ..., diarization_threshold: _Optional[float] = ..., stt_api_key: _Optional[str] = ..., deepgram_api_key: _Optional[str] = ..., use_environment: _Optional[bool] = ...) -> None: ...
+
+class CheckSpeechSettingsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class SpeechSettingsCheck(_message.Message):
+    __slots__ = ("ok", "detail")
+    OK_FIELD_NUMBER: _ClassVar[int]
+    DETAIL_FIELD_NUMBER: _ClassVar[int]
+    ok: bool
+    detail: str
+    def __init__(self, ok: _Optional[bool] = ..., detail: _Optional[str] = ...) -> None: ...

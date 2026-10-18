@@ -68,6 +68,21 @@ class TranscriptionServiceStub:
                 request_serializer=transcription__pb2.SumUserTranscriptionUsageRequest.SerializeToString,
                 response_deserializer=transcription__pb2.SumUserTranscriptionUsageResponse.FromString,
                 _registered_method=True)
+        self.GetSpeechSettings = channel.unary_unary(
+                '/transuai.transcription.v1.TranscriptionService/GetSpeechSettings',
+                request_serializer=transcription__pb2.GetSpeechSettingsRequest.SerializeToString,
+                response_deserializer=transcription__pb2.SpeechSettings.FromString,
+                _registered_method=True)
+        self.UpdateSpeechSettings = channel.unary_unary(
+                '/transuai.transcription.v1.TranscriptionService/UpdateSpeechSettings',
+                request_serializer=transcription__pb2.UpdateSpeechSettingsRequest.SerializeToString,
+                response_deserializer=transcription__pb2.SpeechSettings.FromString,
+                _registered_method=True)
+        self.CheckSpeechSettings = channel.unary_unary(
+                '/transuai.transcription.v1.TranscriptionService/CheckSpeechSettings',
+                request_serializer=transcription__pb2.CheckSpeechSettingsRequest.SerializeToString,
+                response_deserializer=transcription__pb2.SpeechSettingsCheck.FromString,
+                _registered_method=True)
 
 
 class TranscriptionServiceServicer:
@@ -131,6 +146,27 @@ class TranscriptionServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetSpeechSettings(self, request, context):
+        """系統設定的「語音辨識」（只給管理員，權限由 gateway 檢查）：本地的語音辨識伺服器、Deepgram 的金鑰、講者分離的門檻。設定頁存過
+        就是存的，沒存過就是環境變數；金鑰不回傳。存了馬上生效。存金鑰要有 KEY_ENCRYPTION_KEY（沒有就 FAILED_PRECONDITION）。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateSpeechSettings(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CheckSpeechSettings(self, request, context):
+        """用目前的設定試一下：本地伺服器有沒有這個模型；只有 Deepgram 時試它的金鑰。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TranscriptionServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -163,6 +199,21 @@ def add_TranscriptionServiceServicer_to_server(servicer, server):
                     servicer.SumUserTranscriptionUsage,
                     request_deserializer=transcription__pb2.SumUserTranscriptionUsageRequest.FromString,
                     response_serializer=transcription__pb2.SumUserTranscriptionUsageResponse.SerializeToString,
+            ),
+            'GetSpeechSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSpeechSettings,
+                    request_deserializer=transcription__pb2.GetSpeechSettingsRequest.FromString,
+                    response_serializer=transcription__pb2.SpeechSettings.SerializeToString,
+            ),
+            'UpdateSpeechSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateSpeechSettings,
+                    request_deserializer=transcription__pb2.UpdateSpeechSettingsRequest.FromString,
+                    response_serializer=transcription__pb2.SpeechSettings.SerializeToString,
+            ),
+            'CheckSpeechSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.CheckSpeechSettings,
+                    request_deserializer=transcription__pb2.CheckSpeechSettingsRequest.FromString,
+                    response_serializer=transcription__pb2.SpeechSettingsCheck.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -330,6 +381,87 @@ class TranscriptionService:
             '/transuai.transcription.v1.TranscriptionService/SumUserTranscriptionUsage',
             transcription__pb2.SumUserTranscriptionUsageRequest.SerializeToString,
             transcription__pb2.SumUserTranscriptionUsageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSpeechSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.transcription.v1.TranscriptionService/GetSpeechSettings',
+            transcription__pb2.GetSpeechSettingsRequest.SerializeToString,
+            transcription__pb2.SpeechSettings.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateSpeechSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.transcription.v1.TranscriptionService/UpdateSpeechSettings',
+            transcription__pb2.UpdateSpeechSettingsRequest.SerializeToString,
+            transcription__pb2.SpeechSettings.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CheckSpeechSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/transuai.transcription.v1.TranscriptionService/CheckSpeechSettings',
+            transcription__pb2.CheckSpeechSettingsRequest.SerializeToString,
+            transcription__pb2.SpeechSettingsCheck.FromString,
             options,
             channel_credentials,
             insecure,
