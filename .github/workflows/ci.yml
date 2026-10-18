@@ -1,0 +1,157 @@
+# 測試：每個 PR 與推到 main 時跑，只跑這次改到的服務（改了 infra/proto 的話，用到它的服務都跑；改了 workflow 本身就全部跑）。
+# GitHub 的雲端 runner（ubuntu-latest）有 Docker，測試用的 Testcontainers（Postgres、Redis）可以直接跑。
+# 分支保護只要把最後的 ci-ok 設成必要的檢查：沒改到而跳過的服務不算失敗。
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      java: ${{ steps.pick.outputs.java }}
+      python: ${{ steps.pick.outputs.python }}
+      frontend: ${{ steps.pick.outputs.frontend }}
+      deploy: ${{ steps.pick.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            auth-service: [auth-service/**, infra/proto/**]
+            gateway: [gateway/**, infra/proto/**]
+            upload-service: [upload-service/**, infra/proto/**]
+            ai-service: [ai-service/**, infra/proto/**]
+            transcription-service: [transcription-service/**, infra/proto/**]
+            notification-service: [notification-service/**, infra/proto/**]
+            frontend: [frontend/**]
+            deploy: [infra/deploy/**, infra/scripts/**]
+            workflows: [.github/workflows/**]
+      - id: pick
+        env:
+          CHANGED: ${{ steps.filter.outputs.changes }}
+          WORKFLOWS: ${{ steps.filter.outputs.workflows }}
+        run: |
+          if [ "$WORKFLOWS" = true ]; then
+            CHANGED='["auth-service","gateway","upload-service","ai-service","transcription-service","notification-service","frontend","deploy"]'
+          fi
+          echo "java=$(jq -c '[.[] | select(IN("auth-service","gateway","upload-service"))]' <<<"$CHANGED")" >> "$GITHUB_OUTPUT"
+          echo "python=$(jq -c '[.[] | select(IN("ai-service","transcription-service","notification-service"))]' <<<"$CHANGED")" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(jq 'index("frontend") != null' <<<"$CHANGED")" >> "$GITHUB_OUTPUT"
+          echo "deploy=$(jq 'index("deploy") != null' <<<"$CHANGED")" >> "$GITHUB_OUTPUT"
+
+  java:
+    needs: changes
+    if: needs.changes.outputs.java != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.java) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "26"
+          cache: gradle
+          cache-dependency-path: ${{ matrix.service }}/build.gradle
+      # build.gradle 從 ../infra/proto 產生 gRPC 的程式碼。
+      - run: ./gradlew test --no-daemon
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.service }}-test-report
+          path: ${{ matrix.service }}/build/reports/tests/
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.python != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.python) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: ${{ matrix.service }}/uv.lock
+      - run: uv sync --frozen
+      # app/proto_gen 是 commit 進來的產物：改了 infra/proto 卻沒重新產生，這裡就會不一樣。
+      - name: generated gRPC code is up to date
+        run: |
+          bash scripts/generate_grpc.sh
+          git diff --exit-code -- app/proto_gen || {
+            echo "::error::app/proto_gen 跟 infra/proto 不一致：在 ${{ matrix.service }} 跑 scripts/generate_grpc.sh 再 commit"
+            exit 1
+          }
+      - run: uv run pytest -q
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+
+  deploy:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shell scripts
+        run: |
+          for f in infra/deploy/*.sh infra/scripts/*.sh; do bash -n "$f"; done
+          shellcheck -S warning infra/deploy/*.sh
+      - name: compose file
+        working-directory: infra/deploy
+        run: |
+          sed 's/<generate>/ci-placeholder-value/' .env.example > .env
+          docker compose config --quiet
+          docker compose -f compose.yaml -f compose.build.yaml config --quiet
+
+  # 分支保護用的單一檢查：上面每個 job 不是成功就是沒改到而跳過。
+  ci-ok:
+    needs: [changes, java, python, frontend, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in success|skipped) ;; *) exit 1 ;; esac
+          done

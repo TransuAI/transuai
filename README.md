@@ -33,6 +33,21 @@ cd transuai/infra/deploy
 
 本機開發環境見 [infra/README.md](infra/README.md)；架構見 [infra/architecture-design.md](infra/architecture-design.md)。
 
+### Monorepo 的慣例
+
+- 每個服務一個目錄，各自的 Dockerfile、相依套件（`uv.lock`、Gradle、`package-lock.json`）與 README；共用的只有 `infra/proto`。
+- 改 `infra/proto` 時只加欄位、不改也不重用編號；Python 服務的 `app/proto_gen` 要在同一個 commit 重新產生（各自的
+  `scripts/generate_grpc.sh`），Java 服務 build 時自己產生。
+- Commit 訊息：`<type>(<scope>): <subject>`，scope 是服務或領域；跨服務的改動放在同一個 commit。
+- 程式與文件一起改（服務的 README、`infra/architecture-design.md`）。
+
+### CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml)：每個 PR 與推到 `main` 時，只跑這次改到的服務——Java 服務 `./gradlew test`、Python 服務先確認
+`app/proto_gen` 跟 `infra/proto` 一致再 `pytest`、前端 lint／build／測試、安裝包的 shell 與 compose 檢查。改了 `infra/proto` 的話用到它的服務都跑。
+測試用 Testcontainers（GitHub 的 runner 有 Docker）。分支保護把 `ci-ok` 設成必要的檢查。發行：推 `v*` 的 tag
+（[`release-images.yml`](.github/workflows/release-images.yml)）。
+
 ## 授權
 
 TransuAI 以 [Apache License 2.0](LICENSE) 授權。
