@@ -40,3 +40,13 @@ Element.prototype.scrollTo ??= function scrollTo() {}
 // jsdom has no object URLs; exports create one per downloaded file (tests spy on these).
 URL.createObjectURL ??= () => 'blob:jsdom'
 URL.revokeObjectURL ??= () => {}
+
+// jsdom has no media playback: its play() only logs "Not implemented" (once per call, drowning real errors in the
+// output). Resolve like a browser that started playing; tests that care spy on it (vi.spyOn still works).
+Object.defineProperty(HTMLMediaElement.prototype, 'play', {
+  configurable: true,
+  writable: true,
+  value: function play() {
+    return Promise.resolve()
+  },
+})
