@@ -1,7 +1,7 @@
 # TransuAI 的一台伺服器安裝（客戶內部部署）：整套服務用 Docker Compose 跑，資料都在 named volume。
 # 用 install.sh 安裝（它產生 .env 與憑證）；之後的操作見 README.md：
-#   docker compose up -d                    啟動（沒有本地模型）
-#   docker compose --profile gpu up -d      連同本地模型（vLLM，要 NVIDIA GPU）一起啟動
+#   docker compose up -d
+# 模型伺服器（聊天、embedding、語音辨識）不在這裡：另外部署（通常是另一台 GPU 伺服器上的 vLLM，見 docs/models.md），在「系統設定」頁填網址。
 #
 # 只有 edge 對外開 port（TRANSUAI_HTTPS_PORT、TRANSUAI_HTTP_PORT）：它終結 TLS，網頁、/api、/ws 轉給 frontend，物件儲存的 bucket 路徑轉給 minio
 #（presigned URL 簽的就是對外網址，瀏覽器上傳與播放都在同一個網站）。其他服務都只在內部網路。
@@ -43,9 +43,6 @@ volumes:
   redis-data:
   rabbitmq-data:
   minio-data:
-  vllm-models:
-    # 已經有下載好模型的 volume（例如 infra/scripts/vllm.sh 的 transuai-vllm-models）時設 VLLM_MODELS_VOLUME 沿用它。
-    name: ${VLLM_MODELS_VOLUME:-transuai_vllm-models}
 
 configs:
   create-databases:
@@ -217,84 +214,3 @@ services:
       internal:
         ipv4_address: ${TRANSUAI_NET:-172.29.0}.11
     depends_on: [frontend, minio]
-
-  # ---------------------------------------------------------------- 本地模型（--profile gpu）
-  # 三個 OpenAI 相容的伺服器，參數跟 infra/scripts/vllm.sh 一樣（RTX 5080 16GB 實測，見 ai-service ADR 0015）；換卡或換模型時調 .env 的
-  # VLLM_*。每個 vLLM 啟動時要看到它那份顯示記憶體是空的，所以依序啟動：embedding → 語音辨識 → 聊天。
-  # 模型權重第一次啟動時從 Hugging Face 下載到 vllm-models；不能連外的環境先把模型放進這個 volume，VLLM_OFFLINE=1（見 docs/offline.md）。
-  vllm-embed:
-    profiles: [gpu]
-    image: &vllm-image vllm/vllm-openai:${VLLM_VERSION:-v0.31.0}
-    restart: unless-stopped
-    command:
-      - ${VLLM_EMBED_MODEL:-Qwen/Qwen3-Embedding-0.6B}
-      - --runner=pooling
-      - --convert=embed
-      - --max-model-len=${VLLM_EMBED_MAX_LEN:-2048}
-      - --gpu-memory-utilization=${VLLM_EMBED_GPU_SHARE:-0.12}
-    environment: &vllm-env
-      HF_HUB_OFFLINE: ${VLLM_OFFLINE:-0}
-    ipc: host
-    volumes: &vllm-volumes
-      - vllm-models:/root/.cache/huggingface
-    networks: [internal]
-    deploy: &gpu
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck: &vllm-health
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/models')"]
-      interval: 10s
-      timeout: 5s
-      # 第一次要從 Hugging Face 下載模型（聊天模型約 6GB），慢的網路要很久。
-      start_period: 60m
-      retries: 6
-
-  vllm-stt:
-    profiles: [gpu]
-    image: *vllm-image
-    restart: unless-stopped
-    # Breeze-ASR-25：Whisper-large-v2 針對台灣華語與中英夾雜調過。fp8 載入、不錄 CUDA graph、一次一段（省顯示記憶體）。
-    command:
-      - ${VLLM_STT_MODEL:-MediaTek-Research/Breeze-ASR-25}
-      - --quantization=fp8
-      - --enforce-eager
-      - --gpu-memory-utilization=${VLLM_STT_GPU_SHARE:-0.16}
-      - --max-num-seqs=1
-      - --max-num-batched-tokens=1500
-      - '--limit-mm-per-prompt={"audio": 1}'
-    environment: *vllm-env
-    ipc: host
-    volumes: *vllm-volumes
-    networks: [internal]
-    deploy: *gpu
-    healthcheck: *vllm-health
-    depends_on:
-      vllm-embed:
-        condition: service_healthy
-
-  vllm-chat:
-    profiles: [gpu]
-    image: *vllm-image
-    restart: unless-stopped
-    # 會後處理要呼叫工具：Qwen3 的格式是 hermes。thinking 由 ai-service 每次呼叫關掉（PLATFORM_LLM_EXTRA_BODY）。
-    command:
-      - ${VLLM_CHAT_MODEL:-Qwen/Qwen3-8B-AWQ}
-      - --max-model-len=${VLLM_CHAT_MAX_LEN:-28672}
-      - --kv-cache-dtype=fp8
-      - --gpu-memory-utilization=${VLLM_CHAT_GPU_SHARE:-0.53}
-      - --max-num-seqs=4
-      - --enable-auto-tool-choice
-      - --tool-call-parser=hermes
-    environment: *vllm-env
-    ipc: host
-    volumes: *vllm-volumes
-    networks: [internal]
-    deploy: *gpu
-    healthcheck: *vllm-health
-    depends_on:
-      vllm-stt:
-        condition: service_healthy

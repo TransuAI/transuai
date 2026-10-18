@@ -45,6 +45,14 @@ STT_PORT="${VLLM_STT_PORT:-8002}"
 STT_MODEL="${VLLM_STT_MODEL:-MediaTek-Research/Breeze-ASR-25}"
 STT_GPU_SHARE="${VLLM_STT_GPU_SHARE:-0.16}"
 
+api() {  # api <port> <path>：GET，有 VLLM_API_KEY 時帶上
+    if [ -n "${VLLM_API_KEY:-}" ]; then
+        curl -sf -H "Authorization: Bearer $VLLM_API_KEY" "http://localhost:$1$2"
+    else
+        curl -sf "http://localhost:$1$2"
+    fi
+}
+
 run() {
     name=$1 port=$2
     shift 2
@@ -54,8 +62,9 @@ run() {
     fi
     docker rm -f "$name" >/dev/null 2>&1 || true
     echo "== 建立 $name（GPU、模型存在 volume $VOLUME）=="
+    # VLLM_API_KEY 有設時每個請求都要帶這把（另一台機器連過來時建議設；TransuAI 的系統設定頁填同一把）。
     docker run -d --name "$name" --gpus all --restart unless-stopped --ipc=host \
-        -p "$port:8000" -v "$VOLUME:/root/.cache/huggingface" \
+        -p "$port:8000" -v "$VOLUME:/root/.cache/huggingface" ${VLLM_API_KEY:+-e VLLM_API_KEY} \
         "$IMAGE" "$@" >/dev/null
 }
 
@@ -63,7 +72,7 @@ wait_ready() {
     name=$1 port=$2
     echo "== 等 $name 準備好（第一次要下載模型）=="
     i=0
-    until curl -sf "http://localhost:$port/v1/models" >/dev/null 2>&1; do
+    until api "$port" /v1/models >/dev/null 2>&1; do
         i=$((i + 1))
         if ! docker ps --format '{{.Names}}' | grep -qx "$name"; then
             echo "$name 停掉了，看 docker logs $name" >&2
@@ -101,7 +110,7 @@ status() {
     echo
     nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv 2>/dev/null || true
     for port in "$EMBED_PORT" "$STT_PORT" "$CHAT_PORT"; do
-        models=$(curl -sf "http://localhost:$port/v1/models" 2>/dev/null | sed -n 's/.*"root":"\([^"]*\)".*/\1/p' || true)
+        models=$(api "$port" /v1/models 2>/dev/null | sed -n 's/.*"root":"\([^"]*\)".*/\1/p' || true)
         echo "localhost:$port  ${models:-（沒有回應）}"
     done
 }

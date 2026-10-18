@@ -1,12 +1,12 @@
 # TransuAI
 
 上傳會議、課程的錄音或影片，產生有講者的逐字稿、摘要、章節、決策與待辦，並且可以針對內容問答。為了裝在單位內部的伺服器上而設計：
-語音辨識、講者分離、摘要與問答的模型都可以在本機跑（vLLM），完全不用連外；也可以接 Claude、OpenAI、Gemini、OpenRouter 或其他
-OpenAI 相容的服務。
+語音辨識、摘要與問答的模型可以是單位自己的 GPU 伺服器（vLLM 等 OpenAI 相容的伺服器），完全不用連外；講者分離在 TransuAI 裡用 CPU 跑。
+也可以接 Claude、OpenAI、Gemini、OpenRouter。
 
 ## 安裝
 
-一台有 Docker 的 Linux 伺服器（有 NVIDIA GPU 的話可以一起跑本地模型）：
+一台有 Docker 的 Linux 伺服器：
 
 ```bash
 git clone <這個 repo> transuai
@@ -14,8 +14,8 @@ cd transuai/infra/deploy
 ./install.sh
 ```
 
-安裝完會印出網址與管理員的帳號、初始密碼（第一次登入要換成自己的密碼）；有 NVIDIA GPU 時本地模型也一起下載、啟動、設定好。
-其他（外部的模型、寄信）在「系統設定」填。詳細的步驟、硬體建議、備份、升級、憑證與
+安裝完會印出網址與管理員的帳號、初始密碼（第一次登入要換成自己的密碼）。模型伺服器另外部署（見
+[infra/deploy/docs/models.md](infra/deploy/docs/models.md)），在「系統設定」填網址，寄信也在那裡設定。詳細的步驟、硬體建議、備份、升級、憑證與
 離線安裝見 [infra/deploy/README.md](infra/deploy/README.md)。
 
 ## 開發

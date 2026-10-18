@@ -68,7 +68,7 @@ jobs:
           rm -f dist/transuai/compose.build.yaml
           sed -i "s|^TRANSUAI_REGISTRY=.*|TRANSUAI_REGISTRY=ghcr.io/$owner/transuai|; s|^TRANSUAI_VERSION=.*|TRANSUAI_VERSION=${GITHUB_REF_NAME}|" \
             dist/transuai/.env.example
-          sed -i 's|^url="" http_port=80 gpu="" images="build"|url="" http_port=80 gpu="" images="pull"|' dist/transuai/install.sh
+          sed -i '/^url=""/s|images="build"|images="pull"|' dist/transuai/install.sh
           tar -C dist -czf "transuai-deploy-${GITHUB_REF_NAME}.tar.gz" transuai
       - uses: softprops/action-gh-release@v2
         with:

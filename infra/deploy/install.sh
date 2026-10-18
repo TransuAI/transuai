@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# TransuAI 的安裝（一台有 Docker 的 Linux 伺服器）：產生 .env（隨機的密鑰與管理員密碼）與自簽憑證、取得 image、啟動、等到網頁可以開
-#（有本地模型時也等模型下載、載入好），最後印出網址與管理員的帳號密碼。
+# TransuAI 的安裝（一台有 Docker 的 Linux 伺服器）：產生 .env（隨機的密鑰與管理員密碼）與自簽憑證、取得 image、啟動、等到網頁可以開，
+# 最後印出網址與管理員的帳號密碼。模型伺服器不在這裡裝（另外部署，在「系統設定」頁填；見 docs/models.md）。
 # 再跑一次不會覆蓋已經有的 .env 與憑證（升級、重新啟動都可以再跑）。見 README.md。
 #
-#   ./install.sh                          問網址、要不要用本地模型，從原始碼 build image
-#   ./install.sh --url https://transuai.corp.internal --gpu --images pull --yes
+#   ./install.sh                          問網址與管理員的 email，從原始碼 build image
+#   ./install.sh --url https://transuai.corp.internal --admin-email it@corp.internal --images pull --yes
 #
 # 選項：
 #   --url URL          使用者在瀏覽器打的網址（https://主機名或 IP[:port]）；預設 https://$(hostname -f)
 #   --http-port N      轉址到 HTTPS 的 HTTP port；預設 80
 #   --admin-email EMAIL  管理員的 email（登入用）；預設 admin@<主機名>
-#   --gpu | --no-gpu   要不要一起跑本地模型（vLLM，要 NVIDIA GPU 與 NVIDIA Container Toolkit）；預設有 GPU 就問
 #   --images MODE      build（從原始碼，預設）、pull（發行的 image，見 .env 的 TRANSUAI_REGISTRY／TRANSUAI_VERSION）、
 #                      load:<檔案>（離線包，bundle.sh 產生的 tar）
 #   --yes              不問，全部用預設值或上面的選項
@@ -18,17 +17,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-url="" http_port=80 admin_email="" gpu="" images="build" assume_yes=0
+url="" http_port=80 admin_email="" images="build" assume_yes=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --url) url="${2:?--url 要接網址}"; shift 2 ;;
         --http-port) http_port="${2:?--http-port 要接 port}"; shift 2 ;;
         --admin-email) admin_email="${2:?--admin-email 要接 email}"; shift 2 ;;
-        --gpu) gpu=1; shift ;;
-        --no-gpu) gpu=0; shift ;;
         --images) images="${2:?--images 要接 build、pull 或 load:<檔案>}"; shift 2 ;;
         --yes|-y) assume_yes=1; shift ;;
-        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "不認得的選項：$1（--help 看用法）" >&2; exit 2 ;;
     esac
 done
@@ -132,50 +129,7 @@ else
     chmod 644 tls/tls.crt tls/tls.key
 fi
 
-# ---------------------------------------------------------------- 4. 本地模型
-if [ "$new_env" = 1 ]; then
-    has_gpu=0
-    if command -v nvidia-smi >/dev/null && nvidia-smi >/dev/null 2>&1; then
-        gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
-        gpu_mib=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1 | tr -d ' ')
-        say "找到 NVIDIA GPU：$gpu_name（${gpu_mib} MiB）"
-        if ! docker info 2>/dev/null | grep -qi nvidia; then
-            echo "可是 Docker 還不能用 GPU：要先裝 NVIDIA Container Toolkit 並重啟 Docker"
-            echo "（https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html），再跑一次 install.sh。"
-            [ "$gpu" = 1 ] && die "--gpu 需要 NVIDIA Container Toolkit"
-        elif [ "$gpu_mib" -lt 15500 ]; then
-            # 預設的三個模型是在 16GB 的卡上實測的（docs/hardware.md），更小的卡放不下。
-            echo "顯示記憶體不到 16GB，放不下預設的三個本地模型（見 docs/hardware.md）；模型改用外部的伺服器。"
-            if [ "$gpu" = 1 ]; then echo "（--gpu：照樣啟動，請先調 .env 的 VLLM_*）"; has_gpu=1; fi
-        else
-            has_gpu=1
-        fi
-    fi
-    if [ -z "$gpu" ]; then
-        gpu=0
-        if [ "$has_gpu" = 1 ]; then
-            case "$(ask "一起裝本地模型（聊天、embedding、語音辨識；第一次要從 Hugging Face 下載約 10GB）？y/n" y)" in y|Y|yes) gpu=1 ;; esac
-        fi
-    elif [ "$gpu" = 1 ] && [ "$has_gpu" = 0 ]; then
-        die "--gpu：這台沒有 Docker 能用的 NVIDIA GPU"
-    fi
-    if [ "$gpu" = 1 ]; then
-        set_env COMPOSE_PROFILES gpu
-        set_env PLATFORM_LLM_BASE_URL http://vllm-chat:8000/v1
-        set_env PLATFORM_LLM_MODEL "$(env_value VLLM_CHAT_MODEL)"
-        set_env AI_POST_MEETING_PLATFORM_MODEL "$(env_value VLLM_CHAT_MODEL)"
-        set_env EMBEDDING_BASE_URL http://vllm-embed:8000/v1
-        set_env EMBEDDING_MODEL "$(env_value VLLM_EMBED_MODEL)"
-        set_env EMBEDDING_QUERY_INSTRUCTION "Given a question about a recording, retrieve the transcript passages that answer it"
-        set_env STT_BASE_URL http://vllm-stt:8000/v1
-        set_env STT_MODEL "$(env_value VLLM_STT_MODEL)"
-        echo "本地模型會跟著啟動（.env 的 COMPOSE_PROFILES=gpu）"
-    else
-        echo "不跑本地模型：裝好之後在「系統設定」頁填模型伺服器與語音辨識"
-    fi
-fi
-
-# ---------------------------------------------------------------- 5. image
+# ---------------------------------------------------------------- 4. image
 case "$images" in
     build)
         say "從原始碼 build image（第一次要十幾分鐘）"
@@ -195,10 +149,9 @@ case "$images" in
     *) die "--images 要是 build、pull 或 load:<檔案>：$images" ;;
 esac
 
-# ---------------------------------------------------------------- 6. 啟動
+# ---------------------------------------------------------------- 5. 啟動
 say "啟動"
-# 先起服務本身（不含本地模型）：模型第一次要下載很久，不讓它擋住網頁。
-COMPOSE_PROFILES= docker compose up -d
+docker compose up -d
 
 say "等網頁可以開（${url}）"
 for _ in $(seq 1 120); do
@@ -209,38 +162,7 @@ for _ in $(seq 1 120); do
 done
 [ "${ready:-0}" = 1 ] || die "10 分鐘內沒有起來；看 docker compose ps 與 docker compose logs"
 
-# ---------------------------------------------------------------- 7. 本地模型
-# 一個一個起：每個 vLLM 啟動時要看到它那份顯示記憶體是空的（同時起會算錯 KV cache 而失敗）。第一次要從 Hugging Face 下載。
-wait_healthy() {  # wait_healthy <service> <分鐘>
-    local service=$1 minutes=$2 id state i
-    for i in $(seq 1 $((minutes * 4))); do
-        id=$(docker compose ps -q "$service" 2>/dev/null)
-        state=$([ -n "$id" ] && docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2>/dev/null)
-        [ "$state" = healthy ] && return 0
-        if [ $((i % 8)) = 0 ]; then
-            echo "  $(date +%H:%M) $service：${state:-還沒啟動}（$(docker compose logs --tail 1 --no-log-prefix "$service" 2>/dev/null | cut -c1-100)）"
-        fi
-        sleep 15
-    done
-    return 1
-}
-if grep -q '^COMPOSE_PROFILES=gpu' .env; then
-    say "啟動本地模型（第一次要下載約 10GB，幾分鐘到幾十分鐘；網頁已經可以先用）"
-    models_ready=1
-    for service in vllm-embed vllm-stt vllm-chat; do
-        docker compose up -d --no-deps "$service" >/dev/null 2>&1
-        if wait_healthy "$service" 60; then
-            echo "$service 好了"
-        else
-            echo "$service 60 分鐘內沒有好；看 docker compose logs $service（還在下載的話晚一點再跑一次 install.sh）"
-            models_ready=0
-            break
-        fi
-    done
-    [ "$models_ready" = 1 ] && echo "本地模型都好了"
-fi
-
-# ---------------------------------------------------------------- 8. 完成
+# ---------------------------------------------------------------- 6. 完成
 admin_email=$(env_value INITIAL_ADMIN_EMAIL)
 admin_password=$(env_value INITIAL_ADMIN_PASSWORD)
 # 管理員還沒換掉初始密碼時才印出來（換過之後它就沒用了）。
@@ -262,11 +184,8 @@ if [ "$must_change" = t ]; then
 
 EOF
 fi
-if grep -q '^COMPOSE_PROFILES=gpu' .env; then
-    echo "  1. 用管理員登入。本地模型已經設定好；到「系統設定」按「檢查」確認，要寄信（SMTP）的話也在那裡填。"
-else
-    echo "  1. 用管理員登入，到「系統設定」填模型伺服器、語音辨識與寄信（SMTP），按「檢查」確認連得上。"
-fi
+echo "  1. 用管理員登入，到「系統設定」填模型伺服器（聊天、embedding）、語音辨識與寄信（SMTP），按「檢查」確認連得上。"
+echo "     模型伺服器另外部署（例如另一台 GPU 伺服器上的 vLLM），見 docs/models.md。"
 cat <<EOF
   2. 其他人自己到網頁註冊（一般使用者）；要多一位管理員見 README.md。
   3. 憑證是自簽的，瀏覽器會先警告；換成單位自己的憑證見 docs/tls.md。

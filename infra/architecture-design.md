@@ -921,7 +921,7 @@ Redis 不當訊息佇列，改用在 gateway 的限流（每個 API 請求與登
 | Embedding | OpenAI 相容的 `/v1/embeddings`（`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`；本機是 vLLM 上的 `Qwen/Qwen3-Embedding-0.6B`，1024 維）；換模型後 ai-service 啟動時自動重算既有向量 |
 | 網路搜尋（問答「查網路」、事實查核） | Tavily 官方遠端 MCP（`tavily_search`，平台付費的 `TAVILY_API_KEY`；由系統查，不給模型工具；問答在回答前查一次，只送出一句搜尋查詢，見 `ai-service/docs/adr/0014-qa-web-search-by-the-system.md`；事實查核每條主張查一次，只送整理過的那一句主張） |
 | 已連結的帳號（會後處理用） | Google OAuth（平台自己的 OAuth client，只要 Calendar 活動、Gmail 建立草稿、Tasks 的權限）與 Notion 官方遠端 MCP 的 OAuth（PKCE + 動態註冊 client）；權杖用自有金鑰那套 AES-GCM 加密存在 ai-service，state 綁定開始連結的瀏覽器（見 `ai-service/README.md`「已連結的帳號」） |
-| 容器化 | Docker；本機開發有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md`。客戶安裝用 `infra/deploy/`：一台伺服器的 Docker Compose（`install.sh` 產生密鑰與自簽憑證；`edge` 的 nginx 終結 TLS，物件儲存的 bucket 路徑轉給 MinIO，跟網頁同一個網站；`--profile gpu` 一起跑 vLLM 的三個本地模型），發行的 image 在 GHCR（`.github/workflows/release-images.yml`，tag `v*`）。MinIO 官方的 image 已經下架，安裝包用 `pgsty/minio` |
+| 容器化 | Docker；本機開發有兩種跑法——`docker-compose`（只跑基礎設施，服務在 host 上跑）或 **Kubernetes**（`infra/k8s/`，完整六服務 + 基礎設施都在叢集內，本機用 Docker Desktop 內建 kind）。細節見 `infra/README.md`。客戶安裝用 `infra/deploy/`：一台伺服器的 Docker Compose（`install.sh` 產生密鑰與自簽憑證；`edge` 的 nginx 終結 TLS，物件儲存的 bucket 路徑轉給 MinIO，跟網頁同一個網站；模型伺服器不在安裝包裡，另外部署、在系統設定頁填，見 `infra/deploy/docs/models.md`），發行的 image 在 GHCR（`.github/workflows/release-images.yml`，tag `v*`）。MinIO 官方的 image 已經下架，安裝包用 `pgsty/minio` |
 | 即時通訊 | WebSocket（Notification Service，路徑 `/ws/jobs/{jobId}`） |
 
 ---

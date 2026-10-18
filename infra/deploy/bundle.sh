@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 離線安裝包（不能連外的環境）：在能連外的機器上把 compose.yaml 用到的所有 image 存成一個 tar，連同這個目錄帶進去，
 #   ./install.sh --images load:transuai-images.tar
-# 先在這台準備好 image（./install.sh 或 docker compose pull／build）。本地模型的權重另外帶，見 docs/offline.md。
+# 先在這台準備好 image（./install.sh 或 docker compose pull／build）。模型伺服器另外部署，見 docs/offline.md。
 #
-#   ./bundle.sh [輸出檔，預設 transuai-images.tar]     含本地模型的 vLLM image 時：COMPOSE_PROFILES=gpu ./bundle.sh
+#   ./bundle.sh [輸出檔，預設 transuai-images.tar]
 set -euo pipefail
 cd "$(dirname "$0")"
 

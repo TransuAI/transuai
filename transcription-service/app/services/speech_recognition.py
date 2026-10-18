@@ -86,7 +86,7 @@ def recognize(audio_path: Path, language: str | None = None) -> Recognition:
     deepgram_key = speech_settings.current().deepgram_api_key
     if not deepgram_key:
         raise RecognitionNotConfigured(
-            "語音辨識尚未設定：請部署的人設定本地語音辨識（STT_BASE_URL、STT_MODEL）或 Deepgram（DEEPGRAM_API_KEY）")
+            "語音辨識尚未設定：請管理員到「系統設定」設定語音辨識（本地的伺服器或 Deepgram）")
     logger.info("calling Deepgram (%s, %s) for %s", settings.deepgram_model, chosen, audio_path)
     language_params = ([("detect_language", code) for code in _DETECTABLE_LANGUAGES] if chosen == AUTO
                        else [("language", chosen)])

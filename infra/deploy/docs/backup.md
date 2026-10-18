@@ -10,7 +10,7 @@
 | 憑證 | `tls/` |
 
 **`.env` 一定要跟資料庫一起備份**：系統設定頁存的 API key、SMTP 密碼、使用者自己的金鑰與 OAuth 權杖都用 `KEY_ENCRYPTION_KEY`
-加密，沒有它就解不開。redis（限流與快取）、rabbitmq（處理中的訊息）不用備份。本地模型的權重（`transuai_vllm-models`）可以重新下載。
+加密，沒有它就解不開。redis（限流與快取）、rabbitmq（處理中的訊息）不用備份。
 
 ## 備份
 
@@ -55,8 +55,7 @@ docker run --rm -i --volumes-from "$(docker compose ps -aq minio)" pgvector/pgve
 docker compose up -d
 ```
 
-在原本的機器上還原（資料壞了）時，先停掉並刪掉舊的資料 volume（**會刪掉現在的資料**，確定備份是好的再做）。模型的 volume 留著，
-不用重新下載：
+在原本的機器上還原（資料壞了）時，先停掉並刪掉舊的資料 volume（**會刪掉現在的資料**，確定備份是好的再做）：
 
 ```bash
 docker compose down

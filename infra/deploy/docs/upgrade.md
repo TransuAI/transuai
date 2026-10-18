@@ -33,8 +33,3 @@ docker compose logs --since 10m | grep -iE 'error|exception'
 
 資料庫結構升級後不一定能被舊版讀：退回時用升級前的備份還原（[backup.md](backup.md)），再把 `TRANSUAI_VERSION`（或 git）改回舊版
 `docker compose up -d`。
-
-## 本地模型
-
-vLLM 的版本在 `.env` 的 `VLLM_VERSION`；換版本後 `docker compose --profile gpu pull && docker compose up -d`。模型權重在 volume
-`transuai_vllm-models`，換模型時第一次啟動會下載新的。
