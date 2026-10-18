@@ -27,6 +27,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // 測試資料的時間是台灣時間（+08:00），畫面上的時間跟表單驗證都依瀏覽器的時區：固定成台灣，不管在哪裡跑（CI 的機器是 UTC）都一樣。
+    env: { TZ: 'Asia/Taipei' },
     setupFiles: ['./src/test/setup.ts'],
   },
 })
