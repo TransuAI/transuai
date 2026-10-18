@@ -73,7 +73,7 @@ def answer(language, *segments):
 
 def test_each_speakers_words_come_back_at_their_place_in_the_recording(server, monkeypatch, tmp_path):
     monkeypatch.setattr(diarization, "is_available", lambda: True)
-    monkeypatch.setattr(diarization, "diarize", lambda _samples: [turn(0.0, 6.0, "0"), turn(8.0, 15.0, "1")])
+    monkeypatch.setattr(diarization, "diarize", lambda _path: [turn(0.0, 6.0, "0"), turn(8.0, 15.0, "1")])
     server.answers = [answer("zh", (0.0, 2.5, " 大家好 "), (2.5, 6.0, "今天談預算")), answer("zh", (0.0, 4.0, "我同意"))]
 
     recognition = recognize(tmp_path / "meeting.mp3", "zh-TW")
@@ -100,7 +100,7 @@ def test_it_asks_the_configured_model_for_timed_segments_in_the_chosen_language(
 
 def test_with_automatic_detection_the_language_most_chunks_heard_wins(server, monkeypatch, tmp_path):
     monkeypatch.setattr(diarization, "is_available", lambda: True)
-    monkeypatch.setattr(diarization, "diarize", lambda _s: [turn(0.0, 3.0, "0"), turn(4.0, 7.0, "1"), turn(8.0, 11.0, "0")])
+    monkeypatch.setattr(diarization, "diarize", lambda _path: [turn(0.0, 3.0, "0"), turn(4.0, 7.0, "1"), turn(8.0, 11.0, "0")])
     server.answers = [answer("en", (0.0, 1.0, "hi")), answer("en", (0.0, 1.0, "hello")), answer("zh", (0.0, 1.0, "好"))]
 
     recognition = recognize(tmp_path / "meeting.mp3", "auto")
@@ -109,13 +109,61 @@ def test_with_automatic_detection_the_language_most_chunks_heard_wins(server, mo
     assert all('name="language"' not in r.content.decode("latin-1") for r in server.requests)
 
 
+def test_a_chunk_that_fails_for_a_moment_is_tried_again_on_its_own(server, monkeypatch, tmp_path):
+    monkeypatch.setattr(local_speech, "_CHUNK_RETRY_DELAYS_SECONDS", (0, 0))
+    monkeypatch.setattr(diarization, "is_available", lambda: True)
+    monkeypatch.setattr(diarization, "diarize", lambda _path: [turn(2.0, 6.0, "0")])
+    server.answers = [httpx.Response(503, text="busy"), httpx.Response(429, text="slow down"), answer("zh", (0.0, 1.0, "好"))]
+
+    recognition = recognize(tmp_path / "meeting.mp3", "zh-TW")
+
+    assert [w.text for w in recognition.words] == ["好"]
+    assert len(server.requests) == 3
+
+
 def test_a_busy_server_is_worth_retrying_and_a_bad_request_is_not(server, monkeypatch, tmp_path):
+    monkeypatch.setattr(local_speech, "_CHUNK_RETRY_DELAYS_SECONDS", (0, 0))
     monkeypatch.setattr(diarization, "is_available", lambda: False)
     for status, transient in [(503, True), (400, False)]:
-        server.answers = [httpx.Response(status, json={"error": "no"})]
+        server.answers = [httpx.Response(status, json={"error": "no"})] * 3
         with pytest.raises(httpx.HTTPStatusError) as raised:
             recognize(tmp_path / "meeting.mp3", "zh-TW")
         assert is_transient_recognition_error(raised.value) is transient
+
+
+def test_a_chunk_the_server_cannot_time_comes_back_as_one_segment(server, monkeypatch, tmp_path):
+    # vLLM 0.31 answers 500 when it can't build segment times for an almost-empty result; the text alone still works.
+    monkeypatch.setattr(diarization, "is_available", lambda: True)
+    monkeypatch.setattr(diarization, "diarize", lambda _path: [turn(2.0, 6.0, "0")])
+    server.answers = [httpx.Response(500, text="Internal Server Error"), httpx.Response(200, json={"text": " 嗯 "})]
+
+    recognition = recognize(tmp_path / "meeting.mp3", "zh-TW")
+
+    assert [(w.start, w.end, w.text, w.speaker) for w in recognition.words] == [(2.0, 6.0, "嗯", "0")]
+    assert 'name="response_format"\r\n\r\njson\r\n' in server.requests[1].content.decode("latin-1")
+
+
+def test_when_the_text_alone_fails_too_the_first_error_counts(server, monkeypatch, tmp_path):
+    monkeypatch.setattr(diarization, "is_available", lambda: False)
+    monkeypatch.setattr(local_speech, "_CHUNK_RETRY_DELAYS_SECONDS", (0, 0))
+    server.answers = [httpx.Response(500, text="no")] + [httpx.Response(503, text="busy")] * 3
+
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        recognize(tmp_path / "meeting.mp3", "zh-TW")
+    assert raised.value.response.status_code == 500
+
+
+def test_when_diarization_runs_out_of_memory_the_recording_is_still_transcribed_without_speakers(server, monkeypatch, tmp_path):
+    def killed(_path):
+        raise diarization.DiarizationFailed("the process ended early")
+
+    monkeypatch.setattr(diarization, "is_available", lambda: True)
+    monkeypatch.setattr(diarization, "diarize", killed)
+    server.answers = [answer("zh", (0.0, 2.0, "大家好"))]
+
+    recognition = recognize(tmp_path / "meeting.mp3", "zh-TW")
+
+    assert [(w.text, w.speaker) for w in recognition.words] == [("大家好", None)]
 
 
 # --- 用哪一個 ---

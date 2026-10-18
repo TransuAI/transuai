@@ -26,5 +26,8 @@ COPY app ./app
 
 # moviepy 與本地語音辨識的解碼都用 imageio-ffmpeg：它的 wheel 已經附了 ffmpeg 執行檔，不用另外下載。
 ENV PATH="/app/.venv/bin:$PATH"
+# glibc 預設每條 thread 一塊記憶體區（arena），用完不太還給系統；語音辨識同時開幾條 thread，限制成 2 塊，閒著時佔得少
+#（8GB 的伺服器，見 infra/deploy/compose.yaml）。
+ENV MALLOC_ARENA_MAX=2
 EXPOSE 8083
 CMD ["python", "-m", "app.main"]

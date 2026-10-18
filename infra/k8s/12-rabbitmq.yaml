@@ -48,6 +48,9 @@ spec:
                 secretKeyRef:
                   name: app-secrets
                   key: RABBITMQ_PASSWORD
+            # 一則訊息沒 ack 多久算卡住（預設 30 分鐘）：一小時的錄音可能處理更久，調成 4 小時（見 transcription-service 的 consumer）。
+            - name: RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS
+              value: "-rabbit consumer_timeout 14400000"
           readinessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "-q", "ping"]

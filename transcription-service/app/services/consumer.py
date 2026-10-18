@@ -31,7 +31,10 @@ def _declare_retry_queue(channel: BlockingChannel, queue: str, ttl_ms: int) -> N
 
 
 def _consume_once() -> None:
-    connection = pika.BlockingConnection(connection_params())
+    # 一則訊息可能要處理幾十分鐘（一小時的錄音：CPU 上的講者分離、逐段語音辨識；長逐字稿的摘要）。處理時這個 thread 不會回應 RabbitMQ 的
+    # 心跳，開著心跳的話一兩分鐘就被斷線、訊息重新投遞、整個檔案從頭再來。這條連線不用心跳（斷線靠 TCP 發現）；RabbitMQ 那邊的
+    # consumer_timeout（沒 ack 多久算卡住）也調長到 4 小時（infra/deploy/compose.yaml、infra/k8s/12-rabbitmq.yaml）。
+    connection = pika.BlockingConnection(connection_params(heartbeat=0))
     try:
         channel = connection.channel()
         channel.queue_declare(

@@ -1,3 +1,5 @@
+import ctypes
+import gc
 import json
 import logging
 import uuid
@@ -94,6 +96,7 @@ def process_message(
         logger.info("job %s transcribed successfully", job_id)
     except Exception as exc:
         if is_transient_recognition_error(exc) and retry_queue_for(retry_count) is not None:
+            logger.warning("job %s: transient failure, retrying the whole job (retry_count %d): %r", job_id, retry_count, exc)
             raise RetryableMessageError(
                 f"job {job_id}: transient failure, retry_count={retry_count}") from exc
 
@@ -114,3 +117,14 @@ def process_message(
             downloaded.unlink(missing_ok=True)
         if audio_path is not None and audio_path != downloaded:
             audio_path.unlink(missing_ok=True)
+        _release_memory()
+
+
+def _release_memory() -> None:
+    """一個檔案處理完，把用過的記憶體還給系統：glibc 會留著自己用（一小時的錄音解碼後約 230MB，加上語音辨識的幾條 thread），服務閒著
+    也佔著，下一個檔案的講者分離（另一個 process）就可能超過容器的記憶體上限（8GB 的伺服器上設得比較緊，見 infra/deploy/compose.yaml）。"""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):  # 不是 glibc（例如 macOS 上跑測試）
+        pass

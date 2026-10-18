@@ -9,6 +9,7 @@ OpenAI 相容 /v1/audio/transcriptions（Breeze-ASR-25）。先分講者再轉�
 import io
 import logging
 import subprocess
+import time
 import wave
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,8 @@ _CONCURRENT_REQUESTS = 4
 # 上傳時選的語言 → Whisper 的語言代碼；自動偵測就不指定。
 _WHISPER_LANGUAGE = {"zh-TW": "zh", "en": "en"}
 
+# 一段暫時失敗時，等這麼久再試（共 3 次）。
+_CHUNK_RETRY_DELAYS_SECONDS = (2, 5)
 # 一段最長 30 秒，辨識很快；連不上則很快放棄，交給訊息層級重試。
 _client = outbound.client(timeout=httpx.Timeout(300.0, connect=10.0))
 
@@ -49,9 +52,16 @@ class _Chunk:
 
 
 def recognize(audio_path: Path, chosen: str) -> Recognition:
+    # 先分講者（子 process，自己解碼；做完記憶體就還回去），再解碼一次給語音辨識切段。分講者失敗（記憶體不夠）時照樣轉錄、只是不分講者
+    #（使用者還是拿得到逐字稿，可以自己標講者），不讓整個檔案失敗。
+    turns = None
+    if diarization.is_available():
+        try:
+            turns = diarization.diarize(audio_path)
+        except diarization.DiarizationFailed:
+            logger.exception("diarization failed for %s; transcribing without speakers", audio_path)
     samples = _decode(audio_path)
     duration = len(samples) / SAMPLE_RATE
-    turns = diarization.diarize(samples) if diarization.is_available() else None
     if turns is None:
         logger.warning("no diarization models in %s: transcribing without speakers", settings.diarization_models_dir)
     chunks = _chunks(turns, duration)
@@ -109,29 +119,62 @@ def _transcribe(samples: np.ndarray, chunk: _Chunk, language: str | None,
                 config: "speech_settings.SpeechConfig") -> tuple[str | None, list[tuple[float, float, str]]]:
     """一段音訊送去轉錄，回傳偵測到的語言與片段（相對這段開頭的起訖時間、文字）。HTTP 錯誤一律 raise（暫時性與否由
     speech_recognition.is_transient_recognition_error 判斷）。"""
-    piece = samples[int(chunk.start * SAMPLE_RATE):int(chunk.end * SAMPLE_RATE)]
-    data = {"model": config.stt_model, "response_format": "verbose_json",
-            "timestamp_granularities[]": "segment", "temperature": "0"}
-    if language:
-        data["language"] = language
-    headers = {"Authorization": f"Bearer {config.stt_api_key}"} if config.stt_api_key else {}
-    response = _client.post(f"{config.stt_base_url.rstrip('/')}/audio/transcriptions", data=data, headers=headers,
-                            files={"file": ("chunk.wav", _wav(piece), "audio/wav")})
-    response.raise_for_status()
-    body = response.json()
+    piece = _wav(samples[int(chunk.start * SAMPLE_RATE):int(chunk.end * SAMPLE_RATE)])
+    try:
+        body = _post(piece, config, language, timed=True)
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code != 500:
+            raise
+        # vLLM 算片段時間時，辨識結果幾乎是空的那段（例如只有雜音）會出錯回 500（v0.31 的 _get_verbose_segments）。這段改成只要
+        # 文字，整段當一個片段；再不行才算失敗（一段失敗整個檔案都要重來）。
+        logger.warning("the speech server failed on %.1f–%.1fs with timed segments; asking for the text only",
+                       chunk.start, chunk.end)
+        try:
+            body = _post(piece, config, language, timed=False)
+        except httpx.HTTPError:
+            raise error from None
     segments = [(float(s["start"]), float(s["end"]), s["text"].strip()) for s in body.get("segments") or []]
     if not segments and (body.get("text") or "").strip():
         segments = [(0.0, chunk.end - chunk.start, body["text"].strip())]
     return body.get("language"), [segment for segment in segments if segment[2]]
 
 
+def _post(wav: bytes, config: "speech_settings.SpeechConfig", language: str | None, *, timed: bool) -> dict:
+    """送一段。暫時性的錯誤（連不上、逾時、429、500 以外的 5xx）在這一段重試幾次——一小時的錄音有好幾百段，一段失敗就整個檔案（含幾分鐘的
+    講者分離）從頭再來太浪費；還是不行才往外丟，交給訊息層級的重試。500 不在這裡重試（見 _transcribe）。"""
+    for attempt, delay in enumerate(_CHUNK_RETRY_DELAYS_SECONDS + (None,)):
+        try:
+            return _post_once(wav, config, language, timed=timed)
+        except (httpx.TransportError, httpx.HTTPStatusError) as error:
+            status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+            if delay is None or not (status is None or status == 429 or status > 500):
+                raise
+            logger.warning("the speech server failed (%r); trying this chunk again in %ss", error, delay)
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def _post_once(wav: bytes, config: "speech_settings.SpeechConfig", language: str | None, *, timed: bool) -> dict:
+    data = {"model": config.stt_model, "temperature": "0",
+            **({"response_format": "verbose_json", "timestamp_granularities[]": "segment"} if timed
+               else {"response_format": "json"})}
+    if language:
+        data["language"] = language
+    headers = {"Authorization": f"Bearer {config.stt_api_key}"} if config.stt_api_key else {}
+    response = _client.post(f"{config.stt_base_url.rstrip('/')}/audio/transcriptions", data=data, headers=headers,
+                            files={"file": ("chunk.wav", wav, "audio/wav")})
+    response.raise_for_status()
+    return response.json()
+
+
 def _decode(audio_path: Path) -> np.ndarray:
-    """任何 ffmpeg 讀得懂的音檔 → 16kHz 單聲道、-1～1 的 float32。"""
+    """任何 ffmpeg 讀得懂的音檔 → 16kHz 單聲道、-1～1 的 float32（唯讀）。ffmpeg 直接輸出 float32，陣列就用它的輸出、不再複製——一小時的
+    錄音約 230MB，記憶體小的伺服器（8GB）上多一份複製就是多幾百 MB。"""
     completed = subprocess.run(
         [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-loglevel", "error", "-i", str(audio_path),
-         "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "-"],
+         "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "f32le", "-"],
         capture_output=True, check=True)
-    return np.frombuffer(completed.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+    return np.frombuffer(completed.stdout, dtype=np.float32)
 
 
 def _wav(samples: np.ndarray) -> bytes:

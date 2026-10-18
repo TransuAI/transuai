@@ -55,6 +55,8 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-devuser}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-devpassword}
+      # 一則訊息沒 ack 多久算卡住（預設 30 分鐘）：一小時的錄音可能處理更久，調成 4 小時（見 transcription-service 的 consumer）。
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit consumer_timeout 14400000"
     ports:
       - "5672:5672" # AMQP port，各服務連這個
       - "15672:15672" # Management UI: http://localhost:15672

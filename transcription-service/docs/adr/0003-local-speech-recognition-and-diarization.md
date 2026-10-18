@@ -27,6 +27,11 @@ Accepted（2026-10-18）。Deepgram（ADR 0001）保留成可選的雲端方案�
 - 語言：上傳時選的中文對 Whisper 是 `zh`、英文 `en`、自動偵測不指定（多數段落聽到的語言勝出）。
 - 講者分離的模型由 Dockerfile 下載進 image（`/app/models/diarization`）；沒有模型時不分講者，整段每 30 秒送一次。
 - 分群的門檻 `DIARIZATION_THRESHOLD` 預設 0.6（越大分出越少人），執行緒數 `DIARIZATION_THREADS` 預設 4。
+- **講者分離在另一個 process 跑**（2026-10-18 補）：sherpa-onnx 處理時一直拿著 Python 的 GIL，一小時的錄音要 7 分鐘左右，在服務的 process
+  裡跑的話 gRPC（看逐字稿）與 RabbitMQ 的其他連線全部停住（心跳斷線、訊息重新投遞、整個檔案從頭再來）。子 process（spawn）自己讀檔、
+  解碼、分講者，只傳回每段誰在說話，做完就結束，記憶體（解碼的音訊約 230MB＋模型）跟著還回去。
+- **一段失敗不拖垮整個檔案**：一段遇到連不上、逾時、429、500 以外的 5xx 時，那一段自己重試（2 秒、5 秒後，共 3 次）；vLLM 在幾乎沒有
+  辨識結果的段落算片段時間會回 500（v0.31 的 bug），那段改成只要文字、整段當一個片段。
 
 ## 實測（RTX 5080 上的 vLLM、kind 叢集裡的 transcription-service，2026-10-18）
 

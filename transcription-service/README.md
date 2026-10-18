@@ -194,7 +194,7 @@ app/
   controllers/
     transcript_controller.py       TranscriptionServiceServicer 實作（GetTranscript、UpdateSegmentText、RenameSpeaker、AssignSegmentSpeaker）
   services/
-    consumer.py                      RabbitMQ consumer loop（pika）
+    consumer.py                      RabbitMQ consumer loop（pika）；這條連線不用心跳——一則訊息可能處理幾十分鐘（講者分離在 CPU 上），開著心跳的話一兩分鐘就被 RabbitMQ 斷線、整個檔案從頭再來；RabbitMQ 的 consumer_timeout 也調成 4 小時（infra 的 compose 與 k8s）
     deletion_consumer.py             刪除事件（job.deleted、account.deleted）：各自的佇列、retry 佇列，另一條 thread
     account_deletion.py              刪除帳號：用量去識別化
     job_deletion.py                  刪掉一個 Job 的逐字稿與快取；deleted_jobs 標記與寫入後的檢查
@@ -202,8 +202,8 @@ app/
     storage.py                         從 MinIO/R2 下載檔案
     audio.py                            moviepy 抽音軌
     speech_recognition.py                語音辨識 adapter：依設定選本地或 Deepgram（都沒有就 RecognitionNotConfigured），回傳不綁定廠商的逐字資料與音檔秒數，並判斷錯誤是否暫時性
-    local_speech.py                      本地語音辨識：解碼成 16kHz、分講者、切成每段最長 30 秒、送 vLLM 的 /v1/audio/transcriptions、把時間對回整段錄音
-    diarization.py                       講者分離（sherpa-onnx，CPU；模型在 DIARIZATION_MODELS_DIR，沒有就不分）
+    local_speech.py                      本地語音辨識：解碼成 16kHz float32（ffmpeg 直接輸出、不複製：一小時約 230MB）、分講者、切成每段最長 30 秒、送 vLLM 的 /v1/audio/transcriptions、把時間對回整段錄音
+    diarization.py                       講者分離（sherpa-onnx，CPU；模型在 DIARIZATION_MODELS_DIR，沒有就不分）。在另一個 process（spawn）跑：sherpa-onnx 一直拿著 GIL，在服務的 process 裡跑會讓 gRPC 與 RabbitMQ 的心跳停好幾分鐘（ADR 0003）
     transcription_usage.py               記錄轉錄用量（Job 擁有者、音檔秒數、成功或失敗），存檔失敗只記 log
     segmentation.py                       把逐字資料切成片段、講者依第一次開口的順序編號（跟廠商無關）
     transcript_result.py                  切好片段、準備存檔的逐字稿（dataclass）
@@ -266,6 +266,8 @@ uvx pip-audit --no-deps --disable-pip -r /tmp/requirements.txt
 - `recognize()` 呼叫 Deepgram 或本地的 vLLM 遇到暫時性錯誤（429、5xx、逾時、連不上）會自動重試（訊息層級 requeue，最多 2 次、共 3 次嘗試，機制跟 `ai-service` 完全一樣，見 `app/services/retry.py` 跟 `ai-service/docs/adr/0001-...md`）；永久性失敗（壞檔、認證失敗、額度用完的 402 等）或重試預算用盡才會直接判定 `FAILED`，要重新上傳才能重跑。`download_object`/`extract_audio_track`/DB 寫入/gRPC 狀態回報這幾步目前還不在這個重試機制涵蓋範圍內，任一步失敗一樣立即判定失敗（這點跟 RabbitMQ **連線**層級不一樣：consumer 連線斷線時已經有指數退避自動重連，見 `app/services/consumer.py`）
 - 若 `UpdateJobStatus(FAILED, ...)` 這個回寫本身也失敗（例如 job 在 upload-service 那邊已經不存在），現在會被接住只記 log，不會再讓 consumer thread 掛掉；但這則訊息就此沒有任何後續動作（不會重試、不會有 `job.failed` 事件），只能從 log 找出來手動處理——`ai-service` 已經幫這一段補上獨立的 in-process 重試 + 高嚴重度 log marker，這裡還沒跟進，是目前真實存在的已知限制
 - 講者分離只在新轉錄的 Job 上做，舊 Job 不回填（沒有講者，當成只有一位講者）。自動分離不完美：Deepgram 很短的插話（「對」「真的」）常被併進前一位講者，三人以上的對話偶爾只分出兩位（見 ADR 0001 的實測）；本地的同一個人可能被拆成兩位、分出幾個人很受 `DIARIZATION_THRESHOLD` 影響（見 ADR 0003 的實測）
+- vLLM（v0.31）在某一段幾乎沒有辨識結果（例如只有雜音）時，算片段時間會出錯回 500：那一段改成只要文字、整段當一個片段（`local_speech._transcribe`），
+  不會讓整個檔案失敗。
 - 本地語音辨識只有片段（不是每個字）的時間，片段最長近 30 秒；比 Deepgram 慢很多（約 3 倍速，一小時的錄音約 20 分鐘），vLLM 一次只處理一段是瓶頸；Whisper 系的模型偶爾會在很短或很吵的段落聽出不存在的字
 - 語言由上傳時選（ADR 0002）：中文（`zh-TW`，預設，也是沒帶語言時的 `DEEPGRAM_LANGUAGE`）、英文（`en`）、自動偵測（`detect_language=zh&detect_language=en`）。自動偵測判斷成中文時走通用中文模型，錯字明顯較多（ADR 0001 的實測），所以不是預設；整個檔案只判斷一種語言，中英夾雜的錄音仍然辨識不好。語言選錯要重新上傳
 - Deepgram 的 $200 是一次性額度，用完就要付費（$0.0043/分鐘），不像 Groq 每天重置；額度監控與告警仍然沒有（`architecture-design.md` 第 7 節第 7 點）
