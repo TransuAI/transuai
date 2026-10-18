@@ -104,7 +104,8 @@ jobs:
             echo "::error::app/proto_gen 跟 infra/proto 不一致：在 ${{ matrix.service }} 跑 scripts/generate_grpc.sh 再 commit"
             exit 1
           }
-      - run: uv run pytest -q
+      # 失敗的測試另外寫成 GitHub 的 annotation（PR 的檔案上、run 的摘要裡直接看得到是哪一個）。
+      - run: uv run --with pytest-github-actions-annotate-failures pytest -q -rf
 
   frontend:
     needs: changes
