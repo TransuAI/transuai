@@ -31,3 +31,11 @@ cd transuai/infra/deploy
 | [infra](infra/) | proto、本機開發環境（docker-compose、kind）、安裝包 |
 
 本機開發環境見 [infra/README.md](infra/README.md)；架構見 [infra/architecture-design.md](infra/architecture-design.md)。
+
+## 授權
+
+TransuAI 以 [Apache License 2.0](LICENSE) 授權。
+
+安裝包另外用到的元件各有自己的授權（都是原樣使用，沒有修改）：MinIO（`pgsty/minio`，AGPL-3.0，獨立的容器）、PostgreSQL＋pgvector、
+Redis、RabbitMQ、nginx、vLLM（Apache-2.0）；預設的模型 Qwen3-8B-AWQ、Qwen3-Embedding-0.6B、Breeze-ASR-25（Apache-2.0），
+講者分離的 pyannote segmentation-3.0（MIT）與 3D-Speaker CAM++（Apache-2.0）。
