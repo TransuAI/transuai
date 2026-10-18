@@ -9,5 +9,7 @@ RUN uv sync --frozen --no-dev
 COPY app ./app
 
 ENV PATH="/app/.venv/bin:$PATH"
+# 容器裡要聽所有介面，別的容器（frontend 的 nginx）才連得到；沒設時只聽本機（app/core/config.py 的 http_host）。
+ENV HTTP_HOST=0.0.0.0
 EXPOSE 8085
 CMD ["python", "-m", "app.main"]

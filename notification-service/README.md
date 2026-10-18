@@ -34,7 +34,8 @@ uv run python -m app.main
 啟動時會：
 
 1. 開一條背景 thread 消費 RabbitMQ 的 `ai.completed` / `job.failed`（主要業務入口，MQ 驅動）；連線斷線（RabbitMQ 重啟、DNS 暫時解析失敗等）有指數退避自動重連，不會讓這條 thread 永久掛掉（見 `app/services/consumer.py`）
-2. 起 `uvicorn`,監聽 `8085`,提供 `GET /health` 與 `WS /ws/jobs/{jobId}`
+2. 起 `uvicorn`,監聽 `8085`（`HTTP_PORT`）,提供 `GET /health` 與 `WS /ws/jobs/{jobId}`。聽哪個介面是 `HTTP_HOST`：預設 `127.0.0.1`
+   （直接跑時只有本機連得到）；container image 設成 `0.0.0.0`（Dockerfile），別的容器才連得到，對外只開 edge
 
 ## Pipeline
 

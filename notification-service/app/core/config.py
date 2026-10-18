@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     ai_completed_queue: str = "ai.completed"
     job_failed_queue: str = "job.failed"
 
+    # 聽哪個介面：預設只聽本機（直接在主機上跑、開發時），不會意外對外開放。容器裡要讓別的容器連得到，image 設成 0.0.0.0
+    #（見 Dockerfile）；對外只開 edge，隔離靠 compose／k8s 的網路。
+    http_host: str = "127.0.0.1"
     http_port: int = 8085
 
     # 驗證 WebSocket 訂閱者的 access token（auth-service 簽發）。必須跟 auth-service、gateway 的 JWT_SECRET 一樣。

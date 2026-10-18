@@ -51,8 +51,7 @@ def serve() -> None:
     check_secrets(settings)
     uvicorn.run(
         app,
-        # 容器裡要聽所有介面，別的容器才連得到；對外只開 edge，隔離靠 compose／k8s 的網路。
-        host="0.0.0.0",  # NOSONAR
+        host=settings.http_host,
         port=settings.http_port,
         # 只信 TRUSTED_PROXIES 帶的 X-Forwarded-For（見 config.py），沒設就看直接連進來的位址。
         proxy_headers=bool(settings.trusted_proxies),
